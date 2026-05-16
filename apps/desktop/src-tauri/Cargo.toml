@@ -1,0 +1,22 @@
+[package]
+name = "skillbox-desktop"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "skillbox_desktop"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "skillbox-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+skillbox-core = { path = "../../../crates/skillbox-core" }
+skillbox-github = { path = "../../../crates/skillbox-github" }
+tauri = { version = "2", features = [] }

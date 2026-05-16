@@ -1,0 +1,11 @@
+[package]
+name = "skillbox-cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = "1"
+serde_json = "1"
+skillbox-core = { path = "../skillbox-core" }
+skillbox-git = { path = "../skillbox-git" }
+skillbox-github = { path = "../skillbox-github" }

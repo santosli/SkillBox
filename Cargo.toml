@@ -1,0 +1,10 @@
+[workspace]
+members = [
+  "apps/desktop/src-tauri",
+  "crates/skillbox-core",
+  "crates/skillbox-git",
+  "crates/skillbox-github",
+  "crates/skillbox-cli"
+]
+resolver = "2"
+
