@@ -1,0 +1,19 @@
+{
+  "name": "skill-box",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/desktop"
+  ],
+  "bin": {
+    "skillbox": "packages/skillbox-cli/bin/skillbox.js"
+  },
+  "scripts": {
+    "test": "node --test packages/skillbox-core/test/*.test.js",
+    "rust:test": "cargo test --offline",
+    "skillbox": "node packages/skillbox-cli/bin/skillbox.js",
+    "scan": "node packages/skillbox-cli/bin/skillbox.js scan --json"
+  }
+}

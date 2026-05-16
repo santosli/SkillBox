@@ -1,0 +1,11 @@
+{
+  "name": "@skillbox/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "skillbox": "bin/skillbox.js"
+  },
+  "dependencies": {
+    "@skillbox/core": "file:../skillbox-core"
+  }
+}
