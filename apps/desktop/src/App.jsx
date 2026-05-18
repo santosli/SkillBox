@@ -2,56 +2,70 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import desktopPackage from '../package.json';
 
-const fallbackSkills = [
-  {
-    name: 'find-skills',
-    type: 'remote',
-    description: 'Discover and install agent skills from local and remote sources.',
-    sourceRoot: '~/.codex/skills',
-    status: 'up to date',
-    isSymlink: true,
-    contentHash: 'a9c42f1dd4822c80'
-  },
-  {
-    name: 'imagegen',
-    type: 'remote',
-    description: 'Generate and edit raster images for Codex workflows.',
-    sourceRoot: '~/.codex/skills/.system',
-    status: 'update available',
-    contentHash: 'c31de80b7ad93412'
-  },
-  {
-    name: 'lark-doc',
-    type: 'user',
-    description: 'Create, fetch, and update Lark documents through the local CLI.',
-    sourceRoot: '~/.agents/skills',
-    status: 'synced',
-    contentHash: '18f4ed3e7280c219'
-  },
-  {
-    name: 'personal-wiki-updater',
-    type: 'user',
-    description: 'Incrementally refresh the personal wiki derived layer.',
-    sourceRoot: '~/.agents/skills',
-    status: 'needs sync',
-    contentHash: '87b21f5571a7d332'
-  },
-  {
-    name: 'grill-me',
-    type: 'remote',
-    description: 'Stress-test plans and designs through structured questioning.',
-    sourceRoot: '~/.codex/skills',
-    status: 'up to date',
-    isSymlink: true,
-    contentHash: 'f39ad8c7ee410a60'
-  }
-];
-
 const filters = [
   { id: 'all', label: 'All' },
   { id: 'user', label: 'User' },
   { id: 'remote', label: 'Remote' }
 ];
+
+const previewPaths = {
+  root: '~/SkillBox',
+  userSkillsRoot: '~/SkillBox/user-skills',
+  remoteSkillsRoot: '~/SkillBox/remote-skills',
+  databasePath: '~/SkillBox/skillbox.sqlite'
+};
+
+const previewImportCandidates = [
+  {
+    name: 'personal-wiki-updater',
+    description: 'Incrementally refresh the personal wiki derived layer.',
+    sourcePath: '~/.agents/skills/personal-wiki-updater',
+    sourceRoot: '~/.agents/skills',
+    contentHash: '87b21f5571a7d332',
+    suggestedType: 'user',
+    skillType: 'user',
+    suggestionReason: 'inside ~/.agents/skills',
+    isSelected: true,
+    conflict: null
+  },
+  {
+    name: 'find-skills',
+    description: 'Discover and install agent skills from local and remote sources.',
+    sourcePath: '~/.codex/skills/find-skills',
+    sourceRoot: '~/.codex/skills',
+    contentHash: 'a9c42f1dd4822c80',
+    suggestedType: 'remote',
+    skillType: 'remote',
+    suggestionReason: 'inside ~/.codex/skills',
+    isSelected: true,
+    conflict: null
+  },
+  {
+    name: 'imagegen',
+    description: 'Generate and edit raster images for Codex workflows.',
+    sourcePath: '~/.codex/skills/.system/imagegen',
+    sourceRoot: '~/.codex/skills/.system',
+    contentHash: 'c31de80b7ad93412',
+    suggestedType: 'remote',
+    skillType: 'remote',
+    suggestionReason: 'inside ~/.codex/skills/.system',
+    isSelected: false,
+    conflict: null
+  }
+];
+
+const previewGithubCandidate = {
+  name: 'github-skill-kit',
+  description: 'Mock GitHub skill installed from a normalized owner/repo/path ref.',
+  sourcePath: 'https://github.com/santosli/skills/tree/main/github-skill-kit',
+  sourceRoot: 'github.com/santosli/skills',
+  contentHash: '4f6a91c2d0ab4421',
+  suggestedType: 'remote',
+  skillType: 'remote',
+  suggestionReason: 'GitHub source metadata found',
+  isSelected: true,
+  conflict: null
+};
 
 export default function App() {
   const [skills, setSkills] = useState([]);
@@ -62,6 +76,13 @@ export default function App() {
   const [page, setPage] = useState('dashboard');
   const [status, setStatus] = useState('idle');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [isFirstUse, setIsFirstUse] = useState(false);
+  const [importReview, setImportReview] = useState({
+    open: false,
+    candidates: [],
+    errors: []
+  });
   const contentRef = useRef(null);
 
   useEffect(() => {
@@ -103,32 +124,140 @@ export default function App() {
   );
 
   async function refresh() {
-    setStatus('scanning');
+    setStatus('loading');
     setError('');
 
     try {
       if (!window.__TAURI_INTERNALS__) {
-        throw new Error('Browser preview is using sample data. Run inside Tauri to use the local skill bridge.');
+        throw new Error('Browser preview is mocking an empty managed store. Run inside Tauri to use the local skill bridge.');
       }
 
-      const [scan, managedPaths] = await Promise.all([invoke('scan_skills'), invoke('managed_paths')]);
-      const scannedSkills = scan.skills?.map(normalizeSkill) || [];
+      const state = await invoke('managed_state');
+      const managedSkills = state.skills?.map(normalizeSkill) || [];
 
-      setSkills(scannedSkills);
-      setPaths(normalizePaths(managedPaths));
-      setSelectedName(scannedSkills[0]?.name || '');
+      setSkills(managedSkills);
+      setPaths(normalizePaths(state.paths));
+      setIsFirstUse(Boolean(state.isFirstUse ?? state.is_first_use));
+      setSelectedName(managedSkills[0]?.name || '');
       setStatus('ready');
     } catch (scanError) {
-      setSkills(fallbackSkills);
-      setPaths({
-        root: '~/SkillBox',
-        userSkillsRoot: '~/SkillBox/user-skills',
-        remoteSkillsRoot: '~/SkillBox/remote-skills',
-        databasePath: '~/SkillBox/skillbox.sqlite'
-      });
-      setSelectedName(fallbackSkills[0].name);
-      setError(scanError.message || 'Desktop bridge is not available yet.');
+      setSkills([]);
+      setPaths(previewPaths);
+      setIsFirstUse(true);
+      setSelectedName('');
+      setError('');
+      setNotice(scanError.message || 'Browser preview is mocking an empty managed store.');
       setStatus('prototype');
+    }
+  }
+
+  async function scanForImportCandidates() {
+    setStatus('scanning');
+    setError('');
+    setNotice('');
+
+    try {
+      if (!window.__TAURI_INTERNALS__) {
+        setImportReview({
+          open: true,
+          candidates: previewImportCandidates,
+          errors: []
+        });
+        setNotice('Browser preview is using mock scan candidates.');
+        setStatus('prototype');
+        return;
+      }
+
+      const scan = await invoke('scan_import_candidates');
+      const candidates = (scan.candidates || []).map(normalizeImportCandidate);
+
+      setImportReview({
+        open: candidates.length > 0,
+        candidates,
+        errors: scan.errors || []
+      });
+      setNotice(candidates.length === 0 ? 'No new local skills found.' : '');
+      setStatus('ready');
+    } catch (scanError) {
+      setError(scanError.message || 'Unable to scan local skill folders.');
+      setStatus('ready');
+    }
+  }
+
+  function installFromGitHub() {
+    setError('');
+    setNotice('');
+
+    if (!window.__TAURI_INTERNALS__) {
+      setImportReview({
+        open: true,
+        candidates: [previewGithubCandidate],
+        errors: []
+      });
+      setNotice('Browser preview is using a mock GitHub skill.');
+      setStatus('prototype');
+      return;
+    }
+
+    setNotice('GitHub install flow is not wired yet.');
+  }
+
+  function closeImportReview() {
+    setImportReview((current) => ({ ...current, open: false }));
+  }
+
+  function updateImportCandidate(sourcePath, patch) {
+    setImportReview((current) => ({
+      ...current,
+      candidates: current.candidates.map((candidate) =>
+        candidate.sourcePath === sourcePath ? { ...candidate, ...patch } : candidate
+      )
+    }));
+  }
+
+  async function importSelectedCandidates() {
+    const selected = importReview.candidates.filter((candidate) => candidate.isSelected && !candidate.conflict);
+    if (selected.length === 0) {
+      setNotice('Select at least one candidate without conflicts to import.');
+      return;
+    }
+
+    setStatus('importing');
+    setError('');
+    setNotice('');
+
+    if (!window.__TAURI_INTERNALS__) {
+      const importedSkills = selected.map(candidateToPreviewSkill);
+
+      setSkills((current) => mergeSkills(current, importedSkills));
+      setSelectedName(importedSkills[0]?.name || '');
+      setIsFirstUse(false);
+      setImportReview({ open: false, candidates: [], errors: [] });
+      setStatus('prototype');
+      setNotice(`Mock imported ${importedSkills.length} skills.`);
+      return;
+    }
+
+    try {
+      const result = await invoke('import_candidates', {
+        items: selected.map((candidate) => ({
+          source_path: candidate.sourcePath,
+          skill_type: candidate.skillType,
+          deploy_back_to_source: true
+        }))
+      });
+      const importErrors = result.errors || [];
+
+      setImportReview({ open: false, candidates: [], errors: [] });
+      await refresh();
+      setNotice(
+        importErrors.length > 0
+          ? `Imported ${result.imported?.length || 0} skills. ${importErrors.length} item failed.`
+          : `Imported ${result.imported?.length || 0} skills.`
+      );
+    } catch (importError) {
+      setError(importError.message || 'Unable to import selected skills.');
+      setStatus('ready');
     }
   }
 
@@ -160,7 +289,6 @@ export default function App() {
         </div>
 
         <nav className="navGroup" aria-label="Primary">
-          <NavButton active={page === 'setup'} icon="setup" label="Getting Started" onClick={() => setPage('setup')} />
           <NavButton active={(page === 'dashboard' && filter === 'all') || page === 'detail'} icon="dashboard" label="Dashboard" onClick={() => openDashboard('all')} />
           <NavButton active={page === 'dashboard' && filter === 'user'} icon="user-skills" label="User Skills" onClick={() => openDashboard('user')} />
           <NavButton active={page === 'dashboard' && filter === 'remote'} icon="remote-skills" label="Remote Skills" onClick={() => openDashboard('remote')} />
@@ -177,9 +305,7 @@ export default function App() {
       </aside>
 
       <section className="content" ref={contentRef}>
-        {page === 'setup' ? (
-          <GettingStarted paths={paths} status={status} onStartScan={refresh} />
-        ) : page === 'detail' && selected ? (
+        {page === 'detail' && selected ? (
           <SkillDetail paths={paths} skill={selected} onBack={() => openDashboard('all')} onRefresh={refresh} />
         ) : (
           <Dashboard
@@ -187,21 +313,52 @@ export default function App() {
             error={error}
             filter={filter}
             filtered={filtered}
+            isFirstUse={isFirstUse}
+            notice={notice}
             paths={paths}
             query={query}
             status={status}
             onFilter={setFilter}
             onOpenSkill={openSkill}
             onQuery={setQuery}
-            onRefresh={refresh}
+            onInstall={installFromGitHub}
+            onRefresh={scanForImportCandidates}
           />
         )}
       </section>
+
+      {importReview.open ? (
+        <ImportReview
+          candidates={importReview.candidates}
+          onClose={closeImportReview}
+          onImport={importSelectedCandidates}
+          onToggleSelected={(candidate) =>
+            updateImportCandidate(candidate.sourcePath, { isSelected: !candidate.isSelected })
+          }
+          onTypeChange={(candidate, skillType) => updateImportCandidate(candidate.sourcePath, { skillType })}
+          status={status}
+        />
+      ) : null}
     </main>
   );
 }
 
-function Dashboard({ counts, error, filter, filtered, paths, query, status, onFilter, onOpenSkill, onQuery, onRefresh }) {
+function Dashboard({
+  counts,
+  error,
+  filter,
+  filtered,
+  isFirstUse,
+  notice,
+  paths,
+  query,
+  status,
+  onFilter,
+  onInstall,
+  onOpenSkill,
+  onQuery,
+  onRefresh
+}) {
   return (
     <>
       <PageHeader
@@ -209,25 +366,32 @@ function Dashboard({ counts, error, filter, filtered, paths, query, status, onFi
         title="All skills"
         subtitle="Manage local and remote skills from one managed library."
         actions={
+          isFirstUse ? null : (
           <>
             <button className="button secondary" type="button" onClick={onRefresh}>
               Scan
             </button>
-            <button className="button primary" type="button">
+            <button className="button primary" type="button" onClick={onInstall}>
               Install skill
             </button>
           </>
+          )
         }
       />
 
+      {error ? <div className="notice">{error}</div> : null}
+      {notice ? <div className="notice success">{notice}</div> : null}
+
+      {isFirstUse ? (
+        <FirstUseDashboard paths={paths} status={status} onInstall={onInstall} onScan={onRefresh} />
+      ) : (
+        <>
       <section className="metrics" aria-label="Skill statistics">
         <Metric hint="Indexed locally" label="All skills" value={counts.total} tone="blue" />
         <Metric hint="Owned locally" label="User skills" value={counts.user} tone="green" />
         <Metric hint="GitHub-bound" label="Remote skills" value={counts.remote} tone="slate" />
         <Metric hint="New remote version" label="Available updates" value={counts.updates} tone="amber" />
       </section>
-
-      {error ? <div className="notice">{error}</div> : null}
 
       <section className="dashboardGrid">
         <div className="panel allSkillsPanel">
@@ -326,77 +490,135 @@ function Dashboard({ counts, error, filter, filtered, paths, query, status, onFi
           </div>
         </aside>
       </section>
+        </>
+      )}
     </>
   );
 }
 
-function GettingStarted({ paths, status, onStartScan }) {
-  const steps = [
-    ['Choose managed root', paths?.root || '~/SkillBox', 'Ready'],
-    ['Scan existing skill folders', '~/.codex/skills and ~/.agents/skills', status === 'scanning' ? 'Scanning' : 'Ready'],
-    ['Classify local skills', 'Review user and remote skills before migration', 'Review'],
-    ['Deploy with symlinks', 'Runtime folders point back to SkillBox', 'Pending']
-  ];
-
+function FirstUseDashboard({ paths, status, onInstall, onScan }) {
   return (
-    <>
-      <PageHeader
-        eyebrow="First run"
-        title="Getting Started"
-        subtitle="Set up your local skill library before migration and deployment."
-        actions={
-          <>
-            <button className="button secondary" type="button">
-              Configure paths
-            </button>
-            <button className="button primary" type="button" onClick={onStartScan}>
-              Start scan
-            </button>
-          </>
-        }
-      />
+    <section className="firstUseGrid">
+      <div className="panel firstUsePanel">
+        <div className="emptyGlyph">
+          <Icon name="dashboard" />
+        </div>
+        <div>
+          <p className="eyebrow">First import</p>
+          <h2>No skills imported yet</h2>
+          <p>
+            SkillBox will scan local runtime folders, show the candidates first, and only import the
+            skills you confirm.
+          </p>
+        </div>
+        <div className="firstUseActions">
+          <button className="button primary" type="button" onClick={onScan}>
+            {status === 'scanning' ? 'Scanning...' : 'Scan local skills'}
+          </button>
+          <button className="button secondary" type="button" onClick={onInstall}>
+            Install from GitHub
+          </button>
+        </div>
+      </div>
 
-      <section className="setupGrid">
-        <div className="panel setupPanel">
-          <div className="panelHeader">
-            <div>
-              <h2>Prepare SkillBox</h2>
-              <p>Four checks before the first import.</p>
-            </div>
-          </div>
-
-          <div className="setupSteps">
-            {steps.map(([title, description, stepStatus], index) => (
-              <div className="setupStep" key={title}>
-                <span className={index < 2 ? 'stepStatus done' : 'stepStatus'}>{String(index + 1).padStart(2, '0')}</span>
-                <div>
-                  <strong>{title}</strong>
-                  <small>{description}</small>
-                </div>
-                <Badge tone={index < 2 ? 'green' : 'amber'}>{stepStatus}</Badge>
-              </div>
-            ))}
+      <aside className="panel compactPanel">
+        <div className="panelHeader compact">
+          <div>
+            <h2>Managed roots</h2>
+            <p>Import will copy first, then replace runtime folders with symlinks.</p>
           </div>
         </div>
+        <PathList
+          items={[
+            ['Managed root', paths?.root],
+            ['User skills', paths?.userSkillsRoot],
+            ['Remote skills', paths?.remoteSkillsRoot],
+            ['Deploy mode', 'Copy, backup, symlink']
+          ]}
+        />
+      </aside>
+    </section>
+  );
+}
 
-        <aside className="panel summaryPanel">
-          <div className="panelHeader compact">
-            <div>
-              <h2>Setup summary</h2>
-              <p>Default managed layout</p>
-            </div>
+function ImportReview({ candidates, onClose, onImport, onToggleSelected, onTypeChange, status }) {
+  const selectedCount = candidates.filter((candidate) => candidate.isSelected && !candidate.conflict).length;
+
+  return (
+    <div className="modalBackdrop" role="presentation">
+      <section className="importSheet" role="dialog" aria-modal="true" aria-labelledby="import-review-title">
+        <div className="importSheetHeader">
+          <div>
+            <p className="eyebrow">Scan completed</p>
+            <h2 id="import-review-title">Import Review</h2>
+            <p>Confirm each skill type before SkillBox copies it into the managed store.</p>
           </div>
-          <PathList
-            items={[
-              ['Managed root', paths?.root],
-              ['User skills', paths?.userSkillsRoot],
-              ['Remote skills', paths?.remoteSkillsRoot],
-              ['Deploy mode', 'Symlink']
-            ]}
-          />
-        </aside>
+          <button className="iconButton" type="button" aria-label="Close import review" onClick={onClose}>
+            x
+          </button>
+        </div>
+
+        <div className="candidateList">
+          {candidates.map((candidate) => (
+            <div className={candidate.conflict ? 'candidateRow conflict' : 'candidateRow'} key={candidate.sourcePath}>
+              <label className="candidateCheck">
+                <input
+                  checked={candidate.isSelected}
+                  disabled={Boolean(candidate.conflict)}
+                  type="checkbox"
+                  onChange={() => onToggleSelected(candidate)}
+                />
+                <span />
+              </label>
+
+              <div className="candidateMain">
+                <div className="candidateTitle">
+                  <strong>{candidate.name}</strong>
+                  <Badge tone={candidate.skillType === 'user' ? 'green' : 'blue'}>
+                    {candidate.skillType === 'user' ? 'User skill' : 'Remote skill'}
+                  </Badge>
+                  {candidate.conflict ? <Badge tone="red">Conflict</Badge> : null}
+                </div>
+                <small>{candidate.description || 'No description in SKILL.md'}</small>
+                <code>{compactPath(candidate.sourcePath)}</code>
+                <p>{candidate.conflict || candidate.suggestionReason}</p>
+              </div>
+
+              <div className="candidateTypeSwitch" role="group" aria-label={`${candidate.name} type`}>
+                <button
+                  className={candidate.skillType === 'user' ? 'active' : ''}
+                  disabled={Boolean(candidate.conflict)}
+                  type="button"
+                  onClick={() => onTypeChange(candidate, 'user')}
+                >
+                  User
+                </button>
+                <button
+                  className={candidate.skillType === 'remote' ? 'active' : ''}
+                  disabled={Boolean(candidate.conflict)}
+                  type="button"
+                  onClick={() => onTypeChange(candidate, 'remote')}
+                >
+                  Remote
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="importSheetFooter">
+          <span>{selectedCount} selected</span>
+          <div className="headerActions">
+            <button className="button secondary" type="button" onClick={onClose}>
+              Cancel
+            </button>
+            <button className="button primary" disabled={status === 'importing'} type="button" onClick={onImport}>
+              {status === 'importing' ? 'Importing...' : 'Import selected'}
+            </button>
+          </div>
+        </div>
       </section>
-    </>
+    </div>
   );
 }
 
@@ -514,7 +736,7 @@ function PageHeader({ actions, eyebrow, subtitle, title }) {
         <h1>{title}</h1>
         <p>{subtitle}</p>
       </div>
-      <div className="headerActions">{actions}</div>
+      {actions ? <div className="headerActions">{actions}</div> : null}
     </header>
   );
 }
@@ -692,6 +914,50 @@ function normalizeSkill(skill) {
     type,
     status: skill.status || defaultSkillStatus(type)
   };
+}
+
+function normalizeImportCandidate(candidate) {
+  const suggestedType = candidate.suggestedType || candidate.suggested_type || 'user';
+  const sourcePath = candidate.sourcePath || candidate.source_path;
+
+  return {
+    ...candidate,
+    sourcePath,
+    sourceRoot: candidate.sourceRoot || candidate.source_root,
+    contentHash: candidate.contentHash || candidate.content_hash,
+    suggestedType,
+    skillType: candidate.skillType || candidate.skill_type || suggestedType,
+    suggestionReason: candidate.suggestionReason || candidate.suggestion_reason || 'Needs confirm',
+    isSelected: candidate.isSelected ?? candidate.is_selected ?? true
+  };
+}
+
+function candidateToPreviewSkill(candidate) {
+  const type = candidate.skillType || candidate.suggestedType || 'user';
+  const managedPath =
+    type === 'user'
+      ? joinPath(previewPaths.userSkillsRoot, candidate.name)
+      : joinPath(previewPaths.remoteSkillsRoot, `${candidate.name}/current`);
+
+  return {
+    name: candidate.name,
+    type,
+    description: candidate.description,
+    sourceRoot: candidate.sourceRoot,
+    path: managedPath,
+    skillMdPath: joinPath(managedPath, 'SKILL.md'),
+    status: defaultSkillStatus(type),
+    isSymlink: true,
+    contentHash: candidate.contentHash
+  };
+}
+
+function mergeSkills(current, imported) {
+  const next = new Map(current.map((skill) => [skill.name, skill]));
+  for (const skill of imported) {
+    next.set(skill.name, skill);
+  }
+  return Array.from(next.values()).sort((left, right) => left.name.localeCompare(right.name));
 }
 
 function normalizePaths(paths) {
