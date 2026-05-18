@@ -1,6 +1,7 @@
 use rusqlite::{params, Connection};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -48,7 +49,8 @@ pub struct ScanResult {
     pub errors: Vec<ScanError>,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum SkillKind {
     User,
     Remote,
@@ -78,6 +80,79 @@ pub struct Deployment {
     pub target_root: PathBuf,
     pub target_path: PathBuf,
     pub mode: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ManagedSkill {
+    pub name: String,
+    pub description: String,
+    pub version: String,
+    pub path: PathBuf,
+    pub skill_md_path: PathBuf,
+    pub content_hash: String,
+    pub source_root: Option<PathBuf>,
+    pub is_symlink: bool,
+    pub real_path: PathBuf,
+    #[serde(rename = "type")]
+    pub kind: SkillKind,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ManagedState {
+    pub paths: ManagedPaths,
+    pub skills: Vec<ManagedSkill>,
+    pub is_first_use: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ImportCandidate {
+    pub name: String,
+    pub description: String,
+    pub source_path: PathBuf,
+    pub source_root: Option<PathBuf>,
+    pub content_hash: String,
+    pub suggested_type: SkillKind,
+    pub suggestion_reason: String,
+    pub is_selected: bool,
+    pub conflict: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ImportCandidateScan {
+    pub roots: Vec<PathBuf>,
+    pub candidates: Vec<ImportCandidate>,
+    pub errors: Vec<ScanError>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportRequestItem {
+    pub source_path: PathBuf,
+    pub skill_type: SkillKind,
+    pub deploy_back_to_source: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ImportedCandidate {
+    pub name: String,
+    pub kind: SkillKind,
+    pub source_path: PathBuf,
+    pub managed_path: PathBuf,
+    pub content_hash: String,
+    pub backup_path: Option<PathBuf>,
+    pub deployed_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ImportCandidateError {
+    pub source_path: PathBuf,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ImportBatchResult {
+    pub imported: Vec<ImportedCandidate>,
+    pub errors: Vec<ImportCandidateError>,
 }
 
 pub fn default_managed_root() -> PathBuf {
@@ -292,6 +367,151 @@ pub fn deploy_skill(
     })
 }
 
+pub fn managed_state(managed_root: impl AsRef<Path>) -> Result<ManagedState> {
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let mut skills = Vec::new();
+
+    for skill in scan_skill_roots(std::slice::from_ref(&paths.user_skills_root))?.skills {
+        skills.push(managed_skill(skill, SkillKind::User));
+    }
+    for skill in scan_skill_roots(std::slice::from_ref(&paths.remote_skills_root))?.skills {
+        skills.push(managed_skill(skill, SkillKind::Remote));
+    }
+
+    skills.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(ManagedState {
+        is_first_use: skills.is_empty(),
+        paths,
+        skills,
+    })
+}
+
+pub fn scan_import_candidates(
+    roots: &[PathBuf],
+    managed_root: impl AsRef<Path>,
+) -> Result<ImportCandidateScan> {
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let managed_scan = scan_skill_roots(&[
+        paths.user_skills_root.clone(),
+        paths.remote_skills_root.clone(),
+    ])?;
+    let imported_hashes: HashSet<String> = managed_scan
+        .skills
+        .iter()
+        .map(|skill| skill.content_hash.clone())
+        .collect();
+    let scan = scan_skill_roots(roots)?;
+    let mut candidates = Vec::new();
+
+    for skill in scan.skills {
+        if imported_hashes.contains(&skill.content_hash)
+            || is_under_path(&skill.real_path, &paths.root)
+        {
+            continue;
+        }
+
+        let (suggested_type, suggestion_reason, default_selected) =
+            infer_import_candidate_type(&skill, &paths);
+        let conflict = managed_target_conflict(&paths, &skill, suggested_type)?;
+        let is_selected = default_selected && conflict.is_none();
+
+        candidates.push(ImportCandidate {
+            name: skill.name,
+            description: skill.description,
+            source_path: skill.path,
+            source_root: skill.source_root,
+            content_hash: skill.content_hash,
+            suggested_type,
+            suggestion_reason,
+            is_selected,
+            conflict,
+        });
+    }
+
+    candidates.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(ImportCandidateScan {
+        roots: scan.roots,
+        candidates,
+        errors: scan.errors,
+    })
+}
+
+pub fn import_candidates(
+    items: Vec<ImportRequestItem>,
+    managed_root: impl AsRef<Path>,
+) -> Result<ImportBatchResult> {
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let mut imported = Vec::new();
+    let mut errors = Vec::new();
+
+    for item in items {
+        let source_path = item.source_path.clone();
+        match import_one_candidate(&paths, item) {
+            Ok(candidate) => imported.push(candidate),
+            Err(error) => errors.push(ImportCandidateError { source_path, error }),
+        }
+    }
+
+    Ok(ImportBatchResult { imported, errors })
+}
+
+fn managed_skill(skill: Skill, kind: SkillKind) -> ManagedSkill {
+    ManagedSkill {
+        name: skill.name,
+        description: skill.description,
+        version: skill.version,
+        path: skill.path,
+        skill_md_path: skill.skill_md_path,
+        content_hash: skill.content_hash,
+        source_root: skill.source_root,
+        is_symlink: skill.is_symlink,
+        real_path: skill.real_path,
+        kind,
+        status: match kind {
+            SkillKind::User => "sync not checked",
+            SkillKind::Remote => "update not checked",
+        }
+        .to_string(),
+    }
+}
+
+fn import_one_candidate(
+    paths: &ManagedPaths,
+    item: ImportRequestItem,
+) -> Result<ImportedCandidate> {
+    let source_path = expand_home(item.source_path);
+    let imported = import_skill(&source_path, item.skill_type, &paths.root)?;
+    let deployment_target = match item.skill_type {
+        SkillKind::User => imported.managed_path.clone(),
+        SkillKind::Remote => paths
+            .remote_skills_root
+            .join(&imported.name)
+            .join("current"),
+    };
+    let (backup_path, deployed_path) = if item.deploy_back_to_source {
+        let backup_path = replace_source_with_symlink(
+            &source_path,
+            &deployment_target,
+            paths,
+            &imported.name,
+            &imported.content_hash,
+        )?;
+        (backup_path, Some(source_path.clone()))
+    } else {
+        (None, None)
+    };
+
+    Ok(ImportedCandidate {
+        name: imported.name,
+        kind: imported.kind,
+        source_path,
+        managed_path: imported.managed_path,
+        content_hash: imported.content_hash,
+        backup_path,
+        deployed_path,
+    })
+}
+
 fn init_database(database_path: &Path) -> Result<()> {
     if let Some(parent) = database_path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -384,6 +604,153 @@ fn index_deployment(
     Ok(())
 }
 
+fn infer_import_candidate_type(skill: &Skill, paths: &ManagedPaths) -> (SkillKind, String, bool) {
+    let path = skill.path.to_string_lossy();
+
+    if path.contains("/.codex/skills/.system/") || path.ends_with("/.codex/skills/.system") {
+        return (
+            SkillKind::Remote,
+            "inside ~/.codex/skills/.system".to_string(),
+            false,
+        );
+    }
+
+    if path.contains("/.agents/skills/") || path.ends_with("/.agents/skills") {
+        return (SkillKind::User, "inside ~/.agents/skills".to_string(), true);
+    }
+
+    if path.contains("/.codex/skills/") || path.ends_with("/.codex/skills") {
+        return (
+            SkillKind::Remote,
+            "inside ~/.codex/skills".to_string(),
+            true,
+        );
+    }
+
+    if skill_declares_github_source(&skill.skill_md_path) {
+        return (
+            SkillKind::Remote,
+            "GitHub source metadata found".to_string(),
+            true,
+        );
+    }
+
+    if is_under_path(&skill.real_path, &paths.user_skills_root) {
+        return (SkillKind::User, "inside user skill root".to_string(), true);
+    }
+
+    (SkillKind::User, "Needs confirm".to_string(), true)
+}
+
+fn skill_declares_github_source(skill_md_path: &Path) -> bool {
+    fs::read_to_string(skill_md_path)
+        .map(|content| content.to_lowercase().contains("github.com/"))
+        .unwrap_or(false)
+}
+
+fn managed_target_conflict(
+    paths: &ManagedPaths,
+    skill: &Skill,
+    kind: SkillKind,
+) -> Result<Option<String>> {
+    match kind {
+        SkillKind::User => {
+            let target = paths.user_skills_root.join(&skill.name);
+            if !target.exists() {
+                return Ok(None);
+            }
+            if read_skill(&target)
+                .map(|existing| existing.content_hash == skill.content_hash)
+                .unwrap_or(false)
+            {
+                return Ok(None);
+            }
+            Ok(Some(format!("Managed target exists: {}", target.display())))
+        }
+        SkillKind::Remote => {
+            let remote_root = paths.remote_skills_root.join(&skill.name);
+            let version_target = remote_root
+                .join("versions")
+                .join(format!("manual-{}", &skill.content_hash[..12]));
+            if version_target.exists() {
+                return Ok(None);
+            }
+            if remote_root.exists() && !remote_root.is_dir() {
+                return Ok(Some(format!(
+                    "Managed target exists: {}",
+                    remote_root.display()
+                )));
+            }
+            Ok(None)
+        }
+    }
+}
+
+fn replace_source_with_symlink(
+    source_path: &Path,
+    target_path: &Path,
+    paths: &ManagedPaths,
+    skill_name: &str,
+    content_hash: &str,
+) -> Result<Option<PathBuf>> {
+    let metadata = fs::symlink_metadata(source_path).map_err(|error| error.to_string())?;
+    if metadata.file_type().is_symlink() {
+        let linked = fs::canonicalize(source_path).map_err(|error| error.to_string())?;
+        let expected = fs::canonicalize(target_path).map_err(|error| error.to_string())?;
+        if linked == expected {
+            return Ok(None);
+        }
+        return Err(format!(
+            "Refusing to replace symlink pointing elsewhere: {}",
+            source_path.display()
+        ));
+    }
+
+    let backup_path = unique_backup_path(paths, skill_name, content_hash);
+    if let Some(parent) = backup_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+
+    fs::rename(source_path, &backup_path).map_err(|error| error.to_string())?;
+    if let Err(error) = symlink_dir(target_path, source_path) {
+        let _ = fs::rename(&backup_path, source_path);
+        return Err(error);
+    }
+
+    Ok(Some(backup_path))
+}
+
+fn unique_backup_path(paths: &ManagedPaths, skill_name: &str, content_hash: &str) -> PathBuf {
+    let hash = &content_hash[..12];
+    let base = paths
+        .root
+        .join("backups")
+        .join("imports")
+        .join(format!("{skill_name}-{hash}"));
+    if !base.exists() {
+        return base;
+    }
+
+    for index in 2.. {
+        let candidate = paths
+            .root
+            .join("backups")
+            .join("imports")
+            .join(format!("{skill_name}-{hash}-{index}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+
+    unreachable!("backup suffix loop is unbounded")
+}
+
+fn is_under_path(path: &Path, root: &Path) -> bool {
+    let path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let root = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    path.starts_with(root)
+}
+
 fn find_skill_dirs(
     current: &Path,
     depth: usize,
@@ -408,7 +775,9 @@ fn find_skill_dirs(
         {
             continue;
         }
-        if entry.file_name().to_string_lossy().starts_with('.') {
+        let file_name = entry.file_name();
+        let file_name = file_name.to_string_lossy();
+        if file_name.starts_with('.') && file_name != ".system" {
             continue;
         }
         find_skill_dirs(&path, depth + 1, max_depth, found)?;
@@ -603,6 +972,175 @@ description: \"Demo skill\"
         assert!(error.contains("Refusing to overwrite existing non-symlink target"));
     }
 
+    #[test]
+    fn managed_state_is_first_use_when_managed_store_has_no_skills() {
+        let root = temp_dir("managed-state-empty");
+        let state = managed_state(&root.join("SkillBox")).unwrap();
+
+        assert!(state.is_first_use);
+        assert_eq!(state.skills.len(), 0);
+    }
+
+    #[test]
+    fn scan_import_candidates_infers_type_from_path_and_metadata() {
+        let root = temp_dir("candidate-type");
+        let agents_root = root.join(".agents").join("skills");
+        let codex_root = root.join(".codex").join("skills");
+        let system_root = codex_root.join(".system");
+        let misc_root = root.join("Downloads").join("skills");
+        let managed_root = root.join("SkillBox");
+
+        make_skill(&agents_root.join("local"), "local", "Local skill");
+        make_skill(&codex_root.join("remote"), "remote", "Remote skill");
+        make_skill(&system_root.join("system"), "system", "System skill");
+        make_skill_with_body(
+            &misc_root.join("github-skill"),
+            "github-skill",
+            "GitHub skill",
+            "source: https://github.com/acme/skills/tree/main/github-skill",
+        );
+        make_skill(&misc_root.join("unknown"), "unknown", "Unknown skill");
+
+        let candidates =
+            scan_import_candidates(&[agents_root, codex_root, misc_root], &managed_root).unwrap();
+
+        let local = candidate(&candidates.candidates, "local");
+        assert_eq!(local.suggested_type, SkillKind::User);
+        assert_eq!(local.suggestion_reason, "inside ~/.agents/skills");
+        assert!(local.is_selected);
+
+        let remote = candidate(&candidates.candidates, "remote");
+        assert_eq!(remote.suggested_type, SkillKind::Remote);
+        assert_eq!(remote.suggestion_reason, "inside ~/.codex/skills");
+        assert!(remote.is_selected);
+
+        let system = candidate(&candidates.candidates, "system");
+        assert_eq!(system.suggested_type, SkillKind::Remote);
+        assert_eq!(system.suggestion_reason, "inside ~/.codex/skills/.system");
+        assert!(!system.is_selected);
+
+        let github = candidate(&candidates.candidates, "github-skill");
+        assert_eq!(github.suggested_type, SkillKind::Remote);
+        assert_eq!(github.suggestion_reason, "GitHub source metadata found");
+        assert!(github.is_selected);
+
+        let unknown = candidate(&candidates.candidates, "unknown");
+        assert_eq!(unknown.suggested_type, SkillKind::User);
+        assert_eq!(unknown.suggestion_reason, "Needs confirm");
+        assert!(unknown.is_selected);
+    }
+
+    #[test]
+    fn scan_import_candidates_excludes_already_imported_skills_by_hash() {
+        let root = temp_dir("candidate-excludes-imported");
+        let source = root.join("runtime").join("demo");
+        let managed_root = root.join("SkillBox");
+        make_skill(&source, "demo", "Demo skill");
+        import_skill(&source, SkillKind::User, &managed_root).unwrap();
+
+        let candidates = scan_import_candidates(&[root.join("runtime")], &managed_root).unwrap();
+
+        assert_eq!(candidates.candidates.len(), 0);
+    }
+
+    #[test]
+    fn import_candidates_copies_user_skill_backs_up_original_and_symlinks_source() {
+        let root = temp_dir("candidate-import-user");
+        let source = root.join("runtime").join("demo");
+        let managed_root = root.join("SkillBox");
+        make_skill(&source, "demo", "Demo skill");
+
+        let result = import_candidates(
+            vec![ImportRequestItem {
+                source_path: source.clone(),
+                skill_type: SkillKind::User,
+                deploy_back_to_source: true,
+            }],
+            &managed_root,
+        )
+        .unwrap();
+
+        assert_eq!(result.errors.len(), 0);
+        assert_eq!(result.imported.len(), 1);
+        let imported = &result.imported[0];
+        assert_eq!(imported.name, "demo");
+        assert!(imported
+            .backup_path
+            .as_ref()
+            .unwrap()
+            .join("SKILL.md")
+            .exists());
+        assert!(fs::symlink_metadata(&source)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            fs::canonicalize(&source).unwrap(),
+            fs::canonicalize(managed_root.join("user-skills").join("demo")).unwrap()
+        );
+    }
+
+    #[test]
+    fn import_candidates_copies_remote_skill_updates_current_and_symlinks_source_to_current() {
+        let root = temp_dir("candidate-import-remote");
+        let source = root.join("runtime").join("remote-demo");
+        let managed_root = root.join("SkillBox");
+        make_skill(&source, "remote-demo", "Remote demo skill");
+
+        let result = import_candidates(
+            vec![ImportRequestItem {
+                source_path: source.clone(),
+                skill_type: SkillKind::Remote,
+                deploy_back_to_source: true,
+            }],
+            &managed_root,
+        )
+        .unwrap();
+
+        assert_eq!(result.errors.len(), 0);
+        assert_eq!(result.imported.len(), 1);
+        let current = managed_root
+            .join("remote-skills")
+            .join("remote-demo")
+            .join("current");
+        assert!(fs::symlink_metadata(&current)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(current.join("SKILL.md").exists());
+        assert!(fs::symlink_metadata(&source)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            fs::canonicalize(&source).unwrap(),
+            fs::canonicalize(&current).unwrap()
+        );
+    }
+
+    #[test]
+    fn scan_import_candidates_reports_conflicting_managed_target() {
+        let root = temp_dir("candidate-conflict");
+        let source = root.join("runtime").join("demo");
+        let managed_root = root.join("SkillBox");
+        make_skill(&source, "demo", "Runtime version");
+        make_skill(
+            &managed_root.join("user-skills").join("demo"),
+            "demo",
+            "Managed version",
+        );
+
+        let candidates = scan_import_candidates(&[root.join("runtime")], &managed_root).unwrap();
+
+        let demo = candidate(&candidates.candidates, "demo");
+        assert!(demo
+            .conflict
+            .as_ref()
+            .unwrap()
+            .contains("Managed target exists"));
+        assert!(!demo.is_selected);
+    }
+
     fn temp_dir(label: &str) -> PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -614,6 +1152,15 @@ description: \"Demo skill\"
     }
 
     fn make_skill(path: &std::path::Path, name: &str, description: &str) {
+        make_skill_with_body(path, name, description, "");
+    }
+
+    fn make_skill_with_body(
+        path: &std::path::Path,
+        name: &str,
+        description: &str,
+        extra_body: &str,
+    ) {
         fs::create_dir_all(path).unwrap();
         fs::write(
             path.join("SKILL.md"),
@@ -624,9 +1171,17 @@ description: \"{description}\"
 ---
 
 # {name}
+{extra_body}
 "
             ),
         )
         .unwrap();
+    }
+
+    fn candidate<'a>(candidates: &'a [ImportCandidate], name: &str) -> &'a ImportCandidate {
+        candidates
+            .iter()
+            .find(|candidate| candidate.name == name)
+            .unwrap_or_else(|| panic!("candidate not found: {name}"))
     }
 }
