@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
@@ -106,16 +106,30 @@ pub struct ManagedState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ManagedPreferences {
+    pub skip_local_import_confirmation: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ImportCandidate {
     pub name: String,
     pub description: String,
     pub source_path: PathBuf,
     pub source_root: Option<PathBuf>,
+    pub real_path: PathBuf,
     pub content_hash: String,
     pub suggested_type: SkillKind,
     pub suggestion_reason: String,
+    pub import_status: ImportCandidateStatus,
     pub is_selected: bool,
     pub conflict: Option<String>,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ImportCandidateStatus {
+    Importable,
+    Imported,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -374,15 +388,62 @@ pub fn managed_state(managed_root: impl AsRef<Path>) -> Result<ManagedState> {
     for skill in scan_skill_roots(std::slice::from_ref(&paths.user_skills_root))?.skills {
         skills.push(managed_skill(skill, SkillKind::User));
     }
-    for skill in scan_skill_roots(std::slice::from_ref(&paths.remote_skills_root))?.skills {
-        skills.push(managed_skill(skill, SkillKind::Remote));
-    }
+    skills.extend(scan_managed_remote_skills(&paths)?);
 
     skills.sort_by(|left, right| left.name.cmp(&right.name));
     Ok(ManagedState {
         is_first_use: skills.is_empty(),
         paths,
         skills,
+    })
+}
+
+fn scan_managed_remote_skills(paths: &ManagedPaths) -> Result<Vec<ManagedSkill>> {
+    let mut skills = Vec::new();
+    if !paths.remote_skills_root.exists() {
+        return Ok(skills);
+    }
+
+    for entry in fs::read_dir(&paths.remote_skills_root).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let remote_root = entry.path();
+        let current = remote_root.join("current");
+        if !current.join("SKILL.md").exists() {
+            continue;
+        }
+
+        if let Ok(mut skill) = read_skill(&current) {
+            skill.source_root = Some(paths.remote_skills_root.clone());
+            skill.is_symlink = fs::symlink_metadata(&current)
+                .map(|metadata| metadata.file_type().is_symlink())
+                .unwrap_or(false);
+            skills.push(managed_skill(skill, SkillKind::Remote));
+        }
+    }
+
+    Ok(skills)
+}
+
+pub fn managed_preferences(managed_root: impl AsRef<Path>) -> Result<ManagedPreferences> {
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let skip_local_import_confirmation =
+        read_bool_preference(&paths.database_path, "skip_local_import_confirmation")?
+            .unwrap_or(false);
+
+    Ok(ManagedPreferences {
+        skip_local_import_confirmation,
+    })
+}
+
+pub fn set_skip_local_import_confirmation(
+    managed_root: impl AsRef<Path>,
+    skip: bool,
+) -> Result<ManagedPreferences> {
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    write_bool_preference(&paths.database_path, "skip_local_import_confirmation", skip)?;
+
+    Ok(ManagedPreferences {
+        skip_local_import_confirmation: skip,
     })
 }
 
@@ -404,25 +465,38 @@ pub fn scan_import_candidates(
     let mut candidates = Vec::new();
 
     for skill in scan.skills {
-        if imported_hashes.contains(&skill.content_hash)
-            || is_under_path(&skill.real_path, &paths.root)
-        {
-            continue;
-        }
-
+        let is_imported = imported_hashes.contains(&skill.content_hash)
+            || is_under_path(&skill.real_path, &paths.root);
         let (suggested_type, suggestion_reason, default_selected) =
             infer_import_candidate_type(&skill, &paths);
-        let conflict = managed_target_conflict(&paths, &skill, suggested_type)?;
-        let is_selected = default_selected && conflict.is_none();
+        let (suggestion_reason, import_status, is_selected, conflict) = if is_imported {
+            (
+                imported_candidate_reason(&skill, &paths),
+                ImportCandidateStatus::Imported,
+                false,
+                None,
+            )
+        } else {
+            let conflict = managed_target_conflict(&paths, &skill, suggested_type)?;
+            let is_selected = default_selected && conflict.is_none();
+            (
+                suggestion_reason,
+                ImportCandidateStatus::Importable,
+                is_selected,
+                conflict,
+            )
+        };
 
         candidates.push(ImportCandidate {
             name: skill.name,
             description: skill.description,
             source_path: skill.path,
             source_root: skill.source_root,
+            real_path: skill.real_path,
             content_hash: skill.content_hash,
             suggested_type,
             suggestion_reason,
+            import_status,
             is_selected,
             conflict,
         });
@@ -539,9 +613,51 @@ fn init_database(database_path: &Path) -> Result<()> {
               updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               PRIMARY KEY (skill_name, target_root)
             );
+
+            CREATE TABLE IF NOT EXISTS preferences (
+              key TEXT PRIMARY KEY,
+              value TEXT NOT NULL,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             ",
         )
         .map_err(|error| error.to_string())
+}
+
+fn read_bool_preference(database_path: &Path, key: &str) -> Result<Option<bool>> {
+    let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
+    let value: Option<String> = connection
+        .query_row(
+            "SELECT value FROM preferences WHERE key = ?1",
+            params![key],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+
+    match value.as_deref() {
+        None => Ok(None),
+        Some("true") => Ok(Some(true)),
+        Some("false") => Ok(Some(false)),
+        Some(other) => Err(format!("Invalid boolean preference {key}: {other}")),
+    }
+}
+
+fn write_bool_preference(database_path: &Path, key: &str, value: bool) -> Result<()> {
+    let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
+    connection
+        .execute(
+            "
+            INSERT INTO preferences (key, value)
+            VALUES (?1, ?2)
+            ON CONFLICT(key) DO UPDATE SET
+              value = excluded.value,
+              updated_at = CURRENT_TIMESTAMP
+            ",
+            params![key, if value { "true" } else { "false" }],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 fn index_skill(
@@ -640,6 +756,14 @@ fn infer_import_candidate_type(skill: &Skill, paths: &ManagedPaths) -> (SkillKin
     }
 
     (SkillKind::User, "Needs confirm".to_string(), true)
+}
+
+fn imported_candidate_reason(skill: &Skill, paths: &ManagedPaths) -> String {
+    if skill.is_symlink && is_under_path(&skill.real_path, &paths.root) {
+        return "Imported; source links to SkillBox".to_string();
+    }
+
+    "Already imported in SkillBox".to_string()
 }
 
 fn skill_declares_github_source(skill_md_path: &Path) -> bool {
@@ -768,11 +892,13 @@ fn find_skill_dirs(
     for entry in fs::read_dir(current).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;
         let path = entry.path();
-        if !entry
-            .file_type()
-            .map_err(|error| error.to_string())?
-            .is_dir()
-        {
+        let file_type = entry.file_type().map_err(|error| error.to_string())?;
+        let is_dir = file_type.is_dir()
+            || (file_type.is_symlink()
+                && fs::metadata(&path)
+                    .map(|metadata| metadata.is_dir())
+                    .unwrap_or(false));
+        if !is_dir {
             continue;
         }
         let file_name = entry.file_name();
@@ -982,6 +1108,41 @@ description: \"Demo skill\"
     }
 
     #[test]
+    fn managed_state_lists_remote_skill_current_once() {
+        let root = temp_dir("managed-state-remote-once");
+        let source = root.join("runtime").join("find-skills");
+        let managed_root = root.join("SkillBox");
+        make_skill(&source, "find-skills", "Find skills");
+        import_skill(&source, SkillKind::Remote, &managed_root).unwrap();
+
+        let state = managed_state(&managed_root).unwrap();
+
+        assert_eq!(state.skills.len(), 1);
+        assert_eq!(state.skills[0].name, "find-skills");
+        assert_eq!(state.skills[0].kind, SkillKind::Remote);
+        assert!(state.skills[0].path.ends_with("current"));
+    }
+
+    #[test]
+    fn managed_preferences_default_to_showing_local_import_confirmation() {
+        let root = temp_dir("preferences-default");
+        let preferences = managed_preferences(&root.join("SkillBox")).unwrap();
+
+        assert!(!preferences.skip_local_import_confirmation);
+    }
+
+    #[test]
+    fn managed_preferences_persist_skip_local_import_confirmation() {
+        let root = temp_dir("preferences-persist");
+        let managed_root = root.join("SkillBox");
+
+        set_skip_local_import_confirmation(&managed_root, true).unwrap();
+        let preferences = managed_preferences(&managed_root).unwrap();
+
+        assert!(preferences.skip_local_import_confirmation);
+    }
+
+    #[test]
     fn scan_import_candidates_infers_type_from_path_and_metadata() {
         let root = temp_dir("candidate-type");
         let agents_root = root.join(".agents").join("skills");
@@ -1040,7 +1201,10 @@ description: \"Demo skill\"
 
         let candidates = scan_import_candidates(&[root.join("runtime")], &managed_root).unwrap();
 
-        assert_eq!(candidates.candidates.len(), 0);
+        assert_eq!(candidates.candidates.len(), 1);
+        let demo = candidate(&candidates.candidates, "demo");
+        assert_eq!(demo.import_status, ImportCandidateStatus::Imported);
+        assert!(!demo.is_selected);
     }
 
     #[test]
@@ -1078,6 +1242,33 @@ description: \"Demo skill\"
             fs::canonicalize(&source).unwrap(),
             fs::canonicalize(managed_root.join("user-skills").join("demo")).unwrap()
         );
+    }
+
+    #[test]
+    fn scan_import_candidates_marks_symlinked_source_as_imported() {
+        let root = temp_dir("candidate-imported-symlink");
+        let runtime_root = root.join("runtime");
+        let source = runtime_root.join("demo");
+        let managed_root = root.join("SkillBox");
+        make_skill(&source, "demo", "Demo skill");
+
+        import_candidates(
+            vec![ImportRequestItem {
+                source_path: source.clone(),
+                skill_type: SkillKind::User,
+                deploy_back_to_source: true,
+            }],
+            &managed_root,
+        )
+        .unwrap();
+
+        let candidates = scan_import_candidates(&[runtime_root], &managed_root).unwrap();
+
+        assert_eq!(candidates.candidates.len(), 1);
+        let demo = candidate(&candidates.candidates, "demo");
+        assert_eq!(demo.import_status, ImportCandidateStatus::Imported);
+        assert!(!demo.is_selected);
+        assert_eq!(fs::canonicalize(&demo.source_path).unwrap(), demo.real_path);
     }
 
     #[test]

@@ -47,35 +47,11 @@ button {
   background: #ffffff;
 }
 
-.windowControls {
-  display: flex;
-  gap: 8px;
-  padding: 18px 18px 14px;
-}
-
-.windowControls span {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-}
-
-.windowControls .close {
-  background: #ff5f57;
-}
-
-.windowControls .minimize {
-  background: #ffbd2e;
-}
-
-.windowControls .zoom {
-  background: #28c840;
-}
-
 .brand {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 18px 22px;
+  padding: 24px 18px 22px;
 }
 
 .brandMark {
@@ -164,9 +140,19 @@ button {
   font-weight: 650;
 }
 
+.sidebarFooter button.active {
+  background: #eef2f7;
+  color: #111827;
+  font-weight: 650;
+}
+
 .navButton.active .navIcon {
   border-color: #cbd5e1;
   background: #ffffff;
+  color: #0a84ff;
+}
+
+.sidebarFooter button.active svg {
   color: #0a84ff;
 }
 
@@ -262,6 +248,14 @@ button {
   gap: 10px;
 }
 
+.dashboardActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
 .button {
   display: inline-flex;
   height: 38px;
@@ -308,9 +302,9 @@ button {
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(150px, 1fr));
-  gap: 12px;
-  margin-bottom: 18px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
 }
 
 .metric,
@@ -322,8 +316,8 @@ button {
 }
 
 .metric {
-  min-height: 108px;
-  padding: 16px;
+  min-height: 94px;
+  padding: 14px;
 }
 
 .metric span,
@@ -339,15 +333,15 @@ button {
 
 .metric strong {
   display: block;
-  margin-top: 10px;
+  margin-top: 8px;
   color: #111827;
-  font-size: 32px;
+  font-size: 28px;
   font-weight: 690;
   line-height: 1;
 }
 
 .metric small {
-  margin-top: 10px;
+  margin-top: 8px;
   overflow: hidden;
   font-size: 11px;
   font-weight: 580;
@@ -402,6 +396,15 @@ button {
   grid-template-columns: minmax(520px, 1fr) 320px;
   gap: 18px;
   align-items: stretch;
+}
+
+.firstUseOnly {
+  grid-template-columns: 1fr;
+}
+
+.settingsGrid {
+  display: grid;
+  max-width: 760px;
 }
 
 .setupGrid {
@@ -1058,6 +1061,211 @@ dd {
   padding: 32px;
 }
 
+.remoteImportDialog {
+  display: grid;
+  width: min(640px, calc(100vw - 64px));
+  overflow: hidden;
+  border: 1px solid #dbe3ee;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
+}
+
+.localImportDialog {
+  display: grid;
+  width: min(620px, calc(100vw - 64px));
+  overflow: hidden;
+  border: 1px solid #dbe3ee;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
+}
+
+.remoteImportForm {
+  display: grid;
+  gap: 16px;
+  padding: 20px 24px 24px;
+}
+
+.remoteImportModes {
+  display: inline-flex;
+  width: max-content;
+  gap: 2px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 3px;
+}
+
+.remoteImportModes button {
+  height: 32px;
+  border-radius: 6px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 650;
+  padding: 0 12px;
+}
+
+.remoteImportModes button.active {
+  background: #ffffff;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+  color: #111827;
+}
+
+.remoteImportField {
+  display: grid;
+  gap: 7px;
+}
+
+.remoteImportField span {
+  color: #475569;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.remoteImportField input {
+  width: 100%;
+  height: 40px;
+  border: 1px solid #dbe3ee;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #111827;
+  font-size: 14px;
+  padding: 0 12px;
+}
+
+.remoteImportField input:focus {
+  border-color: #0a84ff;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.13);
+  outline: none;
+}
+
+.remoteImportHint {
+  margin: -4px 0 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.formError {
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fff1f2;
+  color: #b91c1c;
+  font-size: 13px;
+  padding: 10px 12px;
+}
+
+.remoteImportFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.localImportBody {
+  display: grid;
+  gap: 16px;
+  padding: 20px 24px;
+}
+
+.localImportImpact {
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  background: #eff6ff;
+  padding: 14px;
+}
+
+.localImportImpact strong {
+  display: block;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 680;
+}
+
+.localImportImpact p {
+  margin: 6px 0 0;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.localImportPaths {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.localImportPaths li {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border: 1px solid #eef2f7;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px 12px;
+}
+
+.localImportPaths li.muted {
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.localImportPaths span,
+.localImportPaths code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.localImportPaths span {
+  color: #111827;
+  font-size: 13px;
+  font-weight: 660;
+}
+
+.localImportPaths code {
+  color: #475569;
+  font-family:
+    "SF Mono",
+    ui-monospace,
+    Menlo,
+    monospace;
+  font-size: 12px;
+}
+
+.localImportPreference {
+  display: inline-flex;
+  width: max-content;
+  max-width: 100%;
+  align-items: center;
+  gap: 9px;
+  color: #334155;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.localImportPreference input {
+  width: 16px;
+  height: 16px;
+  accent-color: #0a84ff;
+}
+
+.localImportFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 18px 24px;
+  border-top: 1px solid #eef2f7;
+  background: #ffffff;
+}
+
 .importSheet {
   display: grid;
   width: min(980px, calc(100vw - 64px));
@@ -1139,6 +1347,10 @@ dd {
   background: #fffafa;
 }
 
+.candidateRow.imported {
+  background: #f8fafc;
+}
+
 .candidateCheck {
   display: grid;
   place-items: center;
@@ -1175,6 +1387,11 @@ dd {
 
 .candidateCheck input:disabled + span {
   background: #f1f5f9;
+}
+
+.candidateCheck input:disabled:checked + span {
+  border-color: #cbd5e1;
+  background: #e2e8f0;
 }
 
 .candidateMain {
@@ -1234,6 +1451,10 @@ dd {
   color: #b91c1c;
 }
 
+.candidateRow.imported .candidateMain p {
+  color: #475569;
+}
+
 .candidateTypeSwitch {
   display: inline-flex;
   gap: 2px;
@@ -1278,6 +1499,36 @@ dd {
   font-weight: 620;
 }
 
+.importSelectionSummary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.selectAllButton {
+  height: 32px;
+  border: 1px solid #dbe3ee;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #334155;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 650;
+  padding: 0 12px;
+}
+
+.selectAllButton:hover:not(:disabled) {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #0a63d8;
+}
+
+.selectAllButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 @media (max-width: 1180px) {
   body {
     min-width: 860px;
@@ -1292,7 +1543,7 @@ dd {
   }
 
   .metrics {
-    grid-template-columns: repeat(3, minmax(128px, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .dashboardGrid,
@@ -1304,6 +1555,10 @@ dd {
 
   .sideStack {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboardSideStack {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -1317,6 +1572,10 @@ dd {
 
   .sideStack {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboardSideStack {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -1335,6 +1594,10 @@ dd {
 
   .content {
     padding: 24px;
+  }
+
+  .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .pageHeader,

@@ -15,6 +15,8 @@ const previewPaths = {
   databasePath: '~/SkillBox/skillbox.sqlite'
 };
 
+const previewPreferenceStorageKey = 'skillbox.skipLocalImportConfirmation';
+
 const previewImportCandidates = [
   {
     name: 'personal-wiki-updater',
@@ -25,6 +27,7 @@ const previewImportCandidates = [
     suggestedType: 'user',
     skillType: 'user',
     suggestionReason: 'inside ~/.agents/skills',
+    importOrigin: 'local-scan',
     isSelected: true,
     conflict: null
   },
@@ -37,6 +40,7 @@ const previewImportCandidates = [
     suggestedType: 'remote',
     skillType: 'remote',
     suggestionReason: 'inside ~/.codex/skills',
+    importOrigin: 'local-scan',
     isSelected: true,
     conflict: null
   },
@@ -49,23 +53,11 @@ const previewImportCandidates = [
     suggestedType: 'remote',
     skillType: 'remote',
     suggestionReason: 'inside ~/.codex/skills/.system',
-    isSelected: false,
+    importOrigin: 'local-scan',
+    isSelected: true,
     conflict: null
   }
 ];
-
-const previewGithubCandidate = {
-  name: 'github-skill-kit',
-  description: 'Mock GitHub skill installed from a normalized owner/repo/path ref.',
-  sourcePath: 'https://github.com/santosli/skills/tree/main/github-skill-kit',
-  sourceRoot: 'github.com/santosli/skills',
-  contentHash: '4f6a91c2d0ab4421',
-  suggestedType: 'remote',
-  skillType: 'remote',
-  suggestionReason: 'GitHub source metadata found',
-  isSelected: true,
-  conflict: null
-};
 
 export default function App() {
   const [skills, setSkills] = useState([]);
@@ -82,6 +74,20 @@ export default function App() {
     open: false,
     candidates: [],
     errors: []
+  });
+  const [preferences, setPreferences] = useState({
+    skipLocalImportConfirmation: false
+  });
+  const [localImportConfirmation, setLocalImportConfirmation] = useState({
+    open: false,
+    candidates: [],
+    dontShowAgain: false
+  });
+  const [remoteImport, setRemoteImport] = useState({
+    open: false,
+    mode: 'url',
+    value: '',
+    error: ''
   });
   const contentRef = useRef(null);
 
@@ -132,17 +138,22 @@ export default function App() {
         throw new Error('Browser preview is mocking an empty managed store. Run inside Tauri to use the local skill bridge.');
       }
 
-      const state = await invoke('managed_state');
+      const [state, storedPreferences] = await Promise.all([
+        invoke('managed_state'),
+        invoke('managed_preferences').catch(() => null)
+      ]);
       const managedSkills = state.skills?.map(normalizeSkill) || [];
 
       setSkills(managedSkills);
       setPaths(normalizePaths(state.paths));
+      setPreferences(normalizePreferences(storedPreferences));
       setIsFirstUse(Boolean(state.isFirstUse ?? state.is_first_use));
       setSelectedName(managedSkills[0]?.name || '');
       setStatus('ready');
     } catch (scanError) {
       setSkills([]);
       setPaths(previewPaths);
+      setPreferences(readPreviewPreferences());
       setIsFirstUse(true);
       setSelectedName('');
       setError('');
@@ -160,7 +171,10 @@ export default function App() {
       if (!window.__TAURI_INTERNALS__) {
         setImportReview({
           open: true,
-          candidates: previewImportCandidates,
+          candidates: applyPreviewImportStatuses(
+            previewImportCandidates.map(normalizeImportCandidate),
+            skills
+          ),
           errors: []
         });
         setNotice('Browser preview is using mock scan candidates.');
@@ -184,22 +198,74 @@ export default function App() {
     }
   }
 
-  function installFromGitHub() {
+  function openRemoteImport() {
     setError('');
     setNotice('');
+    setImportReview((current) => ({ ...current, open: false }));
+    setRemoteImport({
+      open: true,
+      mode: 'url',
+      value: '',
+      error: ''
+    });
+  }
+
+  function closeRemoteImport() {
+    setRemoteImport((current) => ({ ...current, open: false, error: '' }));
+  }
+
+  function updateRemoteImport(patch) {
+    setRemoteImport((current) => ({ ...current, ...patch, error: '' }));
+  }
+
+  async function submitRemoteImport(event) {
+    event.preventDefault();
+
+    const value = remoteImport.value.trim();
+    if (!value) {
+      setRemoteImport((current) => ({ ...current, error: 'Enter a skill URL or Markdown file path.' }));
+      return;
+    }
+
+    if (remoteImport.mode === 'url' && !isHttpUrl(value)) {
+      setRemoteImport((current) => ({ ...current, error: 'Enter a full http(s) skill URL.' }));
+      return;
+    }
+
+    if (remoteImport.mode === 'markdown' && !value.toLowerCase().endsWith('.md')) {
+      setRemoteImport((current) => ({ ...current, error: 'Enter a local Markdown file path ending in .md.' }));
+      return;
+    }
 
     if (!window.__TAURI_INTERNALS__) {
       setImportReview({
         open: true,
-        candidates: [previewGithubCandidate],
+        candidates: [remoteImportCandidate(remoteImport.mode, value)],
         errors: []
       });
-      setNotice('Browser preview is using a mock GitHub skill.');
+      setRemoteImport((current) => ({ ...current, open: false, value: '', error: '' }));
+      setNotice('Browser preview is using a provided remote source.');
       setStatus('prototype');
       return;
     }
 
-    setNotice('GitHub install flow is not wired yet.');
+    try {
+      if (remoteImport.mode === 'url') {
+        await invoke('parse_github_url', { url: value });
+        setNotice('Remote URL was accepted. Remote download/import is not wired yet.');
+      } else {
+        setNotice('Markdown file import is not wired yet.');
+      }
+    } catch (submitError) {
+      setRemoteImport((current) => ({
+        ...current,
+        error: submitError.message || String(submitError) || 'Unable to prepare this import.'
+      }));
+      return;
+    }
+
+    setRemoteImport((current) => ({ ...current, open: false, value: '', error: '' }));
+    setStatus('ready');
   }
 
   function closeImportReview() {
@@ -215,13 +281,33 @@ export default function App() {
     }));
   }
 
+  function toggleAllImportCandidates() {
+    setImportReview((current) => ({
+      ...current,
+      candidates: toggleImportCandidateSelection(current.candidates)
+    }));
+  }
+
   async function importSelectedCandidates() {
-    const selected = importReview.candidates.filter((candidate) => candidate.isSelected && !candidate.conflict);
+    const selected = importReview.candidates.filter((candidate) => candidate.isSelected && isImportableCandidate(candidate));
     if (selected.length === 0) {
       setNotice('Select at least one candidate without conflicts to import.');
       return;
     }
 
+    if (shouldConfirmLocalImport(selected, preferences)) {
+      setLocalImportConfirmation({
+        open: true,
+        candidates: selected,
+        dontShowAgain: false
+      });
+      return;
+    }
+
+    await runCandidateImport(selected);
+  }
+
+  async function runCandidateImport(selected, noticePrefix = '') {
     setStatus('importing');
     setError('');
     setNotice('');
@@ -234,7 +320,7 @@ export default function App() {
       setIsFirstUse(false);
       setImportReview({ open: false, candidates: [], errors: [] });
       setStatus('prototype');
-      setNotice(`Mock imported ${importedSkills.length} skills.`);
+      setNotice(importNotice(noticePrefix, `Mock imported ${importedSkills.length} skills.`));
       return;
     }
 
@@ -251,14 +337,58 @@ export default function App() {
       setImportReview({ open: false, candidates: [], errors: [] });
       await refresh();
       setNotice(
-        importErrors.length > 0
-          ? `Imported ${result.imported?.length || 0} skills. ${importErrors.length} item failed.`
-          : `Imported ${result.imported?.length || 0} skills.`
+        importNotice(
+          noticePrefix,
+          importErrors.length > 0
+            ? `Imported ${result.imported?.length || 0} skills. ${importErrors.length} item failed.`
+            : `Imported ${result.imported?.length || 0} skills.`
+        )
       );
     } catch (importError) {
       setError(importError.message || 'Unable to import selected skills.');
       setStatus('ready');
     }
+  }
+
+  function closeLocalImportConfirmation() {
+    if (status === 'importing') {
+      return;
+    }
+    setLocalImportConfirmation({ open: false, candidates: [], dontShowAgain: false });
+  }
+
+  async function confirmLocalImport() {
+    const selected = localImportConfirmation.candidates;
+    let noticePrefix = '';
+
+    if (localImportConfirmation.dontShowAgain) {
+      try {
+        await saveSkipLocalImportConfirmation(true);
+      } catch (preferenceError) {
+        noticePrefix = `Preference was not saved: ${preferenceError.message || String(preferenceError)}.`;
+      }
+    }
+
+    setLocalImportConfirmation({ open: false, candidates: [], dontShowAgain: false });
+    await runCandidateImport(selected, noticePrefix);
+  }
+
+  async function saveSkipLocalImportConfirmation(skip) {
+    if (!window.__TAURI_INTERNALS__) {
+      try {
+        window.localStorage.setItem(previewPreferenceStorageKey, skip ? 'true' : 'false');
+      } catch {
+        // Browser preview can run without durable storage; keep the session preference in React state.
+      }
+      const nextPreferences = { skipLocalImportConfirmation: skip };
+      setPreferences(nextPreferences);
+      return nextPreferences;
+    }
+
+    const storedPreferences = await invoke('set_skip_local_import_confirmation', { skip });
+    const nextPreferences = normalizePreferences(storedPreferences);
+    setPreferences(nextPreferences);
+    return nextPreferences;
   }
 
   function openDashboard(nextFilter = filter) {
@@ -274,12 +404,6 @@ export default function App() {
   return (
     <main className="appShell">
       <aside className="sidebar">
-        <div className="windowControls" aria-hidden="true">
-          <span className="close" />
-          <span className="minimize" />
-          <span className="zoom" />
-        </div>
-
         <div className="brand">
           <div className="brandMark">SB</div>
           <div>
@@ -295,7 +419,7 @@ export default function App() {
         </nav>
 
         <div className="sidebarFooter">
-          <FooterButton icon="settings" label="Settings" />
+          <FooterButton active={page === 'settings'} icon="settings" label="Settings" onClick={() => setPage('settings')} />
           <FooterButton icon="help" label="Help" />
           <div className="sidebarVersion">
             <span>Version</span>
@@ -307,6 +431,8 @@ export default function App() {
       <section className="content" ref={contentRef}>
         {page === 'detail' && selected ? (
           <SkillDetail paths={paths} skill={selected} onBack={() => openDashboard('all')} onRefresh={refresh} />
+        ) : page === 'settings' ? (
+          <SettingsPage paths={paths} />
         ) : (
           <Dashboard
             counts={counts}
@@ -315,13 +441,12 @@ export default function App() {
             filtered={filtered}
             isFirstUse={isFirstUse}
             notice={notice}
-            paths={paths}
             query={query}
             status={status}
             onFilter={setFilter}
             onOpenSkill={openSkill}
             onQuery={setQuery}
-            onInstall={installFromGitHub}
+            onInstall={openRemoteImport}
             onRefresh={scanForImportCandidates}
           />
         )}
@@ -332,11 +457,40 @@ export default function App() {
           candidates={importReview.candidates}
           onClose={closeImportReview}
           onImport={importSelectedCandidates}
+          onToggleAll={toggleAllImportCandidates}
           onToggleSelected={(candidate) =>
-            updateImportCandidate(candidate.sourcePath, { isSelected: !candidate.isSelected })
+            isImportableCandidate(candidate)
+              ? updateImportCandidate(candidate.sourcePath, { isSelected: !candidate.isSelected })
+              : null
           }
           onTypeChange={(candidate, skillType) => updateImportCandidate(candidate.sourcePath, { skillType })}
           status={status}
+        />
+      ) : null}
+
+      {remoteImport.open ? (
+        <RemoteImportDialog
+          error={remoteImport.error}
+          mode={remoteImport.mode}
+          status={status}
+          value={remoteImport.value}
+          onClose={closeRemoteImport}
+          onModeChange={(mode) => updateRemoteImport({ mode, value: '' })}
+          onSubmit={submitRemoteImport}
+          onValueChange={(value) => updateRemoteImport({ value })}
+        />
+      ) : null}
+
+      {localImportConfirmation.open ? (
+        <LocalImportConfirmationDialog
+          candidates={localImportConfirmation.candidates}
+          dontShowAgain={localImportConfirmation.dontShowAgain}
+          status={status}
+          onClose={closeLocalImportConfirmation}
+          onConfirm={confirmLocalImport}
+          onDontShowAgainChange={(dontShowAgain) =>
+            setLocalImportConfirmation((current) => ({ ...current, dontShowAgain }))
+          }
         />
       ) : null}
     </main>
@@ -350,7 +504,6 @@ function Dashboard({
   filtered,
   isFirstUse,
   notice,
-  paths,
   query,
   status,
   onFilter,
@@ -361,29 +514,22 @@ function Dashboard({
 }) {
   return (
     <>
-      <PageHeader
-        eyebrow="Dashboard"
-        title="All skills"
-        subtitle="Manage local and remote skills from one managed library."
-        actions={
-          isFirstUse ? null : (
-          <>
-            <button className="button secondary" type="button" onClick={onRefresh}>
-              Scan
-            </button>
-            <button className="button primary" type="button" onClick={onInstall}>
-              Install skill
-            </button>
-          </>
-          )
-        }
-      />
+      {!isFirstUse ? (
+        <div className="dashboardActions" aria-label="Dashboard actions">
+          <button className="button secondary" type="button" onClick={onRefresh}>
+            Scan
+          </button>
+          <button className="button primary" type="button" onClick={onInstall}>
+            Install skill
+          </button>
+        </div>
+      ) : null}
 
       {error ? <div className="notice">{error}</div> : null}
       {notice ? <div className="notice success">{notice}</div> : null}
 
       {isFirstUse ? (
-        <FirstUseDashboard paths={paths} status={status} onInstall={onInstall} onScan={onRefresh} />
+        <FirstUseDashboard status={status} onInstall={onInstall} onScan={onRefresh} />
       ) : (
         <>
       <section className="metrics" aria-label="Skill statistics">
@@ -461,24 +607,7 @@ function Dashboard({
           </div>
         </div>
 
-        <aside className="sideStack">
-          <div className="panel compactPanel">
-            <div className="panelHeader compact">
-              <div>
-                <h2>Managed roots</h2>
-                <p>Single source of truth</p>
-              </div>
-            </div>
-            <PathList
-              items={[
-                ['Root', paths?.root],
-                ['User', paths?.userSkillsRoot],
-                ['Remote', paths?.remoteSkillsRoot],
-                ['Database', paths?.databasePath]
-              ]}
-            />
-          </div>
-
+        <aside className="sideStack dashboardSideStack">
           <div className="panel compactPanel">
             <div className="panelHeader compact">
               <div>
@@ -496,9 +625,9 @@ function Dashboard({
   );
 }
 
-function FirstUseDashboard({ paths, status, onInstall, onScan }) {
+function FirstUseDashboard({ status, onInstall, onScan }) {
   return (
-    <section className="firstUseGrid">
+    <section className="firstUseGrid firstUseOnly">
       <div className="panel firstUsePanel">
         <div className="emptyGlyph">
           <Icon name="dashboard" />
@@ -516,40 +645,197 @@ function FirstUseDashboard({ paths, status, onInstall, onScan }) {
             {status === 'scanning' ? 'Scanning...' : 'Scan local skills'}
           </button>
           <button className="button secondary" type="button" onClick={onInstall}>
-            Install from GitHub
+            Import from remote
           </button>
         </div>
       </div>
-
-      <aside className="panel compactPanel">
-        <div className="panelHeader compact">
-          <div>
-            <h2>Managed roots</h2>
-            <p>Import will copy first, then replace runtime folders with symlinks.</p>
-          </div>
-        </div>
-        <PathList
-          items={[
-            ['Managed root', paths?.root],
-            ['User skills', paths?.userSkillsRoot],
-            ['Remote skills', paths?.remoteSkillsRoot],
-            ['Deploy mode', 'Copy, backup, symlink']
-          ]}
-        />
-      </aside>
     </section>
   );
 }
 
-function ImportReview({ candidates, onClose, onImport, onToggleSelected, onTypeChange, status }) {
-  const selectedCount = candidates.filter((candidate) => candidate.isSelected && !candidate.conflict).length;
+function SettingsPage({ paths }) {
+  return (
+    <>
+      <PageHeader
+        eyebrow="Settings"
+        title="Settings"
+        subtitle="Review managed storage roots and deployment defaults."
+      />
+
+      <section className="settingsGrid">
+        <ManagedRootsPanel paths={paths} />
+      </section>
+    </>
+  );
+}
+
+function ManagedRootsPanel({ paths }) {
+  return (
+    <aside className="panel compactPanel">
+      <div className="panelHeader compact">
+        <div>
+          <h2>Managed roots</h2>
+          <p>Import will copy first, then replace runtime folders with symlinks.</p>
+        </div>
+      </div>
+      <PathList
+        items={[
+          ['Managed root', paths?.root],
+          ['User skills', paths?.userSkillsRoot],
+          ['Remote skills', paths?.remoteSkillsRoot],
+          ['Deploy mode', 'Copy, backup, symlink']
+        ]}
+      />
+    </aside>
+  );
+}
+
+function RemoteImportDialog({ error, mode, status, value, onClose, onModeChange, onSubmit, onValueChange }) {
+  const isMarkdown = mode === 'markdown';
+
+  return (
+    <div className="modalBackdrop" role="presentation">
+      <section className="remoteImportDialog" role="dialog" aria-modal="true" aria-labelledby="remote-import-title">
+        <div className="importSheetHeader">
+          <div>
+            <h2 id="remote-import-title">Import skill</h2>
+            <p>Provide a skill URL or a local Markdown file to review before importing.</p>
+          </div>
+          <button className="iconButton" type="button" aria-label="Close remote import" onClick={onClose}>
+            x
+          </button>
+        </div>
+
+        <form className="remoteImportForm" onSubmit={onSubmit}>
+          <div className="remoteImportModes" role="group" aria-label="Import source type">
+            <button
+              className={mode === 'url' ? 'active' : ''}
+              type="button"
+              onClick={() => onModeChange('url')}
+            >
+              Skill URL
+            </button>
+            <button
+              className={isMarkdown ? 'active' : ''}
+              type="button"
+              onClick={() => onModeChange('markdown')}
+            >
+              Markdown file
+            </button>
+          </div>
+
+          <label className="remoteImportField">
+            <span>{isMarkdown ? 'Markdown file path' : 'Skill URL'}</span>
+            <input
+              autoFocus
+              placeholder={
+                isMarkdown
+                  ? '~/Downloads/SKILL.md'
+                  : 'https://github.com/owner/repo/tree/main/path/to/skill'
+              }
+              type={isMarkdown ? 'text' : 'url'}
+              value={value}
+              onChange={(event) => onValueChange(event.target.value)}
+            />
+          </label>
+
+          <p className="remoteImportHint">
+            {isMarkdown
+              ? 'Use a local .md file path. SkillBox will turn it into a reviewable import candidate.'
+              : 'Use a GitHub tree, blob, raw, or API URL that points to a skill directory or SKILL.md.'}
+          </p>
+          {error ? <div className="formError">{error}</div> : null}
+
+          <div className="remoteImportFooter">
+            <button className="button secondary" type="button" onClick={onClose}>
+              Cancel
+            </button>
+            <button className="button primary" disabled={status === 'importing'} type="submit">
+              Review import
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function LocalImportConfirmationDialog({
+  candidates,
+  dontShowAgain,
+  status,
+  onClose,
+  onConfirm,
+  onDontShowAgainChange
+}) {
+  const shownCandidates = candidates.slice(0, 3);
+  const remainingCount = Math.max(candidates.length - shownCandidates.length, 0);
+
+  return (
+    <div className="modalBackdrop" role="presentation">
+      <section className="localImportDialog" role="dialog" aria-modal="true" aria-labelledby="local-import-title">
+        <div className="importSheetHeader">
+          <div>
+            <h2 id="local-import-title">Confirm local import</h2>
+            <p>SkillBox will move the selected skill folders into the managed store.</p>
+          </div>
+          <button className="iconButton" type="button" aria-label="Close local import confirmation" onClick={onClose}>
+            x
+          </button>
+        </div>
+
+        <div className="localImportBody">
+          <div className="localImportImpact">
+            <strong>{candidates.length} selected</strong>
+            <p>
+              The original folders will be replaced with symlinks to the managed copies, and the
+              moved folders will be kept under the SkillBox import backups.
+            </p>
+          </div>
+
+          <ul className="localImportPaths" aria-label="Selected local skill paths">
+            {shownCandidates.map((candidate) => (
+              <li key={candidate.sourcePath}>
+                <span>{candidate.name}</span>
+                <code>{compactPath(candidate.sourcePath)}</code>
+              </li>
+            ))}
+            {remainingCount > 0 ? <li className="muted">+{remainingCount} more</li> : null}
+          </ul>
+
+          <label className="localImportPreference">
+            <input
+              checked={dontShowAgain}
+              type="checkbox"
+              onChange={(event) => onDontShowAgainChange(event.target.checked)}
+            />
+            <span>Don't show this again</span>
+          </label>
+        </div>
+
+        <div className="localImportFooter">
+          <button className="button secondary" disabled={status === 'importing'} type="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="button primary" disabled={status === 'importing'} type="button" onClick={onConfirm}>
+            {status === 'importing' ? 'Importing...' : 'Confirm import'}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ImportReview({ candidates, onClose, onImport, onToggleAll, onToggleSelected, onTypeChange, status }) {
+  const selectableCount = candidates.filter(isImportableCandidate).length;
+  const selectedCount = candidates.filter((candidate) => candidate.isSelected && isImportableCandidate(candidate)).length;
+  const isAllSelected = selectableCount > 0 && selectedCount === selectableCount;
 
   return (
     <div className="modalBackdrop" role="presentation">
       <section className="importSheet" role="dialog" aria-modal="true" aria-labelledby="import-review-title">
         <div className="importSheetHeader">
           <div>
-            <p className="eyebrow">Scan completed</p>
             <h2 id="import-review-title">Import Review</h2>
             <p>Confirm each skill type before SkillBox copies it into the managed store.</p>
           </div>
@@ -560,11 +846,11 @@ function ImportReview({ candidates, onClose, onImport, onToggleSelected, onTypeC
 
         <div className="candidateList">
           {candidates.map((candidate) => (
-            <div className={candidate.conflict ? 'candidateRow conflict' : 'candidateRow'} key={candidate.sourcePath}>
+            <div className={candidateRowClass(candidate)} key={candidate.sourcePath}>
               <label className="candidateCheck">
                 <input
                   checked={candidate.isSelected}
-                  disabled={Boolean(candidate.conflict)}
+                  disabled={!isImportableCandidate(candidate)}
                   type="checkbox"
                   onChange={() => onToggleSelected(candidate)}
                 />
@@ -577,6 +863,7 @@ function ImportReview({ candidates, onClose, onImport, onToggleSelected, onTypeC
                   <Badge tone={candidate.skillType === 'user' ? 'green' : 'blue'}>
                     {candidate.skillType === 'user' ? 'User skill' : 'Remote skill'}
                   </Badge>
+                  {candidate.importStatus === 'imported' ? <Badge tone="slate">Imported</Badge> : null}
                   {candidate.conflict ? <Badge tone="red">Conflict</Badge> : null}
                 </div>
                 <small>{candidate.description || 'No description in SKILL.md'}</small>
@@ -587,7 +874,7 @@ function ImportReview({ candidates, onClose, onImport, onToggleSelected, onTypeC
               <div className="candidateTypeSwitch" role="group" aria-label={`${candidate.name} type`}>
                 <button
                   className={candidate.skillType === 'user' ? 'active' : ''}
-                  disabled={Boolean(candidate.conflict)}
+                  disabled={!isImportableCandidate(candidate)}
                   type="button"
                   onClick={() => onTypeChange(candidate, 'user')}
                 >
@@ -595,7 +882,7 @@ function ImportReview({ candidates, onClose, onImport, onToggleSelected, onTypeC
                 </button>
                 <button
                   className={candidate.skillType === 'remote' ? 'active' : ''}
-                  disabled={Boolean(candidate.conflict)}
+                  disabled={!isImportableCandidate(candidate)}
                   type="button"
                   onClick={() => onTypeChange(candidate, 'remote')}
                 >
@@ -607,12 +894,27 @@ function ImportReview({ candidates, onClose, onImport, onToggleSelected, onTypeC
         </div>
 
         <div className="importSheetFooter">
-          <span>{selectedCount} selected</span>
+          <div className="importSelectionSummary">
+            <button
+              className="selectAllButton"
+              disabled={selectableCount === 0 || status === 'importing'}
+              type="button"
+              onClick={onToggleAll}
+            >
+              {isAllSelected ? 'Unselect all' : 'Select all'}
+            </button>
+            <span>{selectedCount} selected</span>
+          </div>
           <div className="headerActions">
             <button className="button secondary" type="button" onClick={onClose}>
               Cancel
             </button>
-            <button className="button primary" disabled={status === 'importing'} type="button" onClick={onImport}>
+            <button
+              className="button primary"
+              disabled={status === 'importing' || selectedCount === 0}
+              type="button"
+              onClick={onImport}
+            >
               {status === 'importing' ? 'Importing...' : 'Import selected'}
             </button>
           </div>
@@ -752,9 +1054,9 @@ function NavButton({ active, icon, label, onClick }) {
   );
 }
 
-function FooterButton({ icon, label }) {
+function FooterButton({ active = false, icon, label, onClick }) {
   return (
-    <button type="button">
+    <button className={active ? 'active' : ''} type="button" onClick={onClick}>
       <Icon name={icon} />
       {label}
     </button>
@@ -916,20 +1218,175 @@ function normalizeSkill(skill) {
   };
 }
 
+function normalizePreferences(preferences) {
+  return {
+    skipLocalImportConfirmation: Boolean(
+      preferences?.skipLocalImportConfirmation ?? preferences?.skip_local_import_confirmation
+    )
+  };
+}
+
+function readPreviewPreferences() {
+  try {
+    return {
+      skipLocalImportConfirmation: window.localStorage.getItem(previewPreferenceStorageKey) === 'true'
+    };
+  } catch {
+    return { skipLocalImportConfirmation: false };
+  }
+}
+
 function normalizeImportCandidate(candidate) {
   const suggestedType = candidate.suggestedType || candidate.suggested_type || 'user';
   const sourcePath = candidate.sourcePath || candidate.source_path;
+  const conflict = candidate.conflict || null;
+  const importStatus = candidate.importStatus || candidate.import_status || 'importable';
+  const isImportable = importStatus === 'importable' && !conflict;
 
   return {
     ...candidate,
     sourcePath,
     sourceRoot: candidate.sourceRoot || candidate.source_root,
+    realPath: candidate.realPath || candidate.real_path,
     contentHash: candidate.contentHash || candidate.content_hash,
     suggestedType,
     skillType: candidate.skillType || candidate.skill_type || suggestedType,
     suggestionReason: candidate.suggestionReason || candidate.suggestion_reason || 'Needs confirm',
-    isSelected: candidate.isSelected ?? candidate.is_selected ?? true
+    importOrigin: candidate.importOrigin || candidate.import_origin || 'local-scan',
+    importStatus,
+    conflict,
+    isSelected: Boolean(candidate.isSelected ?? candidate.is_selected ?? isImportable)
   };
+}
+
+function remoteImportCandidate(mode, value) {
+  const name = inferSkillNameFromImportValue(value);
+  const isMarkdown = mode === 'markdown';
+
+  return {
+    name,
+    description: isMarkdown ? 'Remote skill created from a Markdown file.' : 'Remote skill source provided by URL.',
+    sourcePath: value,
+    sourceRoot: inferImportSourceRoot(value),
+    contentHash: previewContentHash(value),
+    suggestedType: 'remote',
+    skillType: 'remote',
+    suggestionReason: isMarkdown ? 'User provided Markdown file' : 'User provided skill URL',
+    importOrigin: 'remote-input',
+    importStatus: 'importable',
+    isSelected: true,
+    conflict: null
+  };
+}
+
+function applyPreviewImportStatuses(candidates, importedSkills) {
+  const importedHashes = new Set(importedSkills.map((skill) => skill.contentHash).filter(Boolean));
+  const importedNames = new Set(importedSkills.map((skill) => skill.name).filter(Boolean));
+
+  return candidates.map((candidate) => {
+    if (!importedHashes.has(candidate.contentHash) && !importedNames.has(candidate.name)) {
+      return candidate;
+    }
+
+    return {
+      ...candidate,
+      importStatus: 'imported',
+      isSelected: false,
+      suggestionReason: 'Imported; source links to SkillBox'
+    };
+  });
+}
+
+function shouldConfirmLocalImport(candidates, preferences) {
+  if (preferences.skipLocalImportConfirmation) {
+    return false;
+  }
+
+  return candidates.some((candidate) => isImportableCandidate(candidate) && requiresLocalImportConfirmation(candidate));
+}
+
+function requiresLocalImportConfirmation(candidate) {
+  const sourcePath = String(candidate.sourcePath || '');
+
+  if (candidate.importOrigin === 'remote-input') {
+    return false;
+  }
+
+  if (isHttpUrl(sourcePath) || sourcePath.toLowerCase().endsWith('.md')) {
+    return false;
+  }
+
+  return true;
+}
+
+function importNotice(prefix, message) {
+  return [prefix, message].filter(Boolean).join(' ');
+}
+
+function isImportableCandidate(candidate) {
+  return candidate.importStatus !== 'imported' && !candidate.conflict;
+}
+
+function candidateRowClass(candidate) {
+  return [
+    'candidateRow',
+    candidate.conflict ? 'conflict' : '',
+    candidate.importStatus === 'imported' ? 'imported' : ''
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
+function toggleImportCandidateSelection(candidates) {
+  const selectable = candidates.filter(isImportableCandidate);
+  const shouldSelectAll = selectable.some((candidate) => !candidate.isSelected);
+
+  return candidates.map((candidate) =>
+    isImportableCandidate(candidate) ? { ...candidate, isSelected: shouldSelectAll } : candidate
+  );
+}
+
+function isHttpUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function inferSkillNameFromImportValue(value) {
+  const clean = value.split(/[?#]/)[0].replace(/\/+$/, '');
+  const parts = clean.split(/[\\/]/).filter(Boolean);
+  let name = parts[parts.length - 1] || 'remote-skill';
+
+  if (name.toLowerCase() === 'skill.md' && parts.length > 1) {
+    name = parts[parts.length - 2];
+  } else if (name.toLowerCase().endsWith('.md')) {
+    name = name.slice(0, -3);
+  }
+
+  return name || 'remote-skill';
+}
+
+function inferImportSourceRoot(value) {
+  try {
+    const parsed = new URL(value);
+    const pathParts = parsed.pathname.split('/').filter(Boolean).slice(0, 2);
+    return [parsed.hostname, ...pathParts].join('/');
+  } catch {
+    const clean = value.split(/[?#]/)[0].replace(/\/+$/, '');
+    const parts = clean.split(/[\\/]/).filter(Boolean);
+    return parts.slice(0, -1).join('/') || clean;
+  }
+}
+
+function previewContentHash(value) {
+  let hash = 0;
+  for (const char of value) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  }
+  return `preview-${hash.toString(16).padStart(8, '0')}`;
 }
 
 function candidateToPreviewSkill(candidate) {

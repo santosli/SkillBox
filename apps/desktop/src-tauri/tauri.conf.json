@@ -13,6 +13,7 @@
     "windows": [
       {
         "title": "SkillBox",
+        "hiddenTitle": true,
         "width": 1120,
         "height": 760,
         "minWidth": 860,

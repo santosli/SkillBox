@@ -15,6 +15,21 @@ fn managed_state() -> Result<Value, String> {
 }
 
 #[tauri::command]
+fn managed_preferences() -> Result<Value, String> {
+    let preferences = skillbox_core::managed_preferences(skillbox_core::default_managed_root())?;
+    serde_json::to_value(preferences).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_skip_local_import_confirmation(skip: bool) -> Result<Value, String> {
+    let preferences = skillbox_core::set_skip_local_import_confirmation(
+        skillbox_core::default_managed_root(),
+        skip,
+    )?;
+    serde_json::to_value(preferences).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn scan_skills() -> Result<Value, String> {
     let scan = skillbox_core::scan_skill_roots(&skillbox_core::default_runtime_roots())?;
     serde_json::to_value(scan).map_err(|error| error.to_string())
@@ -46,6 +61,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             managed_paths,
             managed_state,
+            managed_preferences,
+            set_skip_local_import_confirmation,
             scan_skills,
             scan_import_candidates,
             import_candidates,
