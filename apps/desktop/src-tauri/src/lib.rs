@@ -31,14 +31,14 @@ fn set_skip_local_import_confirmation(skip: bool) -> Result<Value, String> {
 
 #[tauri::command]
 fn scan_skills() -> Result<Value, String> {
-    let scan = skillbox_core::scan_skill_roots(&skillbox_core::default_runtime_roots())?;
+    let scan = skillbox_core::scan_skill_roots(&skillbox_core::global_runtime_roots())?;
     serde_json::to_value(scan).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 fn scan_import_candidates() -> Result<Value, String> {
     let scan = skillbox_core::scan_import_candidates(
-        &skillbox_core::default_runtime_roots(),
+        &skillbox_core::global_runtime_roots(),
         skillbox_core::default_managed_root(),
     )?;
     serde_json::to_value(scan).map_err(|error| error.to_string())

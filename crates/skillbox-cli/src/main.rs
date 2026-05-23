@@ -1,5 +1,5 @@
 use skillbox_core::{
-    default_managed_root, default_runtime_roots, deploy_skill, import_skill, managed_paths,
+    default_managed_root, deploy_skill, global_runtime_roots, import_skill, managed_paths,
     scan_skill_roots, SkillKind,
 };
 use skillbox_github::parse_github_skill_url;
@@ -25,7 +25,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         "scan" => {
             let roots = positional(command_args);
             let roots = if roots.is_empty() {
-                default_runtime_roots()
+                global_runtime_roots()
             } else {
                 roots.into_iter().map(PathBuf::from).collect()
             };

@@ -182,6 +182,154 @@ pub fn default_runtime_roots() -> Vec<PathBuf> {
     ]
 }
 
+pub fn global_runtime_roots() -> Vec<PathBuf> {
+    runtime_roots_under(&home_dir())
+}
+
+fn runtime_roots_under(home: &Path) -> Vec<PathBuf> {
+    let mut roots = vec![home.join(".codex/skills"), home.join(".agents/skills")];
+    roots.extend(discover_runtime_roots_under(home));
+    dedupe_runtime_roots(roots)
+}
+
+fn discover_runtime_roots_under(home: &Path) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    discover_runtime_roots(home, 0, 3, &mut roots);
+    for base in runtime_root_search_bases(home) {
+        discover_runtime_roots(&base, 0, 8, &mut roots);
+    }
+    dedupe_runtime_roots(roots)
+}
+
+fn runtime_root_search_bases(home: &Path) -> Vec<PathBuf> {
+    [
+        "Desktop",
+        "Documents",
+        "Downloads",
+        "Developer",
+        "Projects",
+        "Code",
+        "code",
+        "zone",
+        "work",
+        "src",
+        "Library/Mobile Documents",
+    ]
+    .iter()
+    .map(|relative| home.join(relative))
+    .collect()
+}
+
+fn discover_runtime_roots(
+    current: &Path,
+    depth: usize,
+    max_depth: usize,
+    roots: &mut Vec<PathBuf>,
+) {
+    if depth > max_depth || !current.is_dir() {
+        return;
+    }
+
+    if is_runtime_skill_root(current) {
+        roots.push(current.to_path_buf());
+        return;
+    }
+
+    let mut has_direct_runtime_root = false;
+    for runtime_parent in [".agents", ".codex"] {
+        let runtime_root = current.join(runtime_parent).join("skills");
+        if runtime_root.is_dir() {
+            roots.push(runtime_root);
+            has_direct_runtime_root = true;
+        }
+    }
+    if depth > 0 && has_direct_runtime_root {
+        return;
+    }
+
+    let entries = match fs::read_dir(current) {
+        Ok(entries) => entries,
+        Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(_) => continue,
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+
+        if should_skip_runtime_root_search(&path) {
+            continue;
+        }
+
+        discover_runtime_roots(&path, depth + 1, max_depth, roots);
+    }
+}
+
+fn is_runtime_skill_root(path: &Path) -> bool {
+    path.file_name().and_then(|name| name.to_str()) == Some("skills")
+        && matches!(
+            path.parent()
+                .and_then(|parent| parent.file_name())
+                .and_then(|name| name.to_str()),
+            Some(".agents" | ".codex")
+        )
+}
+
+fn should_skip_runtime_root_search(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
+    if matches!(name, ".agents" | ".codex") {
+        return false;
+    }
+    if name.starts_with('.') {
+        return true;
+    }
+    if matches!(
+        name,
+        "node_modules"
+            | "target"
+            | "dist"
+            | "build"
+            | ".venv"
+            | "venv"
+            | "SkillBox"
+            | "Applications"
+            | "Pictures"
+            | "Movies"
+            | "Music"
+            | "Caches"
+    ) {
+        return true;
+    }
+
+    let parent_name = path
+        .parent()
+        .and_then(|parent| parent.file_name())
+        .and_then(|name| name.to_str());
+    parent_name == Some("Library") && name != "Mobile Documents"
+}
+
+fn dedupe_runtime_roots(roots: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut seen = HashSet::new();
+    let mut deduped = Vec::new();
+
+    for root in roots {
+        let key = fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
+        if seen.insert(key) {
+            deduped.push(root);
+        }
+    }
+
+    deduped
+}
+
 pub fn managed_paths(root: impl Into<PathBuf>) -> ManagedPaths {
     let root = expand_home(root.into());
     ManagedPaths {
@@ -1059,6 +1207,70 @@ description: \"Demo skill\"
             .map(|skill| skill.name.as_str())
             .collect();
         assert_eq!(names, vec!["alpha", "beta"]);
+    }
+
+    #[test]
+    fn global_runtime_roots_include_project_local_skill_roots() {
+        let root = temp_dir("global-runtime-roots");
+        let project_agents_root = root
+            .join("Library")
+            .join("Mobile Documents")
+            .join("iCloud~md~obsidian")
+            .join("Documents")
+            .join("Pandora")
+            .join(".agents")
+            .join("skills");
+        let project_codex_root = root
+            .join("zone")
+            .join("project")
+            .join(".codex")
+            .join("skills");
+
+        make_skill(
+            &project_agents_root.join("pandora-local"),
+            "pandora-local",
+            "Pandora local skill",
+        );
+        make_skill(
+            &project_codex_root.join("project-remote"),
+            "project-remote",
+            "Project remote skill",
+        );
+
+        let roots = runtime_roots_under(&root);
+
+        assert!(roots.contains(&root.join(".codex").join("skills")));
+        assert!(roots.contains(&root.join(".agents").join("skills")));
+        assert!(roots.contains(&project_agents_root));
+        assert!(roots.contains(&project_codex_root));
+    }
+
+    #[test]
+    fn scan_import_candidates_uses_discovered_project_local_roots() {
+        let root = temp_dir("candidate-project-roots");
+        let project_agents_root = root
+            .join("Library")
+            .join("Mobile Documents")
+            .join("iCloud~md~obsidian")
+            .join("Documents")
+            .join("Pandora")
+            .join(".agents")
+            .join("skills");
+        let managed_root = root.join("SkillBox");
+
+        make_skill(
+            &project_agents_root.join("pandora-local"),
+            "pandora-local",
+            "Pandora local skill",
+        );
+
+        let roots = runtime_roots_under(&root);
+        let candidates = scan_import_candidates(&roots, &managed_root).unwrap();
+        let candidate = candidate(&candidates.candidates, "pandora-local");
+
+        assert_eq!(candidate.suggested_type, SkillKind::User);
+        assert_eq!(candidate.source_root, Some(project_agents_root));
+        assert!(candidate.is_selected);
     }
 
     #[test]

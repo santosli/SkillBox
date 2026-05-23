@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import desktopPackage from '../package.json';
+import codexAppIcon from './assets/codex-app-icon.png';
+import codexCliIcon from './assets/codex-cli-icon.png';
 
 const filters = [
   { id: 'all', label: 'All' },
@@ -860,6 +862,7 @@ function ImportReview({ candidates, onClose, onImport, onToggleAll, onToggleSele
               <div className="candidateMain">
                 <div className="candidateTitle">
                   <strong>{candidate.name}</strong>
+                  <SourceIcon candidate={candidate} />
                   <Badge tone={candidate.skillType === 'user' ? 'green' : 'blue'}>
                     {candidate.skillType === 'user' ? 'User skill' : 'Remote skill'}
                   </Badge>
@@ -868,7 +871,7 @@ function ImportReview({ candidates, onClose, onImport, onToggleAll, onToggleSele
                 </div>
                 <small>{candidate.description || 'No description in SKILL.md'}</small>
                 <code>{compactPath(candidate.sourcePath)}</code>
-                <p>{candidate.conflict || candidate.suggestionReason}</p>
+                {candidateStatusNote(candidate) ? <p>{candidateStatusNote(candidate)}</p> : null}
               </div>
 
               <div className="candidateTypeSwitch" role="group" aria-label={`${candidate.name} type`}>
@@ -1060,6 +1063,21 @@ function FooterButton({ active = false, icon, label, onClick }) {
       <Icon name={icon} />
       {label}
     </button>
+  );
+}
+
+function SourceIcon({ candidate }) {
+  const source = candidateSource(candidate);
+  if (!source) {
+    return null;
+  }
+
+  const iconSource = source.kind === 'agent' ? codexCliIcon : codexAppIcon;
+
+  return (
+    <span className={`sourceIcon ${source.kind}`} title={source.label} aria-label={source.label}>
+      <img src={iconSource} alt="" aria-hidden="true" />
+    </span>
   );
 }
 
@@ -1255,7 +1273,7 @@ function normalizeImportCandidate(candidate) {
     importOrigin: candidate.importOrigin || candidate.import_origin || 'local-scan',
     importStatus,
     conflict,
-    isSelected: Boolean(candidate.isSelected ?? candidate.is_selected ?? isImportable)
+    isSelected: isImportable
   };
 }
 
@@ -1335,6 +1353,41 @@ function candidateRowClass(candidate) {
   ]
     .filter(Boolean)
     .join(' ');
+}
+
+function candidateStatusNote(candidate) {
+  if (candidate.conflict) {
+    return candidate.conflict;
+  }
+  if (candidate.importStatus === 'imported') {
+    return '';
+  }
+  if (candidateSource(candidate)) {
+    return '';
+  }
+  return candidate.suggestionReason;
+}
+
+function candidateSource(candidate) {
+  const values = [
+    candidate.sourceRoot,
+    candidate.sourcePath,
+    candidate.realPath,
+    candidate.suggestionReason
+  ]
+    .filter(Boolean)
+    .map((value) => String(value));
+  const combined = values.join(' ');
+
+  if (combined.includes('/.agents/skills') || combined.includes('~/.agents/skills')) {
+    return { kind: 'agent', label: 'From ~/.agents/skills' };
+  }
+
+  if (combined.includes('/.codex/skills') || combined.includes('~/.codex/skills')) {
+    return { kind: 'codex', label: 'From ~/.codex/skills' };
+  }
+
+  return null;
 }
 
 function toggleImportCandidateSelection(candidates) {
