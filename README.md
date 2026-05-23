@@ -13,6 +13,8 @@ The project is currently bootstrapped with:
 
 ```sh
 npm test
+npm run hooks:install
+npm run docs:check-staged
 node packages/skillbox-cli/bin/skillbox.js scan --json
 node packages/skillbox-cli/bin/skillbox.js paths --json
 node packages/skillbox-cli/bin/skillbox.js parse-github-url <github-url> --json
@@ -21,6 +23,11 @@ cargo test --offline
 ```
 
 The default managed root is `~/SkillBox`, or `SKILLBOX_HOME` when set.
+
+`npm install` runs `npm run hooks:install`, which points Git at the tracked
+`.githooks/` directory. The pre-commit hook checks staged implementation and
+workflow changes and blocks the commit until the matching docs update is staged,
+or until the author explicitly commits with `SKILLBOX_SKIP_DOCS_CHECK=1`.
 
 ## Managed Layout
 

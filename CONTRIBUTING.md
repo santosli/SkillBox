@@ -76,6 +76,9 @@ cargo run -p skillbox-cli --offline -- deploy <skill-name> --target <target-root
 PR 前检查：
 
 - 跑相关自动化测试：通常至少 `npm test` 和 `cargo test --offline`。
+- 本仓库使用 `.githooks/pre-commit` 检查 staged implementation / workflow 变更是否需要同步更新文档。
+  `npm install` 会自动设置 `core.hooksPath=.githooks`，也可以手动运行 `npm run hooks:install`。
+- 如果已经确认本次变更不需要文档更新，可用 `SKILLBOX_SKIP_DOCS_CHECK=1 git commit ...` 显式跳过。
 - 如果改动 UI，运行 Vite 或 Tauri dev，并做浏览器或 Tauri 手动验证。
 - 如果改动 workflow，更新 `docs/workflows.md` 中对应完成标准。
 - 如果改动存储、schema、目录布局或迁移行为，更新 `docs/data-model.md`。

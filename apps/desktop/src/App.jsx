@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import desktopPackage from '../package.json';
+import skillBoxAppIcon from '../src-tauri/icons/icon.png';
 import codexAppIcon from './assets/codex-app-icon.png';
 import codexCliIcon from './assets/codex-cli-icon.png';
 import { normalizeImportCandidate } from './importCandidates.js';
@@ -57,7 +58,8 @@ const previewImportCandidates = [
     skillType: 'remote',
     suggestionReason: 'inside ~/.codex/skills/.system',
     importOrigin: 'local-scan',
-    isSelected: true,
+    importStatus: 'system',
+    isSelected: false,
     conflict: null
   }
 ];
@@ -408,7 +410,7 @@ export default function App() {
     <main className="appShell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brandMark">SB</div>
+          <img className="brandMark" src={skillBoxAppIcon} alt="" aria-hidden="true" />
           <div>
             <strong>SkillBox</strong>
             <span>Local skill manager</span>
@@ -830,6 +832,13 @@ function LocalImportConfirmationDialog({
 }
 
 function ImportReview({ candidates, onClose, onImport, onToggleAll, onToggleSelected, onTypeChange, status }) {
+  const [isImportedExpanded, setIsImportedExpanded] = useState(false);
+  const [isSystemExpanded, setIsSystemExpanded] = useState(false);
+  const importedCandidates = candidates.filter((candidate) => candidate.importStatus === 'imported');
+  const systemCandidates = candidates.filter((candidate) => candidate.importStatus === 'system');
+  const reviewCandidates = candidates.filter(
+    (candidate) => candidate.importStatus !== 'imported' && candidate.importStatus !== 'system'
+  );
   const selectableCount = candidates.filter(isImportableCandidate).length;
   const selectedCount = candidates.filter((candidate) => candidate.isSelected && isImportableCandidate(candidate)).length;
   const isAllSelected = selectableCount > 0 && selectedCount === selectableCount;
@@ -848,53 +857,30 @@ function ImportReview({ candidates, onClose, onImport, onToggleAll, onToggleSele
         </div>
 
         <div className="candidateList">
-          {candidates.map((candidate) => (
-            <div className={candidateRowClass(candidate)} key={candidate.sourcePath}>
-              <label className="candidateCheck">
-                <input
-                  checked={candidate.isSelected}
-                  disabled={!isImportableCandidate(candidate)}
-                  type="checkbox"
-                  onChange={() => onToggleSelected(candidate)}
-                />
-                <span />
-              </label>
-
-              <div className="candidateMain">
-                <div className="candidateTitle">
-                  <strong>{candidate.name}</strong>
-                  <SourceIcon candidate={candidate} />
-                  <Badge tone={candidate.skillType === 'user' ? 'green' : 'blue'}>
-                    {candidate.skillType === 'user' ? 'User skill' : 'Remote skill'}
-                  </Badge>
-                  {candidate.importStatus === 'imported' ? <Badge tone="slate">Imported</Badge> : null}
-                  {candidate.conflict ? <Badge tone="red">Conflict</Badge> : null}
-                </div>
-                <small>{candidate.description || 'No description in SKILL.md'}</small>
-                <code>{compactPath(candidate.sourcePath)}</code>
-                {candidateStatusNote(candidate) ? <p>{candidateStatusNote(candidate)}</p> : null}
-              </div>
-
-              <div className="candidateTypeSwitch" role="group" aria-label={`${candidate.name} type`}>
-                <button
-                  className={candidate.skillType === 'user' ? 'active' : ''}
-                  disabled={!isImportableCandidate(candidate)}
-                  type="button"
-                  onClick={() => onTypeChange(candidate, 'user')}
-                >
-                  User
-                </button>
-                <button
-                  className={candidate.skillType === 'remote' ? 'active' : ''}
-                  disabled={!isImportableCandidate(candidate)}
-                  type="button"
-                  onClick={() => onTypeChange(candidate, 'remote')}
-                >
-                  Remote
-                </button>
-              </div>
-            </div>
+          {reviewCandidates.map((candidate) => (
+            <CandidateRow
+              candidate={candidate}
+              key={candidate.sourcePath}
+              onToggleSelected={onToggleSelected}
+              onTypeChange={onTypeChange}
+            />
           ))}
+          <CollapsedCandidateGroup
+            candidates={systemCandidates}
+            isExpanded={isSystemExpanded}
+            label="System skills"
+            onToggle={() => setIsSystemExpanded((current) => !current)}
+            onToggleSelected={onToggleSelected}
+            onTypeChange={onTypeChange}
+          />
+          <CollapsedCandidateGroup
+            candidates={importedCandidates}
+            isExpanded={isImportedExpanded}
+            label="Imported skills"
+            onToggle={() => setIsImportedExpanded((current) => !current)}
+            onToggleSelected={onToggleSelected}
+            onTypeChange={onTypeChange}
+          />
         </div>
 
         <div className="importSheetFooter">
@@ -924,6 +910,99 @@ function ImportReview({ candidates, onClose, onImport, onToggleAll, onToggleSele
           </div>
         </div>
       </section>
+    </div>
+  );
+}
+
+function CollapsedCandidateGroup({
+  candidates,
+  isExpanded,
+  label,
+  onToggle,
+  onToggleSelected,
+  onTypeChange
+}) {
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="collapsedCandidateGroup">
+      <button
+        className="collapsedCandidateToggle"
+        type="button"
+        aria-expanded={isExpanded}
+        onClick={onToggle}
+      >
+        <span>
+          {label}
+          <strong>{candidates.length}</strong>
+        </span>
+        <span>{isExpanded ? 'Hide' : 'Show'}</span>
+      </button>
+      {isExpanded ? (
+        <div className="collapsedCandidateRows">
+          {candidates.map((candidate) => (
+            <CandidateRow
+              candidate={candidate}
+              key={candidate.sourcePath}
+              onToggleSelected={onToggleSelected}
+              onTypeChange={onTypeChange}
+            />
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function CandidateRow({ candidate, onToggleSelected, onTypeChange }) {
+  return (
+    <div className={candidateRowClass(candidate)}>
+      <label className="candidateCheck">
+        <input
+          checked={candidate.isSelected}
+          disabled={!isImportableCandidate(candidate)}
+          type="checkbox"
+          onChange={() => onToggleSelected(candidate)}
+        />
+        <span />
+      </label>
+
+      <div className="candidateMain">
+        <div className="candidateTitle">
+          <strong>{candidate.name}</strong>
+          <SourceIcon candidate={candidate} />
+          <Badge tone={candidate.skillType === 'user' ? 'green' : 'blue'}>
+            {candidate.skillType === 'user' ? 'User skill' : 'Remote skill'}
+          </Badge>
+          {candidate.importStatus === 'system' ? <Badge tone="slate">System</Badge> : null}
+          {candidate.importStatus === 'imported' ? <Badge tone="slate">Imported</Badge> : null}
+          {candidate.conflict ? <Badge tone="red">Conflict</Badge> : null}
+        </div>
+        <small>{candidate.description || 'No description in SKILL.md'}</small>
+        <code>{compactPath(candidate.sourcePath)}</code>
+        {candidateStatusNote(candidate) ? <p>{candidateStatusNote(candidate)}</p> : null}
+      </div>
+
+      <div className="candidateTypeSwitch" role="group" aria-label={`${candidate.name} type`}>
+        <button
+          className={candidate.skillType === 'user' ? 'active' : ''}
+          disabled={!isImportableCandidate(candidate)}
+          type="button"
+          onClick={() => onTypeChange(candidate, 'user')}
+        >
+          User
+        </button>
+        <button
+          className={candidate.skillType === 'remote' ? 'active' : ''}
+          disabled={!isImportableCandidate(candidate)}
+          type="button"
+          onClick={() => onTypeChange(candidate, 'remote')}
+        >
+          Remote
+        </button>
+      </div>
     </div>
   );
 }
@@ -1280,6 +1359,10 @@ function applyPreviewImportStatuses(candidates, importedSkills) {
   const importedNames = new Set(importedSkills.map((skill) => skill.name).filter(Boolean));
 
   return candidates.map((candidate) => {
+    if (candidate.importStatus !== 'importable') {
+      return candidate;
+    }
+
     if (!importedHashes.has(candidate.contentHash) && !importedNames.has(candidate.name)) {
       return candidate;
     }
@@ -1320,14 +1403,15 @@ function importNotice(prefix, message) {
 }
 
 function isImportableCandidate(candidate) {
-  return candidate.importStatus !== 'imported' && !candidate.conflict;
+  return candidate.importStatus === 'importable' && !candidate.conflict;
 }
 
 function candidateRowClass(candidate) {
   return [
     'candidateRow',
     candidate.conflict ? 'conflict' : '',
-    candidate.importStatus === 'imported' ? 'imported' : ''
+    candidate.importStatus === 'imported' ? 'imported' : '',
+    candidate.importStatus === 'system' ? 'system' : ''
   ]
     .filter(Boolean)
     .join(' ');
@@ -1337,7 +1421,7 @@ function candidateStatusNote(candidate) {
   if (candidate.conflict) {
     return candidate.conflict;
   }
-  if (candidate.importStatus === 'imported') {
+  if (candidate.importStatus === 'imported' || candidate.importStatus === 'system') {
     return '';
   }
   if (candidateSource(candidate)) {

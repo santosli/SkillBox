@@ -48,3 +48,7 @@ SkillBox 管理两类内容：
 
 在声称某个 workflow 完成之前，必须运行对应测试或命令，并报告验证内容。
 需要保持可验证的 workflow 见 `docs/workflows.md`。
+
+提交前的 `.githooks/pre-commit` 会检查 staged implementation / workflow 变更是否需要同步更新
+`AGENTS.md`、`README.md`、`CONTRIBUTING.md` 或 `docs/*`。确认为无需文档更新时，可以用
+`SKILLBOX_SKIP_DOCS_CHECK=1 git commit ...` 显式跳过。

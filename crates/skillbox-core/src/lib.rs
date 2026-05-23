@@ -130,6 +130,7 @@ pub struct ImportCandidate {
 pub enum ImportCandidateStatus {
     Importable,
     Imported,
+    System,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -613,11 +614,19 @@ pub fn scan_import_candidates(
     let mut candidates = Vec::new();
 
     for skill in scan.skills {
+        let is_system = is_system_skill(&skill);
         let is_imported = imported_hashes.contains(&skill.content_hash)
             || is_under_path(&skill.real_path, &paths.root);
         let (suggested_type, suggestion_reason, default_selected) =
             infer_import_candidate_type(&skill, &paths);
-        let (suggestion_reason, import_status, is_selected, conflict) = if is_imported {
+        let (suggestion_reason, import_status, is_selected, conflict) = if is_system {
+            (
+                suggestion_reason,
+                ImportCandidateStatus::System,
+                false,
+                None,
+            )
+        } else if is_imported {
             (
                 imported_candidate_reason(&skill, &paths),
                 ImportCandidateStatus::Imported,
@@ -904,6 +913,11 @@ fn infer_import_candidate_type(skill: &Skill, paths: &ManagedPaths) -> (SkillKin
     }
 
     (SkillKind::User, "Needs confirm".to_string(), true)
+}
+
+fn is_system_skill(skill: &Skill) -> bool {
+    let path = skill.path.to_string_lossy();
+    path.contains("/.codex/skills/.system/") || path.ends_with("/.codex/skills/.system")
 }
 
 fn imported_candidate_reason(skill: &Skill, paths: &ManagedPaths) -> String {
@@ -1390,6 +1404,7 @@ description: \"Demo skill\"
         let system = candidate(&candidates.candidates, "system");
         assert_eq!(system.suggested_type, SkillKind::Remote);
         assert_eq!(system.suggestion_reason, "inside ~/.codex/skills/.system");
+        assert_eq!(system.import_status, ImportCandidateStatus::System);
         assert!(!system.is_selected);
 
         let github = candidate(&candidates.candidates, "github-skill");

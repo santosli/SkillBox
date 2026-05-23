@@ -55,15 +55,11 @@ button {
 }
 
 .brandMark {
-  display: grid;
   width: 36px;
   height: 36px;
-  place-items: center;
   border-radius: 8px;
-  background: #111827;
-  color: #ffffff;
-  font-size: 12px;
-  font-weight: 760;
+  display: block;
+  object-fit: cover;
 }
 
 .brand strong,
@@ -1331,6 +1327,58 @@ dd {
   background: #f8fafc;
 }
 
+.collapsedCandidateGroup,
+.collapsedCandidateRows {
+  display: grid;
+  gap: 10px;
+}
+
+.collapsedCandidateToggle {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 650;
+  padding: 0 14px;
+}
+
+.collapsedCandidateToggle:hover {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+  color: #334155;
+}
+
+.collapsedCandidateToggle > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.collapsedCandidateToggle strong {
+  display: inline-flex;
+  min-width: 24px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0 8px;
+}
+
+.collapsedCandidateToggle > span:last-child {
+  color: #2563eb;
+}
+
 .candidateRow {
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr) auto;
@@ -1347,7 +1395,8 @@ dd {
   background: #fffafa;
 }
 
-.candidateRow.imported {
+.candidateRow.imported,
+.candidateRow.system {
   background: #f8fafc;
 }
 
