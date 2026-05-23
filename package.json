@@ -11,7 +11,7 @@
     "skillbox": "packages/skillbox-cli/bin/skillbox.js"
   },
   "scripts": {
-    "test": "node --test packages/skillbox-core/test/*.test.js",
+    "test": "node --test packages/skillbox-core/test/*.test.js apps/desktop/src/*.test.js",
     "rust:test": "cargo test --offline",
     "skillbox": "node packages/skillbox-cli/bin/skillbox.js",
     "scan": "node packages/skillbox-cli/bin/skillbox.js scan --json"

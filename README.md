@@ -1,6 +1,7 @@
 # SkillBox
 
-SkillBox is a local macOS app and CLI for managing Codex-compatible skills.
+SkillBox is a local macOS app and CLI for managing skills, rules, prompts, and capability packs across mainstream agent runtimes.
+SkillBox should grow toward Claude, Codex, OpenClaw, Cursor, Claude Code, Copilot, and similar agent ecosystems.
 
 The project is currently bootstrapped with:
 
@@ -30,7 +31,7 @@ The default managed root is `~/SkillBox`, or `SKILLBOX_HOME` when set.
   skillbox.sqlite
 ```
 
-Runtime directories such as `~/.codex/skills` and `~/.agents/skills` are deployment targets.
+Runtime directories such as `~/.codex/skills`, `~/.agents/skills`, and future Claude/Cursor/Copilot-style targets are deployment targets.
 SkillBox deploys managed skills through symlinks by default.
 
 ## Toolchain Status

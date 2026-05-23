@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import desktopPackage from '../package.json';
 import codexAppIcon from './assets/codex-app-icon.png';
 import codexCliIcon from './assets/codex-cli-icon.png';
+import { normalizeImportCandidate } from './importCandidates.js';
 
 const filters = [
   { id: 'all', label: 'All' },
@@ -1252,29 +1253,6 @@ function readPreviewPreferences() {
   } catch {
     return { skipLocalImportConfirmation: false };
   }
-}
-
-function normalizeImportCandidate(candidate) {
-  const suggestedType = candidate.suggestedType || candidate.suggested_type || 'user';
-  const sourcePath = candidate.sourcePath || candidate.source_path;
-  const conflict = candidate.conflict || null;
-  const importStatus = candidate.importStatus || candidate.import_status || 'importable';
-  const isImportable = importStatus === 'importable' && !conflict;
-
-  return {
-    ...candidate,
-    sourcePath,
-    sourceRoot: candidate.sourceRoot || candidate.source_root,
-    realPath: candidate.realPath || candidate.real_path,
-    contentHash: candidate.contentHash || candidate.content_hash,
-    suggestedType,
-    skillType: candidate.skillType || candidate.skill_type || suggestedType,
-    suggestionReason: candidate.suggestionReason || candidate.suggestion_reason || 'Needs confirm',
-    importOrigin: candidate.importOrigin || candidate.import_origin || 'local-scan',
-    importStatus,
-    conflict,
-    isSelected: isImportable
-  };
 }
 
 function remoteImportCandidate(mode, value) {
