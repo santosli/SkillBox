@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+
+node scripts/check-commit-message.js "$1"

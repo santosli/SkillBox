@@ -49,6 +49,24 @@ SkillBox 管理两类内容：
 在声称某个 workflow 完成之前，必须运行对应测试或命令，并报告验证内容。
 需要保持可验证的 workflow 见 `docs/workflows.md`。
 
+## 提交规范
+
+所有提交必须使用 Conventional Commits，并写英文提交信息。
+
+格式：
+
+```text
+<type>(<scope>): <summary>
+```
+
+允许的 type：`feat`、`fix`、`docs`、`test`、`refactor`、`chore`、`build`、`ci`、`perf`、`style`。
+
+允许的 scope：`desktop`、`core`、`cli`、`scan`、`import`、`docs`、`hooks`、`github`。
+
+summary 必须简洁具体，不要使用 `update`、`fix stuff`、`improve things` 这类模糊描述。
+如果一次提交包含多个不相关变更，先拆分提交。
+
 提交前的 `.githooks/pre-commit` 会检查 staged implementation / workflow 变更是否需要同步更新
 `AGENTS.md`、`README.md`、`CONTRIBUTING.md` 或 `docs/*`。确认为无需文档更新时，可以用
 `SKILLBOX_SKIP_DOCS_CHECK=1 git commit ...` 显式跳过。
+提交前的 `.githooks/commit-msg` 会校验提交信息是否符合本节规则。
