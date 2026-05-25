@@ -290,6 +290,18 @@ button {
   background: #f8fafc;
 }
 
+.linkButton {
+  width: max-content;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  color: #0a84ff;
+  font-size: 13px;
+  font-weight: 680;
+  padding: 0;
+  text-align: left;
+}
+
 .button:disabled {
   cursor: not-allowed;
   opacity: 0.64;
@@ -933,6 +945,61 @@ dd {
   margin-bottom: 14px;
 }
 
+.syncSection {
+  display: grid;
+  gap: 14px;
+}
+
+.syncMeta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 18px;
+  border: 1px solid #eef2f7;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 0 12px;
+}
+
+.syncOptionsHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.syncOptionsHeader span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.syncOptionField {
+  display: grid;
+  gap: 7px;
+}
+
+.syncOptionField span {
+  color: #475569;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.syncOptionField input {
+  width: 100%;
+  height: 38px;
+  border: 1px solid #dbe3ee;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #111827;
+  font-size: 14px;
+  padding: 0 12px;
+}
+
+.syncOptionField input:focus {
+  border-color: #0a84ff;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.13);
+  outline: none;
+}
+
 .versionRows {
   display: grid;
   gap: 8px;
@@ -1067,6 +1134,16 @@ dd {
   box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
 }
 
+.syncDialog {
+  display: grid;
+  width: min(620px, calc(100vw - 64px));
+  overflow: hidden;
+  border: 1px solid #dbe3ee;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
+}
+
 .localImportDialog {
   display: grid;
   width: min(620px, calc(100vw - 64px));
@@ -1136,6 +1213,24 @@ dd {
   border-color: #0a84ff;
   box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.13);
   outline: none;
+}
+
+.syncCheckbox {
+  display: inline-flex;
+  width: max-content;
+  max-width: 100%;
+  align-items: center;
+  gap: 9px;
+  color: #334155;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.syncCheckbox input {
+  width: 16px;
+  height: 16px;
+  accent-color: #0a84ff;
 }
 
 .remoteImportHint {
@@ -1700,6 +1795,7 @@ dd {
 
   .metrics,
   .fieldGrid,
+  .syncMeta,
   .sideStack {
     grid-template-columns: 1fr;
   }

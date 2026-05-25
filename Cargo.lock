@@ -2825,6 +2825,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "sha2",
+ "skillbox-git",
 ]
 
 [[package]]

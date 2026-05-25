@@ -61,6 +61,20 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 target,
             )?)
         }
+        "user-skills-status" => print_json(&skillbox_core::user_skills_git_status(managed_root(
+            command_args,
+        ))?),
+        "sync-user-skills" => {
+            let request = skillbox_core::UserSkillsSyncRequest {
+                remote_url: option(command_args, "--remote"),
+                commit_message: option(command_args, "--message"),
+                push: !has_flag(command_args, "--no-push"),
+            };
+            print_json(&skillbox_core::sync_user_skills_git(
+                request,
+                managed_root(command_args),
+            )?)
+        }
         other => Err(format!("Unknown command: {other}")),
     }
 }
@@ -106,6 +120,10 @@ fn positional(args: &[String]) -> Vec<String> {
     result
 }
 
+fn has_flag(args: &[String], name: &str) -> bool {
+    args.iter().any(|arg| arg == name)
+}
+
 fn help_text() -> &'static str {
     "SkillBox Rust CLI
 
@@ -115,5 +133,7 @@ Commands:
   skillbox parse-github-url <github-url>
   skillbox import <source-dir> --type user|remote [--managed-root <path>]
   skillbox deploy <skill-name> --target <path> [--managed-root <path>]
+  skillbox user-skills-status [--managed-root <path>]
+  skillbox sync-user-skills [--remote <git-url>] [--message <msg>] [--no-push] [--managed-root <path>]
 "
 }

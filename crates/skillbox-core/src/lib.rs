@@ -110,6 +110,51 @@ pub struct ManagedPreferences {
     pub skip_local_import_confirmation: bool,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UserSkillsGitState {
+    NotConfigured,
+    Clean,
+    Dirty,
+    PushFailed,
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UserSkillsGitStatus {
+    pub repo_path: PathBuf,
+    pub initialized: bool,
+    pub branch: String,
+    pub remote_url: Option<String>,
+    pub dirty: bool,
+    pub raw_status: String,
+    pub state: UserSkillsGitState,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UserSkillsSyncRequest {
+    pub remote_url: Option<String>,
+    pub commit_message: Option<String>,
+    pub push: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UserSkillsSyncResult {
+    pub repo_path: PathBuf,
+    pub initialized: bool,
+    pub remote_updated: bool,
+    pub branch: String,
+    pub dirty: bool,
+    pub raw_status: String,
+    pub committed: bool,
+    pub commit_sha: Option<String>,
+    pub pushed: bool,
+    pub push_attempted: bool,
+    pub state: UserSkillsGitState,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ImportCandidate {
     pub name: String,
@@ -596,6 +641,104 @@ pub fn set_skip_local_import_confirmation(
     })
 }
 
+pub fn user_skills_git_status(managed_root: impl AsRef<Path>) -> Result<UserSkillsGitStatus> {
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    user_skills_git_status_for_repo(paths.user_skills_root)
+}
+
+pub fn sync_user_skills_git(
+    request: UserSkillsSyncRequest,
+    managed_root: impl AsRef<Path>,
+) -> Result<UserSkillsSyncResult> {
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let repo = paths.user_skills_root;
+    let before = skillbox_git::status(&repo)?;
+    let initialized = !before.initialized;
+
+    if initialized {
+        skillbox_git::init_main(&repo)?;
+    }
+
+    let mut remote_updated = false;
+    let current_remote = if repo.join(".git").exists() {
+        skillbox_git::origin_url(&repo)?
+    } else {
+        None
+    };
+    let requested_remote = request
+        .remote_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    if let Some(remote_url) = requested_remote {
+        if current_remote.as_deref() != Some(remote_url) {
+            skillbox_git::set_origin_url(&repo, remote_url)?;
+            remote_updated = true;
+        }
+    } else if request
+        .remote_url
+        .as_deref()
+        .is_some_and(|value| value.trim().is_empty())
+    {
+        return Err("Git remote URL cannot be empty.".to_string());
+    }
+
+    if request.push && skillbox_git::origin_url(&repo)?.is_none() {
+        return Err("Git remote URL is required before syncing user skills.".to_string());
+    }
+
+    skillbox_git::add_all(&repo)?;
+    let has_staged_changes = skillbox_git::staged_changes(&repo)?;
+    let commit_message = normalized_commit_message(request.commit_message.as_deref());
+    let commit_sha = if has_staged_changes {
+        Some(skillbox_git::commit(&repo, &commit_message)?)
+    } else {
+        None
+    };
+    let committed = commit_sha.is_some();
+    let mut pushed = false;
+    let mut state_override = None;
+    let mut message = if committed {
+        "Committed user skills.".to_string()
+    } else {
+        "Already synced.".to_string()
+    };
+
+    if request.push {
+        match skillbox_git::push_origin_main(&repo, true) {
+            Ok(()) => {
+                pushed = true;
+                message = if committed {
+                    "Synced user skills.".to_string()
+                } else {
+                    "Already synced.".to_string()
+                };
+            }
+            Err(error) => {
+                state_override = Some(UserSkillsGitState::PushFailed);
+                message = format!("Git push failed: {error}");
+            }
+        }
+    }
+
+    let status = user_skills_git_status_for_repo(repo)?;
+    Ok(UserSkillsSyncResult {
+        repo_path: status.repo_path,
+        initialized,
+        remote_updated,
+        branch: status.branch,
+        dirty: status.dirty,
+        raw_status: status.raw_status,
+        committed,
+        commit_sha,
+        pushed,
+        push_attempted: request.push,
+        state: state_override.unwrap_or(status.state),
+        message,
+    })
+}
+
 pub fn scan_import_candidates(
     roots: &[PathBuf],
     managed_root: impl AsRef<Path>,
@@ -704,6 +847,49 @@ fn managed_skill(skill: Skill, kind: SkillKind) -> ManagedSkill {
         }
         .to_string(),
     }
+}
+
+fn user_skills_git_status_for_repo(repo_path: PathBuf) -> Result<UserSkillsGitStatus> {
+    let git_status = skillbox_git::status(&repo_path)?;
+    let remote_url = if git_status.initialized {
+        skillbox_git::origin_url(&repo_path)?
+    } else {
+        None
+    };
+    let state = user_skills_git_state(git_status.initialized, git_status.dirty, &remote_url);
+
+    Ok(UserSkillsGitStatus {
+        repo_path,
+        initialized: git_status.initialized,
+        branch: git_status.branch,
+        remote_url,
+        dirty: git_status.dirty,
+        raw_status: git_status.raw_status,
+        state,
+        last_error: None,
+    })
+}
+
+fn user_skills_git_state(
+    initialized: bool,
+    dirty: bool,
+    remote_url: &Option<String>,
+) -> UserSkillsGitState {
+    if !initialized || remote_url.is_none() {
+        UserSkillsGitState::NotConfigured
+    } else if dirty {
+        UserSkillsGitState::Dirty
+    } else {
+        UserSkillsGitState::Clean
+    }
+}
+
+fn normalized_commit_message(message: Option<&str>) -> String {
+    message
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("Sync user skills")
+        .to_string()
 }
 
 fn import_one_candidate(
@@ -1369,6 +1555,73 @@ description: \"Demo skill\"
     }
 
     #[test]
+    fn user_skills_git_status_is_not_configured_without_origin() {
+        let managed_root = temp_dir("user-skills-status").join("SkillBox");
+        let status = user_skills_git_status(&managed_root).unwrap();
+
+        assert_eq!(status.state, UserSkillsGitState::NotConfigured);
+        assert!(!status.initialized);
+        assert!(status.remote_url.is_none());
+    }
+
+    #[test]
+    fn sync_user_skills_initializes_shared_repo_and_commits_all_skills() {
+        let root = temp_dir("user-skills-sync");
+        let managed_root = root.join("SkillBox");
+        let paths = ensure_managed_layout(&managed_root).unwrap();
+        make_skill(
+            &paths.user_skills_root.join("alpha"),
+            "alpha",
+            "Alpha skill",
+        );
+        make_skill(&paths.user_skills_root.join("beta"), "beta", "Beta skill");
+        let remote = bare_remote("user-skills-sync-remote");
+
+        let result = sync_user_skills_git(
+            UserSkillsSyncRequest {
+                remote_url: Some(remote.to_string_lossy().to_string()),
+                commit_message: Some("Sync user skills".to_string()),
+                push: true,
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        assert!(result.initialized);
+        assert!(result.remote_updated);
+        assert!(result.committed);
+        assert!(result.pushed);
+        assert_eq!(result.state, UserSkillsGitState::Clean);
+    }
+
+    #[test]
+    fn sync_user_skills_reports_push_failed_without_losing_commit() {
+        let root = temp_dir("user-skills-push-fail");
+        let managed_root = root.join("SkillBox");
+        let paths = ensure_managed_layout(&managed_root).unwrap();
+        make_skill(
+            &paths.user_skills_root.join("alpha"),
+            "alpha",
+            "Alpha skill",
+        );
+
+        let result = sync_user_skills_git(
+            UserSkillsSyncRequest {
+                remote_url: Some("/no/such/remote.git".to_string()),
+                commit_message: Some("Sync user skills".to_string()),
+                push: true,
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        assert!(result.committed);
+        assert!(!result.pushed);
+        assert_eq!(result.state, UserSkillsGitState::PushFailed);
+        assert!(result.message.contains("push"));
+    }
+
+    #[test]
     fn scan_import_candidates_infers_type_from_path_and_metadata() {
         let root = temp_dir("candidate-type");
         let agents_root = root.join(".agents").join("skills");
@@ -1601,5 +1854,21 @@ description: \"{description}\"
             .iter()
             .find(|candidate| candidate.name == name)
             .unwrap_or_else(|| panic!("candidate not found: {name}"))
+    }
+
+    fn bare_remote(label: &str) -> PathBuf {
+        let remote = temp_dir(label).join("remote.git");
+        let output = std::process::Command::new("git")
+            .arg("init")
+            .arg("--bare")
+            .arg(&remote)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        remote
     }
 }

@@ -221,31 +221,37 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 触发条件：
 
-- Node CLI 当前入口：`skillbox sync-user-skills [--remote <git-url>] [--message <msg>] [--push]`。
-- 目标入口：Rust core + Rust CLI + Tauri command。
+- Rust CLI 入口：`skillbox sync-user-skills [--remote <git-url>] [--message <msg>] [--no-push]`。
+- Rust CLI 状态入口：`skillbox user-skills-status`。
+- Tauri command：`user_skills_git_status` 和 `sync_user_skills_git`。
+- Node CLI 仍保留 legacy 兼容入口：`skillbox sync-user-skills [--remote <git-url>] [--message <msg>] [--push]`。
 
 步骤：
 
 - 确保 `~/SkillBox/user-skills` 存在。
-- 如果没有 `.git`，初始化 Git 仓库。
+- 默认所有本地 user skills 通过同一个 `~/SkillBox/user-skills` Git 仓库和同一个 `origin` remote 同步。
+- 如果没有 `.git`，初始化 `main` 分支 Git 仓库。
 - 如果提供 remote，设置或更新 `origin`。
 - `git add .`。
-- 如果有变更且提供 commit message，创建 commit。
-- 如果 `--push`，推送到 `origin main`。
-- 返回 initialized、branch、dirty、raw status、committed、pushed。
+- 如果有 staged 变更，使用提供的 commit message 创建 commit；message 为空时默认 `Sync user skills`。
+- 默认 push 到 `origin main` 并设置 upstream；Rust CLI 可用 `--no-push` 跳过 push。
+- 返回 initialized、remote_updated、branch、dirty、raw_status、committed、commit_sha、pushed、push_attempted、state、message。
 
 失败与回滚：
 
 - Git 命令失败时返回结构化错误，不吞掉 stderr。
-- 没有 commit message 时不自动提交。
-- push 失败不应修改本地提交历史。
+- 没有 commit message 时使用默认 `Sync user skills`。
+- 没有 configured remote 且要求 push 时拒绝同步。
+- push 失败不应修改本地提交历史；本地 commit 保留，返回 `push_failed` 状态。
 - 不应把 remote URL 或 commit message 拼成 shell 字符串。
 
 完成验证：
 
-- 当前 Node：`node packages/skillbox-cli/bin/skillbox.js sync-user-skills --managed-root <temp-SkillBox> --message "test sync" --json`
-- Git status：Rust `skillbox-git` tests 或手动调用覆盖 dirty/clean 仓库。
-- Rust 迁移完成后新增 tests 覆盖 init、remote add/set-url、no-op、commit 和 push failure。
+- `cargo test -p skillbox-git --offline`
+- `cargo test -p skillbox-core --offline user_skills`
+- `cargo run -p skillbox-cli --offline -- user-skills-status --managed-root <temp-SkillBox>`
+- `cargo run -p skillbox-cli --offline -- sync-user-skills --managed-root <temp-SkillBox> --remote <bare-repo-path> --message "test sync"`
+- UI 路径变更时，手动验证 first-time setup modal、默认 commit message、shared remote 提示和 push failure 状态。
 
 ## 9. Add Agent Adapter
 

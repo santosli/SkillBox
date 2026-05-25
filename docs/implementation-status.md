@@ -17,6 +17,7 @@
 - Implemented GitHub URL normalization for tree, blob, raw, and contents API URLs.
 - Implemented a first CLI surface for the planned commands.
 - Added a Tauri + React desktop shell with scan and path bridge commands.
+- Implemented Rust/Tauri user-skills Git sync for the shared `~/SkillBox/user-skills` repository.
 - Added Rust crate scaffolding for the planned Tauri/Rust architecture.
 - Verified the desktop shell in browser preview at `http://127.0.0.1:1420/`.
 

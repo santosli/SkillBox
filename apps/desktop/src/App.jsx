@@ -5,6 +5,15 @@ import skillBoxAppIcon from '../src-tauri/icons/icon.png';
 import codexAppIcon from './assets/codex-app-icon.png';
 import codexCliIcon from './assets/codex-cli-icon.png';
 import { normalizeImportCandidate } from './importCandidates.js';
+import {
+  defaultSyncCommitMessage,
+  normalizeUserSkillsGitStatus,
+  syncNotice,
+  userSkillRowStatus,
+  userSyncAction,
+  userSyncLabel,
+  userSyncTone
+} from './userSkillsGitSync.js';
 
 const filters = [
   { id: 'all', label: 'All' },
@@ -94,6 +103,16 @@ export default function App() {
     value: '',
     error: ''
   });
+  const [userSkillsGit, setUserSkillsGit] = useState(normalizeUserSkillsGitStatus(null));
+  const [syncDialog, setSyncDialog] = useState({
+    open: false,
+    remoteUrl: '',
+    commitMessage: defaultSyncCommitMessage,
+    push: true,
+    error: ''
+  });
+  const [syncOptionsOpen, setSyncOptionsOpen] = useState(false);
+  const [syncCommitMessage, setSyncCommitMessage] = useState(defaultSyncCommitMessage);
   const contentRef = useRef(null);
 
   useEffect(() => {
@@ -143,15 +162,17 @@ export default function App() {
         throw new Error('Browser preview is mocking an empty managed store. Run inside Tauri to use the local skill bridge.');
       }
 
-      const [state, storedPreferences] = await Promise.all([
+      const [state, storedPreferences, gitStatus] = await Promise.all([
         invoke('managed_state'),
-        invoke('managed_preferences').catch(() => null)
+        invoke('managed_preferences').catch(() => null),
+        invoke('user_skills_git_status').catch(() => null)
       ]);
       const managedSkills = state.skills?.map(normalizeSkill) || [];
 
       setSkills(managedSkills);
       setPaths(normalizePaths(state.paths));
       setPreferences(normalizePreferences(storedPreferences));
+      setUserSkillsGit(normalizeUserSkillsGitStatus(gitStatus));
       setIsFirstUse(Boolean(state.isFirstUse ?? state.is_first_use));
       setSelectedName(managedSkills[0]?.name || '');
       setStatus('ready');
@@ -159,6 +180,7 @@ export default function App() {
       setSkills([]);
       setPaths(previewPaths);
       setPreferences(readPreviewPreferences());
+      setUserSkillsGit(normalizeUserSkillsGitStatus(null));
       setIsFirstUse(true);
       setSelectedName('');
       setError('');
@@ -396,6 +418,106 @@ export default function App() {
     return nextPreferences;
   }
 
+  function openSyncDialog() {
+    setError('');
+    setNotice('');
+    setSyncDialog({
+      open: true,
+      remoteUrl: userSkillsGit.remoteUrl || '',
+      commitMessage: syncCommitMessage || defaultSyncCommitMessage,
+      push: true,
+      error: ''
+    });
+  }
+
+  function closeSyncDialog() {
+    if (status === 'syncing') {
+      return;
+    }
+    setSyncDialog((current) => ({ ...current, open: false, error: '' }));
+  }
+
+  function updateSyncDialog(patch) {
+    setSyncDialog((current) => ({ ...current, ...patch, error: '' }));
+  }
+
+  async function submitSyncSetup(event) {
+    event.preventDefault();
+    const remoteUrl = syncDialog.remoteUrl.trim();
+    if (!remoteUrl) {
+      setSyncDialog((current) => ({ ...current, error: 'Enter a Git remote URL.' }));
+      return;
+    }
+
+    await runUserSkillsSync({
+      remoteUrl,
+      commitMessage: syncDialog.commitMessage,
+      push: syncDialog.push,
+      closeDialog: true
+    });
+  }
+
+  async function runUserSkillsSync({
+    remoteUrl = '',
+    commitMessage = syncCommitMessage,
+    push = true,
+    closeDialog = false
+  } = {}) {
+    setStatus('syncing');
+    setError('');
+    setNotice('');
+
+    const message = commitMessage.trim() || defaultSyncCommitMessage;
+
+    if (!window.__TAURI_INTERNALS__) {
+      const normalized = normalizeUserSkillsGitStatus({
+        repo_path: previewPaths.userSkillsRoot,
+        remote_url: remoteUrl || userSkillsGit.remoteUrl || 'git@example.com:santosli/my-skills.git',
+        branch: 'main',
+        state: 'clean',
+        dirty: false,
+        message: 'Mock synced user skills.'
+      });
+      setUserSkillsGit(normalized);
+      setSyncCommitMessage(message);
+      if (closeDialog) {
+        setSyncDialog((current) => ({ ...current, open: false, error: '' }));
+      }
+      setNotice(syncNotice(normalized));
+      setStatus('prototype');
+      return;
+    }
+
+    try {
+      const result = await invoke('sync_user_skills_git', {
+        request: {
+          remote_url: remoteUrl.trim() || null,
+          commit_message: message,
+          push
+        }
+      });
+      const normalized = normalizeUserSkillsGitStatus({
+        ...result,
+        remote_url: result.remote_url || remoteUrl || userSkillsGit.remoteUrl
+      });
+      setUserSkillsGit(normalized);
+      setSyncCommitMessage(message);
+      if (closeDialog) {
+        setSyncDialog((current) => ({ ...current, open: false, error: '' }));
+      }
+      setNotice(result.message || syncNotice(normalized));
+      setStatus('ready');
+    } catch (syncError) {
+      const syncMessage = syncError.message || String(syncError) || 'Unable to sync user skills.';
+      if (closeDialog) {
+        setSyncDialog((current) => ({ ...current, error: syncMessage }));
+      } else {
+        setError(syncMessage);
+      }
+      setStatus('ready');
+    }
+  }
+
   function openDashboard(nextFilter = filter) {
     setFilter(nextFilter);
     setPage('dashboard');
@@ -435,7 +557,20 @@ export default function App() {
 
       <section className="content" ref={contentRef}>
         {page === 'detail' && selected ? (
-          <SkillDetail paths={paths} skill={selected} onBack={() => openDashboard('all')} onRefresh={refresh} />
+          <SkillDetail
+            paths={paths}
+            skill={selected}
+            status={status}
+            syncCommitMessage={syncCommitMessage}
+            syncOptionsOpen={syncOptionsOpen}
+            userSkillsGit={userSkillsGit}
+            onBack={() => openDashboard('all')}
+            onOpenSyncSetup={openSyncDialog}
+            onRefresh={refresh}
+            onRunUserSkillsSync={runUserSkillsSync}
+            onSyncCommitMessage={setSyncCommitMessage}
+            onSyncOptionsOpen={setSyncOptionsOpen}
+          />
         ) : page === 'settings' ? (
           <SettingsPage paths={paths} />
         ) : (
@@ -448,6 +583,7 @@ export default function App() {
             notice={notice}
             query={query}
             status={status}
+            userSkillsGit={userSkillsGit}
             onFilter={setFilter}
             onOpenSkill={openSkill}
             onQuery={setQuery}
@@ -498,6 +634,16 @@ export default function App() {
           }
         />
       ) : null}
+
+      {syncDialog.open ? (
+        <UserSkillsSyncDialog
+          dialog={syncDialog}
+          status={status}
+          onClose={closeSyncDialog}
+          onSubmit={submitSyncSetup}
+          onUpdate={updateSyncDialog}
+        />
+      ) : null}
     </main>
   );
 }
@@ -511,6 +657,7 @@ function Dashboard({
   notice,
   query,
   status,
+  userSkillsGit,
   onFilter,
   onInstall,
   onOpenSkill,
@@ -598,7 +745,7 @@ function Dashboard({
                   <small>{skill.description || 'No description in SKILL.md'}</small>
                 </span>
                 <Badge tone={skill.type === 'user' ? 'green' : 'blue'}>{labelize(skill.type)}</Badge>
-                <StatusBadge skill={skill} />
+                <StatusBadge skill={skill} userSkillsGit={userSkillsGit} />
                 <span className="checkedText">just now</span>
               </button>
             ))}
@@ -757,6 +904,64 @@ function RemoteImportDialog({ error, mode, status, value, onClose, onModeChange,
             </button>
             <button className="button primary" disabled={status === 'importing'} type="submit">
               Review import
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function UserSkillsSyncDialog({ dialog, status, onClose, onSubmit, onUpdate }) {
+  return (
+    <div className="modalBackdrop" role="presentation">
+      <section className="syncDialog" role="dialog" aria-modal="true" aria-labelledby="user-skills-sync-title">
+        <div className="importSheetHeader">
+          <div>
+            <h2 id="user-skills-sync-title">Set up user skills sync</h2>
+            <p>All local user skills under ~/SkillBox/user-skills will sync to this Git remote.</p>
+          </div>
+          <button className="iconButton" type="button" aria-label="Close user skills sync setup" onClick={onClose}>
+            x
+          </button>
+        </div>
+
+        <form className="remoteImportForm" onSubmit={onSubmit}>
+          <label className="remoteImportField">
+            <span>Remote URL</span>
+            <input
+              autoFocus
+              placeholder="git@github.com:santosli/my-skills.git"
+              value={dialog.remoteUrl}
+              onChange={(event) => onUpdate({ remoteUrl: event.target.value })}
+            />
+          </label>
+
+          <label className="remoteImportField">
+            <span>Commit message</span>
+            <input
+              value={dialog.commitMessage}
+              onChange={(event) => onUpdate({ commitMessage: event.target.value })}
+            />
+          </label>
+
+          <label className="syncCheckbox">
+            <input
+              checked={dialog.push}
+              type="checkbox"
+              onChange={(event) => onUpdate({ push: event.target.checked })}
+            />
+            <span>Push after commit</span>
+          </label>
+
+          {dialog.error ? <div className="formError">{dialog.error}</div> : null}
+
+          <div className="remoteImportFooter">
+            <button className="button secondary" disabled={status === 'syncing'} type="button" onClick={onClose}>
+              Cancel
+            </button>
+            <button className="button primary" disabled={status === 'syncing'} type="submit">
+              {status === 'syncing' ? 'Syncing...' : 'Set up sync'}
             </button>
           </div>
         </form>
@@ -1007,16 +1212,37 @@ function CandidateRow({ candidate, onToggleSelected, onTypeChange }) {
   );
 }
 
-function SkillDetail({ paths, skill, onBack, onRefresh }) {
+function SkillDetail({
+  paths,
+  skill,
+  status,
+  syncCommitMessage,
+  syncOptionsOpen,
+  userSkillsGit,
+  onBack,
+  onOpenSyncSetup,
+  onRefresh,
+  onRunUserSkillsSync,
+  onSyncCommitMessage,
+  onSyncOptionsOpen
+}) {
   const managedPath =
     skill.type === 'user'
       ? joinPath(paths?.userSkillsRoot, skill.name)
       : joinPath(paths?.remoteSkillsRoot, `${skill.name}/current`);
   const shortHash = (skill.contentHash || 'not-indexed').slice(0, 8);
-  const operationStatus = skillStatus(skill);
+  const operationStatus =
+    skill.type === 'user'
+      ? { label: userSyncLabel(userSkillsGit), tone: userSyncTone(userSkillsGit) }
+      : skillStatus(skill);
   const statusFieldLabel = skill.type === 'remote' ? 'Update status' : 'Sync status';
   const statusPanelTitle = skill.type === 'remote' ? 'Update' : 'Sync';
-  const statusPanelDetail = skill.type === 'remote' ? 'GitHub source check' : 'User-skills git status';
+  const statusPanelDetail =
+    skill.type === 'remote'
+      ? 'GitHub source check'
+      : userSkillsGit.remoteUrl || 'Git remote required';
+  const syncAction = userSyncAction(userSkillsGit, skill.type);
+  const isSyncing = status === 'syncing';
 
   return (
     <>
@@ -1032,13 +1258,30 @@ function SkillDetail({ paths, skill, onBack, onRefresh }) {
           <p>{skill.description || 'No description in SKILL.md frontmatter.'}</p>
         </div>
         <div className="headerActions">
-          <button className="button secondary" type="button" onClick={onRefresh}>
-            Check update
-          </button>
-          <button className="button secondary" type="button">
-            Rollback
-          </button>
-          <button className="button primary" type="button">
+          {skill.type === 'user' ? (
+            <button
+              className="button primary"
+              disabled={isSyncing}
+              type="button"
+              onClick={
+                userSkillsGit.state === 'not_configured'
+                  ? onOpenSyncSetup
+                  : () => onRunUserSkillsSync()
+              }
+            >
+              {isSyncing ? 'Syncing...' : syncAction}
+            </button>
+          ) : (
+            <>
+              <button className="button secondary" type="button" onClick={onRefresh}>
+                Check update
+              </button>
+              <button className="button secondary" type="button">
+                Rollback
+              </button>
+            </>
+          )}
+          <button className={skill.type === 'user' ? 'button secondary' : 'button primary'} type="button">
             Deploy
           </button>
         </div>
@@ -1063,6 +1306,40 @@ function SkillDetail({ paths, skill, onBack, onRefresh }) {
             <Field label="Skill file" value={skill.skillMdPath || joinPath(skill.path, 'SKILL.md')} />
             <Field label={statusFieldLabel} value={operationStatus.label} />
           </dl>
+
+          {skill.type === 'user' ? (
+            <section className="subsection syncSection">
+              <div className="subsectionHeader">
+                <h2>User skills sync</h2>
+                <span>Shared repository</span>
+              </div>
+              <div className="syncMeta">
+                <Field label="Repository" value={userSkillsGit.repoPath || paths?.userSkillsRoot} />
+                <Field label="Remote" value={userSkillsGit.remoteUrl || 'Not configured'} />
+                <Field label="Branch" value={userSkillsGit.branch || 'main'} />
+                <Field label="State" value={operationStatus.label} />
+              </div>
+              <div className="syncOptionsHeader">
+                <button
+                  className="linkButton"
+                  type="button"
+                  onClick={() => onSyncOptionsOpen(!syncOptionsOpen)}
+                >
+                  Sync options
+                </button>
+                <span>All local user skills sync together.</span>
+              </div>
+              {syncOptionsOpen ? (
+                <label className="syncOptionField">
+                  <span>Commit message</span>
+                  <input
+                    value={syncCommitMessage}
+                    onChange={(event) => onSyncCommitMessage(event.target.value)}
+                  />
+                </label>
+              ) : null}
+            </section>
+          ) : null}
 
           <section className="subsection">
             <div className="subsectionHeader">
@@ -1238,8 +1515,8 @@ function Badge({ children, tone = 'slate' }) {
   return <span className={`badge ${tone}`}>{children}</span>;
 }
 
-function StatusBadge({ skill }) {
-  const status = skillStatus(skill);
+function StatusBadge({ skill, userSkillsGit }) {
+  const status = userSkillRowStatus(skill, userSkillsGit) || skillStatus(skill);
   return <Badge tone={status.tone}>{status.label}</Badge>;
 }
 

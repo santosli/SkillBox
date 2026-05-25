@@ -7,3 +7,4 @@ edition = "2021"
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
+skillbox-git = { path = "../skillbox-git" }
