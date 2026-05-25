@@ -7,17 +7,37 @@ Date: 2026-05-25
 Implement a one-click Git sync workflow for local user-created skills stored in
 `~/SkillBox/user-skills`.
 
-This feature covers only the managed user skills repository. It does not sync
-remote skills, runtime deployment directories, or agent-specific adapter output.
-`~/SkillBox` remains the source of truth, and `~/.codex/skills`,
-`~/.agents/skills`, and future agent runtime directories remain deployment
-targets.
+This feature covers only the managed user skills repository. By default, every
+local user skill under `~/SkillBox/user-skills` syncs through one shared Git
+repository and one shared remote. It does not sync remote skills, runtime
+deployment directories, or agent-specific adapter output. `~/SkillBox` remains
+the source of truth, and `~/.codex/skills`, `~/.agents/skills`, and future agent
+runtime directories remain deployment targets.
 
 ## User Goal
 
 The user should be able to back up and push local user skills with one primary
 action after a short first-time setup. The first setup records the Git remote.
 Subsequent syncs should use that remote automatically.
+
+## Remote Model
+
+The MVP repository boundary is `~/SkillBox/user-skills`.
+
+- All local user skills are committed and pushed together.
+- The default sync remote is the Git `origin` remote for that repository.
+- The remote is user configurable during first-time setup.
+- If the repository already has `origin`, SkillBox should display it and use it
+  by default.
+- The backend request keeps `remote_url` optional so callers can update `origin`
+  later without changing the repository model.
+- The UI should leave a clear path for a future `Change remote` action in the
+  sync panel or Settings. That action still changes the shared
+  `~/SkillBox/user-skills` remote, not a per-skill remote.
+
+Per-skill remotes are out of scope for this design. If they are added later,
+they should be introduced as an explicit repository-routing feature rather than
+as hidden behavior on individual skill rows.
 
 ## Entry Points
 
@@ -28,8 +48,8 @@ The primary entry point is the User Skill detail page.
 - For a user skill with a configured `origin`, the detail page shows a primary
   `Sync now` action.
 - The Settings page can show read-only sync metadata, such as repository path,
-  branch, and remote URL. It is informational and not required for the MVP
-  workflow.
+  branch, and remote URL. It can later host `Change remote`, but that action is
+  not required for the first implementation.
 - Remote skills keep their existing update-oriented language and do not show
   user-skills sync actions.
 
@@ -70,6 +90,8 @@ When `~/SkillBox/user-skills` is a Git repository with `origin`:
 3. The sync panel includes a collapsed `Sync options` disclosure. Expanding it
    reveals a commit message input prefilled with `Sync user skills`; the next
    click on `Sync now` uses the edited value.
+   It may also show the current remote URL as read-only metadata, with a future
+   slot for `Change remote`.
 4. The backend runs:
    - `git add .`
    - commit if the repository has staged changes
@@ -189,6 +211,7 @@ Automated Rust tests should cover:
 - Initializing an empty `user-skills` directory.
 - Adding `origin` during first-time setup.
 - Updating an existing `origin` when the user provides a new remote.
+- Syncing all child skill directories through the same `user-skills` repository.
 - No-op sync when there are no changes.
 - Commit creation when files changed.
 - Push failure preserving the local commit.
