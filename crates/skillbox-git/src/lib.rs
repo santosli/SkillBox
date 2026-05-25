@@ -85,6 +85,24 @@ pub fn push_origin_main(repo: impl AsRef<Path>, set_upstream: bool) -> Result<()
     Ok(())
 }
 
+pub fn ls_remote(repo_url: &str, reference: &str) -> Result<Option<String>, String> {
+    let output = Command::new("git")
+        .arg("ls-remote")
+        .arg(repo_url)
+        .arg(reference)
+        .output()
+        .map_err(|error| error.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .next()
+        .map(str::to_string))
+}
+
 fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
     let output = Command::new("git")
         .arg("-C")

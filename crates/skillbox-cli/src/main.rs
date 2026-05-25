@@ -64,6 +64,9 @@ fn run(args: Vec<String>) -> Result<(), String> {
         "user-skills-status" => print_json(&skillbox_core::user_skills_git_status(managed_root(
             command_args,
         ))?),
+        "check-remote-updates" => print_json(&skillbox_core::check_remote_skill_updates(
+            managed_root(command_args),
+        )?),
         "sync-user-skills" => {
             let request = skillbox_core::UserSkillsSyncRequest {
                 remote_url: option(command_args, "--remote"),
@@ -134,6 +137,7 @@ Commands:
   skillbox import <source-dir> --type user|remote [--managed-root <path>]
   skillbox deploy <skill-name> --target <path> [--managed-root <path>]
   skillbox user-skills-status [--managed-root <path>]
+  skillbox check-remote-updates [--managed-root <path>]
   skillbox sync-user-skills [--remote <git-url>] [--message <msg>] [--no-push] [--managed-root <path>]
 "
 }

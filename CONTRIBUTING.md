@@ -50,6 +50,7 @@ cargo run -p skillbox-cli --offline -- paths
 cargo run -p skillbox-cli --offline -- parse-github-url <github-url>
 cargo run -p skillbox-cli --offline -- import <source-dir> --type user --managed-root <temp-SkillBox>
 cargo run -p skillbox-cli --offline -- deploy <skill-name> --target <target-root> --managed-root <temp-SkillBox>
+cargo run -p skillbox-cli --offline -- check-remote-updates --managed-root <temp-SkillBox>
 ```
 
 ## 代码约定

@@ -69,6 +69,12 @@ fn sync_user_skills_git(request: skillbox_core::UserSkillsSyncRequest) -> Result
     serde_json::to_value(result).map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn check_remote_skill_updates() -> Result<Value, String> {
+    let result = skillbox_core::check_remote_skill_updates(skillbox_core::default_managed_root())?;
+    serde_json::to_value(result).map_err(|error| error.to_string())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -81,7 +87,8 @@ pub fn run() {
             import_candidates,
             parse_github_url,
             user_skills_git_status,
-            sync_user_skills_git
+            sync_user_skills_git,
+            check_remote_skill_updates
         ])
         .run(tauri::generate_context!())
         .expect("failed to run SkillBox");

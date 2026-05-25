@@ -84,13 +84,12 @@ node packages/skillbox-cli/bin/skillbox.js <command>
 
 - 用结构化参数执行 `git -C <repo> ...`。
 - 读取仓库是否初始化、当前分支、dirty 状态和原始 status。
-- 提供 init、origin 读取/设置、add、commit、push 等可复用 Git 原语。
+- 提供 init、origin 读取/设置、add、commit、push、`ls-remote` 等可复用 Git 原语。
 - 不负责 managed store 级别的提交策略；`~/SkillBox/user-skills` 的同步编排在 `skillbox-core`。
 
 legacy Node core 当前仍负责：
 
 - `installRemoteSkillFromGitHub`
-- `checkRemoteUpdates`
 - `rollbackRemoteSkill`
 - Node 版 `operations` 日志写入
 
@@ -125,16 +124,16 @@ Runtime 目录只是部署目标：
 当前状态：
 
 - Rust core 已经是桌面应用的主要后端。
-- Rust CLI 有 `paths`、`scan`、`parse-github-url`、`import`、`deploy`、`user-skills-status`、`sync-user-skills`。
+- Rust CLI 有 `paths`、`scan`、`parse-github-url`、`import`、`deploy`、`user-skills-status`、`sync-user-skills`、`check-remote-updates`。
 - Rust core 和 Tauri 已覆盖 `~/SkillBox/user-skills` 的共享 remote Git 同步。
-- Node CLI 仍有更完整的远程 GitHub install、check updates 和 rollback 工作流。
+- Rust core 和 Tauri 已覆盖 remote skill 的 GitHub update check；Node CLI 仍有更完整的远程 GitHub install 和 rollback 工作流。
 - agent support 当前主要是 `SKILL.md` / Codex-style roots，尚未覆盖 Claude、OpenClaw、Cursor、Claude Code、Copilot 的原生格式。
 - Rust SQLite schema 和 Node SQLite schema 尚未完全统一。
 
 目标状态：
 
 - UI 和 CLI 都只通过 Rust core 执行业务逻辑。
-- GitHub install、update check、update 和 rollback 全部迁移到 Rust。
+- GitHub install、update 和 rollback 全部迁移到 Rust。
 - 增加 agent adapter registry，让 Claude、Codex、OpenClaw、Cursor、Claude Code、Copilot 等 runtime 通过同一 managed store 管理。
 - Node CLI 退化为兼容包装或被移除。
 - SQLite schema 由 Rust migration 管理，并兼容读取 Node MVP 已写入的数据。

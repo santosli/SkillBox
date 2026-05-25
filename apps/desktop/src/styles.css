@@ -257,6 +257,7 @@ button {
   height: 38px;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   border-radius: 8px;
   cursor: pointer;
   font-size: 14px;
@@ -271,6 +272,16 @@ button {
 
 .button:hover {
   transform: translateY(-1px);
+}
+
+.button svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
 }
 
 .button.primary {
@@ -391,6 +402,10 @@ button {
   color: #166534;
 }
 
+.panelNotice {
+  margin: 16px 18px 0;
+}
+
 .dashboardGrid,
 .detailGrid {
   display: grid;
@@ -449,41 +464,6 @@ button {
   margin: 5px 0 0;
   color: #64748b;
   font-size: 13px;
-}
-
-.runtime {
-  display: inline-flex;
-  min-width: 78px;
-  height: 28px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  background: #eef2f7;
-  color: #475569;
-  font-size: 12px;
-  font-weight: 680;
-  text-transform: capitalize;
-}
-
-.runtime.ready {
-  background: #dcfce7;
-  color: #166534;
-}
-
-.runtime.scanning {
-  background: #dbeafe;
-  color: #1d4ed8;
-}
-
-.runtime.loading,
-.runtime.importing {
-  background: #dbeafe;
-  color: #1d4ed8;
-}
-
-.runtime.prototype {
-  background: #fef3c7;
-  color: #92400e;
 }
 
 .toolbar {

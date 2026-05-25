@@ -1,10 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { RefreshCw } from 'lucide-react';
 import desktopPackage from '../package.json';
 import skillBoxAppIcon from '../src-tauri/icons/icon.png';
 import codexAppIcon from './assets/codex-app-icon.png';
 import codexCliIcon from './assets/codex-cli-icon.png';
 import { normalizeImportCandidate } from './importCandidates.js';
+import {
+  dashboardStatusNotice,
+  normalizeRemoteSkillUpdates,
+  remoteSkillRowStatus
+} from './skillStatusRefresh.js';
 import {
   defaultSyncCommitMessage,
   normalizeUserSkillsGitStatus,
@@ -104,6 +110,8 @@ export default function App() {
     error: ''
   });
   const [userSkillsGit, setUserSkillsGit] = useState(normalizeUserSkillsGitStatus(null));
+  const [remoteSkillUpdates, setRemoteSkillUpdates] = useState(normalizeRemoteSkillUpdates(null));
+  const [lastStatusCheckedLabel, setLastStatusCheckedLabel] = useState('not checked');
   const [syncDialog, setSyncDialog] = useState({
     open: false,
     remoteUrl: '',
@@ -144,13 +152,22 @@ export default function App() {
   const selected = skills.find((skill) => skill.name === selectedName) || filtered[0] || skills[0];
 
   const counts = useMemo(
-    () => ({
-      total: skills.length,
-      user: skills.filter((skill) => skill.type === 'user').length,
-      remote: skills.filter((skill) => skill.type === 'remote').length,
-      updates: skills.filter(hasAvailableUpdate).length
-    }),
-    [skills]
+    () => {
+      const refreshedUpdateCount = remoteSkillUpdates.statuses.filter(
+        (update) => update.state === 'update_available'
+      ).length;
+
+      return {
+        total: skills.length,
+        user: skills.filter((skill) => skill.type === 'user').length,
+        remote: skills.filter((skill) => skill.type === 'remote').length,
+        updates:
+          remoteSkillUpdates.statuses.length > 0
+            ? refreshedUpdateCount
+            : skills.filter(hasAvailableUpdate).length
+      };
+    },
+    [skills, remoteSkillUpdates]
   );
 
   async function refresh() {
@@ -173,6 +190,8 @@ export default function App() {
       setPaths(normalizePaths(state.paths));
       setPreferences(normalizePreferences(storedPreferences));
       setUserSkillsGit(normalizeUserSkillsGitStatus(gitStatus));
+      setRemoteSkillUpdates(normalizeRemoteSkillUpdates(null));
+      setLastStatusCheckedLabel('not checked');
       setIsFirstUse(Boolean(state.isFirstUse ?? state.is_first_use));
       setSelectedName(managedSkills[0]?.name || '');
       setStatus('ready');
@@ -181,11 +200,61 @@ export default function App() {
       setPaths(previewPaths);
       setPreferences(readPreviewPreferences());
       setUserSkillsGit(normalizeUserSkillsGitStatus(null));
+      setRemoteSkillUpdates(normalizeRemoteSkillUpdates(null));
+      setLastStatusCheckedLabel('not checked');
       setIsFirstUse(true);
       setSelectedName('');
       setError('');
       setNotice(scanError.message || 'Browser preview is mocking an empty managed store.');
       setStatus('prototype');
+    }
+  }
+
+  async function refreshSkillStatuses() {
+    setStatus('checking');
+    setError('');
+    setNotice('');
+
+    if (!window.__TAURI_INTERNALS__) {
+      const nextRemoteUpdates = normalizeRemoteSkillUpdates({
+        statuses: skills
+          .filter((skill) => skill.type === 'remote')
+          .map((skill, index) => ({
+            skill_name: skill.name,
+            state: index === 0 ? 'update_available' : 'up_to_date',
+            update_available: index === 0
+          }))
+      });
+
+      setRemoteSkillUpdates(nextRemoteUpdates);
+      setLastStatusCheckedLabel('just now');
+      setNotice(dashboardStatusNotice({ userSkillsGit, remoteUpdates: nextRemoteUpdates }));
+      setStatus('prototype');
+      return;
+    }
+
+    try {
+      const [state, gitStatus, remoteUpdatesResult] = await Promise.all([
+        invoke('managed_state'),
+        invoke('user_skills_git_status').catch(() => null),
+        invoke('check_remote_skill_updates')
+      ]);
+      const managedSkills = state.skills?.map(normalizeSkill) || [];
+      const nextUserSkillsGit = normalizeUserSkillsGitStatus(gitStatus);
+      const nextRemoteUpdates = normalizeRemoteSkillUpdates(remoteUpdatesResult);
+
+      setSkills(managedSkills);
+      setPaths(normalizePaths(state.paths));
+      setUserSkillsGit(nextUserSkillsGit);
+      setRemoteSkillUpdates(nextRemoteUpdates);
+      setLastStatusCheckedLabel('just now');
+      setIsFirstUse(Boolean(state.isFirstUse ?? state.is_first_use));
+      setSelectedName(managedSkills[0]?.name || '');
+      setNotice(dashboardStatusNotice({ userSkillsGit: nextUserSkillsGit, remoteUpdates: nextRemoteUpdates }));
+      setStatus('ready');
+    } catch (refreshError) {
+      setError(refreshError.message || String(refreshError) || 'Unable to refresh skill status.');
+      setStatus('ready');
     }
   }
 
@@ -580,8 +649,10 @@ export default function App() {
             filter={filter}
             filtered={filtered}
             isFirstUse={isFirstUse}
+            lastStatusCheckedLabel={lastStatusCheckedLabel}
             notice={notice}
             query={query}
+            remoteSkillUpdates={remoteSkillUpdates}
             status={status}
             userSkillsGit={userSkillsGit}
             onFilter={setFilter}
@@ -589,6 +660,7 @@ export default function App() {
             onQuery={setQuery}
             onInstall={openRemoteImport}
             onRefresh={scanForImportCandidates}
+            onRefreshStatuses={refreshSkillStatuses}
           />
         )}
       </section>
@@ -654,16 +726,21 @@ function Dashboard({
   filter,
   filtered,
   isFirstUse,
+  lastStatusCheckedLabel,
   notice,
   query,
+  remoteSkillUpdates,
   status,
   userSkillsGit,
   onFilter,
   onInstall,
   onOpenSkill,
   onQuery,
-  onRefresh
+  onRefresh,
+  onRefreshStatuses
 }) {
+  const isChecking = status === 'checking';
+
   return (
     <>
       {!isFirstUse ? (
@@ -678,7 +755,7 @@ function Dashboard({
       ) : null}
 
       {error ? <div className="notice">{error}</div> : null}
-      {notice ? <div className="notice success">{notice}</div> : null}
+      {isFirstUse && notice ? <div className="notice success">{notice}</div> : null}
 
       {isFirstUse ? (
         <FirstUseDashboard status={status} onInstall={onInstall} onScan={onRefresh} />
@@ -698,8 +775,13 @@ function Dashboard({
               <h2>All skills</h2>
               <p>{filtered.length} matching skills</p>
             </div>
-            <span className={`runtime ${status}`}>{status}</span>
+            <button className="button secondary" disabled={isChecking} type="button" onClick={onRefreshStatuses}>
+              <RefreshCw aria-hidden="true" />
+              {isChecking ? 'Checking...' : 'Refresh status'}
+            </button>
           </div>
+
+          {notice ? <div className="panelNotice notice success">{notice}</div> : null}
 
           <div className="toolbar">
             <label className="searchField" aria-label="Search skills">
@@ -745,8 +827,12 @@ function Dashboard({
                   <small>{skill.description || 'No description in SKILL.md'}</small>
                 </span>
                 <Badge tone={skill.type === 'user' ? 'green' : 'blue'}>{labelize(skill.type)}</Badge>
-                <StatusBadge skill={skill} userSkillsGit={userSkillsGit} />
-                <span className="checkedText">just now</span>
+                <StatusBadge
+                  remoteSkillUpdates={remoteSkillUpdates}
+                  skill={skill}
+                  userSkillsGit={userSkillsGit}
+                />
+                <span className="checkedText">{lastStatusCheckedLabel}</span>
               </button>
             ))}
 
@@ -1515,8 +1601,11 @@ function Badge({ children, tone = 'slate' }) {
   return <span className={`badge ${tone}`}>{children}</span>;
 }
 
-function StatusBadge({ skill, userSkillsGit }) {
-  const status = userSkillRowStatus(skill, userSkillsGit) || skillStatus(skill);
+function StatusBadge({ remoteSkillUpdates, skill, userSkillsGit }) {
+  const status =
+    userSkillRowStatus(skill, userSkillsGit) ||
+    remoteSkillRowStatus(skill, remoteSkillUpdates) ||
+    skillStatus(skill);
   return <Badge tone={status.tone}>{status.label}</Badge>;
 }
 

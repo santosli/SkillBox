@@ -137,27 +137,32 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 触发条件：
 
-- Node CLI 当前入口：`skillbox check-updates [skill-name]`。
-- 目标入口：Rust core + Rust CLI + Tauri command。
+- Rust CLI 当前入口：`cargo run -p skillbox-cli --offline -- check-remote-updates [--managed-root <temp-SkillBox>]`。
+- Tauri command：`check_remote_skill_updates`。
+- Node CLI 兼容入口仍有 `skillbox check-updates [skill-name]`，但桌面 UI 不调用 Node。
 
 步骤：
 
 - 遍历 `remote-skills/<name>/source.json`。
 - 只处理 `type: github` 的 remote skill。
 - 使用 `git ls-remote <repoUrl> <ref>` 查询最新 SHA。
-- 比较 `latestSha` 与 `installedSha`。
-- 返回 `skillName`、`installedSha`、`latestSha`、`updateAvailable`。
+- 比较 latest remote SHA 与 `installedSha`。
+- 返回每个 remote skill 的 `skillName`、`sourceType`、`installedSha`、`latestSha`、`updateAvailable`、`state`、`message`。
+- Dashboard 的 `Refresh status` 通过 Tauri command 刷新 user-skills Git 状态和 remote update check，再把行状态更新为 `Needs sync`、`Synced`、`Update available`、`Up to date`、`Check failed` 或 `Not checkable`。
 
 失败与回滚：
 
-- 缺失 `source.json` 的 remote skill 跳过或标记不可检查。
-- 非 GitHub remote 跳过。
+- 缺失 `source.json` 的 remote skill 标记为 `not_checkable`。
+- 非 GitHub remote 标记为 `not_checkable`。
 - 网络或 Git 失败应作为该 skill 的 update check error 返回，不应破坏现有版本。
+- 这个 workflow 只检查状态，不更新 `source.json`、`current` symlink 或版本目录。
 
 完成验证：
 
-- 当前 Node：`node packages/skillbox-cli/bin/skillbox.js check-updates --managed-root <temp-SkillBox> --json`
-- Rust 迁移完成后新增 tests 覆盖 missing source、manual source、GitHub source 和 Git failure。
+- `cargo test -p skillbox-core --offline check_remote_skill_updates`
+- `cargo run -p skillbox-cli --offline -- check-remote-updates --managed-root <temp-SkillBox>`
+- `npm test`
+- 桌面 UI 视觉验证 Dashboard `Refresh status` 按钮、状态 badge、Available updates 计数和 notice。
 
 ## 6. Update Remote Skill
 

@@ -18,12 +18,13 @@
 - Implemented a first CLI surface for the planned commands.
 - Added a Tauri + React desktop shell with scan and path bridge commands.
 - Implemented Rust/Tauri user-skills Git sync for the shared `~/SkillBox/user-skills` repository.
+- Implemented Rust/Tauri/CLI remote skill update status checks and Dashboard status refresh.
 - Added Rust crate scaffolding for the planned Tauri/Rust architecture.
 - Verified the desktop shell in browser preview at `http://127.0.0.1:1420/`.
 
 ## Next Implementation Targets
 
 - Add SQLite migrations and FTS search in the Rust core.
-- Add network-backed remote update and rollback flows to the desktop UI.
+- Add network-backed remote update install and rollback flows to the desktop UI.
 - Add import review screens for unknown existing skills.
 - Add copy snapshot deployment mode after symlink mode is stable.

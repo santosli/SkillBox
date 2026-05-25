@@ -155,6 +155,43 @@ pub struct UserSkillsSyncResult {
     pub message: String,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteSkillUpdateState {
+    NotCheckable,
+    UpToDate,
+    UpdateAvailable,
+    CheckFailed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RemoteSkillUpdateStatus {
+    pub skill_name: String,
+    pub source_type: Option<String>,
+    pub installed_sha: Option<String>,
+    pub latest_sha: Option<String>,
+    pub update_available: bool,
+    pub state: RemoteSkillUpdateState,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RemoteSkillUpdateCheck {
+    pub statuses: Vec<RemoteSkillUpdateStatus>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct RemoteSkillSource {
+    #[serde(rename = "type")]
+    source_type: String,
+    #[serde(rename = "repoUrl", alias = "repo_url")]
+    repo_url: Option<String>,
+    #[serde(rename = "ref", alias = "reference")]
+    reference: Option<String>,
+    #[serde(rename = "installedSha", alias = "installed_sha")]
+    installed_sha: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ImportCandidate {
     pub name: String,
@@ -739,6 +776,28 @@ pub fn sync_user_skills_git(
     })
 }
 
+pub fn check_remote_skill_updates(
+    managed_root: impl AsRef<Path>,
+) -> Result<RemoteSkillUpdateCheck> {
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let mut remote_roots = fs::read_dir(&paths.remote_skills_root)
+        .map_err(|error| error.to_string())?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false))
+        .collect::<Vec<_>>();
+    remote_roots.sort_by_key(|entry| entry.file_name());
+
+    let statuses = remote_roots
+        .into_iter()
+        .map(|entry| {
+            let skill_name = entry.file_name().to_string_lossy().to_string();
+            check_one_remote_skill_update(&skill_name, &entry.path())
+        })
+        .collect();
+
+    Ok(RemoteSkillUpdateCheck { statuses })
+}
+
 pub fn scan_import_candidates(
     roots: &[PathBuf],
     managed_root: impl AsRef<Path>,
@@ -846,6 +905,110 @@ fn managed_skill(skill: Skill, kind: SkillKind) -> ManagedSkill {
             SkillKind::Remote => "update not checked",
         }
         .to_string(),
+    }
+}
+
+fn check_one_remote_skill_update(skill_name: &str, remote_root: &Path) -> RemoteSkillUpdateStatus {
+    let source_path = remote_root.join("source.json");
+    let source_content = match fs::read_to_string(&source_path) {
+        Ok(content) => content,
+        Err(_) => {
+            return RemoteSkillUpdateStatus {
+                skill_name: skill_name.to_string(),
+                source_type: None,
+                installed_sha: None,
+                latest_sha: None,
+                update_available: false,
+                state: RemoteSkillUpdateState::NotCheckable,
+                message: Some("Remote source metadata is missing.".to_string()),
+            };
+        }
+    };
+
+    let source: RemoteSkillSource = match serde_json::from_str(&source_content) {
+        Ok(source) => source,
+        Err(error) => {
+            return RemoteSkillUpdateStatus {
+                skill_name: skill_name.to_string(),
+                source_type: None,
+                installed_sha: None,
+                latest_sha: None,
+                update_available: false,
+                state: RemoteSkillUpdateState::CheckFailed,
+                message: Some(format!("Invalid source metadata: {error}")),
+            };
+        }
+    };
+
+    if source.source_type != "github" {
+        return RemoteSkillUpdateStatus {
+            skill_name: skill_name.to_string(),
+            source_type: Some(source.source_type),
+            installed_sha: source.installed_sha,
+            latest_sha: None,
+            update_available: false,
+            state: RemoteSkillUpdateState::NotCheckable,
+            message: Some("Only GitHub remote skills can be checked.".to_string()),
+        };
+    }
+
+    let Some(repo_url) = source
+        .repo_url
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return RemoteSkillUpdateStatus {
+            skill_name: skill_name.to_string(),
+            source_type: Some(source.source_type),
+            installed_sha: source.installed_sha,
+            latest_sha: None,
+            update_available: false,
+            state: RemoteSkillUpdateState::CheckFailed,
+            message: Some("GitHub source is missing repoUrl.".to_string()),
+        };
+    };
+    let reference = source
+        .reference
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("main");
+
+    match skillbox_git::ls_remote(repo_url, reference) {
+        Ok(Some(latest_sha)) => {
+            let update_available = source.installed_sha.as_deref() != Some(latest_sha.as_str());
+            RemoteSkillUpdateStatus {
+                skill_name: skill_name.to_string(),
+                source_type: Some(source.source_type),
+                installed_sha: source.installed_sha,
+                latest_sha: Some(latest_sha),
+                update_available,
+                state: if update_available {
+                    RemoteSkillUpdateState::UpdateAvailable
+                } else {
+                    RemoteSkillUpdateState::UpToDate
+                },
+                message: None,
+            }
+        }
+        Ok(None) => RemoteSkillUpdateStatus {
+            skill_name: skill_name.to_string(),
+            source_type: Some(source.source_type),
+            installed_sha: source.installed_sha,
+            latest_sha: None,
+            update_available: false,
+            state: RemoteSkillUpdateState::CheckFailed,
+            message: Some(format!("Git ref not found: {reference}")),
+        },
+        Err(error) => RemoteSkillUpdateStatus {
+            skill_name: skill_name.to_string(),
+            source_type: Some(source.source_type),
+            installed_sha: source.installed_sha,
+            latest_sha: None,
+            update_available: false,
+            state: RemoteSkillUpdateState::CheckFailed,
+            message: Some(format!("Git update check failed: {error}")),
+        },
     }
 }
 
@@ -1622,6 +1785,82 @@ description: \"Demo skill\"
     }
 
     #[test]
+    fn check_remote_skill_updates_reports_update_available_and_up_to_date() {
+        let root = temp_dir("remote-updates");
+        let managed_root = root.join("SkillBox");
+        let paths = ensure_managed_layout(&managed_root).unwrap();
+        let remote = bare_remote_with_main("remote-updates-origin");
+        let latest_sha = remote_head(&remote);
+
+        write_remote_source(
+            &paths.remote_skills_root.join("fresh"),
+            &remote,
+            &latest_sha,
+        );
+        write_remote_source(
+            &paths.remote_skills_root.join("stale"),
+            &remote,
+            "0000000000000000000000000000000000000000",
+        );
+
+        let result = check_remote_skill_updates(&managed_root).unwrap();
+        let fresh = remote_status(&result.statuses, "fresh");
+        let stale = remote_status(&result.statuses, "stale");
+
+        assert_eq!(fresh.state, RemoteSkillUpdateState::UpToDate);
+        assert!(!fresh.update_available);
+        assert_eq!(fresh.latest_sha.as_deref(), Some(latest_sha.as_str()));
+        assert_eq!(stale.state, RemoteSkillUpdateState::UpdateAvailable);
+        assert!(stale.update_available);
+        assert_eq!(stale.latest_sha.as_deref(), Some(latest_sha.as_str()));
+    }
+
+    #[test]
+    fn check_remote_skill_updates_marks_missing_and_manual_sources_not_checkable() {
+        let root = temp_dir("remote-not-checkable");
+        let managed_root = root.join("SkillBox");
+        let paths = ensure_managed_layout(&managed_root).unwrap();
+        fs::create_dir_all(paths.remote_skills_root.join("missing-source")).unwrap();
+        fs::create_dir_all(paths.remote_skills_root.join("manual-source")).unwrap();
+        fs::write(
+            paths
+                .remote_skills_root
+                .join("manual-source")
+                .join("source.json"),
+            r#"{"type":"manual","installedSha":"manual-abc123"}"#,
+        )
+        .unwrap();
+
+        let result = check_remote_skill_updates(&managed_root).unwrap();
+        let missing = remote_status(&result.statuses, "missing-source");
+        let manual = remote_status(&result.statuses, "manual-source");
+
+        assert_eq!(missing.state, RemoteSkillUpdateState::NotCheckable);
+        assert_eq!(manual.state, RemoteSkillUpdateState::NotCheckable);
+        assert!(!missing.update_available);
+        assert!(!manual.update_available);
+    }
+
+    #[test]
+    fn check_remote_skill_updates_records_git_failures_per_skill() {
+        let root = temp_dir("remote-check-failed");
+        let managed_root = root.join("SkillBox");
+        let paths = ensure_managed_layout(&managed_root).unwrap();
+        write_remote_source(
+            &paths.remote_skills_root.join("broken"),
+            &root.join("missing.git"),
+            "0000000000000000000000000000000000000000",
+        );
+
+        let result = check_remote_skill_updates(&managed_root).unwrap();
+        let broken = remote_status(&result.statuses, "broken");
+
+        assert_eq!(broken.state, RemoteSkillUpdateState::CheckFailed);
+        assert!(!broken.update_available);
+        assert!(broken.message.as_deref().unwrap_or("").contains("Git"));
+    }
+
+    #[test]
     fn scan_import_candidates_infers_type_from_path_and_metadata() {
         let root = temp_dir("candidate-type");
         let agents_root = root.join(".agents").join("skills");
@@ -1856,6 +2095,38 @@ description: \"{description}\"
             .unwrap_or_else(|| panic!("candidate not found: {name}"))
     }
 
+    fn remote_status<'a>(
+        statuses: &'a [RemoteSkillUpdateStatus],
+        skill_name: &str,
+    ) -> &'a RemoteSkillUpdateStatus {
+        statuses
+            .iter()
+            .find(|status| status.skill_name == skill_name)
+            .unwrap_or_else(|| panic!("remote status not found: {skill_name}"))
+    }
+
+    fn write_remote_source(
+        remote_root: &std::path::Path,
+        repo_url: &std::path::Path,
+        installed_sha: &str,
+    ) {
+        fs::create_dir_all(remote_root).unwrap();
+        fs::write(
+            remote_root.join("source.json"),
+            format!(
+                r#"{{
+  "type": "github",
+  "repoUrl": "{}",
+  "ref": "main",
+  "installedSha": "{}"
+}}"#,
+                repo_url.display(),
+                installed_sha
+            ),
+        )
+        .unwrap();
+    }
+
     fn bare_remote(label: &str) -> PathBuf {
         let remote = temp_dir(label).join("remote.git");
         let output = std::process::Command::new("git")
@@ -1870,5 +2141,64 @@ description: \"{description}\"
             String::from_utf8_lossy(&output.stderr)
         );
         remote
+    }
+
+    fn bare_remote_with_main(label: &str) -> PathBuf {
+        let remote = bare_remote(label);
+        let work = temp_dir(&format!("{label}-work"));
+        run_git(&work, &["init", "-b", "main"]);
+        fs::write(work.join("README.md"), "remote").unwrap();
+        run_git(&work, &["add", "."]);
+        run_git(
+            &work,
+            &[
+                "-c",
+                "user.name=SkillBox",
+                "-c",
+                "user.email=skillbox@example.invalid",
+                "commit",
+                "-m",
+                "Initial",
+            ],
+        );
+        run_git(
+            &work,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
+        run_git(&work, &["push", "origin", "main"]);
+        remote
+    }
+
+    fn remote_head(remote: &std::path::Path) -> String {
+        let output = std::process::Command::new("git")
+            .arg("ls-remote")
+            .arg(remote)
+            .arg("main")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout)
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .to_string()
+    }
+
+    fn run_git(cwd: &std::path::Path, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(cwd)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }
