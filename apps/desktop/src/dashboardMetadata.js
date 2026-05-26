@@ -21,13 +21,19 @@ const agentCatalog = {
   openclaw: { id: 'openclaw', label: 'OpenClaw' }
 };
 
-export function deriveDashboardSkill(skill, userSkillsGit, remoteSkillUpdates, favoriteNames = new Set()) {
+export function deriveDashboardSkill(
+  skill,
+  userSkillsGit,
+  remoteSkillUpdates,
+  favoriteNames = new Set(),
+  tagOverrides = {}
+) {
   const status = dashboardSkillStatus(skill, userSkillsGit, remoteSkillUpdates);
   const sourceRoot = skill.sourceRoot || skill.source_root || '';
 
   return {
     ...skill,
-    displayTags: deriveTags(skill),
+    displayTags: displayTagsForSkill(skill, tagOverrides),
     agentLabel: deriveAgentLabel(sourceRoot),
     installedAgents: deriveInstalledAgents(skill),
     sourceLabel: compactSourceLabel(sourceRoot),
@@ -69,6 +75,51 @@ export function normalizeFavoriteNames(value) {
   }
 
   return [...new Set(parsed.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim()))];
+}
+
+export function normalizeDashboardTagOverrides(value) {
+  let parsed = value;
+
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return {};
+    }
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return {};
+  }
+
+  return Object.entries(parsed).reduce((overrides, [skillName, tags]) => {
+    const name = String(skillName || '').trim();
+    if (!name || !Array.isArray(tags)) {
+      return overrides;
+    }
+
+    overrides[name] = normalizeEditableTags(tags);
+    return overrides;
+  }, {});
+}
+
+export function normalizeEditableTags(tags = []) {
+  if (!Array.isArray(tags)) {
+    return [];
+  }
+
+  const normalized = tags
+    .filter((tag) => typeof tag === 'string')
+    .map((tag) =>
+      tag
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '-')
+        .replace(/[^a-z0-9_-]/g, '')
+    )
+    .filter(Boolean);
+
+  return [...new Set(normalized)];
 }
 
 function dashboardSkillStatus(skill, userSkillsGit, remoteSkillUpdates) {
@@ -120,6 +171,15 @@ function deriveTags(skill) {
     .map(([tag]) => tag);
 
   return tags.length > 0 ? tags : ['general'];
+}
+
+function displayTagsForSkill(skill, tagOverrides) {
+  const normalizedOverrides = normalizeDashboardTagOverrides(tagOverrides);
+  if (Object.prototype.hasOwnProperty.call(normalizedOverrides, skill.name)) {
+    return normalizedOverrides[skill.name];
+  }
+
+  return deriveTags(skill);
 }
 
 function deriveAgentLabel(sourceRoot = '') {

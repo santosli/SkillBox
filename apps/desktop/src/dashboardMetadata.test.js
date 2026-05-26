@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   dashboardFilterOptions,
   deriveDashboardSkill,
+  normalizeDashboardTagOverrides,
   normalizeFavoriteNames
 } from './dashboardMetadata.js';
 import { normalizeRemoteSkillUpdates } from './skillStatusRefresh.js';
@@ -80,6 +81,41 @@ test('derives installed agent icons from explicit agent and deployment fields', 
     { id: 'codex', label: 'Codex' },
     { id: 'cursor', label: 'Cursor' }
   ]);
+});
+
+test('uses editable dashboard tag overrides when present', () => {
+  const skill = deriveDashboardSkill(
+    {
+      name: 'note-manager',
+      description: 'Manage Obsidian docs and sync notes from GitHub.',
+      sourceRoot: '/Users/santos/.codex/skills',
+      type: 'remote'
+    },
+    { state: 'clean' },
+    normalizeRemoteSkillUpdates(null),
+    new Set(),
+    { 'note-manager': ['writing', 'sync'] }
+  );
+
+  assert.deepEqual(skill.displayTags, ['writing', 'sync']);
+});
+
+test('normalizes editable dashboard tag overrides from persisted values', () => {
+  assert.deepEqual(
+    normalizeDashboardTagOverrides(
+      JSON.stringify({
+        alpha: [' Sync ', 'SYNC', 'research notes', 3],
+        beta: [],
+        '': ['ignored'],
+        gamma: 'not-tags'
+      })
+    ),
+    {
+      alpha: ['sync', 'research-notes'],
+      beta: []
+    }
+  );
+  assert.deepEqual(normalizeDashboardTagOverrides('not-json'), {});
 });
 
 test('falls back to the current symlink deployment target for installed agent icons', () => {

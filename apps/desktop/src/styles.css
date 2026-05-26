@@ -728,6 +728,10 @@ button {
 
 .skillCardHitArea:focus-visible,
 .skillFavoriteButton:focus-visible,
+.skillDetailCloseButton:focus-visible,
+.detailFavoriteButton:focus-visible,
+.editableTagPill:focus-visible,
+.skillDetailTagInput button:focus-visible,
 .dashboardChipGroup button:focus-visible,
 .favoriteFilterButton:focus-visible,
 .viewSwitch button:focus-visible,
@@ -1804,6 +1808,238 @@ dd {
   box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
 }
 
+.skillDetailDialog {
+  display: grid;
+  width: min(560px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  gap: 18px;
+  overflow: auto;
+  border: 1px solid #dbe3ee;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
+  padding: 24px;
+}
+
+.skillDetailDialogHeader {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.skillDetailTitleBlock {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+}
+
+.skillDetailBadges {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.skillDetailTitleBlock h2 {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #111827;
+  font-size: 24px;
+  font-weight: 720;
+  letter-spacing: 0;
+  line-height: 1.15;
+}
+
+.skillDetailCloseButton {
+  flex: 0 0 auto;
+}
+
+.skillDetailCloseButton svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.skillDetailDescription {
+  display: -webkit-box;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+.skillDetailTagList {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.skillDetailTagEditor {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+}
+
+.editableTagPill {
+  display: inline-flex;
+  max-width: 180px;
+  min-height: 30px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: #e0f2fe;
+  color: #0369a1;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 720;
+  line-height: 1;
+  padding: 0 10px 0 12px;
+}
+
+.editableTagPill:nth-child(3n + 2) {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.editableTagPill:nth-child(3n) {
+  background: #fce7f3;
+  color: #be185d;
+}
+
+.editableTagPill span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editableTagPill svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.4;
+}
+
+.skillDetailTagInput {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.skillDetailTagInput input {
+  width: 100%;
+  height: 36px;
+  border: 1px solid #dbe3ee;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #111827;
+  font-size: 14px;
+  padding: 0 11px;
+}
+
+.skillDetailTagInput input:focus {
+  border-color: #0a84ff;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.13);
+  outline: none;
+}
+
+.skillDetailTagInput button {
+  height: 36px;
+  border-radius: 8px;
+  background: #eef2f7;
+  color: #475569;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 0 12px;
+}
+
+.skillDetailTagInput button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.skillDetailAgentRow {
+  display: flex;
+  min-width: 0;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px solid #eef2f7;
+  border-bottom: 1px solid #eef2f7;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 680;
+}
+
+.skillDetailAgentRow > span:first-child {
+  flex: 0 0 auto;
+}
+
+.skillDetailActions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.detailFavoriteButton {
+  display: inline-flex;
+  height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid #dbe3ee;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #475569;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 680;
+  padding: 0 13px;
+}
+
+.detailFavoriteButton.active {
+  border-color: #fed7aa;
+  background: #fff7ed;
+  color: #d97706;
+}
+
+.detailFavoriteButton svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.detailFavoriteButton.active svg {
+  fill: currentColor;
+}
+
 .remoteImportForm {
   display: grid;
   gap: 16px;
@@ -2772,6 +3008,20 @@ dd {
   .toolbar {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .skillDetailDialog {
+    width: calc(100vw - 40px);
+    padding: 20px;
+  }
+
+  .skillDetailActions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .skillDetailActions > button {
+    width: 100%;
   }
 
   .headerActions {

@@ -9,6 +9,8 @@ import { dashboardTabItems, skillMatchesDashboardFilters } from './dashboardFilt
 import {
   dashboardFilterOptions,
   deriveDashboardSkill,
+  normalizeDashboardTagOverrides,
+  normalizeEditableTags,
   normalizeFavoriteNames
 } from './dashboardMetadata.js';
 import { parseUnifiedDiff } from './gitDiffView.js';
@@ -19,7 +21,6 @@ import {
   formatStatusNoticeCountdown,
   normalizeRemoteSkillUpdates,
   normalizeStatusRefreshIntervalMinutes,
-  remoteSkillRowStatus,
   statusNoticeAutoCloseSeconds
 } from './skillStatusRefresh.js';
 import {
@@ -31,10 +32,8 @@ import {
   syncNotice,
   userSkillsSyncProgressSteps,
   waitForNextPaint,
-  userSkillRowStatus,
   userSyncAction,
-  userSyncLabel,
-  userSyncTone
+  userSyncLabel
 } from './userSkillsGitSync.js';
 
 const previewPaths = {
@@ -47,6 +46,7 @@ const previewPaths = {
 const previewPreferenceStorageKey = 'skillbox.skipLocalImportConfirmation';
 const previewStatusRefreshIntervalStorageKey = 'skillbox.statusRefreshIntervalMinutes';
 const dashboardFavoriteStorageKey = 'skillbox.dashboardFavorites';
+const dashboardTagStorageKey = 'skillbox.dashboardTags';
 const autoRefreshBlockedStatuses = new Set([
   'checking',
   'importing',
@@ -140,6 +140,7 @@ export default function App() {
   const [dashboardFavoritesOnly, setDashboardFavoritesOnly] = useState(false);
   const [dashboardViewMode, setDashboardViewMode] = useState('grid');
   const [favoriteNames, setFavoriteNames] = useState(readDashboardFavorites);
+  const [dashboardTagOverrides, setDashboardTagOverrides] = useState(readDashboardTagOverrides);
   const [selectedName, setSelectedName] = useState('');
   const [page, setPage] = useState('dashboard');
   const [status, setStatus] = useState('idle');
@@ -182,7 +183,6 @@ export default function App() {
     selectedPaths: [],
     activePath: ''
   });
-  const [syncOptionsOpen, setSyncOptionsOpen] = useState(false);
   const [syncCommitMessage, setSyncCommitMessage] = useState(defaultSyncCommitMessage);
   const contentRef = useRef(null);
   const autoRefreshStateRef = useRef({ status: 'idle', isFirstUse: false });
@@ -227,15 +227,21 @@ export default function App() {
       contentRef.current.scrollTop = 0;
       contentRef.current.scrollLeft = 0;
     }
-  }, [page, selectedName, filter]);
+  }, [page, filter]);
 
   const favoriteNameSet = useMemo(() => new Set(favoriteNames), [favoriteNames]);
   const dashboardSkills = useMemo(
     () =>
       skills.map((skill) =>
-        deriveDashboardSkill(skill, userSkillsGit, remoteSkillUpdates, favoriteNameSet)
+        deriveDashboardSkill(
+          skill,
+          userSkillsGit,
+          remoteSkillUpdates,
+          favoriteNameSet,
+          dashboardTagOverrides
+        )
       ),
-    [skills, userSkillsGit, remoteSkillUpdates, favoriteNameSet]
+    [skills, userSkillsGit, remoteSkillUpdates, favoriteNameSet, dashboardTagOverrides]
   );
   const dashboardOptions = useMemo(
     () => dashboardFilterOptions(dashboardSkills),
@@ -262,7 +268,9 @@ export default function App() {
     ]
   );
 
-  const selected = skills.find((skill) => skill.name === selectedName) || filtered[0] || skills[0];
+  const selectedSkill = selectedName
+    ? dashboardSkills.find((skill) => skill.name === selectedName)
+    : null;
 
   const counts = useMemo(
     () => {
@@ -312,7 +320,9 @@ export default function App() {
       setRemoteSkillUpdates(normalizeRemoteSkillUpdates(null));
       setLastStatusCheckedAt('');
       setIsFirstUse(Boolean(state.isFirstUse ?? state.is_first_use));
-      setSelectedName(managedSkills[0]?.name || '');
+      setSelectedName((currentName) =>
+        currentName && managedSkills.some((skill) => skill.name === currentName) ? currentName : ''
+      );
       setStatus('ready');
     } catch (scanError) {
       setSkills([]);
@@ -372,7 +382,9 @@ export default function App() {
       setRemoteSkillUpdates(nextRemoteUpdates);
       setLastStatusCheckedAt(new Date().toISOString());
       setIsFirstUse(Boolean(state.isFirstUse ?? state.is_first_use));
-      setSelectedName(managedSkills[0]?.name || '');
+      setSelectedName((currentName) =>
+        currentName && managedSkills.some((skill) => skill.name === currentName) ? currentName : ''
+      );
       if (!automatic) {
         setNotice(dashboardStatusNotice({ userSkillsGit: nextUserSkillsGit, remoteUpdates: nextRemoteUpdates }));
       }
@@ -538,7 +550,7 @@ export default function App() {
       const importedSkills = selected.map(candidateToPreviewSkill);
 
       setSkills((current) => mergeSkills(current, importedSkills));
-      setSelectedName(importedSkills[0]?.name || '');
+      setSelectedName('');
       setIsFirstUse(false);
       setImportReview({ open: false, candidates: [], errors: [] });
       setStatus('prototype');
@@ -878,12 +890,16 @@ export default function App() {
 
   function openDashboard(nextFilter = filter) {
     setFilter(nextFilter);
+    setSelectedName('');
     setPage('dashboard');
   }
 
   function openSkill(skill) {
     setSelectedName(skill.name);
-    setPage('detail');
+  }
+
+  function closeSkillDetail() {
+    setSelectedName('');
   }
 
   function toggleDashboardFavorite(skillName) {
@@ -896,6 +912,27 @@ export default function App() {
         window.localStorage.setItem(dashboardFavoriteStorageKey, JSON.stringify(next));
       } catch {
         // Favorites are a local dashboard preference; if storage is unavailable, keep session state.
+      }
+
+      return next;
+    });
+  }
+
+  function updateDashboardSkillTags(skillName, tags) {
+    if (!skillName) {
+      return;
+    }
+
+    setDashboardTagOverrides((current) => {
+      const next = {
+        ...current,
+        [skillName]: normalizeEditableTags(tags)
+      };
+
+      try {
+        window.localStorage.setItem(dashboardTagStorageKey, JSON.stringify(next));
+      } catch {
+        // Tags are a local dashboard preference; if storage is unavailable, keep session state.
       }
 
       return next;
@@ -947,7 +984,7 @@ export default function App() {
         </div>
 
         <nav className="navGroup" aria-label="Primary">
-          <NavButton active={(page === 'dashboard' && (filter === 'all' || filter === 'updates')) || page === 'detail'} icon="dashboard" label="Dashboard" onClick={() => openDashboard('all')} />
+          <NavButton active={page === 'dashboard' && (filter === 'all' || filter === 'updates')} icon="dashboard" label="Dashboard" onClick={() => openDashboard('all')} />
           <NavButton active={page === 'dashboard' && filter === 'user'} icon="user-skills" label="User Skills" onClick={() => openDashboard('user')} />
           <NavButton active={page === 'dashboard' && filter === 'remote'} icon="remote-skills" label="Remote Skills" onClick={() => openDashboard('remote')} />
         </nav>
@@ -963,21 +1000,7 @@ export default function App() {
       </aside>
 
       <section className="content" ref={contentRef}>
-        {page === 'detail' && selected ? (
-          <SkillDetail
-            paths={paths}
-            skill={selected}
-            status={status}
-            syncCommitMessage={syncCommitMessage}
-            syncOptionsOpen={syncOptionsOpen}
-            userSkillsGit={userSkillsGit}
-            onBack={() => openDashboard('all')}
-            onOpenSyncSetup={openSyncDialog}
-            onRefresh={refresh}
-            onSyncCommitMessage={setSyncCommitMessage}
-            onSyncOptionsOpen={setSyncOptionsOpen}
-          />
-        ) : page === 'settings' ? (
+        {page === 'settings' ? (
           <SettingsPage
             paths={paths}
             preferences={preferences}
@@ -1015,6 +1038,19 @@ export default function App() {
           />
         )}
       </section>
+
+      {page === 'dashboard' && selectedSkill ? (
+        <SkillDetailDialog
+          skill={selectedSkill}
+          status={status}
+          userSkillsGit={userSkillsGit}
+          onCheckUpdates={refreshSkillStatuses}
+          onClose={closeSkillDetail}
+          onOpenSyncSetup={openSyncDialog}
+          onTagsChange={updateDashboardSkillTags}
+          onToggleFavorite={toggleDashboardFavorite}
+        />
+      ) : null}
 
       {importReview.open ? (
         <ImportReview
@@ -2124,53 +2160,126 @@ function CandidateRow({ candidate, onToggleSelected, onTypeChange }) {
   );
 }
 
-function SkillDetail({
-  paths,
+function SkillDetailDialog({
   skill,
   status,
-  syncCommitMessage,
-  syncOptionsOpen,
   userSkillsGit,
-  onBack,
+  onCheckUpdates,
+  onClose,
   onOpenSyncSetup,
-  onRefresh,
-  onSyncCommitMessage,
-  onSyncOptionsOpen
+  onTagsChange,
+  onToggleFavorite
 }) {
-  const managedPath =
-    skill.type === 'user'
-      ? joinPath(paths?.userSkillsRoot, skill.name)
-      : joinPath(paths?.remoteSkillsRoot, `${skill.name}/current`);
-  const shortHash = (skill.contentHash || 'not-indexed').slice(0, 8);
-  const operationStatus =
-    skill.type === 'user'
-      ? userSkillRowStatus(skill, userSkillsGit) ||
-        { label: userSyncLabel(userSkillsGit), tone: userSyncTone(userSkillsGit) }
-      : skillStatus(skill);
-  const statusFieldLabel = skill.type === 'remote' ? 'Update status' : 'Sync status';
-  const statusPanelTitle = skill.type === 'remote' ? 'Update' : 'Sync';
-  const statusPanelDetail =
-    skill.type === 'remote'
-      ? 'GitHub source check'
-      : userSkillsGit.remoteUrl || 'Git remote required';
+  const [tagInput, setTagInput] = useState('');
   const syncAction = userSyncAction(userSkillsGit, skill.type);
   const isPreparingSync = status === 'preparing_sync';
   const isSyncing = status === 'syncing' || isPreparingSync;
+  const isChecking = status === 'checking';
+  const pendingTag = normalizeEditableTags([tagInput])[0] || '';
+
+  useEffect(() => {
+    function closeOnEscape(event) {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    }
+
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [onClose]);
+
+  function closeOnBackdrop(event) {
+    if (event.target === event.currentTarget) {
+      onClose();
+    }
+  }
+
+  function addTag(event) {
+    event.preventDefault();
+    if (!pendingTag) {
+      return;
+    }
+
+    onTagsChange(skill.name, [...skill.displayTags, pendingTag]);
+    setTagInput('');
+  }
+
+  function removeTag(tag) {
+    onTagsChange(
+      skill.name,
+      skill.displayTags.filter((item) => item !== tag)
+    );
+  }
 
   return (
-    <>
-      <div className="detailHeader">
-        <div>
-          <button className="breadcrumb" type="button" onClick={onBack}>
-            All skills / {skill.name}
-          </button>
-          <div className="titleLine">
-            <h1>{skill.name}</h1>
-            <Badge tone={skill.type === 'user' ? 'green' : 'blue'}>{labelize(skill.type)} skill</Badge>
+    <div className="modalBackdrop skillDetailBackdrop" role="presentation" onMouseDown={closeOnBackdrop}>
+      <section
+        className="skillDetailDialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="skill-detail-title"
+      >
+        <header className="skillDetailDialogHeader">
+          <div className="skillDetailTitleBlock">
+            <div className="skillDetailBadges">
+              <Badge tone={skill.type === 'user' ? 'green' : 'blue'}>{labelize(skill.type)}</Badge>
+              <Badge tone={skill.statusTone}>{skill.statusLabel}</Badge>
+            </div>
+            <h2 id="skill-detail-title">{skill.name}</h2>
           </div>
-          <p>{skill.description || 'No description in SKILL.md frontmatter.'}</p>
+          <button className="iconButton skillDetailCloseButton" type="button" aria-label="Close skill detail" onClick={onClose}>
+            <X aria-hidden="true" />
+          </button>
+        </header>
+
+        <p className="skillDetailDescription">
+          {skill.description || 'No description in SKILL.md frontmatter.'}
+        </p>
+
+        <form className="skillDetailTagEditor" onSubmit={addTag}>
+          <div className="skillDetailTagList" aria-label="Skill tags">
+            {skill.displayTags.map((tag) => (
+              <button
+                aria-label={`Remove ${tag} tag`}
+                className="editableTagPill"
+                key={tag}
+                type="button"
+                onClick={() => removeTag(tag)}
+              >
+                <span>{tag}</span>
+                <X aria-hidden="true" />
+              </button>
+            ))}
+          </div>
+          <div className="skillDetailTagInput">
+            <input
+              aria-label="Add tag"
+              placeholder="new tag"
+              value={tagInput}
+              onChange={(event) => setTagInput(event.target.value)}
+            />
+            <button disabled={!pendingTag} type="submit">
+              Add
+            </button>
+          </div>
+        </form>
+
+        <div className="skillDetailAgentRow">
+          <span>Installed agents</span>
+          <AgentIconStack agents={skill.installedAgents} />
         </div>
-        <div className="headerActions">
+
+        <footer className="skillDetailActions">
+          <button
+            aria-pressed={skill.isFavorite}
+            className={skill.isFavorite ? 'detailFavoriteButton active' : 'detailFavoriteButton'}
+            type="button"
+            onClick={() => onToggleFavorite(skill.name)}
+          >
+            <Star aria-hidden="true" />
+            {skill.isFavorite ? 'Favorited' : 'Favorite'}
+          </button>
+
           {skill.type === 'user' ? (
             <button
               className="button primary"
@@ -2181,121 +2290,18 @@ function SkillDetail({
               {isPreparingSync ? 'Preparing...' : status === 'syncing' ? 'Syncing...' : syncAction}
             </button>
           ) : (
-            <>
-              <button className="button secondary" type="button" onClick={onRefresh}>
-                Check update
-              </button>
-              <button className="button secondary" type="button">
-                Rollback
-              </button>
-            </>
-          )}
-          <button className={skill.type === 'user' ? 'button secondary' : 'button primary'} type="button">
-            Deploy
-          </button>
-        </div>
-      </div>
-
-      <section className="detailGrid">
-        <div className="panel detailMain">
-          <div className="tabs" role="tablist" aria-label="Skill detail sections">
-            <button className="active" type="button">
-              Overview
+            <button
+              className="button primary"
+              disabled={isChecking}
+              type="button"
+              onClick={() => onCheckUpdates()}
+            >
+              {isChecking ? 'Checking...' : 'Check update'}
             </button>
-            <button type="button">Versions</button>
-            <button type="button">Deployments</button>
-            <button type="button">Logs</button>
-          </div>
-
-          <dl className="fieldGrid">
-            <Field label="Managed path" value={managedPath} />
-            <Field label="Source root" value={skill.sourceRoot} />
-            <Field label="Current SHA" value={shortHash} />
-            <Field label="Latest SHA" value={hasAvailableUpdate(skill) ? 'available' : 'not checked'} />
-            <Field label="Skill file" value={skill.skillMdPath || joinPath(skill.path, 'SKILL.md')} />
-            <Field label={statusFieldLabel} value={operationStatus.label} />
-          </dl>
-
-          {skill.type === 'user' ? (
-            <section className="subsection syncSection">
-              <div className="subsectionHeader">
-                <h2>User skills sync</h2>
-                <span>Shared repository</span>
-              </div>
-              <div className="syncMeta">
-                <Field label="Repository" value={userSkillsGit.repoPath || paths?.userSkillsRoot} />
-                <Field label="Remote" value={userSkillsGit.remoteUrl || 'Not configured'} />
-                <Field label="Branch" value={userSkillsGit.branch || 'main'} />
-                <Field label="State" value={operationStatus.label} />
-              </div>
-              <div className="syncOptionsHeader">
-                <button
-                  className="linkButton"
-                  type="button"
-                  onClick={() => onSyncOptionsOpen(!syncOptionsOpen)}
-                >
-                  Sync options
-                </button>
-                <span>All local user skills sync together.</span>
-              </div>
-              {syncOptionsOpen ? (
-                <label className="syncOptionField">
-                  <span>Commit message</span>
-                  <input
-                    value={syncCommitMessage}
-                    onChange={(event) => onSyncCommitMessage(event.target.value)}
-                  />
-                </label>
-              ) : null}
-            </section>
-          ) : null}
-
-          <section className="subsection">
-            <div className="subsectionHeader">
-              <h2>Version history</h2>
-              <span>{shortHash === 'not-inde' ? 'No indexed version' : '1 indexed version'}</span>
-            </div>
-            <div className="versionRows">
-              <div className="versionRow">
-                <span>
-                  <strong>{shortHash}</strong>
-                  <small>Current version</small>
-                </span>
-                <Badge tone="green">Active</Badge>
-                <button type="button" disabled>
-                  Current
-                </button>
-              </div>
-              <div className="versionRow muted">
-                <span>
-                  <strong>Previous versions</strong>
-                  <small>Rollback points will appear after updates are installed.</small>
-                </span>
-                <Badge tone="slate">Empty</Badge>
-                <button type="button" disabled>
-                  Rollback
-                </button>
-              </div>
-            </div>
-          </section>
-
-          <section className="subsection">
-            <div className="subsectionHeader">
-              <h2>Recent operations</h2>
-              <span>Local only</span>
-            </div>
-            <ActivityList compact />
-          </section>
-        </div>
-
-        <aside className="sideStack">
-          <StatusPanel title="Deployment" tone={isDeployed(skill) ? 'green' : 'amber'} value={isDeployed(skill) ? 'Healthy' : 'Not deployed'} detail="~/.codex/skills" />
-          <StatusPanel title={statusPanelTitle} tone={operationStatus.tone} value={operationStatus.label} detail={statusPanelDetail} />
-          <StatusPanel title="Symlink" tone={skill.isSymlink ? 'green' : 'slate'} value={skill.isSymlink ? 'Healthy' : 'Not linked'} detail={targetLabel(skill)} />
-          <StatusPanel title="Source trust" tone="blue" value={labelize(skill.type)} detail={compactPath(skill.sourceRoot)} />
-        </aside>
+          )}
+        </footer>
       </section>
-    </>
+    </div>
   );
 }
 
@@ -2414,23 +2420,6 @@ function Badge({ children, tone = 'slate' }) {
   return <span className={`badge ${tone}`}>{children}</span>;
 }
 
-function StatusBadge({ remoteSkillUpdates, skill, userSkillsGit }) {
-  const status =
-    userSkillRowStatus(skill, userSkillsGit) ||
-    remoteSkillRowStatus(skill, remoteSkillUpdates) ||
-    skillStatus(skill);
-  return <Badge tone={status.tone}>{status.label}</Badge>;
-}
-
-function Field({ label, value }) {
-  return (
-    <div className="field">
-      <dt>{label}</dt>
-      <dd>{value || 'Not available'}</dd>
-    </div>
-  );
-}
-
 function PathList({ items }) {
   return (
     <dl className="pathList">
@@ -2441,41 +2430,6 @@ function PathList({ items }) {
         </div>
       ))}
     </dl>
-  );
-}
-
-function ActivityList({ compact = false }) {
-  const items = [
-    ['Scan completed', 'Runtime folders checked'],
-    ['Managed layout ready', '~/SkillBox verified'],
-    ['Symlink policy active', 'Deployments stay reversible']
-  ];
-
-  return (
-    <ul className={compact ? 'activityList compact' : 'activityList'}>
-      {items.map(([title, detail]) => (
-        <li key={title}>
-          <span />
-          <div>
-            <strong>{title}</strong>
-            <small>{detail}</small>
-          </div>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function StatusPanel({ detail, title, tone, value }) {
-  return (
-    <div className="panel statusPanel">
-      <span className={`statusLight ${tone}`} />
-      <div>
-        <p>{title}</p>
-        <strong>{value}</strong>
-        <small>{detail}</small>
-      </div>
-    </div>
   );
 }
 
@@ -2528,6 +2482,14 @@ function readDashboardFavorites() {
     return normalizeFavoriteNames(window.localStorage.getItem(dashboardFavoriteStorageKey));
   } catch {
     return [];
+  }
+}
+
+function readDashboardTagOverrides() {
+  try {
+    return normalizeDashboardTagOverrides(window.localStorage.getItem(dashboardTagStorageKey));
+  } catch {
+    return {};
   }
 }
 
@@ -2745,10 +2707,6 @@ function inferType(sourceRoot = '') {
   return 'remote';
 }
 
-function isDeployed(skill) {
-  return skill.isSymlink || ['deployed', 'ok', 'healthy'].includes(String(skill.status).toLowerCase());
-}
-
 function defaultSkillStatus(type) {
   return type === 'user' ? 'sync not checked' : 'update not checked';
 }
@@ -2756,30 +2714,6 @@ function defaultSkillStatus(type) {
 function hasAvailableUpdate(skill) {
   const normalized = String(skill.status || '').toLowerCase();
   return skill.type === 'remote' && (normalized.includes('update available') || normalized.includes('new version'));
-}
-
-function skillStatus(skill) {
-  const normalized = String(skill.status || '').toLowerCase();
-
-  if (normalized.includes('error')) return { label: 'Error', tone: 'red' };
-  if (normalized.includes('conflict')) return { label: 'Conflict', tone: 'red' };
-  if (skill.type === 'remote') {
-    if (hasAvailableUpdate(skill)) {
-      return { label: 'Update available', tone: 'amber' };
-    }
-    if (normalized.includes('up to date') || normalized.includes('current') || normalized.includes('deployed') || normalized.includes('ok')) {
-      return { label: 'Up to date', tone: 'green' };
-    }
-    return { label: 'Update not checked', tone: 'slate' };
-  }
-
-  if (normalized.includes('needs sync') || normalized.includes('dirty') || normalized.includes('sync needed')) {
-    return { label: 'Needs sync', tone: 'amber' };
-  }
-  if (normalized.includes('synced') || normalized.includes('clean') || normalized.includes('up to date') || normalized.includes('ok')) {
-    return { label: 'Synced', tone: 'green' };
-  }
-  return { label: 'Sync not checked', tone: 'slate' };
 }
 
 function labelize(value = '') {
@@ -2793,9 +2727,4 @@ function compactPath(value = '') {
 function joinPath(root, child) {
   if (!root) return child;
   return `${String(root).replace(/\/$/, '')}/${child}`;
-}
-
-function targetLabel(skill) {
-  if (skill.isSymlink || isDeployed(skill)) return '~/.codex/skills';
-  return 'Not deployed';
 }
