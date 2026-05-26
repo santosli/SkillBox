@@ -769,10 +769,11 @@ button {
 .skillCardDescription {
   display: -webkit-box;
   min-width: 0;
+  max-height: 40px;
   overflow: hidden;
   color: #64748b;
   font-size: 14px;
-  line-height: 1.45;
+  line-height: 20px;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
