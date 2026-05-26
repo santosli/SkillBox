@@ -1,6 +1,19 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Grid3X3, List, RefreshCw, Search, Star, X } from 'lucide-react';
+import {
+  FolderCode,
+  Gauge,
+  Grid3X3,
+  List,
+  MessageCircleQuestionMark,
+  Plus,
+  RefreshCw,
+  Search,
+  Settings2,
+  Star,
+  Trash2,
+  X
+} from 'lucide-react';
 import desktopPackage from '../package.json';
 import skillBoxAppIcon from '../src-tauri/icons/icon.png';
 import codexAppIcon from './assets/codex-app-icon.png';
@@ -15,6 +28,7 @@ import {
 } from './dashboardMetadata.js';
 import { parseUnifiedDiff } from './gitDiffView.js';
 import { normalizeImportCandidate } from './importCandidates.js';
+import { closeOnBackdropClick } from './modalEvents.js';
 import {
   dashboardStatusNotice,
   formatStatusCheckedAt,
@@ -35,6 +49,17 @@ import {
   userSyncAction,
   userSyncLabel
 } from './userSkillsGitSync.js';
+import {
+  normalizeWorkspace,
+  normalizeWorkspaces,
+  sidebarFooterItems,
+  sidebarItems,
+  workspaceCardMetaLabels,
+  workspaceCounts,
+  workspaceMatchesTypeFilter,
+  workspaceSkillReviewMeta,
+  workspaceTypeTabs
+} from './workspaces.js';
 
 const previewPaths = {
   root: '~/SkillBox',
@@ -53,6 +78,8 @@ const autoRefreshBlockedStatuses = new Set([
   'loading',
   'preparing_sync',
   'scanning',
+  'scanning_workspace_skills',
+  'scanning_workspaces',
   'syncing'
 ]);
 
@@ -99,6 +126,35 @@ const previewImportCandidates = [
   }
 ];
 
+const previewWorkspaces = [
+  {
+    canonical_path: '/Users/santos/.codex/skills',
+    path: '/Users/santos/.codex/skills',
+    kind: 'global',
+    source: 'auto',
+    agent_id: 'codex',
+    display_name: 'Codex',
+    skill_count: 4,
+    imported_skill_count: 2,
+    last_scan_error_count: 0,
+    last_scanned_at: '2026-05-26 08:00:00'
+  },
+  {
+    canonical_path:
+      '/Users/santos/Library/Mobile Documents/iCloud~md~obsidian/Documents/Pandora/.agents/skills',
+    path:
+      '/Users/santos/Library/Mobile Documents/iCloud~md~obsidian/Documents/Pandora/.agents/skills',
+    kind: 'user',
+    source: 'manual',
+    agent_id: 'agents',
+    display_name: 'Pandora',
+    skill_count: 2,
+    imported_skill_count: 1,
+    last_scan_error_count: 0,
+    last_scanned_at: '2026-05-26 08:00:00'
+  }
+];
+
 function previewUserSkillsGitChanges() {
   return {
     repo_path: previewPaths.userSkillsRoot,
@@ -133,12 +189,14 @@ function previewUserSkillsGitChanges() {
 
 export default function App() {
   const [skills, setSkills] = useState([]);
+  const [workspaces, setWorkspaces] = useState([]);
   const [paths, setPaths] = useState(null);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all');
   const [dashboardTagFilter, setDashboardTagFilter] = useState('all');
   const [dashboardFavoritesOnly, setDashboardFavoritesOnly] = useState(false);
   const [dashboardViewMode, setDashboardViewMode] = useState('grid');
+  const [workspaceTypeFilter, setWorkspaceTypeFilter] = useState('all');
   const [favoriteNames, setFavoriteNames] = useState(readDashboardFavorites);
   const [dashboardTagOverrides, setDashboardTagOverrides] = useState(readDashboardTagOverrides);
   const [selectedName, setSelectedName] = useState('');
@@ -150,7 +208,10 @@ export default function App() {
   const [importReview, setImportReview] = useState({
     open: false,
     candidates: [],
-    errors: []
+    errors: [],
+    title: 'Import Review',
+    subtitle: 'Confirm each skill type before SkillBox copies it into the managed store.',
+    noticePrefix: ''
   });
   const [preferences, setPreferences] = useState({
     skipLocalImportConfirmation: false,
@@ -159,7 +220,8 @@ export default function App() {
   const [localImportConfirmation, setLocalImportConfirmation] = useState({
     open: false,
     candidates: [],
-    dontShowAgain: false
+    dontShowAgain: false,
+    noticePrefix: ''
   });
   const [remoteImport, setRemoteImport] = useState({
     open: false,
@@ -184,6 +246,12 @@ export default function App() {
     activePath: ''
   });
   const [syncCommitMessage, setSyncCommitMessage] = useState(defaultSyncCommitMessage);
+  const [workspaceDialog, setWorkspaceDialog] = useState({
+    open: false,
+    path: '',
+    kind: 'user',
+    error: ''
+  });
   const contentRef = useRef(null);
   const autoRefreshStateRef = useRef({ status: 'idle', isFirstUse: false });
   const refreshSkillStatusesRef = useRef(null);
@@ -227,7 +295,7 @@ export default function App() {
       contentRef.current.scrollTop = 0;
       contentRef.current.scrollLeft = 0;
     }
-  }, [page, filter]);
+  }, [page, filter, workspaceTypeFilter]);
 
   const favoriteNameSet = useMemo(() => new Set(favoriteNames), [favoriteNames]);
   const dashboardSkills = useMemo(
@@ -246,6 +314,12 @@ export default function App() {
   const dashboardOptions = useMemo(
     () => dashboardFilterOptions(dashboardSkills),
     [dashboardSkills]
+  );
+  const workspaceSummary = useMemo(() => workspaceCounts(workspaces), [workspaces]);
+  const workspaceTabs = useMemo(() => workspaceTypeTabs(workspaceSummary), [workspaceSummary]);
+  const filteredWorkspaces = useMemo(
+    () => workspaces.filter((workspace) => workspaceMatchesTypeFilter(workspace, workspaceTypeFilter)),
+    [workspaceTypeFilter, workspaces]
   );
   const filtered = useMemo(
     () =>
@@ -306,14 +380,16 @@ export default function App() {
         throw new Error('Browser preview is mocking an empty managed store. Run inside Tauri to use the local skill bridge.');
       }
 
-      const [state, storedPreferences, gitStatus] = await Promise.all([
+      const [state, storedPreferences, gitStatus, workspaceRows] = await Promise.all([
         invoke('managed_state'),
         invoke('managed_preferences').catch(() => null),
-        invoke('user_skills_git_status').catch(() => null)
+        invoke('user_skills_git_status').catch(() => null),
+        invoke('list_workspaces').catch(() => [])
       ]);
       const managedSkills = state.skills?.map(normalizeSkill) || [];
 
       setSkills(managedSkills);
+      setWorkspaces(normalizeWorkspaces(workspaceRows));
       setPaths(normalizePaths(state.paths));
       setPreferences(normalizePreferences(storedPreferences));
       setUserSkillsGit(normalizeUserSkillsGitStatus(gitStatus));
@@ -326,6 +402,7 @@ export default function App() {
       setStatus('ready');
     } catch (scanError) {
       setSkills([]);
+      setWorkspaces(normalizeWorkspaces(previewWorkspaces));
       setPaths(previewPaths);
       setPreferences(readPreviewPreferences());
       setUserSkillsGit(normalizeUserSkillsGitStatus(null));
@@ -403,13 +480,17 @@ export default function App() {
 
     try {
       if (!window.__TAURI_INTERNALS__) {
+        setWorkspaces(normalizeWorkspaces(previewWorkspaces));
         setImportReview({
           open: true,
           candidates: applyPreviewImportStatuses(
             previewImportCandidates.map(normalizeImportCandidate),
             skills
           ),
-          errors: []
+          errors: [],
+          title: 'Import Review',
+          subtitle: 'Confirm each skill type before SkillBox copies it into the managed store.',
+          noticePrefix: ''
         });
         setNotice('Browser preview is using mock scan candidates.');
         setStatus('prototype');
@@ -417,12 +498,17 @@ export default function App() {
       }
 
       const scan = await invoke('scan_import_candidates');
+      const workspaceRows = await invoke('list_workspaces').catch(() => []);
       const candidates = (scan.candidates || []).map(normalizeImportCandidate);
+      setWorkspaces(normalizeWorkspaces(workspaceRows));
 
       setImportReview({
         open: candidates.length > 0,
         candidates,
-        errors: scan.errors || []
+        errors: scan.errors || [],
+        title: 'Import Review',
+        subtitle: 'Confirm each skill type before SkillBox copies it into the managed store.',
+        noticePrefix: ''
       });
       setNotice(candidates.length === 0 ? 'No new local skills found.' : '');
       setStatus('ready');
@@ -475,7 +561,10 @@ export default function App() {
       setImportReview({
         open: true,
         candidates: [remoteImportCandidate(remoteImport.mode, value)],
-        errors: []
+        errors: [],
+        title: 'Import Review',
+        subtitle: 'Confirm each skill type before SkillBox copies it into the managed store.',
+        noticePrefix: ''
       });
       setRemoteImport((current) => ({ ...current, open: false, value: '', error: '' }));
       setNotice('Browser preview is using a provided remote source.');
@@ -533,12 +622,13 @@ export default function App() {
       setLocalImportConfirmation({
         open: true,
         candidates: selected,
-        dontShowAgain: false
+        dontShowAgain: false,
+        noticePrefix: importReview.noticePrefix || ''
       });
       return;
     }
 
-    await runCandidateImport(selected);
+    await runCandidateImport(selected, importReview.noticePrefix || '');
   }
 
   async function runCandidateImport(selected, noticePrefix = '') {
@@ -552,7 +642,7 @@ export default function App() {
       setSkills((current) => mergeSkills(current, importedSkills));
       setSelectedName('');
       setIsFirstUse(false);
-      setImportReview({ open: false, candidates: [], errors: [] });
+      setImportReview({ open: false, candidates: [], errors: [], noticePrefix: '' });
       setStatus('prototype');
       setNotice(importNotice(noticePrefix, `Mock imported ${importedSkills.length} skills.`));
       return;
@@ -568,7 +658,7 @@ export default function App() {
       });
       const importErrors = result.errors || [];
 
-      setImportReview({ open: false, candidates: [], errors: [] });
+      setImportReview({ open: false, candidates: [], errors: [], noticePrefix: '' });
       await refresh();
       setNotice(
         importNotice(
@@ -588,22 +678,25 @@ export default function App() {
     if (status === 'importing') {
       return;
     }
-    setLocalImportConfirmation({ open: false, candidates: [], dontShowAgain: false });
+    setLocalImportConfirmation({ open: false, candidates: [], dontShowAgain: false, noticePrefix: '' });
   }
 
   async function confirmLocalImport() {
     const selected = localImportConfirmation.candidates;
-    let noticePrefix = '';
+    let noticePrefix = localImportConfirmation.noticePrefix || '';
 
     if (localImportConfirmation.dontShowAgain) {
       try {
         await saveSkipLocalImportConfirmation(true);
       } catch (preferenceError) {
-        noticePrefix = `Preference was not saved: ${preferenceError.message || String(preferenceError)}.`;
+        noticePrefix = importNotice(
+          noticePrefix,
+          `Preference was not saved: ${preferenceError.message || String(preferenceError)}.`
+        );
       }
     }
 
-    setLocalImportConfirmation({ open: false, candidates: [], dontShowAgain: false });
+    setLocalImportConfirmation({ open: false, candidates: [], dontShowAgain: false, noticePrefix: '' });
     await runCandidateImport(selected, noticePrefix);
   }
 
@@ -967,6 +1060,178 @@ export default function App() {
     return normalized;
   }
 
+  async function scanWorkspaceRegistry() {
+    setStatus('scanning_workspaces');
+    setError('');
+    setNotice('');
+
+    if (!window.__TAURI_INTERNALS__) {
+      setWorkspaces(normalizeWorkspaces(previewWorkspaces));
+      setNotice('Browser preview is using mock workspaces.');
+      setStatus('prototype');
+      return;
+    }
+
+    try {
+      const result = await invoke('scan_workspaces');
+      setWorkspaces(normalizeWorkspaces(result.workspaces || []));
+      setNotice(
+        result.error_count > 0
+          ? `Scanned ${result.scanned_count} workspaces with ${result.error_count} issues.`
+          : `Scanned ${result.scanned_count} workspaces.`
+      );
+      setStatus('ready');
+    } catch (workspaceError) {
+      setError(workspaceError.message || String(workspaceError) || 'Unable to scan workspaces.');
+      setStatus('ready');
+    }
+  }
+
+  async function scanWorkspaceSkills(workspace) {
+    const reviewMeta = workspaceSkillReviewMeta(workspace);
+
+    setStatus('scanning_workspace_skills');
+    setError('');
+    setNotice('');
+
+    if (!window.__TAURI_INTERNALS__) {
+      const candidates = applyPreviewImportStatuses(
+        previewCandidatesForWorkspace(workspace).map(normalizeImportCandidate),
+        skills
+      );
+
+      setImportReview({
+        open: true,
+        candidates,
+        errors: [],
+        ...reviewMeta
+      });
+      setNotice(`Browser preview is using mock skills for ${workspace.displayName}.`);
+      setStatus('prototype');
+      return;
+    }
+
+    try {
+      const scan = await invoke('scan_workspace_import_candidates', { path: workspace.path });
+      const workspaceRows = await invoke('list_workspaces').catch(() => []);
+      const candidates = (scan.candidates || []).map(normalizeImportCandidate);
+
+      setWorkspaces(normalizeWorkspaces(workspaceRows));
+      setImportReview({
+        open: true,
+        candidates,
+        errors: scan.errors || [],
+        ...reviewMeta
+      });
+      setNotice(candidates.length === 0 ? `${workspace.displayName}: no skills found.` : '');
+      setStatus('ready');
+    } catch (workspaceError) {
+      setError(workspaceError.message || String(workspaceError) || 'Unable to scan workspace skills.');
+      setStatus('ready');
+    }
+  }
+
+  function openWorkspaceDialog() {
+    setWorkspaceDialog({ open: true, path: '', kind: 'user', error: '' });
+    setNotice('');
+    setError('');
+  }
+
+  function closeWorkspaceDialog() {
+    if (status === 'scanning_workspaces') {
+      return;
+    }
+    setWorkspaceDialog((current) => ({ ...current, open: false, error: '' }));
+  }
+
+  function updateWorkspaceDialog(patch) {
+    setWorkspaceDialog((current) => ({ ...current, ...patch, error: '' }));
+  }
+
+  async function submitWorkspaceDialog(event) {
+    event.preventDefault();
+    const workspacePath = workspaceDialog.path.trim();
+
+    if (!workspacePath) {
+      setWorkspaceDialog((current) => ({ ...current, error: 'Enter a workspace path.' }));
+      return;
+    }
+
+    setStatus('scanning_workspaces');
+    setError('');
+    setNotice('');
+
+    if (!window.__TAURI_INTERNALS__) {
+      const workspace = normalizeWorkspace({
+        canonical_path: workspacePath,
+        path: workspacePath,
+        kind: workspaceDialog.kind,
+        source: 'manual',
+        agent_id: workspacePath.includes('/.codex/') ? 'codex' : 'agents',
+        skill_count: 0,
+        last_scan_error_count: 0,
+        last_scanned_at: new Date().toISOString()
+      });
+      setWorkspaces((current) =>
+        [...current.filter((item) => item.canonicalPath !== workspace.canonicalPath), workspace]
+          .sort((left, right) => left.path.localeCompare(right.path))
+      );
+      setWorkspaceDialog({ open: false, path: '', kind: 'user', error: '' });
+      setNotice('Workspace added.');
+      setStatus('prototype');
+      return;
+    }
+
+    try {
+      const workspace = await invoke('add_workspace', {
+        request: {
+          path: workspacePath,
+          kind: workspaceDialog.kind
+        }
+      });
+      const rows = await invoke('list_workspaces').catch(() => [workspace]);
+      setWorkspaces(normalizeWorkspaces(rows));
+      setWorkspaceDialog({ open: false, path: '', kind: 'user', error: '' });
+      setNotice(`Workspace added: ${normalizeWorkspace(workspace).compactPath}`);
+      setStatus('ready');
+    } catch (workspaceError) {
+      setWorkspaceDialog((current) => ({
+        ...current,
+        error: workspaceError.message || String(workspaceError) || 'Unable to add workspace.'
+      }));
+      setStatus('ready');
+    }
+  }
+
+  async function forgetWorkspaceRow(workspace) {
+    if (workspace.source !== 'manual') {
+      return;
+    }
+
+    setStatus('scanning_workspaces');
+    setError('');
+    setNotice('');
+
+    if (!window.__TAURI_INTERNALS__) {
+      setWorkspaces((current) =>
+        current.filter((item) => item.canonicalPath !== workspace.canonicalPath)
+      );
+      setNotice('Workspace forgotten.');
+      setStatus('prototype');
+      return;
+    }
+
+    try {
+      const rows = await invoke('forget_workspace', { path: workspace.path });
+      setWorkspaces(normalizeWorkspaces(rows));
+      setNotice(`Workspace forgotten: ${workspace.compactPath}`);
+      setStatus('ready');
+    } catch (workspaceError) {
+      setError(workspaceError.message || String(workspaceError) || 'Unable to forget workspace.');
+      setStatus('ready');
+    }
+  }
+
   function openSyncSettings() {
     setSyncDialog((current) => ({ ...current, open: false, error: '' }));
     setPage('settings');
@@ -984,14 +1249,34 @@ export default function App() {
         </div>
 
         <nav className="navGroup" aria-label="Primary">
-          <NavButton active={page === 'dashboard' && (filter === 'all' || filter === 'updates')} icon="dashboard" label="Dashboard" onClick={() => openDashboard('all')} />
-          <NavButton active={page === 'dashboard' && filter === 'user'} icon="user-skills" label="User Skills" onClick={() => openDashboard('user')} />
-          <NavButton active={page === 'dashboard' && filter === 'remote'} icon="remote-skills" label="Remote Skills" onClick={() => openDashboard('remote')} />
+          {sidebarItems.map((item) => (
+            <NavButton
+              active={page === item.id}
+              icon={item.icon}
+              key={item.id}
+              label={item.label}
+              onClick={() => {
+                if (item.id === 'dashboard') {
+                  openDashboard('all');
+                } else {
+                  setSelectedName('');
+                  setPage(item.id);
+                }
+              }}
+            />
+          ))}
         </nav>
 
         <div className="sidebarFooter">
-          <FooterButton active={page === 'settings'} icon="settings" label="Settings" onClick={() => setPage('settings')} />
-          <FooterButton icon="help" label="Help" />
+          {sidebarFooterItems.map((item) => (
+            <FooterButton
+              active={page === item.id}
+              icon={item.icon}
+              key={item.id}
+              label={item.label}
+              onClick={item.id === 'settings' ? () => setPage('settings') : undefined}
+            />
+          ))}
           <div className="sidebarVersion">
             <span>Version</span>
             <strong>v{desktopPackage.version}</strong>
@@ -1008,6 +1293,21 @@ export default function App() {
             userSkillsGit={userSkillsGit}
             onSaveStatusRefreshInterval={saveStatusRefreshIntervalMinutes}
             onSaveUserSkillsRemote={saveUserSkillsGitRemote}
+          />
+        ) : page === 'workspaces' ? (
+          <WorkspacePage
+            error={error}
+            filter={workspaceTypeFilter}
+            notice={notice}
+            status={status}
+            tabs={workspaceTabs}
+            workspaces={filteredWorkspaces}
+            onAdd={openWorkspaceDialog}
+            onDismissNotice={dismissNotice}
+            onFilter={setWorkspaceTypeFilter}
+            onForget={forgetWorkspaceRow}
+            onOpenSkills={scanWorkspaceSkills}
+            onScan={scanWorkspaceRegistry}
           />
         ) : (
           <Dashboard
@@ -1055,6 +1355,7 @@ export default function App() {
       {importReview.open ? (
         <ImportReview
           candidates={importReview.candidates}
+          errors={importReview.errors}
           onClose={closeImportReview}
           onImport={importSelectedCandidates}
           onToggleAll={toggleAllImportCandidates}
@@ -1065,6 +1366,8 @@ export default function App() {
           }
           onTypeChange={(candidate, skillType) => updateImportCandidate(candidate.sourcePath, { skillType })}
           status={status}
+          subtitle={importReview.subtitle}
+          title={importReview.title}
         />
       ) : null}
 
@@ -1106,6 +1409,16 @@ export default function App() {
           onSubmit={submitSyncSetup}
           onTogglePath={toggleSyncDialogPath}
           onUpdate={updateSyncDialog}
+        />
+      ) : null}
+
+      {workspaceDialog.open ? (
+        <WorkspaceAddDialog
+          dialog={workspaceDialog}
+          status={status}
+          onClose={closeWorkspaceDialog}
+          onSubmit={submitWorkspaceDialog}
+          onUpdate={updateWorkspaceDialog}
         />
       ) : null}
     </main>
@@ -1468,6 +1781,200 @@ function FirstUseDashboard({ status, onInstall, onScan }) {
   );
 }
 
+function WorkspacePage({
+  error,
+  filter,
+  notice,
+  status,
+  tabs,
+  workspaces,
+  onAdd,
+  onDismissNotice,
+  onFilter,
+  onForget,
+  onOpenSkills,
+  onScan
+}) {
+  const isScanning = status === 'scanning_workspaces';
+  const isOpeningWorkspace = status === 'scanning_workspace_skills';
+
+  return (
+    <section className="dashboardFrame workspaceFrame" aria-label="Workspace registry">
+      {error ? <div className="notice">{error}</div> : null}
+      <div className="dashboardTitleRow">
+        <div className="dashboardTitleGroup">
+          <h1>Workspaces</h1>
+          <span className="dashboardCountPill">{workspaces.length}</span>
+        </div>
+      </div>
+
+      <div className="dashboardControlRow workspaceControlRow">
+        <div className="dashboardTypeTabs workspaceTypeTabs" role="tablist" aria-label="Workspace type">
+          {tabs.map((tab) => (
+            <button
+              aria-selected={filter === tab.id}
+              className={filter === tab.id ? 'active' : ''}
+              key={tab.id}
+              role="tab"
+              type="button"
+              onClick={() => onFilter(tab.id)}
+            >
+              <span>{tab.label}</span>
+              <small>{tab.count}</small>
+            </button>
+          ))}
+        </div>
+        <div className="workspaceHeaderActions">
+          <button className="button secondary" disabled={isScanning} type="button" onClick={onScan}>
+            <RefreshCw aria-hidden="true" />
+            {isScanning ? 'Scanning...' : 'Scan'}
+          </button>
+          <button className="button primary" disabled={isScanning} type="button" onClick={onAdd}>
+            <Plus aria-hidden="true" />
+            Add workspace
+          </button>
+        </div>
+      </div>
+
+      {notice ? (
+        <DashboardStatusNotice message={notice} onDismiss={onDismissNotice} />
+      ) : null}
+
+      {workspaces.length > 0 ? (
+        <div className="workspaceCardGrid" aria-label="Workspace cards">
+          {workspaces.map((workspace) => (
+            <WorkspaceCard
+              isBusy={isScanning || isOpeningWorkspace}
+              key={workspace.canonicalPath}
+              workspace={workspace}
+              onForget={onForget}
+              onOpenSkills={onOpenSkills}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="emptyState dashboardEmptyState workspaceEmptyState">
+          <strong>No workspaces found</strong>
+          <span>Run Scan or add an existing skills root.</span>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function WorkspaceCard({ isBusy, workspace, onForget, onOpenSkills }) {
+  const metaValues = {
+    Scope: <Badge tone={workspace.kind === 'global' ? 'blue' : 'green'}>{workspace.kindLabel}</Badge>,
+    Skills: <strong>{workspace.skillCount}</strong>,
+    Imported: <strong>{workspace.importedSkillCount}</strong>
+  };
+
+  return (
+    <article className={workspace.kind === 'global' ? 'workspaceCard global' : 'workspaceCard'}>
+      <button
+        className="workspaceCardOpenButton"
+        disabled={isBusy}
+        type="button"
+        onClick={() => onOpenSkills(workspace)}
+      >
+        <div className="workspaceCardBody">
+          <div className="workspaceCardTitleRow">
+            <strong>{workspace.displayName}</strong>
+          </div>
+          <code className="workspaceCardPath">{workspace.compactPath}</code>
+          {workspace.lastScanError ? <small>{workspace.lastScanError}</small> : null}
+          <div className="workspaceCardMeta">
+            {workspaceCardMetaLabels.map((label) => (
+              <span className="workspaceCardMetric" key={label}>
+                <small>{label}</small>
+                {metaValues[label]}
+              </span>
+            ))}
+          </div>
+        </div>
+      </button>
+      {workspace.source === 'manual' ? (
+        <button
+          aria-label={`Forget ${workspace.compactPath}`}
+          className="iconButton workspaceForgetButton"
+          disabled={isBusy}
+          type="button"
+          onClick={() => onForget(workspace)}
+        >
+          <Trash2 aria-hidden="true" />
+        </button>
+      ) : null}
+    </article>
+  );
+}
+
+function WorkspaceAddDialog({ dialog, status, onClose, onSubmit, onUpdate }) {
+  const isBusy = status === 'scanning_workspaces';
+
+  return (
+    <div
+      className="modalBackdrop"
+      role="presentation"
+      onMouseDown={(event) => closeOnBackdropClick(event, onClose)}
+    >
+      <section className="workspaceDialog" role="dialog" aria-modal="true" aria-labelledby="workspace-add-title">
+        <div className="importSheetHeader">
+          <div>
+            <h2 id="workspace-add-title">Add workspace</h2>
+            <p>Register an existing skills root.</p>
+          </div>
+          <button className="iconButton" disabled={isBusy} type="button" aria-label="Close workspace dialog" onClick={onClose}>
+            <X aria-hidden="true" />
+          </button>
+        </div>
+
+        <form className="remoteImportForm" onSubmit={onSubmit}>
+          <label className="remoteImportField">
+            <span>Path</span>
+            <input
+              autoFocus
+              disabled={isBusy}
+              placeholder="/path/to/.agents/skills"
+              value={dialog.path}
+              onChange={(event) => onUpdate({ path: event.target.value })}
+            />
+          </label>
+
+          <div className="remoteImportModes" role="group" aria-label="Workspace scope">
+            <button
+              className={dialog.kind === 'user' ? 'active' : ''}
+              disabled={isBusy}
+              type="button"
+              onClick={() => onUpdate({ kind: 'user' })}
+            >
+              User
+            </button>
+            <button
+              className={dialog.kind === 'global' ? 'active' : ''}
+              disabled={isBusy}
+              type="button"
+              onClick={() => onUpdate({ kind: 'global' })}
+            >
+              Global
+            </button>
+          </div>
+
+          {dialog.error ? <div className="formError">{dialog.error}</div> : null}
+
+          <div className="remoteImportFooter">
+            <button className="button secondary" disabled={isBusy} type="button" onClick={onClose}>
+              Cancel
+            </button>
+            <button className="button primary" disabled={isBusy} type="submit">
+              {isBusy ? 'Scanning...' : 'Add workspace'}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 function SettingsPage({
   paths,
   preferences,
@@ -1648,7 +2155,11 @@ function RemoteImportDialog({ error, mode, status, value, onClose, onModeChange,
   const isMarkdown = mode === 'markdown';
 
   return (
-    <div className="modalBackdrop" role="presentation">
+    <div
+      className="modalBackdrop"
+      role="presentation"
+      onMouseDown={(event) => closeOnBackdropClick(event, onClose)}
+    >
       <section className="remoteImportDialog" role="dialog" aria-modal="true" aria-labelledby="remote-import-title">
         <div className="importSheetHeader">
           <div>
@@ -1750,7 +2261,11 @@ function UserSkillsSyncDialog({
         : 'Commit and sync';
 
   return (
-    <div className="modalBackdrop" role="presentation">
+    <div
+      className="modalBackdrop"
+      role="presentation"
+      onMouseDown={(event) => closeOnBackdropClick(event, onClose)}
+    >
       <section className="syncDialog gitCommitDialog" role="dialog" aria-modal="true" aria-labelledby="user-skills-sync-title">
         <div className="importSheetHeader">
           <div>
@@ -1930,7 +2445,11 @@ function LocalImportConfirmationDialog({
   const remainingCount = Math.max(candidates.length - shownCandidates.length, 0);
 
   return (
-    <div className="modalBackdrop" role="presentation">
+    <div
+      className="modalBackdrop"
+      role="presentation"
+      onMouseDown={(event) => closeOnBackdropClick(event, onClose)}
+    >
       <section className="localImportDialog" role="dialog" aria-modal="true" aria-labelledby="local-import-title">
         <div className="importSheetHeader">
           <div>
@@ -1984,7 +2503,18 @@ function LocalImportConfirmationDialog({
   );
 }
 
-function ImportReview({ candidates, onClose, onImport, onToggleAll, onToggleSelected, onTypeChange, status }) {
+function ImportReview({
+  candidates,
+  errors = [],
+  onClose,
+  onImport,
+  onToggleAll,
+  onToggleSelected,
+  onTypeChange,
+  status,
+  subtitle = 'Confirm each skill type before SkillBox copies it into the managed store.',
+  title = 'Import Review'
+}) {
   const [isImportedExpanded, setIsImportedExpanded] = useState(false);
   const [isSystemExpanded, setIsSystemExpanded] = useState(false);
   const importedCandidates = candidates.filter((candidate) => candidate.importStatus === 'imported');
@@ -1997,12 +2527,16 @@ function ImportReview({ candidates, onClose, onImport, onToggleAll, onToggleSele
   const isAllSelected = selectableCount > 0 && selectedCount === selectableCount;
 
   return (
-    <div className="modalBackdrop" role="presentation">
+    <div
+      className="modalBackdrop"
+      role="presentation"
+      onMouseDown={(event) => closeOnBackdropClick(event, onClose)}
+    >
       <section className="importSheet" role="dialog" aria-modal="true" aria-labelledby="import-review-title">
         <div className="importSheetHeader">
           <div>
-            <h2 id="import-review-title">Import Review</h2>
-            <p>Confirm each skill type before SkillBox copies it into the managed store.</p>
+            <h2 id="import-review-title">{title}</h2>
+            <p>{subtitle}</p>
           </div>
           <button className="iconButton" type="button" aria-label="Close import review" onClick={onClose}>
             x
@@ -2010,6 +2544,17 @@ function ImportReview({ candidates, onClose, onImport, onToggleAll, onToggleSele
         </div>
 
         <div className="candidateList">
+          {errors.length > 0 ? (
+            <div className="workspaceSkillError">
+              {errors.length} scan {errors.length === 1 ? 'issue' : 'issues'} found.
+            </div>
+          ) : null}
+          {candidates.length === 0 && errors.length === 0 ? (
+            <div className="emptyState dashboardEmptyState workspaceSkillEmptyState">
+              <strong>No skills found</strong>
+              <span>This workspace has no importable SKILL.md directories yet.</span>
+            </div>
+          ) : null}
           {reviewCandidates.map((candidate) => (
             <CandidateRow
               candidate={candidate}
@@ -2188,12 +2733,6 @@ function SkillDetailDialog({
     return () => window.removeEventListener('keydown', closeOnEscape);
   }, [onClose]);
 
-  function closeOnBackdrop(event) {
-    if (event.target === event.currentTarget) {
-      onClose();
-    }
-  }
-
   function addTag(event) {
     event.preventDefault();
     if (!pendingTag) {
@@ -2212,7 +2751,11 @@ function SkillDetailDialog({
   }
 
   return (
-    <div className="modalBackdrop skillDetailBackdrop" role="presentation" onMouseDown={closeOnBackdrop}>
+    <div
+      className="modalBackdrop skillDetailBackdrop"
+      role="presentation"
+      onMouseDown={(event) => closeOnBackdropClick(event, onClose)}
+    >
       <section
         className="skillDetailDialog"
         role="dialog"
@@ -2332,7 +2875,9 @@ function NavButton({ active, icon, label, onClick }) {
 function FooterButton({ active = false, icon, label, onClick }) {
   return (
     <button className={active ? 'active' : ''} type="button" onClick={onClick}>
-      <Icon name={icon} />
+      <span className="footerIcon">
+        <Icon name={icon} />
+      </span>
       {label}
     </button>
   );
@@ -2354,6 +2899,22 @@ function SourceIcon({ candidate }) {
 }
 
 function Icon({ name }) {
+  if (name === 'gauge') {
+    return <Gauge aria-hidden="true" />;
+  }
+
+  if (name === 'folder-code') {
+    return <FolderCode aria-hidden="true" />;
+  }
+
+  if (name === 'settings-2' || name === 'settings') {
+    return <Settings2 aria-hidden="true" />;
+  }
+
+  if (name === 'message-circle-question-mark' || name === 'help') {
+    return <MessageCircleQuestionMark aria-hidden="true" />;
+  }
+
   if (name === 'setup') {
     return (
       <svg aria-hidden="true" viewBox="0 0 24 24">
@@ -2370,6 +2931,19 @@ function Icon({ name }) {
         <path d="M13 5h7v4h-7z" />
         <path d="M13 11h7v8h-7z" />
         <path d="M4 14h7v5H4z" />
+      </svg>
+    );
+  }
+
+  if (name === 'workspaces') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path d="M4 5h6v6H4z" />
+        <path d="M14 5h6v6h-6z" />
+        <path d="M4 15h6v4H4z" />
+        <path d="M14 15h6v4h-6z" />
+        <path d="M10 8h4" />
+        <path d="M10 17h4" />
       </svg>
     );
   }
@@ -2394,15 +2968,6 @@ function Icon({ name }) {
         <path d="M4 12h16" />
         <path d="M12 4a12 12 0 0 1 0 16" />
         <path d="M12 4a12 12 0 0 0 0 16" />
-      </svg>
-    );
-  }
-
-  if (name === 'settings') {
-    return (
-      <svg aria-hidden="true" viewBox="0 0 24 24">
-        <circle cx="12" cy="12" r="3" />
-        <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 0 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 0 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.6V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.6h.1a1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 0 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.6 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5.8Z" />
       </svg>
     );
   }
@@ -2532,6 +3097,26 @@ function applyPreviewImportStatuses(candidates, importedSkills) {
       isSelected: false,
       suggestionReason: 'Imported; source links to SkillBox'
     };
+  });
+}
+
+function previewCandidatesForWorkspace(workspace) {
+  const agentNeedle = workspace.agentId === 'agents' ? '.agents' : `.${workspace.agentId}`;
+  const roots = [
+    workspace.path,
+    workspace.compactPath,
+    workspace.path?.replace('/Users/santos', '~')
+  ].filter(Boolean);
+
+  return previewImportCandidates.filter((candidate) => {
+    const sourcePath = candidate.sourcePath || '';
+    const sourceRoot = candidate.sourceRoot || '';
+
+    if (roots.some((root) => sourcePath.startsWith(root) || sourceRoot.startsWith(root))) {
+      return true;
+    }
+
+    return agentNeedle && (sourcePath.includes(agentNeedle) || sourceRoot.includes(agentNeedle));
   });
 }
 

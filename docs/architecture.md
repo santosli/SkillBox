@@ -41,8 +41,13 @@ React UI
 - `set_skip_local_import_confirmation` -> `skillbox_core::set_skip_local_import_confirmation`
 - `scan_skills` -> `skillbox_core::scan_skill_roots`
 - `scan_import_candidates` -> `skillbox_core::scan_import_candidates`
+- `scan_workspace_import_candidates` -> `skillbox_core::scan_import_candidates` scoped to one workspace root
 - `import_candidates` -> `skillbox_core::import_candidates`
 - `parse_github_url` -> `skillbox_github::parse_github_skill_url`
+- `list_workspaces` -> `skillbox_core::list_workspaces`
+- `scan_workspaces` -> `skillbox_core::scan_workspaces`
+- `add_workspace` -> `skillbox_core::add_workspace`
+- `forget_workspace` -> `skillbox_core::forget_workspace`
 
 Rust CLI 当前调用链：
 
@@ -66,6 +71,7 @@ node packages/skillbox-cli/bin/skillbox.js <command>
 
 - skill 根目录扫描和 `SKILL.md` 读取。
 - managed store 路径计算和初始化。
+- workspace registry 的发现、手动添加、扫描统计和 forget 操作。
 - user/remote skill 导入。
 - import candidates 扫描、类型推断、冲突检测。
 - symlink 部署和部署索引。
@@ -111,9 +117,14 @@ Runtime 目录只是部署目标：
 
 - `~/.codex/skills`
 - `~/.agents/skills`
+- `~/.claude/skills`
 - 项目局部 `.codex/skills`
 - 项目局部 `.agents/skills`
+- 项目局部 `.claude/skills`
 - Claude、OpenClaw、Cursor、Claude Code、Copilot 等 agent adapter 声明的全局或项目局部 target
+
+Workspace registry 记录这些 skills root，作为后续 deploy skills 的目标候选。`global` workspace 表示
+home-level agent root，`user` workspace 表示项目局部 root；React 只展示和提交结构化请求，发现、分类、持久化和按 workspace 扫描 import candidates 都在 Rust core。
 
 不要在没有 adapter 语义的情况下猜测某个 agent 的目录布局。新增 agent 支持时，先定义 adapter 的发现路径、原生格式、部署方式和冲突处理。
 
@@ -125,6 +136,7 @@ Runtime 目录只是部署目标：
 
 - Rust core 已经是桌面应用的主要后端。
 - Rust CLI 有 `paths`、`scan`、`parse-github-url`、`import`、`deploy`、`user-skills-status`、`sync-user-skills`、`check-remote-updates`。
+- Rust CLI 有 `workspaces`、`workspace-scan`、`workspace-add`、`workspace-forget` 来管理 workspace registry。
 - Rust core 和 Tauri 已覆盖 `~/SkillBox/user-skills` 的共享 remote Git 同步。
 - Rust core 和 Tauri 已覆盖 remote skill 的 GitHub update check；Node CLI 仍有更完整的远程 GitHub install 和 rollback 工作流。
 - agent support 当前主要是 `SKILL.md` / Codex-style roots，尚未覆盖 Claude、OpenClaw、Cursor、Claude Code、Copilot 的原生格式。

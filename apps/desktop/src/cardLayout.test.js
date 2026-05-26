@@ -1,0 +1,35 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import test from 'node:test';
+
+const css = await readFile(new URL('./styles.css', import.meta.url), 'utf8');
+
+test('dashboard and workspace cards share a fixed auto-wrapping grid width', () => {
+  const sharedGridRule = css.match(/\.skillCardGrid,\s*\.workspaceCardGrid\s*\{(?<body>[^}]*)\}/s)
+    ?.groups.body || '';
+
+  assert.match(css, /--dashboard-card-width:\s*360px;/);
+  assert.match(css, /--dashboard-card-track:\s*minmax\(var\(--dashboard-card-width\),\s*var\(--dashboard-card-width\)\);/);
+  assert.match(
+    sharedGridRule,
+    /grid-template-columns:\s*repeat\(auto-fill,\s*var\(--dashboard-card-track\)\);/
+  );
+  assert.doesNotMatch(sharedGridRule, /repeat\([234],\s*minmax\(0,\s*1fr\)\)/);
+  assert.doesNotMatch(css, /\.skillCardGrid,\s*\.workspaceCardGrid\s*\{[^}]*repeat\([234],\s*minmax\(0,\s*1fr\)\)/s);
+});
+
+test('sidebar footer icons use the same shell as primary nav icons', () => {
+  const sharedIconRule = css.match(
+    /\.navButton \.navIcon,\s*\.sidebarFooter button \.footerIcon\s*\{(?<body>[^}]*)\}/s
+  )?.groups.body || '';
+  const sharedSvgRule = css.match(
+    /\.navButton \.navIcon svg,\s*\.sidebarFooter button \.footerIcon svg\s*\{(?<body>[^}]*)\}/s
+  )?.groups.body || '';
+
+  assert.match(sharedIconRule, /width:\s*22px;/);
+  assert.match(sharedIconRule, /height:\s*22px;/);
+  assert.match(sharedIconRule, /border:\s*1px solid #e5e7eb;/);
+  assert.match(sharedSvgRule, /width:\s*15px;/);
+  assert.match(sharedSvgRule, /height:\s*15px;/);
+  assert.doesNotMatch(css, /\.sidebarFooter button svg\s*\{[^}]*width:\s*22px;/s);
+});

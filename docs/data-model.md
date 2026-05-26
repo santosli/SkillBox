@@ -33,6 +33,8 @@ managed store 是跨 agent 的真相源，不绑定 Codex、Claude、Cursor、Co
 - `backups/imports` 保存从 runtime 目录迁移到 SkillBox 前的原始内容。
 - `adapters/<agent-id>` 预留给 agent-specific cache、manifest 或转换产物；当前 Rust schema 尚未实现。
 - 一个有效 skill 目录必须包含 `SKILL.md`。
+- workspace 表记录 skills 所在工程目录或 runtime skills root，用于后续部署目标选择；workspace path 指向
+  `.../.agents/skills`、`.../.codex/skills` 或 `.../.claude/skills` 这类 skills root，而不是单个 skill 目录。
 
 当前实现仍以 `SKILL.md` 目录作为可读写单位。Claude、OpenClaw、Cursor、Claude Code、Copilot 等 agent 可能使用不同的原生文件格式；
 支持这些格式时，应由 adapter 把原生格式映射到 SkillBox 的规范化记录，而不是让 UI 或 workflow 分别维护 schema。
@@ -103,7 +105,24 @@ preferences
   key TEXT PRIMARY KEY
   value TEXT NOT NULL
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+
+workspaces
+  canonical_path TEXT PRIMARY KEY
+  path TEXT NOT NULL
+  kind TEXT NOT NULL
+  source TEXT NOT NULL
+  agent_id TEXT
+  display_name TEXT NOT NULL
+  skill_count INTEGER NOT NULL DEFAULT 0
+  imported_skill_count INTEGER NOT NULL DEFAULT 0
+  last_scan_error_count INTEGER NOT NULL DEFAULT 0
+  last_scan_error TEXT
+  last_scanned_at TEXT
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 ```
+
+`workspaces.display_name` 由 path 推导：home-level global roots 使用 agent 名（例如 `Codex`、`Claude`），项目局部 roots 使用项目目录名（例如 `Pandora`）。`global` / `user` 不拼进名称，由 `kind` 字段表达。`imported_skill_count` 使用 import candidate 的同一套 imported 判定：内容 hash 已存在于 SkillBox managed store，或 workspace skill 已 symlink 到 managed root。
 
 跨 agent 目标 schema 需要补充的概念：
 
@@ -132,6 +151,14 @@ deployments
 ```
 
 这不是当前已实现 schema。新增 agent 支持时应先设计 migration，再让 Rust core 统一读写。
+
+当前已实现的 `workspaces` registry 是 `runtime_targets` 的前置模型：
+
+- `kind=global` 表示 agent 自带或 home-level skills root，例如 `~/.codex/skills`、`~/.agents/skills`、`~/.claude/skills`。
+- `kind=user` 表示用户项目局部 skills root，例如 `<project>/.agents/skills`。
+- `source=auto` 表示由 scan 自动发现；`source=manual` 表示用户显式添加。
+- 手动添加要求目录已存在；删除 manual workspace 只删除 registry 记录，不删除文件。
+- `canonical_path` 用于去重，`path` 保留展示路径。
 
 Node MVP 旧表差异：
 

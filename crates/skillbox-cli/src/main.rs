@@ -1,6 +1,6 @@
 use skillbox_core::{
     default_managed_root, deploy_skill, global_runtime_roots, import_skill, managed_paths,
-    scan_skill_roots, SkillKind,
+    scan_skill_roots, SkillKind, WorkspaceAddRequest, WorkspaceKind,
 };
 use skillbox_github::parse_github_skill_url;
 use std::path::PathBuf;
@@ -67,6 +67,33 @@ fn run(args: Vec<String>) -> Result<(), String> {
         "check-remote-updates" => print_json(&skillbox_core::check_remote_skill_updates(
             managed_root(command_args),
         )?),
+        "workspaces" => print_json(&skillbox_core::list_workspaces(managed_root(command_args))?),
+        "workspace-scan" => {
+            print_json(&skillbox_core::scan_workspaces(managed_root(command_args))?)
+        }
+        "workspace-add" => {
+            let path = positional(command_args).into_iter().next().ok_or_else(|| {
+                "Usage: skillbox workspace-add <path> --kind global|user".to_string()
+            })?;
+            let kind = workspace_kind(command_args)?;
+            print_json(&skillbox_core::add_workspace(
+                WorkspaceAddRequest {
+                    path: PathBuf::from(path),
+                    kind,
+                },
+                managed_root(command_args),
+            )?)
+        }
+        "workspace-forget" => {
+            let path = positional(command_args)
+                .into_iter()
+                .next()
+                .ok_or_else(|| "Usage: skillbox workspace-forget <path>".to_string())?;
+            print_json(&skillbox_core::forget_workspace(
+                PathBuf::from(path),
+                managed_root(command_args),
+            )?)
+        }
         "sync-user-skills" => {
             let request = skillbox_core::UserSkillsSyncRequest {
                 remote_url: option(command_args, "--remote"),
@@ -128,6 +155,14 @@ fn has_flag(args: &[String], name: &str) -> bool {
     args.iter().any(|arg| arg == name)
 }
 
+fn workspace_kind(args: &[String]) -> Result<WorkspaceKind, String> {
+    match option(args, "--kind").as_deref() {
+        Some("global") => Ok(WorkspaceKind::Global),
+        Some("user") | None => Ok(WorkspaceKind::User),
+        Some(other) => Err(format!("Invalid workspace kind: {other}")),
+    }
+}
+
 fn help_text() -> &'static str {
     "SkillBox Rust CLI
 
@@ -139,6 +174,10 @@ Commands:
   skillbox deploy <skill-name> --target <path> [--managed-root <path>]
   skillbox user-skills-status [--managed-root <path>]
   skillbox check-remote-updates [--managed-root <path>]
+  skillbox workspaces [--managed-root <path>]
+  skillbox workspace-scan [--managed-root <path>]
+  skillbox workspace-add <path> --kind global|user [--managed-root <path>]
+  skillbox workspace-forget <path> [--managed-root <path>]
   skillbox sync-user-skills [--remote <git-url>] [--message <msg>] [--no-push] [--managed-root <path>]
 "
 }

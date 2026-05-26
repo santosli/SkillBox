@@ -124,6 +124,66 @@ pub struct ManagedPreferences {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkspaceKind {
+    Global,
+    User,
+}
+
+impl WorkspaceKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WorkspaceKind::Global => "global",
+            WorkspaceKind::User => "user",
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkspaceSource {
+    Auto,
+    Manual,
+}
+
+impl WorkspaceSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WorkspaceSource::Auto => "auto",
+            WorkspaceSource::Manual => "manual",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Workspace {
+    pub canonical_path: PathBuf,
+    pub path: PathBuf,
+    pub kind: WorkspaceKind,
+    pub source: WorkspaceSource,
+    pub agent_id: Option<String>,
+    pub display_name: String,
+    pub skill_count: usize,
+    pub imported_skill_count: usize,
+    pub last_scan_error_count: usize,
+    pub last_scan_error: Option<String>,
+    pub last_scanned_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceAddRequest {
+    pub path: PathBuf,
+    pub kind: WorkspaceKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WorkspaceScanResult {
+    pub workspaces: Vec<Workspace>,
+    pub scanned_count: usize,
+    pub error_count: usize,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UserSkillsGitState {
     NotConfigured,
@@ -298,6 +358,7 @@ pub fn default_runtime_roots() -> Vec<PathBuf> {
     vec![
         home_dir().join(".codex/skills"),
         home_dir().join(".agents/skills"),
+        home_dir().join(".claude/skills"),
     ]
 }
 
@@ -306,7 +367,11 @@ pub fn global_runtime_roots() -> Vec<PathBuf> {
 }
 
 fn runtime_roots_under(home: &Path) -> Vec<PathBuf> {
-    let mut roots = vec![home.join(".codex/skills"), home.join(".agents/skills")];
+    let mut roots = vec![
+        home.join(".codex/skills"),
+        home.join(".agents/skills"),
+        home.join(".claude/skills"),
+    ];
     roots.extend(discover_runtime_roots_under(home));
     dedupe_runtime_roots(roots)
 }
@@ -355,7 +420,7 @@ fn discover_runtime_roots(
     }
 
     let mut has_direct_runtime_root = false;
-    for runtime_parent in [".agents", ".codex"] {
+    for runtime_parent in [".agents", ".codex", ".claude"] {
         let runtime_root = current.join(runtime_parent).join("skills");
         if runtime_root.is_dir() {
             roots.push(runtime_root);
@@ -395,7 +460,7 @@ fn is_runtime_skill_root(path: &Path) -> bool {
             path.parent()
                 .and_then(|parent| parent.file_name())
                 .and_then(|name| name.to_str()),
-            Some(".agents" | ".codex")
+            Some(".agents" | ".codex" | ".claude")
         )
 }
 
@@ -404,7 +469,7 @@ fn should_skip_runtime_root_search(path: &Path) -> bool {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("");
-    if matches!(name, ".agents" | ".codex") {
+    if matches!(name, ".agents" | ".codex" | ".claude") {
         return false;
     }
     if name.starts_with('.') {
@@ -752,6 +817,99 @@ pub fn set_status_refresh_interval_minutes(
     managed_preferences(paths.root)
 }
 
+pub fn list_workspaces(managed_root: impl AsRef<Path>) -> Result<Vec<Workspace>> {
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    load_workspaces(&paths.database_path)
+}
+
+pub fn scan_workspaces(managed_root: impl AsRef<Path>) -> Result<WorkspaceScanResult> {
+    scan_workspaces_under(&home_dir(), managed_root)
+}
+
+fn scan_workspaces_under(
+    home: &Path,
+    managed_root: impl AsRef<Path>,
+) -> Result<WorkspaceScanResult> {
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let roots = runtime_roots_under(home)
+        .into_iter()
+        .filter(|root| workspace_root_is_readable(root))
+        .collect::<Vec<_>>();
+    let mut scanned_count = 0;
+    let mut error_count = 0;
+
+    for root in roots {
+        let kind = infer_workspace_kind(&root, home);
+        let workspace = upsert_workspace(&paths, &root, kind, WorkspaceSource::Auto)?;
+        scanned_count += 1;
+        error_count += workspace.last_scan_error_count;
+    }
+
+    Ok(WorkspaceScanResult {
+        workspaces: load_workspaces(&paths.database_path)?,
+        scanned_count,
+        error_count,
+    })
+}
+
+pub fn add_workspace(
+    request: WorkspaceAddRequest,
+    managed_root: impl AsRef<Path>,
+) -> Result<Workspace> {
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let workspace_path = expand_home(request.path);
+
+    if !workspace_path.exists() {
+        return Err(format!(
+            "Workspace path does not exist: {}",
+            workspace_path.display()
+        ));
+    }
+    if !workspace_path.is_dir() {
+        return Err(format!(
+            "Workspace path is not a directory: {}",
+            workspace_path.display()
+        ));
+    }
+
+    upsert_workspace(
+        &paths,
+        &workspace_path,
+        request.kind,
+        WorkspaceSource::Manual,
+    )
+}
+
+pub fn forget_workspace(
+    path: impl AsRef<Path>,
+    managed_root: impl AsRef<Path>,
+) -> Result<Vec<Workspace>> {
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let workspace_path = expand_home(path.as_ref().to_path_buf());
+    let canonical_path = fs::canonicalize(&workspace_path).map_err(|error| {
+        format!(
+            "Workspace path cannot be resolved: {} ({error})",
+            workspace_path.display()
+        )
+    })?;
+    let existing = load_workspace_by_canonical_path(&paths.database_path, &canonical_path)?
+        .ok_or_else(|| format!("Workspace is not registered: {}", workspace_path.display()))?;
+
+    if existing.source != WorkspaceSource::Manual {
+        return Err("Only manually added workspaces can be forgotten.".to_string());
+    }
+
+    let connection = Connection::open(&paths.database_path).map_err(|error| error.to_string())?;
+    connection
+        .execute(
+            "DELETE FROM workspaces WHERE canonical_path = ?1 AND source = 'manual'",
+            params![canonical_path.to_string_lossy()],
+        )
+        .map_err(|error| error.to_string())?;
+
+    load_workspaces(&paths.database_path)
+}
+
 pub fn user_skills_git_status(managed_root: impl AsRef<Path>) -> Result<UserSkillsGitStatus> {
     let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
     user_skills_git_status_for_repo(paths.user_skills_root)
@@ -947,22 +1105,14 @@ pub fn scan_import_candidates(
     managed_root: impl AsRef<Path>,
 ) -> Result<ImportCandidateScan> {
     let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
-    let managed_scan = scan_skill_roots(&[
-        paths.user_skills_root.clone(),
-        paths.remote_skills_root.clone(),
-    ])?;
-    let imported_hashes: HashSet<String> = managed_scan
-        .skills
-        .iter()
-        .map(|skill| skill.content_hash.clone())
-        .collect();
+    let imported_hashes = imported_skill_hashes(&paths)?;
     let scan = scan_skill_roots(roots)?;
+    record_scanned_workspaces(&paths, &scan.roots)?;
     let mut candidates = Vec::new();
 
     for skill in scan.skills {
         let is_system = is_system_skill(&skill);
-        let is_imported = imported_hashes.contains(&skill.content_hash)
-            || is_under_path(&skill.real_path, &paths.root);
+        let is_imported = skill_is_imported(&skill, &imported_hashes, &paths);
         let (suggested_type, suggestion_reason, default_selected) =
             infer_import_candidate_type(&skill, &paths);
         let (suggestion_reason, import_status, is_selected, conflict) = if is_system {
@@ -1388,9 +1538,60 @@ fn init_database(database_path: &Path) -> Result<()> {
               value TEXT NOT NULL,
               updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS workspaces (
+              canonical_path TEXT PRIMARY KEY,
+              path TEXT NOT NULL,
+              kind TEXT NOT NULL,
+              source TEXT NOT NULL,
+              agent_id TEXT,
+              display_name TEXT NOT NULL,
+              skill_count INTEGER NOT NULL DEFAULT 0,
+              imported_skill_count INTEGER NOT NULL DEFAULT 0,
+              last_scan_error_count INTEGER NOT NULL DEFAULT 0,
+              last_scan_error TEXT,
+              last_scanned_at TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             ",
         )
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    ensure_database_column(
+        &connection,
+        "workspaces",
+        "imported_skill_count",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    Ok(())
+}
+
+fn ensure_database_column(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<()> {
+    let mut statement = connection
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(|error| error.to_string())?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| error.to_string())?;
+
+    for existing in columns {
+        if existing.map_err(|error| error.to_string())? == column {
+            return Ok(());
+        }
+    }
+
+    connection
+        .execute(
+            &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 fn read_bool_preference(database_path: &Path, key: &str) -> Result<Option<bool>> {
@@ -1463,6 +1664,341 @@ fn write_u32_preference(database_path: &Path, key: &str, value: u32) -> Result<(
         )
         .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+fn record_scanned_workspaces(paths: &ManagedPaths, roots: &[PathBuf]) -> Result<()> {
+    let home = home_dir();
+    for root in roots {
+        if workspace_root_is_readable(root) {
+            upsert_workspace(
+                paths,
+                root,
+                infer_workspace_kind(root, &home),
+                WorkspaceSource::Auto,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn upsert_workspace(
+    paths: &ManagedPaths,
+    path: &Path,
+    kind: WorkspaceKind,
+    source: WorkspaceSource,
+) -> Result<Workspace> {
+    let path = expand_home(path.to_path_buf());
+    let canonical_path = fs::canonicalize(&path).map_err(|error| error.to_string())?;
+    let stats = scan_workspace_root(&path, paths)?;
+    let agent_id = workspace_agent_id(&path);
+    let display_name = workspace_display_name(&path, agent_id.as_deref(), kind);
+    let connection = Connection::open(&paths.database_path).map_err(|error| error.to_string())?;
+
+    connection
+        .execute(
+            "
+            INSERT INTO workspaces (
+              canonical_path,
+              path,
+              kind,
+              source,
+              agent_id,
+              display_name,
+              skill_count,
+              imported_skill_count,
+              last_scan_error_count,
+              last_scan_error,
+              last_scanned_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, CURRENT_TIMESTAMP)
+            ON CONFLICT(canonical_path) DO UPDATE SET
+              path = excluded.path,
+              kind = CASE
+                WHEN workspaces.source = 'manual' AND excluded.source = 'auto'
+                THEN workspaces.kind
+                ELSE excluded.kind
+              END,
+              source = CASE
+                WHEN workspaces.source = 'manual' AND excluded.source = 'auto'
+                THEN workspaces.source
+                ELSE excluded.source
+              END,
+              agent_id = excluded.agent_id,
+              display_name = excluded.display_name,
+              skill_count = excluded.skill_count,
+              imported_skill_count = excluded.imported_skill_count,
+              last_scan_error_count = excluded.last_scan_error_count,
+              last_scan_error = excluded.last_scan_error,
+              last_scanned_at = CURRENT_TIMESTAMP,
+              updated_at = CURRENT_TIMESTAMP
+            ",
+            params![
+                canonical_path.to_string_lossy(),
+                path.to_string_lossy(),
+                kind.as_str(),
+                source.as_str(),
+                agent_id,
+                display_name,
+                stats.skill_count as i64,
+                stats.imported_skill_count as i64,
+                stats.error_count as i64,
+                stats.last_error,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+
+    load_workspace_by_canonical_path(&paths.database_path, &canonical_path)?
+        .ok_or_else(|| format!("Workspace was not saved: {}", path.display()))
+}
+
+fn load_workspaces(database_path: &Path) -> Result<Vec<Workspace>> {
+    let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT
+              canonical_path,
+              path,
+              kind,
+              source,
+              agent_id,
+              display_name,
+              skill_count,
+              imported_skill_count,
+              last_scan_error_count,
+              last_scan_error,
+              last_scanned_at
+            FROM workspaces
+            ORDER BY kind, display_name, path
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], workspace_from_row)
+        .map_err(|error| error.to_string())?;
+    let mut workspaces = Vec::new();
+
+    for row in rows {
+        workspaces.push(row.map_err(|error| error.to_string())?);
+    }
+
+    Ok(workspaces)
+}
+
+fn load_workspace_by_canonical_path(
+    database_path: &Path,
+    canonical_path: &Path,
+) -> Result<Option<Workspace>> {
+    let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
+    connection
+        .query_row(
+            "
+            SELECT
+              canonical_path,
+              path,
+              kind,
+              source,
+              agent_id,
+              display_name,
+              skill_count,
+              imported_skill_count,
+              last_scan_error_count,
+              last_scan_error,
+              last_scanned_at
+            FROM workspaces
+            WHERE canonical_path = ?1
+            ",
+            params![canonical_path.to_string_lossy()],
+            workspace_from_row,
+        )
+        .optional()
+        .map_err(|error| error.to_string())
+}
+
+fn workspace_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Workspace> {
+    let kind_raw: String = row.get(2)?;
+    let source_raw: String = row.get(3)?;
+    let skill_count: i64 = row.get(6)?;
+    let imported_skill_count: i64 = row.get(7)?;
+    let last_scan_error_count: i64 = row.get(8)?;
+
+    Ok(Workspace {
+        canonical_path: PathBuf::from(row.get::<_, String>(0)?),
+        path: PathBuf::from(row.get::<_, String>(1)?),
+        kind: workspace_kind_from_str(&kind_raw)
+            .map_err(rusqlite::Error::ToSqlConversionFailure)?,
+        source: workspace_source_from_str(&source_raw)
+            .map_err(rusqlite::Error::ToSqlConversionFailure)?,
+        agent_id: row.get(4)?,
+        display_name: row.get(5)?,
+        skill_count: usize::try_from(skill_count.max(0)).unwrap_or_default(),
+        imported_skill_count: usize::try_from(imported_skill_count.max(0)).unwrap_or_default(),
+        last_scan_error_count: usize::try_from(last_scan_error_count.max(0)).unwrap_or_default(),
+        last_scan_error: row.get(9)?,
+        last_scanned_at: row.get(10)?,
+    })
+}
+
+fn workspace_kind_from_str(
+    value: &str,
+) -> std::result::Result<WorkspaceKind, Box<dyn std::error::Error + Send + Sync>> {
+    match value {
+        "global" => Ok(WorkspaceKind::Global),
+        "user" => Ok(WorkspaceKind::User),
+        other => Err(format!("Invalid workspace kind: {other}").into()),
+    }
+}
+
+fn workspace_source_from_str(
+    value: &str,
+) -> std::result::Result<WorkspaceSource, Box<dyn std::error::Error + Send + Sync>> {
+    match value {
+        "auto" => Ok(WorkspaceSource::Auto),
+        "manual" => Ok(WorkspaceSource::Manual),
+        other => Err(format!("Invalid workspace source: {other}").into()),
+    }
+}
+
+struct WorkspaceScanStats {
+    skill_count: usize,
+    imported_skill_count: usize,
+    error_count: usize,
+    last_error: Option<String>,
+}
+
+fn scan_workspace_root(root: &Path, paths: &ManagedPaths) -> Result<WorkspaceScanStats> {
+    let scan = scan_skill_roots(&[root.to_path_buf()])?;
+    let imported_hashes = imported_skill_hashes(paths)?;
+    let imported_skill_count = scan
+        .skills
+        .iter()
+        .filter(|skill| skill_is_imported(skill, &imported_hashes, paths))
+        .count();
+
+    Ok(WorkspaceScanStats {
+        skill_count: scan.skills.len(),
+        imported_skill_count,
+        error_count: scan.errors.len(),
+        last_error: scan.errors.first().map(format_scan_error),
+    })
+}
+
+fn imported_skill_hashes(paths: &ManagedPaths) -> Result<HashSet<String>> {
+    let managed_scan = scan_skill_roots(&[
+        paths.user_skills_root.clone(),
+        paths.remote_skills_root.clone(),
+    ])?;
+    Ok(managed_scan
+        .skills
+        .iter()
+        .map(|skill| skill.content_hash.clone())
+        .collect())
+}
+
+fn skill_is_imported(
+    skill: &Skill,
+    imported_hashes: &HashSet<String>,
+    paths: &ManagedPaths,
+) -> bool {
+    imported_hashes.contains(&skill.content_hash) || is_under_path(&skill.real_path, &paths.root)
+}
+
+fn format_scan_error(error: &ScanError) -> String {
+    match &error.path {
+        Some(path) => format!("{}: {}", path.display(), error.error),
+        None => format!("{}: {}", error.root.display(), error.error),
+    }
+}
+
+fn workspace_root_is_readable(root: &Path) -> bool {
+    root.is_dir() && fs::read_dir(root).is_ok()
+}
+
+fn infer_workspace_kind(root: &Path, home: &Path) -> WorkspaceKind {
+    let canonical_root = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+
+    if direct_global_workspace_roots(home)
+        .into_iter()
+        .filter(|candidate| candidate.exists())
+        .map(|candidate| fs::canonicalize(&candidate).unwrap_or(candidate))
+        .any(|candidate| candidate == canonical_root)
+    {
+        WorkspaceKind::Global
+    } else {
+        WorkspaceKind::User
+    }
+}
+
+fn direct_global_workspace_roots(home: &Path) -> Vec<PathBuf> {
+    vec![
+        home.join(".codex/skills"),
+        home.join(".agents/skills"),
+        home.join(".claude/skills"),
+    ]
+}
+
+fn workspace_agent_id(path: &Path) -> Option<String> {
+    match path
+        .parent()
+        .and_then(|parent| parent.file_name())
+        .and_then(|name| name.to_str())
+    {
+        Some(".codex") => Some("codex".to_string()),
+        Some(".agents") => Some("agents".to_string()),
+        Some(".claude") => Some("claude".to_string()),
+        _ => None,
+    }
+}
+
+fn workspace_display_name(path: &Path, agent_id: Option<&str>, kind: WorkspaceKind) -> String {
+    if kind == WorkspaceKind::User {
+        if let Some(project_name) = workspace_project_name(path) {
+            return project_name;
+        }
+    }
+
+    workspace_agent_label(agent_id)
+        .or_else(|| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "Local".to_string())
+}
+
+fn workspace_agent_label(agent_id: Option<&str>) -> Option<String> {
+    let label = match agent_id {
+        Some("codex") => "Codex",
+        Some("agents") => "Agents",
+        Some("claude") => "Claude",
+        _ => return None,
+    };
+
+    Some(label.to_string())
+}
+
+fn workspace_project_name(path: &Path) -> Option<String> {
+    let root_name = path.file_name()?.to_str()?;
+    let parent = path.parent()?;
+    let parent_name = parent
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
+
+    if root_name == "skills" && matches!(parent_name, ".codex" | ".agents" | ".claude") {
+        parent
+            .parent()
+            .and_then(|project| project.file_name())
+            .and_then(|name| name.to_str())
+            .map(str::to_string)
+    } else if root_name == "skills" {
+        parent
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_string)
+    } else {
+        Some(root_name.to_string())
+    }
 }
 
 fn index_skill(
@@ -1933,6 +2469,12 @@ description: \"Demo skill\"
             .join("project")
             .join(".codex")
             .join("skills");
+        let global_claude_root = root.join(".claude").join("skills");
+        let project_claude_root = root
+            .join("Documents")
+            .join("project")
+            .join(".claude")
+            .join("skills");
 
         make_skill(
             &project_agents_root.join("pandora-local"),
@@ -1944,13 +2486,179 @@ description: \"Demo skill\"
             "project-remote",
             "Project remote skill",
         );
+        make_skill(
+            &global_claude_root.join("claude-global"),
+            "claude-global",
+            "Claude global skill",
+        );
+        make_skill(
+            &project_claude_root.join("claude-project"),
+            "claude-project",
+            "Claude project skill",
+        );
 
         let roots = runtime_roots_under(&root);
 
         assert!(roots.contains(&root.join(".codex").join("skills")));
         assert!(roots.contains(&root.join(".agents").join("skills")));
+        assert!(roots.contains(&global_claude_root));
         assert!(roots.contains(&project_agents_root));
         assert!(roots.contains(&project_codex_root));
+        assert!(roots.contains(&project_claude_root));
+    }
+
+    #[test]
+    fn list_workspaces_initializes_empty_registry() {
+        let managed_root = temp_dir("workspace-empty").join("SkillBox");
+
+        let workspaces = list_workspaces(&managed_root).unwrap();
+
+        assert!(workspaces.is_empty());
+    }
+
+    #[test]
+    fn add_workspace_rejects_missing_directory() {
+        let root = temp_dir("workspace-missing");
+        let managed_root = root.join("SkillBox");
+
+        let error = add_workspace(
+            WorkspaceAddRequest {
+                path: root.join("missing").join("skills"),
+                kind: WorkspaceKind::User,
+            },
+            &managed_root,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("Workspace path does not exist"));
+    }
+
+    #[test]
+    fn add_workspace_scans_existing_root_and_dedupes_by_canonical_path() {
+        let root = temp_dir("workspace-add");
+        let managed_root = root.join("SkillBox");
+        let workspace_root = root.join("project").join(".agents").join("skills");
+        make_skill(&workspace_root.join("alpha"), "alpha", "Alpha skill");
+
+        let first = add_workspace(
+            WorkspaceAddRequest {
+                path: workspace_root.clone(),
+                kind: WorkspaceKind::User,
+            },
+            &managed_root,
+        )
+        .unwrap();
+        let second = add_workspace(
+            WorkspaceAddRequest {
+                path: workspace_root.join("."),
+                kind: WorkspaceKind::User,
+            },
+            &managed_root,
+        )
+        .unwrap();
+        let workspaces = list_workspaces(&managed_root).unwrap();
+
+        assert_eq!(first.skill_count, 1);
+        assert_eq!(first.last_scan_error_count, 0);
+        assert_eq!(first.kind, WorkspaceKind::User);
+        assert_eq!(first.source, WorkspaceSource::Manual);
+        assert_eq!(first.agent_id.as_deref(), Some("agents"));
+        assert_eq!(first.display_name, "project");
+        assert_eq!(second.canonical_path, first.canonical_path);
+        assert_eq!(workspaces.len(), 1);
+    }
+
+    #[test]
+    fn add_workspace_counts_imported_skills() {
+        let root = temp_dir("workspace-imported-count");
+        let managed_root = root.join("SkillBox");
+        let workspace_root = root.join("project").join(".agents").join("skills");
+        let imported_source = workspace_root.join("alpha");
+        make_skill(&imported_source, "alpha", "Alpha skill");
+        make_skill(&workspace_root.join("beta"), "beta", "Beta skill");
+        import_skill(&imported_source, SkillKind::User, &managed_root).unwrap();
+
+        let workspace = add_workspace(
+            WorkspaceAddRequest {
+                path: workspace_root,
+                kind: WorkspaceKind::User,
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        assert_eq!(workspace.skill_count, 2);
+        assert_eq!(workspace.imported_skill_count, 1);
+    }
+
+    #[test]
+    fn scan_workspaces_discovers_global_and_user_roots() {
+        let root = temp_dir("workspace-scan");
+        let managed_root = root.join("SkillBox");
+        let global_codex_root = root.join(".codex").join("skills");
+        let global_claude_root = root.join(".claude").join("skills");
+        let project_agents_root = root
+            .join("Library")
+            .join("Mobile Documents")
+            .join("iCloud~md~obsidian")
+            .join("Documents")
+            .join("Pandora")
+            .join(".agents")
+            .join("skills");
+        make_skill(
+            &global_codex_root.join("find-skills"),
+            "find-skills",
+            "Find skills",
+        );
+        make_skill(
+            &global_claude_root.join("claude-helper"),
+            "claude-helper",
+            "Claude helper",
+        );
+        make_skill(
+            &project_agents_root.join("pandora-local"),
+            "pandora-local",
+            "Pandora local skill",
+        );
+
+        let result = scan_workspaces_under(&root, &managed_root).unwrap();
+        let workspaces = list_workspaces(&managed_root).unwrap();
+        let global_codex = workspace(&workspaces, &global_codex_root);
+        let global_claude = workspace(&workspaces, &global_claude_root);
+        let project_agents = workspace(&workspaces, &project_agents_root);
+
+        assert_eq!(result.scanned_count, 3);
+        assert_eq!(global_codex.kind, WorkspaceKind::Global);
+        assert_eq!(global_codex.agent_id.as_deref(), Some("codex"));
+        assert_eq!(global_codex.display_name, "Codex");
+        assert_eq!(global_claude.kind, WorkspaceKind::Global);
+        assert_eq!(global_claude.agent_id.as_deref(), Some("claude"));
+        assert_eq!(global_claude.display_name, "Claude");
+        assert_eq!(project_agents.kind, WorkspaceKind::User);
+        assert_eq!(project_agents.agent_id.as_deref(), Some("agents"));
+        assert_eq!(project_agents.display_name, "Pandora");
+    }
+
+    #[test]
+    fn scan_import_candidates_records_scanned_workspaces() {
+        let root = temp_dir("workspace-import-candidates");
+        let managed_root = root.join("SkillBox");
+        let workspace_root = root.join("project").join(".agents").join("skills");
+        make_skill(
+            &workspace_root.join("pandora-local"),
+            "pandora-local",
+            "Pandora local skill",
+        );
+
+        let candidates = scan_import_candidates(&[workspace_root.clone()], &managed_root).unwrap();
+        let workspaces = list_workspaces(&managed_root).unwrap();
+        let recorded = workspace(&workspaces, &workspace_root);
+
+        assert_eq!(candidates.candidates.len(), 1);
+        assert_eq!(recorded.kind, WorkspaceKind::User);
+        assert_eq!(recorded.source, WorkspaceSource::Auto);
+        assert_eq!(recorded.display_name, "project");
+        assert_eq!(recorded.skill_count, 1);
     }
 
     #[test]
@@ -2006,7 +2714,10 @@ description: \"Demo skill\"
         assert_eq!(state.skills.len(), 1);
         assert_eq!(state.skills[0].deployments.len(), 1);
         assert_eq!(state.skills[0].deployments[0].target_root, target_root);
-        assert_eq!(state.skills[0].deployments[0].target_path, deployment.target_path);
+        assert_eq!(
+            state.skills[0].deployments[0].target_path,
+            deployment.target_path
+        );
         assert_eq!(state.skills[0].deployments[0].mode, "symlink");
     }
 
@@ -2677,6 +3388,14 @@ description: \"{description}\"
             .iter()
             .find(|status| status.skill_name == skill_name)
             .unwrap_or_else(|| panic!("remote status not found: {skill_name}"))
+    }
+
+    fn workspace<'a>(workspaces: &'a [Workspace], path: &std::path::Path) -> &'a Workspace {
+        let canonical = fs::canonicalize(path).unwrap();
+        workspaces
+            .iter()
+            .find(|workspace| workspace.canonical_path == canonical)
+            .unwrap_or_else(|| panic!("workspace not found: {}", path.display()))
     }
 
     fn write_remote_source(

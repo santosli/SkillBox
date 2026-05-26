@@ -14,12 +14,13 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 步骤：
 
-- 读取当前已实现的默认 runtime roots：`~/.codex/skills`、`~/.agents/skills`，以及发现到的项目局部 `.codex/skills`、`.agents/skills`。
+- 读取当前已实现的默认 runtime roots：`~/.codex/skills`、`~/.agents/skills`、`~/.claude/skills`，以及发现到的项目局部 `.codex/skills`、`.agents/skills`、`.claude/skills`。
 - 后续通过 agent adapter 读取 Claude、OpenClaw、Cursor、Claude Code、Copilot 等 runtime roots。
 - 在每个 root 内递归查找包含 `SKILL.md` 的目录。
 - 读取 frontmatter 中的 `name`、`description`、`version`。
 - 计算 `SKILL.md` content hash。
 - 标记 source root、是否 symlink、real path。
+- 扫描 import candidates 时把存在且可读取的 skills root 写入 `workspaces` registry；home-level roots 记为 `global`，项目局部 roots 记为 `user`。
 - 按 skill name 排序返回，同时保留 scan errors。
 
 失败与回滚：
@@ -296,3 +297,39 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `cargo test --offline`
 - 如果 adapter 影响 legacy Node CLI 兼容入口，也运行 `npm test`。
 - 用临时目录模拟该 agent runtime，不直接修改真实用户 runtime。
+
+## 10. Manage Workspaces
+
+触发条件：
+
+- 桌面 UI 打开 Workspaces 页面。
+- 桌面 UI 或 Rust CLI 执行 workspace scan。
+- 用户手动添加或忘记 workspace。
+- 用户点击 workspace 查看其中 skills，并选择导入。
+- Dashboard scan import candidates 时自动登记已扫描的 workspace。
+
+步骤：
+
+- `workspace-scan` 调用 Rust core 发现存在且可读取的 `.codex/skills`、`.agents/skills`、`.claude/skills` roots。
+- home-level roots 记录为 `kind=global`；项目局部 roots 记录为 `kind=user`。
+- 根据路径推断 `agent_id`：`.codex` -> `codex`，`.agents` -> `agents`，`.claude` -> `claude`。
+- display name 由 path 推导：global root 使用 agent 名，项目局部 root 使用项目目录名，不拼接 `global` 或 `user`。
+- 扫描每个 workspace root，记录 skill 数、已导入 skill 数、scan error 数和最后一条 scan error。
+- 点击 workspace 时只扫描该 workspace path，复用 import candidate review 行样式展示其中的 skills，并使用现有 `import_candidates` 流程导入选中项。
+- 手动添加 workspace 时必须提供已存在目录，并立即扫描该目录。
+- 忘记 workspace 只允许删除 `source=manual` 的 registry row，不删除或修改磁盘文件。
+
+失败与回滚：
+
+- 不存在的手动 path 拒绝添加。
+- 自动 scan 跳过不存在或不可读取的 roots。
+- scan error 记录在 workspace 行上，不中断其它 workspace。
+- forget 不能删除 auto workspace，也不能删除 runtime 目录中的内容。
+
+完成验证：
+
+- `cargo test -p skillbox-core --offline workspace`
+- `cargo run -p skillbox-cli --offline -- workspace-scan --managed-root <temp-SkillBox>`
+- `cargo run -p skillbox-cli --offline -- workspace-add <temp-root> --kind user --managed-root <temp-SkillBox>`
+- `npm test`
+- 桌面 UI 验证 sidebar 只保留 Dashboard、Workspaces、Settings，Workspace 页面可 scan、add、forget manual rows，并且点击 workspace 可查看和导入该 workspace 下的 skills。

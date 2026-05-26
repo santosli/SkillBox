@@ -19,6 +19,7 @@ node packages/skillbox-cli/bin/skillbox.js scan --json
 node packages/skillbox-cli/bin/skillbox.js paths --json
 node packages/skillbox-cli/bin/skillbox.js parse-github-url <github-url> --json
 cargo run -p skillbox-cli --offline -- scan ~/.codex/skills ~/.agents/skills
+cargo run -p skillbox-cli --offline -- workspace-scan
 cargo test --offline
 ```
 
@@ -38,7 +39,7 @@ or until the author explicitly commits with `SKILLBOX_SKIP_DOCS_CHECK=1`.
   skillbox.sqlite
 ```
 
-Runtime directories such as `~/.codex/skills`, `~/.agents/skills`, and future Claude/Cursor/Copilot-style targets are deployment targets.
+Runtime directories such as `~/.codex/skills`, `~/.agents/skills`, `~/.claude/skills`, and future Cursor/Copilot-style targets are deployment targets.
 SkillBox deploys managed skills through symlinks by default.
 
 ## Toolchain Status

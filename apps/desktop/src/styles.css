@@ -1,4 +1,6 @@
 :root {
+  --dashboard-card-width: 360px;
+  --dashboard-card-track: minmax(var(--dashboard-card-width), var(--dashboard-card-width));
   color: #111827;
   background: #f7f8fa;
   font-family:
@@ -103,7 +105,8 @@ button {
   padding: 0 12px;
 }
 
-.navButton .navIcon {
+.navButton .navIcon,
+.sidebarFooter button .footerIcon {
   display: grid;
   width: 22px;
   height: 22px;
@@ -114,7 +117,7 @@ button {
 }
 
 .navButton .navIcon svg,
-.sidebarFooter button svg {
+.sidebarFooter button .footerIcon svg {
   width: 15px;
   height: 15px;
   color: currentColor;
@@ -142,13 +145,10 @@ button {
   font-weight: 650;
 }
 
-.navButton.active .navIcon {
+.navButton.active .navIcon,
+.sidebarFooter button.active .footerIcon {
   border-color: #cbd5e1;
   background: #ffffff;
-  color: #0a84ff;
-}
-
-.sidebarFooter button.active svg {
   color: #0a84ff;
 }
 
@@ -163,14 +163,11 @@ button {
   padding: 0 12px;
 }
 
-.sidebarFooter button svg {
-  width: 22px;
-  height: 22px;
+.sidebarFooter button .footerIcon {
   flex: 0 0 auto;
-  color: #64748b;
 }
 
-.sidebarFooter button:hover svg {
+.sidebarFooter button:hover .footerIcon {
   color: #0a84ff;
 }
 
@@ -675,11 +672,13 @@ button {
   fill: currentColor;
 }
 
-.skillCardGrid {
+.skillCardGrid,
+.workspaceCardGrid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, var(--dashboard-card-track));
   gap: 16px;
   align-items: stretch;
+  justify-content: start;
 }
 
 .skillCard {
@@ -727,11 +726,13 @@ button {
 }
 
 .skillCardHitArea:focus-visible,
+.workspaceCardOpenButton:focus-visible,
 .skillFavoriteButton:focus-visible,
 .skillDetailCloseButton:focus-visible,
 .detailFavoriteButton:focus-visible,
 .editableTagPill:focus-visible,
 .skillDetailTagInput button:focus-visible,
+.workspaceForgetButton:focus-visible,
 .dashboardChipGroup button:focus-visible,
 .favoriteFilterButton:focus-visible,
 .viewSwitch button:focus-visible,
@@ -989,6 +990,183 @@ button {
   display: grid;
   gap: 18px;
   max-width: 760px;
+}
+
+.workspaceFrame {
+  max-width: none;
+}
+
+.workspaceControlRow {
+  justify-content: space-between;
+}
+
+.workspaceTypeTabs {
+  flex: 0 0 auto;
+}
+
+.workspaceHeaderActions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.workspaceCard {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 188px;
+  overflow: hidden;
+  border: 1px solid #dfe4ec;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.035);
+}
+
+.workspaceCard::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 3px;
+  background: #38a169;
+  content: "";
+}
+
+.workspaceCard.global::before {
+  background: #0a84ff;
+}
+
+.workspaceCard:hover {
+  border-color: #b9c4d3;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+}
+
+.workspaceCardOpenButton {
+  width: 100%;
+  min-height: 188px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+}
+
+.workspaceCardOpenButton:disabled {
+  cursor: wait;
+}
+
+.workspaceCardBody {
+  display: grid;
+  min-width: 0;
+  min-height: 188px;
+  grid-template-rows: auto auto minmax(22px, 1fr) auto;
+  gap: 12px;
+  padding: 22px 22px 18px;
+}
+
+.workspaceCardTitleRow {
+  display: flex;
+  min-width: 0;
+  min-height: 28px;
+  align-items: center;
+  gap: 10px;
+  padding-right: 42px;
+}
+
+.workspaceCardTitleRow strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: #111827;
+  font-size: 17px;
+  font-weight: 720;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspaceCardPath {
+  min-width: 0;
+  overflow: hidden;
+  color: #475569;
+  font-family:
+    "SF Mono",
+    ui-monospace,
+    Menlo,
+    monospace;
+  font-size: 12px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspaceCardBody > small {
+  min-width: 0;
+  overflow: hidden;
+  align-self: start;
+  color: #b45309;
+  font-size: 12px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspaceCardMeta {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  border-top: 1px solid #eef2f7;
+  padding-top: 14px;
+}
+
+.workspaceCardMetric {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.workspaceCardMetric small {
+  min-width: 0;
+  overflow: hidden;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 720;
+  letter-spacing: 0;
+  line-height: 1;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.workspaceCardMetric strong {
+  color: #111827;
+  font-size: 18px;
+  font-weight: 720;
+  line-height: 1;
+}
+
+.workspaceForgetButton {
+  position: absolute;
+  right: 18px;
+  top: 18px;
+}
+
+.workspaceForgetButton svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.workspaceEmptyState {
+  min-height: 180px;
 }
 
 .settingsForm {
@@ -1778,6 +1956,16 @@ dd {
 .remoteImportDialog {
   display: grid;
   width: min(640px, calc(100vw - 64px));
+  overflow: hidden;
+  border: 1px solid #dbe3ee;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
+}
+
+.workspaceDialog {
+  display: grid;
+  width: min(620px, calc(100vw - 64px));
   overflow: hidden;
   border: 1px solid #dbe3ee;
   border-radius: 12px;
@@ -2640,6 +2828,16 @@ dd {
   color: #111827;
 }
 
+.iconButton svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
 .candidateList {
   display: grid;
   gap: 10px;
@@ -2709,6 +2907,20 @@ dd {
   border-radius: 10px;
   background: #ffffff;
   padding: 14px;
+}
+
+.workspaceSkillError {
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 12px 14px;
+}
+
+.workspaceSkillEmptyState {
+  min-height: 160px;
 }
 
 .candidateRow.conflict {
@@ -2967,10 +3179,6 @@ dd {
 }
 
 @media (max-width: 1360px) {
-  .skillCardGrid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
   .dashboardGrid,
   .detailGrid,
   .setupGrid,
@@ -3035,8 +3243,15 @@ dd {
     grid-template-columns: 1fr;
   }
 
-  .skillCardGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .workspaceFrame .dashboardTitleRow {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 14px;
+    padding-bottom: 14px;
+  }
+
+  .workspaceHeaderActions {
+    justify-content: flex-start;
   }
 
   .firstUsePanel {

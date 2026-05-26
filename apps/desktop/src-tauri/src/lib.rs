@@ -54,6 +54,15 @@ fn scan_import_candidates() -> Result<Value, String> {
 }
 
 #[tauri::command]
+fn scan_workspace_import_candidates(path: String) -> Result<Value, String> {
+    let scan = skillbox_core::scan_import_candidates(
+        &[std::path::PathBuf::from(path)],
+        skillbox_core::default_managed_root(),
+    )?;
+    serde_json::to_value(scan).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn import_candidates(items: Vec<skillbox_core::ImportRequestItem>) -> Result<Value, String> {
     let result = skillbox_core::import_candidates(items, skillbox_core::default_managed_root())?;
     serde_json::to_value(result).map_err(|error| error.to_string())
@@ -99,6 +108,30 @@ fn check_remote_skill_updates() -> Result<Value, String> {
     serde_json::to_value(result).map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn list_workspaces() -> Result<Value, String> {
+    let result = skillbox_core::list_workspaces(skillbox_core::default_managed_root())?;
+    serde_json::to_value(result).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn scan_workspaces() -> Result<Value, String> {
+    let result = skillbox_core::scan_workspaces(skillbox_core::default_managed_root())?;
+    serde_json::to_value(result).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn add_workspace(request: skillbox_core::WorkspaceAddRequest) -> Result<Value, String> {
+    let result = skillbox_core::add_workspace(request, skillbox_core::default_managed_root())?;
+    serde_json::to_value(result).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn forget_workspace(path: String) -> Result<Value, String> {
+    let result = skillbox_core::forget_workspace(path, skillbox_core::default_managed_root())?;
+    serde_json::to_value(result).map_err(|error| error.to_string())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -109,13 +142,18 @@ pub fn run() {
             set_status_refresh_interval_minutes,
             scan_skills,
             scan_import_candidates,
+            scan_workspace_import_candidates,
             import_candidates,
             parse_github_url,
             user_skills_git_status,
             user_skills_git_changes,
             set_user_skills_git_remote,
             sync_user_skills_git,
-            check_remote_skill_updates
+            check_remote_skill_updates,
+            list_workspaces,
+            scan_workspaces,
+            add_workspace,
+            forget_workspace
         ])
         .run(tauri::generate_context!())
         .expect("failed to run SkillBox");
