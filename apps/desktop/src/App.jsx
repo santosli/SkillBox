@@ -1,31 +1,36 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, X } from 'lucide-react';
 import desktopPackage from '../package.json';
 import skillBoxAppIcon from '../src-tauri/icons/icon.png';
 import codexAppIcon from './assets/codex-app-icon.png';
 import codexCliIcon from './assets/codex-cli-icon.png';
+import { dashboardTabItems, skillMatchesDashboardFilter } from './dashboardFilters.js';
+import { parseUnifiedDiff } from './gitDiffView.js';
 import { normalizeImportCandidate } from './importCandidates.js';
 import {
   dashboardStatusNotice,
+  formatStatusCheckedAt,
+  formatStatusNoticeCountdown,
   normalizeRemoteSkillUpdates,
-  remoteSkillRowStatus
+  normalizeStatusRefreshIntervalMinutes,
+  remoteSkillRowStatus,
+  statusNoticeAutoCloseSeconds
 } from './skillStatusRefresh.js';
 import {
+  canCommitUserSkillsChanges,
   defaultSyncCommitMessage,
+  normalizeUserSkillsGitChanges,
   normalizeUserSkillsGitStatus,
+  suggestUserSkillsCommitMessage,
   syncNotice,
+  userSkillsSyncProgressSteps,
+  waitForNextPaint,
   userSkillRowStatus,
   userSyncAction,
   userSyncLabel,
   userSyncTone
 } from './userSkillsGitSync.js';
-
-const filters = [
-  { id: 'all', label: 'All' },
-  { id: 'user', label: 'User' },
-  { id: 'remote', label: 'Remote' }
-];
 
 const previewPaths = {
   root: '~/SkillBox',
@@ -35,6 +40,15 @@ const previewPaths = {
 };
 
 const previewPreferenceStorageKey = 'skillbox.skipLocalImportConfirmation';
+const previewStatusRefreshIntervalStorageKey = 'skillbox.statusRefreshIntervalMinutes';
+const autoRefreshBlockedStatuses = new Set([
+  'checking',
+  'importing',
+  'loading',
+  'preparing_sync',
+  'scanning',
+  'syncing'
+]);
 
 const previewImportCandidates = [
   {
@@ -79,6 +93,38 @@ const previewImportCandidates = [
   }
 ];
 
+function previewUserSkillsGitChanges() {
+  return {
+    repo_path: previewPaths.userSkillsRoot,
+    initialized: true,
+    branch: 'main',
+    remote_url: 'git@example.com:santosli/my-skills.git',
+    files: [
+      {
+        path: 'codex-chat-sync/SKILL.md',
+        status: ' M',
+        diff:
+          'diff --git a/codex-chat-sync/SKILL.md b/codex-chat-sync/SKILL.md\n' +
+          '--- a/codex-chat-sync/SKILL.md\n' +
+          '+++ b/codex-chat-sync/SKILL.md\n' +
+          '@@\n' +
+          '+description: Import Codex App history into Pandora.\n'
+      },
+      {
+        path: 'dida-task-sync/SKILL.md',
+        status: '??',
+        diff:
+          'diff --git a/dida-task-sync/SKILL.md b/dida-task-sync/SKILL.md\n' +
+          'new file mode 100644\n' +
+          '--- /dev/null\n' +
+          '+++ b/dida-task-sync/SKILL.md\n' +
+          '@@\n' +
+          '+name: dida-task-sync\n'
+      }
+    ]
+  };
+}
+
 export default function App() {
   const [skills, setSkills] = useState([]);
   const [paths, setPaths] = useState(null);
@@ -96,7 +142,8 @@ export default function App() {
     errors: []
   });
   const [preferences, setPreferences] = useState({
-    skipLocalImportConfirmation: false
+    skipLocalImportConfirmation: false,
+    statusRefreshIntervalMinutes: 5
   });
   const [localImportConfirmation, setLocalImportConfirmation] = useState({
     open: false,
@@ -111,21 +158,59 @@ export default function App() {
   });
   const [userSkillsGit, setUserSkillsGit] = useState(normalizeUserSkillsGitStatus(null));
   const [remoteSkillUpdates, setRemoteSkillUpdates] = useState(normalizeRemoteSkillUpdates(null));
-  const [lastStatusCheckedLabel, setLastStatusCheckedLabel] = useState('not checked');
+  const [lastStatusCheckedAt, setLastStatusCheckedAt] = useState('');
   const [syncDialog, setSyncDialog] = useState({
     open: false,
+    loading: false,
     remoteUrl: '',
     commitMessage: defaultSyncCommitMessage,
+    commitMessageEdited: false,
     push: true,
-    error: ''
+    error: '',
+    syncLog: [],
+    changes: normalizeUserSkillsGitChanges(null),
+    selectedPaths: [],
+    activePath: ''
   });
   const [syncOptionsOpen, setSyncOptionsOpen] = useState(false);
   const [syncCommitMessage, setSyncCommitMessage] = useState(defaultSyncCommitMessage);
   const contentRef = useRef(null);
+  const autoRefreshStateRef = useRef({ status: 'idle', isFirstUse: false });
+  const refreshSkillStatusesRef = useRef(null);
+  const dismissNotice = () => setNotice('');
+  const lastStatusCheckedLabel = useMemo(
+    () => formatStatusCheckedAt(lastStatusCheckedAt),
+    [lastStatusCheckedAt]
+  );
 
   useEffect(() => {
     refresh();
   }, []);
+
+  useEffect(() => {
+    autoRefreshStateRef.current = { status, isFirstUse };
+  }, [status, isFirstUse]);
+
+  useEffect(() => {
+    refreshSkillStatusesRef.current = () => refreshSkillStatuses({ automatic: true });
+  });
+
+  useEffect(() => {
+    const intervalMinutes = normalizeStatusRefreshIntervalMinutes(
+      preferences.statusRefreshIntervalMinutes
+    );
+    const intervalId = window.setInterval(() => {
+      const current = autoRefreshStateRef.current;
+
+      if (current.isFirstUse || autoRefreshBlockedStatuses.has(current.status)) {
+        return;
+      }
+
+      refreshSkillStatusesRef.current?.();
+    }, intervalMinutes * 60 * 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [preferences.statusRefreshIntervalMinutes]);
 
   useEffect(() => {
     if (contentRef.current) {
@@ -138,7 +223,7 @@ export default function App() {
     const normalized = query.trim().toLowerCase();
 
     return skills.filter((skill) => {
-      const matchesFilter = filter === 'all' || skill.type === filter;
+      const matchesFilter = skillMatchesDashboardFilter(skill, filter, remoteSkillUpdates);
       const matchesQuery =
         !normalized ||
         [skill.name, skill.description, skill.sourceRoot, skill.status, skill.type]
@@ -147,7 +232,7 @@ export default function App() {
 
       return matchesFilter && matchesQuery;
     });
-  }, [skills, query, filter]);
+  }, [skills, query, filter, remoteSkillUpdates]);
 
   const selected = skills.find((skill) => skill.name === selectedName) || filtered[0] || skills[0];
 
@@ -191,7 +276,7 @@ export default function App() {
       setPreferences(normalizePreferences(storedPreferences));
       setUserSkillsGit(normalizeUserSkillsGitStatus(gitStatus));
       setRemoteSkillUpdates(normalizeRemoteSkillUpdates(null));
-      setLastStatusCheckedLabel('not checked');
+      setLastStatusCheckedAt('');
       setIsFirstUse(Boolean(state.isFirstUse ?? state.is_first_use));
       setSelectedName(managedSkills[0]?.name || '');
       setStatus('ready');
@@ -201,7 +286,7 @@ export default function App() {
       setPreferences(readPreviewPreferences());
       setUserSkillsGit(normalizeUserSkillsGitStatus(null));
       setRemoteSkillUpdates(normalizeRemoteSkillUpdates(null));
-      setLastStatusCheckedLabel('not checked');
+      setLastStatusCheckedAt('');
       setIsFirstUse(true);
       setSelectedName('');
       setError('');
@@ -210,10 +295,12 @@ export default function App() {
     }
   }
 
-  async function refreshSkillStatuses() {
+  async function refreshSkillStatuses({ automatic = false } = {}) {
     setStatus('checking');
     setError('');
-    setNotice('');
+    if (!automatic) {
+      setNotice('');
+    }
 
     if (!window.__TAURI_INTERNALS__) {
       const nextRemoteUpdates = normalizeRemoteSkillUpdates({
@@ -227,8 +314,10 @@ export default function App() {
       });
 
       setRemoteSkillUpdates(nextRemoteUpdates);
-      setLastStatusCheckedLabel('just now');
-      setNotice(dashboardStatusNotice({ userSkillsGit, remoteUpdates: nextRemoteUpdates }));
+      setLastStatusCheckedAt(new Date().toISOString());
+      if (!automatic) {
+        setNotice(dashboardStatusNotice({ userSkillsGit, remoteUpdates: nextRemoteUpdates }));
+      }
       setStatus('prototype');
       return;
     }
@@ -247,12 +336,15 @@ export default function App() {
       setPaths(normalizePaths(state.paths));
       setUserSkillsGit(nextUserSkillsGit);
       setRemoteSkillUpdates(nextRemoteUpdates);
-      setLastStatusCheckedLabel('just now');
+      setLastStatusCheckedAt(new Date().toISOString());
       setIsFirstUse(Boolean(state.isFirstUse ?? state.is_first_use));
       setSelectedName(managedSkills[0]?.name || '');
-      setNotice(dashboardStatusNotice({ userSkillsGit: nextUserSkillsGit, remoteUpdates: nextRemoteUpdates }));
+      if (!automatic) {
+        setNotice(dashboardStatusNotice({ userSkillsGit: nextUserSkillsGit, remoteUpdates: nextRemoteUpdates }));
+      }
       setStatus('ready');
     } catch (refreshError) {
+      setLastStatusCheckedAt(new Date().toISOString());
       setError(refreshError.message || String(refreshError) || 'Unable to refresh skill status.');
       setStatus('ready');
     }
@@ -476,7 +568,7 @@ export default function App() {
       } catch {
         // Browser preview can run without durable storage; keep the session preference in React state.
       }
-      const nextPreferences = { skipLocalImportConfirmation: skip };
+      const nextPreferences = { ...preferences, skipLocalImportConfirmation: skip };
       setPreferences(nextPreferences);
       return nextPreferences;
     }
@@ -487,41 +579,197 @@ export default function App() {
     return nextPreferences;
   }
 
-  function openSyncDialog() {
+  async function saveStatusRefreshIntervalMinutes(minutes) {
+    const intervalMinutes = Number(minutes);
+
+    if (!Number.isInteger(intervalMinutes) || intervalMinutes < 1 || intervalMinutes > 1440) {
+      throw new Error('Auto refresh interval must be between 1 and 1440 minutes.');
+    }
+
+    if (!window.__TAURI_INTERNALS__) {
+      try {
+        window.localStorage.setItem(
+          previewStatusRefreshIntervalStorageKey,
+          String(intervalMinutes)
+        );
+      } catch {
+        // Browser preview can run without durable storage; keep the session preference in React state.
+      }
+      const nextPreferences = {
+        ...preferences,
+        statusRefreshIntervalMinutes: intervalMinutes
+      };
+      setPreferences(nextPreferences);
+      return nextPreferences;
+    }
+
+    const storedPreferences = await invoke('set_status_refresh_interval_minutes', {
+      minutes: intervalMinutes
+    });
+    const nextPreferences = normalizePreferences(storedPreferences);
+    setPreferences(nextPreferences);
+    return nextPreferences;
+  }
+
+  async function openSyncDialog() {
     setError('');
     setNotice('');
     setSyncDialog({
       open: true,
+      loading: true,
       remoteUrl: userSkillsGit.remoteUrl || '',
-      commitMessage: syncCommitMessage || defaultSyncCommitMessage,
+      commitMessage: defaultSyncCommitMessage,
+      commitMessageEdited: false,
       push: true,
-      error: ''
+      error: '',
+      syncLog: [],
+      changes: normalizeUserSkillsGitChanges(null),
+      selectedPaths: [],
+      activePath: ''
     });
+
+    if (!window.__TAURI_INTERNALS__) {
+      const changes = normalizeUserSkillsGitChanges(previewUserSkillsGitChanges());
+      setSyncDialog((current) => ({
+        ...current,
+        loading: false,
+        changes,
+        selectedPaths: changes.selectedPaths,
+        activePath: changes.activePath,
+        commitMessage: suggestUserSkillsCommitMessage(changes.files, changes.selectedPaths)
+      }));
+      return;
+    }
+
+    setStatus('preparing_sync');
+    try {
+      const result = await invoke('user_skills_git_changes');
+      const changes = normalizeUserSkillsGitChanges(result);
+      setSyncDialog((current) => ({
+        ...current,
+        loading: false,
+        remoteUrl: current.remoteUrl || changes.remoteUrl || '',
+        changes,
+        selectedPaths: changes.selectedPaths,
+        activePath: changes.activePath,
+        commitMessage: current.commitMessageEdited
+          ? current.commitMessage
+          : suggestUserSkillsCommitMessage(changes.files, changes.selectedPaths)
+      }));
+      setStatus('ready');
+    } catch (syncError) {
+      setSyncDialog((current) => ({
+        ...current,
+        loading: false,
+        error: syncError.message || String(syncError) || 'Unable to load user skills changes.'
+      }));
+      setStatus('ready');
+    }
   }
 
   function closeSyncDialog() {
-    if (status === 'syncing') {
+    if (status === 'syncing' || status === 'preparing_sync') {
       return;
     }
     setSyncDialog((current) => ({ ...current, open: false, error: '' }));
   }
 
   function updateSyncDialog(patch) {
-    setSyncDialog((current) => ({ ...current, ...patch, error: '' }));
+    setSyncDialog((current) => ({
+      ...current,
+      ...patch,
+      commitMessageEdited: Object.prototype.hasOwnProperty.call(patch, 'commitMessage')
+        ? true
+        : current.commitMessageEdited,
+      error: ''
+    }));
+  }
+
+  function setSyncDialogProgress({ push, selectedCount }) {
+    setSyncDialog((current) => ({
+      ...current,
+      error: '',
+      syncLog: userSkillsSyncProgressSteps({ push, selectedCount })
+    }));
+  }
+
+  function toggleSyncDialogPath(path, selected) {
+    setSyncDialog((current) => {
+      const selectedPaths = selected
+        ? [...new Set([...current.selectedPaths, path])]
+        : current.selectedPaths.filter((item) => item !== path);
+
+      return {
+        ...current,
+        selectedPaths,
+        activePath: path,
+        commitMessage: current.commitMessageEdited
+          ? current.commitMessage
+          : suggestUserSkillsCommitMessage(current.changes.files, selectedPaths),
+        error: ''
+      };
+    });
+  }
+
+  function selectAllSyncDialogPaths(selected) {
+    setSyncDialog((current) => ({
+      ...current,
+      selectedPaths: selected ? current.changes.files.map((file) => file.path) : [],
+      activePath: current.activePath || current.changes.files[0]?.path || '',
+      commitMessage: current.commitMessageEdited
+        ? current.commitMessage
+        : suggestUserSkillsCommitMessage(
+            current.changes.files,
+            selected ? current.changes.files.map((file) => file.path) : []
+          ),
+      error: ''
+    }));
+  }
+
+  function activateSyncDialogPath(path) {
+    setSyncDialog((current) => ({ ...current, activePath: path }));
+  }
+
+  function generateSyncDialogMessage() {
+    setSyncDialog((current) => ({
+      ...current,
+      commitMessage: suggestUserSkillsCommitMessage(current.changes.files, current.selectedPaths),
+      commitMessageEdited: false,
+      error: ''
+    }));
   }
 
   async function submitSyncSetup(event) {
     event.preventDefault();
     const remoteUrl = syncDialog.remoteUrl.trim();
-    if (!remoteUrl) {
-      setSyncDialog((current) => ({ ...current, error: 'Enter a Git remote URL.' }));
+    if (syncDialog.push && !remoteUrl) {
+      setSyncDialog((current) => ({
+        ...current,
+        error: 'Configure a Git remote URL in Settings before syncing.'
+      }));
+      return;
+    }
+
+    if (syncDialog.changes.files.length === 0) {
+      setSyncDialog((current) => ({ ...current, error: 'No changed files to commit.' }));
+      return;
+    }
+
+    const selectedPaths =
+      syncDialog.changes.files.length > 0 ? syncDialog.selectedPaths : null;
+    if (syncDialog.changes.files.length > 0 && selectedPaths.length === 0) {
+      setSyncDialog((current) => ({ ...current, error: 'Select at least one file to commit.' }));
       return;
     }
 
     await runUserSkillsSync({
       remoteUrl,
-      commitMessage: syncDialog.commitMessage,
+      commitMessage:
+        syncDialog.commitMessage ||
+        suggestUserSkillsCommitMessage(syncDialog.changes.files, syncDialog.selectedPaths),
       push: syncDialog.push,
+      selectedPaths,
+      selectedCount: selectedPaths?.length || 0,
       closeDialog: true
     });
   }
@@ -530,11 +778,17 @@ export default function App() {
     remoteUrl = '',
     commitMessage = syncCommitMessage,
     push = true,
+    selectedPaths = null,
+    selectedCount = selectedPaths?.length || 0,
     closeDialog = false
   } = {}) {
     setStatus('syncing');
     setError('');
     setNotice('');
+    if (closeDialog) {
+      setSyncDialogProgress({ push, selectedCount });
+      await waitForNextPaint();
+    }
 
     const message = commitMessage.trim() || defaultSyncCommitMessage;
 
@@ -560,9 +814,10 @@ export default function App() {
     try {
       const result = await invoke('sync_user_skills_git', {
         request: {
-          remote_url: remoteUrl.trim() || null,
+          remote_url: null,
           commit_message: message,
-          push
+          push,
+          selected_paths: selectedPaths
         }
       });
       const normalized = normalizeUserSkillsGitStatus({
@@ -597,6 +852,39 @@ export default function App() {
     setPage('detail');
   }
 
+  async function saveUserSkillsGitRemote(remoteUrl) {
+    const trimmed = remoteUrl.trim();
+    if (!trimmed) {
+      throw new Error('Enter a Git remote URL.');
+    }
+
+    if (!window.__TAURI_INTERNALS__) {
+      const normalized = normalizeUserSkillsGitStatus({
+        repo_path: previewPaths.userSkillsRoot,
+        remote_url: trimmed,
+        branch: 'main',
+        state: 'clean',
+        dirty: false
+      });
+      setUserSkillsGit(normalized);
+      setNotice('User skills remote saved.');
+      return normalized;
+    }
+
+    const result = await invoke('set_user_skills_git_remote', {
+      request: { remote_url: trimmed }
+    });
+    const normalized = normalizeUserSkillsGitStatus(result);
+    setUserSkillsGit(normalized);
+    setNotice('User skills remote saved.');
+    return normalized;
+  }
+
+  function openSyncSettings() {
+    setSyncDialog((current) => ({ ...current, open: false, error: '' }));
+    setPage('settings');
+  }
+
   return (
     <main className="appShell">
       <aside className="sidebar">
@@ -609,7 +897,7 @@ export default function App() {
         </div>
 
         <nav className="navGroup" aria-label="Primary">
-          <NavButton active={(page === 'dashboard' && filter === 'all') || page === 'detail'} icon="dashboard" label="Dashboard" onClick={() => openDashboard('all')} />
+          <NavButton active={(page === 'dashboard' && (filter === 'all' || filter === 'updates')) || page === 'detail'} icon="dashboard" label="Dashboard" onClick={() => openDashboard('all')} />
           <NavButton active={page === 'dashboard' && filter === 'user'} icon="user-skills" label="User Skills" onClick={() => openDashboard('user')} />
           <NavButton active={page === 'dashboard' && filter === 'remote'} icon="remote-skills" label="Remote Skills" onClick={() => openDashboard('remote')} />
         </nav>
@@ -636,12 +924,18 @@ export default function App() {
             onBack={() => openDashboard('all')}
             onOpenSyncSetup={openSyncDialog}
             onRefresh={refresh}
-            onRunUserSkillsSync={runUserSkillsSync}
             onSyncCommitMessage={setSyncCommitMessage}
             onSyncOptionsOpen={setSyncOptionsOpen}
           />
         ) : page === 'settings' ? (
-          <SettingsPage paths={paths} />
+          <SettingsPage
+            paths={paths}
+            preferences={preferences}
+            status={status}
+            userSkillsGit={userSkillsGit}
+            onSaveStatusRefreshInterval={saveStatusRefreshIntervalMinutes}
+            onSaveUserSkillsRemote={saveUserSkillsGitRemote}
+          />
         ) : (
           <Dashboard
             counts={counts}
@@ -661,6 +955,7 @@ export default function App() {
             onInstall={openRemoteImport}
             onRefresh={scanForImportCandidates}
             onRefreshStatuses={refreshSkillStatuses}
+            onDismissNotice={dismissNotice}
           />
         )}
       </section>
@@ -712,7 +1007,12 @@ export default function App() {
           dialog={syncDialog}
           status={status}
           onClose={closeSyncDialog}
+          onActivatePath={activateSyncDialogPath}
+          onGenerateMessage={generateSyncDialogMessage}
+          onOpenSettings={openSyncSettings}
+          onSelectAllPaths={selectAllSyncDialogPaths}
           onSubmit={submitSyncSetup}
+          onTogglePath={toggleSyncDialogPath}
           onUpdate={updateSyncDialog}
         />
       ) : null}
@@ -737,129 +1037,151 @@ function Dashboard({
   onOpenSkill,
   onQuery,
   onRefresh,
-  onRefreshStatuses
+  onRefreshStatuses,
+  onDismissNotice
 }) {
   const isChecking = status === 'checking';
+  const tabs = dashboardTabItems(counts);
 
   return (
     <>
-      {!isFirstUse ? (
-        <div className="dashboardActions" aria-label="Dashboard actions">
-          <button className="button secondary" type="button" onClick={onRefresh}>
-            Scan
-          </button>
-          <button className="button primary" type="button" onClick={onInstall}>
-            Install skill
-          </button>
-        </div>
-      ) : null}
-
       {error ? <div className="notice">{error}</div> : null}
       {isFirstUse && notice ? <div className="notice success">{notice}</div> : null}
 
       {isFirstUse ? (
         <FirstUseDashboard status={status} onInstall={onInstall} onScan={onRefresh} />
       ) : (
-        <>
-      <section className="metrics" aria-label="Skill statistics">
-        <Metric hint="Indexed locally" label="All skills" value={counts.total} tone="blue" />
-        <Metric hint="Owned locally" label="User skills" value={counts.user} tone="green" />
-        <Metric hint="GitHub-bound" label="Remote skills" value={counts.remote} tone="slate" />
-        <Metric hint="New remote version" label="Available updates" value={counts.updates} tone="amber" />
-      </section>
-
-      <section className="dashboardGrid">
-        <div className="panel allSkillsPanel">
-          <div className="panelHeader">
-            <div>
-              <h2>All skills</h2>
-              <p>{filtered.length} matching skills</p>
+        <section className="dashboardSingle">
+          <div className="panel allSkillsPanel">
+            <div className="panelHeader allSkillsHeader">
+              <div>
+                <h2>All skills</h2>
+                <p>{filtered.length} matching skills</p>
+              </div>
+              <div className="panelActions" aria-label="Skill actions">
+                <button className="button secondary" disabled={isChecking} type="button" onClick={onRefreshStatuses}>
+                  <RefreshCw aria-hidden="true" />
+                  {isChecking ? 'Checking...' : 'Refresh'}
+                </button>
+                <button className="button secondary" type="button" onClick={onRefresh}>
+                  Scan
+                </button>
+                <button className="button primary" type="button" onClick={onInstall}>
+                  Install skill
+                </button>
+              </div>
             </div>
-            <button className="button secondary" disabled={isChecking} type="button" onClick={onRefreshStatuses}>
-              <RefreshCw aria-hidden="true" />
-              {isChecking ? 'Checking...' : 'Refresh status'}
-            </button>
-          </div>
 
-          {notice ? <div className="panelNotice notice success">{notice}</div> : null}
-
-          <div className="toolbar">
-            <label className="searchField" aria-label="Search skills">
-              <input
-                value={query}
-                onChange={(event) => onQuery(event.target.value)}
-                placeholder="Search skills"
-                type="search"
-              />
-            </label>
-
-            <div className="segments" role="tablist" aria-label="Skill filter">
-              {filters.map((item) => (
+            <div className="dashboardTabs" role="tablist" aria-label="Skill filter">
+              {tabs.map((tab) => (
                 <button
-                  className={filter === item.id ? 'active' : ''}
-                  key={item.id}
+                  aria-selected={filter === tab.id}
+                  className={filter === tab.id ? 'dashboardTab active' : 'dashboardTab'}
+                  key={tab.id}
+                  role="tab"
                   type="button"
-                  onClick={() => onFilter(item.id)}
+                  onClick={() => onFilter(tab.id)}
                 >
-                  {item.label}
+                  <span className="dashboardTabLabel">{tab.label}</span>
+                  <span className="dashboardTabCount">{tab.count}</span>
                 </button>
               ))}
             </div>
-          </div>
 
-          <div className="skillsTable" role="table" aria-label="All skills">
-            <div className="tableHeader" role="row">
-              <span>Name</span>
-              <span>Type</span>
-              <span>Status</span>
-              <span>Checked</span>
-            </div>
-
-            {filtered.map((skill) => (
-              <button
-                className="tableRow"
-                key={`${skill.sourceRoot}-${skill.name}`}
-                type="button"
-                onClick={() => onOpenSkill(skill)}
-              >
-                <span className="skillNameCell">
-                  <strong>{skill.name}</strong>
-                  <small>{skill.description || 'No description in SKILL.md'}</small>
-                </span>
-                <Badge tone={skill.type === 'user' ? 'green' : 'blue'}>{labelize(skill.type)}</Badge>
-                <StatusBadge
-                  remoteSkillUpdates={remoteSkillUpdates}
-                  skill={skill}
-                  userSkillsGit={userSkillsGit}
-                />
-                <span className="checkedText">{lastStatusCheckedLabel}</span>
-              </button>
-            ))}
-
-            {filtered.length === 0 ? (
-              <div className="emptyState">
-                <strong>No skills found</strong>
-                <span>Try another filter or run a fresh scan.</span>
-              </div>
+            {notice ? (
+              <DashboardStatusNotice message={notice} onDismiss={onDismissNotice} />
             ) : null}
-          </div>
-        </div>
 
-        <aside className="sideStack dashboardSideStack">
-          <div className="panel compactPanel">
-            <div className="panelHeader compact">
-              <div>
-                <h2>Recent activity</h2>
-                <p>Local operations</p>
-              </div>
+            <div className="toolbar">
+              <label className="searchField" aria-label="Search skills">
+                <input
+                  value={query}
+                  onChange={(event) => onQuery(event.target.value)}
+                  name="skill-search"
+                  placeholder="Search skills"
+                  type="search"
+                />
+              </label>
             </div>
-            <ActivityList />
+
+            <div className="skillsTable" role="table" aria-label="All skills">
+              <div className="tableHeader" role="row">
+                <span>Name</span>
+                <span>Type</span>
+                <span>Status</span>
+                <span>Checked</span>
+              </div>
+
+              {filtered.map((skill) => (
+                <button
+                  className="tableRow"
+                  key={`${skill.sourceRoot}-${skill.name}`}
+                  type="button"
+                  onClick={() => onOpenSkill(skill)}
+                >
+                  <span className="skillNameCell">
+                    <strong>{skill.name}</strong>
+                    <small>{skill.description || 'No description in SKILL.md'}</small>
+                  </span>
+                  <Badge tone={skill.type === 'user' ? 'green' : 'blue'}>{labelize(skill.type)}</Badge>
+                  <StatusBadge
+                    remoteSkillUpdates={remoteSkillUpdates}
+                    skill={skill}
+                    userSkillsGit={userSkillsGit}
+                  />
+                  <span className="checkedText">{lastStatusCheckedLabel}</span>
+                </button>
+              ))}
+
+              {filtered.length === 0 ? (
+                <div className="emptyState">
+                  <strong>No skills found</strong>
+                  <span>Try another filter or run a fresh scan.</span>
+                </div>
+              ) : null}
+            </div>
           </div>
-        </aside>
-      </section>
-        </>
+        </section>
       )}
     </>
+  );
+}
+
+function DashboardStatusNotice({ message, onDismiss }) {
+  const [remainingSeconds, setRemainingSeconds] = useState(statusNoticeAutoCloseSeconds);
+
+  useEffect(() => {
+    const startedAt = Date.now();
+
+    setRemainingSeconds(statusNoticeAutoCloseSeconds);
+
+    const intervalId = window.setInterval(() => {
+      const elapsedSeconds = Math.floor((Date.now() - startedAt) / 1000);
+      setRemainingSeconds(Math.max(statusNoticeAutoCloseSeconds - elapsedSeconds, 0));
+    }, 250);
+    const timeoutId = window.setTimeout(onDismiss, statusNoticeAutoCloseSeconds * 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.clearTimeout(timeoutId);
+    };
+  }, [message]);
+
+  return (
+    <div className="panelNotice notice success dashboardStatusNotice" role="status">
+      <span className="dashboardStatusNoticeMessage">{message}</span>
+      <span className="dashboardStatusNoticeCountdown">
+        {formatStatusNoticeCountdown(remainingSeconds)}
+      </span>
+      <button
+        className="noticeDismissButton"
+        type="button"
+        aria-label="Dismiss status notice"
+        onClick={onDismiss}
+      >
+        <X aria-hidden="true" size={14} />
+      </button>
+    </div>
   );
 }
 
@@ -891,7 +1213,14 @@ function FirstUseDashboard({ status, onInstall, onScan }) {
   );
 }
 
-function SettingsPage({ paths }) {
+function SettingsPage({
+  paths,
+  preferences,
+  status,
+  userSkillsGit,
+  onSaveStatusRefreshInterval,
+  onSaveUserSkillsRemote
+}) {
   return (
     <>
       <PageHeader
@@ -902,8 +1231,140 @@ function SettingsPage({ paths }) {
 
       <section className="settingsGrid">
         <ManagedRootsPanel paths={paths} />
+        <UserSkillsGitSettingsPanel
+          status={status}
+          userSkillsGit={userSkillsGit}
+          onSave={onSaveUserSkillsRemote}
+        />
+        <StatusRefreshSettingsPanel
+          preferences={preferences}
+          status={status}
+          onSave={onSaveStatusRefreshInterval}
+        />
       </section>
     </>
+  );
+}
+
+function StatusRefreshSettingsPanel({ preferences, status, onSave }) {
+  const [intervalMinutes, setIntervalMinutes] = useState(
+    String(preferences.statusRefreshIntervalMinutes || 5)
+  );
+  const [saveStatus, setSaveStatus] = useState('idle');
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    setIntervalMinutes(String(preferences.statusRefreshIntervalMinutes || 5));
+  }, [preferences.statusRefreshIntervalMinutes]);
+
+  async function submit(event) {
+    event.preventDefault();
+    setSaveStatus('saving');
+    setMessage('');
+
+    try {
+      await onSave(Number(intervalMinutes));
+      setSaveStatus('saved');
+      setMessage('Saved.');
+    } catch (error) {
+      setSaveStatus('error');
+      setMessage(error.message || String(error) || 'Unable to save refresh interval.');
+    }
+  }
+
+  return (
+    <aside className="panel compactPanel">
+      <div className="panelHeader compact">
+        <div>
+          <h2>Status refresh</h2>
+          <p>Dashboard status checks run automatically.</p>
+        </div>
+      </div>
+      <form className="settingsForm" onSubmit={submit}>
+        <label className="remoteImportField">
+          <span>Auto refresh interval</span>
+          <div className="numberFieldRow">
+            <input
+              min="1"
+              max="1440"
+              step="1"
+              type="number"
+              value={intervalMinutes}
+              onChange={(event) => {
+                setIntervalMinutes(event.target.value);
+                setMessage('');
+              }}
+            />
+            <span>minutes</span>
+          </div>
+        </label>
+        <div className="settingsActions">
+          {message ? <span className={saveStatus === 'error' ? 'settingsError' : 'settingsSaved'}>{message}</span> : <span />}
+          <button className="button primary" disabled={status === 'checking' || saveStatus === 'saving'} type="submit">
+            {saveStatus === 'saving' ? 'Saving...' : 'Save interval'}
+          </button>
+        </div>
+      </form>
+    </aside>
+  );
+}
+
+function UserSkillsGitSettingsPanel({ status, userSkillsGit, onSave }) {
+  const [remoteUrl, setRemoteUrl] = useState(userSkillsGit.remoteUrl || '');
+  const [saveStatus, setSaveStatus] = useState('idle');
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    setRemoteUrl(userSkillsGit.remoteUrl || '');
+  }, [userSkillsGit.remoteUrl]);
+
+  async function submit(event) {
+    event.preventDefault();
+    setSaveStatus('saving');
+    setMessage('');
+
+    try {
+      await onSave(remoteUrl);
+      setSaveStatus('saved');
+      setMessage('Saved.');
+    } catch (error) {
+      setSaveStatus('error');
+      setMessage(error.message || String(error) || 'Unable to save remote URL.');
+    }
+  }
+
+  return (
+    <aside className="panel compactPanel">
+      <div className="panelHeader compact">
+        <div>
+          <h2>User skills Git</h2>
+          <p>Shared repository used by every local user skill.</p>
+        </div>
+      </div>
+      <form className="settingsForm" onSubmit={submit}>
+        <label className="remoteImportField">
+          <span>Remote URL</span>
+          <input
+            placeholder="git@github.com:santosli/my-skills.git"
+            value={remoteUrl}
+            onChange={(event) => setRemoteUrl(event.target.value)}
+          />
+        </label>
+        <PathList
+          items={[
+            ['Repository', userSkillsGit.repoPath || '~/SkillBox/user-skills'],
+            ['Branch', userSkillsGit.branch || 'main'],
+            ['State', userSyncLabel(userSkillsGit)]
+          ]}
+        />
+        <div className="settingsActions">
+          {message ? <span className={saveStatus === 'error' ? 'settingsError' : 'settingsSaved'}>{message}</span> : <span />}
+          <button className="button primary" disabled={status === 'syncing' || saveStatus === 'saving'} type="submit">
+            {saveStatus === 'saving' ? 'Saving...' : 'Save remote'}
+          </button>
+        </div>
+      </form>
+    </aside>
   );
 }
 
@@ -998,60 +1459,206 @@ function RemoteImportDialog({ error, mode, status, value, onClose, onModeChange,
   );
 }
 
-function UserSkillsSyncDialog({ dialog, status, onClose, onSubmit, onUpdate }) {
+function UserSkillsSyncDialog({
+  dialog,
+  status,
+  onActivatePath,
+  onClose,
+  onGenerateMessage,
+  onOpenSettings,
+  onSelectAllPaths,
+  onSubmit,
+  onTogglePath,
+  onUpdate
+}) {
+  const selected = new Set(dialog.selectedPaths);
+  const activeFile =
+    dialog.changes.files.find((file) => file.path === dialog.activePath) ||
+    dialog.changes.files[0] ||
+    null;
+  const allSelected =
+    dialog.changes.files.length > 0 && dialog.selectedPaths.length === dialog.changes.files.length;
+  const isBusy = status === 'syncing' || dialog.loading;
+  const canSubmit = canCommitUserSkillsChanges({
+    files: dialog.changes.files,
+    loading: dialog.loading,
+    push: dialog.push,
+    remoteUrl: dialog.remoteUrl,
+    selectedPaths: dialog.selectedPaths,
+    status
+  });
+  const submitLabel =
+    status === 'syncing'
+      ? 'Committing...'
+      : dialog.changes.files.length === 0
+        ? 'No changes'
+        : 'Commit and sync';
+
   return (
     <div className="modalBackdrop" role="presentation">
-      <section className="syncDialog" role="dialog" aria-modal="true" aria-labelledby="user-skills-sync-title">
+      <section className="syncDialog gitCommitDialog" role="dialog" aria-modal="true" aria-labelledby="user-skills-sync-title">
         <div className="importSheetHeader">
           <div>
-            <h2 id="user-skills-sync-title">Set up user skills sync</h2>
-            <p>All local user skills under ~/SkillBox/user-skills will sync to this Git remote.</p>
+            <h2 id="user-skills-sync-title">Review user skills commit</h2>
+            <p>Choose the files to commit, review the diff, then sync the shared user skills repo.</p>
           </div>
-          <button className="iconButton" type="button" aria-label="Close user skills sync setup" onClick={onClose}>
+          <button className="iconButton" disabled={isBusy} type="button" aria-label="Close user skills commit review" onClick={onClose}>
             x
           </button>
         </div>
 
-        <form className="remoteImportForm" onSubmit={onSubmit}>
-          <label className="remoteImportField">
-            <span>Remote URL</span>
-            <input
-              autoFocus
-              placeholder="git@github.com:santosli/my-skills.git"
-              value={dialog.remoteUrl}
-              onChange={(event) => onUpdate({ remoteUrl: event.target.value })}
-            />
-          </label>
-
-          <label className="remoteImportField">
-            <span>Commit message</span>
-            <input
-              value={dialog.commitMessage}
-              onChange={(event) => onUpdate({ commitMessage: event.target.value })}
-            />
-          </label>
+        <form className="gitCommitForm" onSubmit={onSubmit}>
+          <div className="gitCommitFields">
+            <label className="remoteImportField">
+              <span className="fieldLabelRow">
+                <span>Commit message</span>
+                <button className="inlineActionButton" disabled={isBusy} type="button" onClick={onGenerateMessage}>
+                  <RefreshCw aria-hidden="true" size={14} />
+                  Generate
+                </button>
+              </span>
+              <input
+                autoFocus
+                disabled={isBusy}
+                name="commit-message"
+                value={dialog.commitMessage}
+                onChange={(event) => onUpdate({ commitMessage: event.target.value })}
+              />
+            </label>
+            <label className="remoteImportField">
+              <span className="fieldLabelRow">
+                <span>Remote URL</span>
+                <button className="inlineActionButton" disabled={isBusy} type="button" onClick={onOpenSettings}>
+                  Edit in Settings
+                </button>
+              </span>
+              <input
+                name="remote-url"
+                placeholder="git@github.com:santosli/my-skills.git"
+                readOnly
+                value={dialog.remoteUrl || 'Not configured'}
+              />
+            </label>
+          </div>
 
           <label className="syncCheckbox">
             <input
               checked={dialog.push}
+              disabled={isBusy}
+              name="push-after-commit"
               type="checkbox"
               onChange={(event) => onUpdate({ push: event.target.checked })}
             />
             <span>Push after commit</span>
           </label>
 
+          {dialog.syncLog.length > 0 ? (
+            <div className="syncProgressPanel" aria-live="polite">
+              <span className="syncSpinner" aria-hidden="true" />
+              <div>
+                <strong>{dialog.push ? 'Committing and pushing' : 'Committing locally'}</strong>
+                <ol>
+                  {dialog.syncLog.map((line, index) => (
+                    <li key={line} className={index === 0 ? 'active' : ''}>
+                      {line}
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="gitCommitReview">
+            <aside className="gitFilePane">
+              <div className="gitFilePaneHeader">
+                <strong>{dialog.selectedPaths.length} selected</strong>
+                <label className="syncCheckbox compact">
+                  <input
+                    checked={allSelected}
+                    disabled={isBusy || dialog.changes.files.length === 0}
+                    name="select-all-files"
+                    type="checkbox"
+                    onChange={(event) => onSelectAllPaths(event.target.checked)}
+                  />
+                  <span>All</span>
+                </label>
+              </div>
+
+              {dialog.loading ? (
+                <div className="gitEmptyState">Loading changes...</div>
+              ) : dialog.changes.files.length === 0 ? (
+                <div className="gitEmptyState">No changed files.</div>
+              ) : (
+                <div className="gitFileList">
+                  {dialog.changes.files.map((file) => (
+                    <label
+                      className={activeFile?.path === file.path ? 'gitFileRow active' : 'gitFileRow'}
+                      key={file.path}
+                      onClick={() => onActivatePath(file.path)}
+                    >
+                      <input
+                        checked={selected.has(file.path)}
+                        disabled={isBusy}
+                        name="selected-files"
+                        type="checkbox"
+                        onChange={(event) => onTogglePath(file.path, event.target.checked)}
+                      />
+                      <span>
+                        <strong>{file.path}</strong>
+                        <small>{file.label}</small>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </aside>
+
+            <section className="gitDiffPane" aria-label="Selected file diff">
+              <div className="gitDiffHeader">
+                <strong>{activeFile?.path || 'Diff'}</strong>
+                {activeFile ? <span>{activeFile.label}</span> : null}
+              </div>
+              <GitDiffView diff={activeFile?.diff || ''} />
+            </section>
+          </div>
+
           {dialog.error ? <div className="formError">{dialog.error}</div> : null}
 
           <div className="remoteImportFooter">
-            <button className="button secondary" disabled={status === 'syncing'} type="button" onClick={onClose}>
+            <button className="button secondary" disabled={isBusy} type="button" onClick={onClose}>
               Cancel
             </button>
-            <button className="button primary" disabled={status === 'syncing'} type="submit">
-              {status === 'syncing' ? 'Syncing...' : 'Set up sync'}
+            <button className="button primary" disabled={!canSubmit} type="submit">
+              {submitLabel}
             </button>
           </div>
         </form>
       </section>
+    </div>
+  );
+}
+
+function GitDiffView({ diff }) {
+  const rows = parseUnifiedDiff(diff);
+
+  if (rows.length === 0) {
+    return <div className="gitDiffEmpty">No diff to show.</div>;
+  }
+
+  return (
+    <div className="githubDiffScroller">
+      <table className="githubDiffTable" aria-label="Unified diff">
+        <tbody>
+          {rows.map((row, index) => (
+            <tr className={`githubDiffRow ${row.kind}`} key={`${index}-${row.kind}`}>
+              <td className="githubDiffLineNumber">{row.oldLine ?? ''}</td>
+              <td className="githubDiffLineNumber">{row.newLine ?? ''}</td>
+              <td className="githubDiffMarker">{row.marker}</td>
+              <td className="githubDiffCode">{row.content || ' '}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -1308,7 +1915,6 @@ function SkillDetail({
   onBack,
   onOpenSyncSetup,
   onRefresh,
-  onRunUserSkillsSync,
   onSyncCommitMessage,
   onSyncOptionsOpen
 }) {
@@ -1319,7 +1925,8 @@ function SkillDetail({
   const shortHash = (skill.contentHash || 'not-indexed').slice(0, 8);
   const operationStatus =
     skill.type === 'user'
-      ? { label: userSyncLabel(userSkillsGit), tone: userSyncTone(userSkillsGit) }
+      ? userSkillRowStatus(skill, userSkillsGit) ||
+        { label: userSyncLabel(userSkillsGit), tone: userSyncTone(userSkillsGit) }
       : skillStatus(skill);
   const statusFieldLabel = skill.type === 'remote' ? 'Update status' : 'Sync status';
   const statusPanelTitle = skill.type === 'remote' ? 'Update' : 'Sync';
@@ -1328,7 +1935,8 @@ function SkillDetail({
       ? 'GitHub source check'
       : userSkillsGit.remoteUrl || 'Git remote required';
   const syncAction = userSyncAction(userSkillsGit, skill.type);
-  const isSyncing = status === 'syncing';
+  const isPreparingSync = status === 'preparing_sync';
+  const isSyncing = status === 'syncing' || isPreparingSync;
 
   return (
     <>
@@ -1349,13 +1957,9 @@ function SkillDetail({
               className="button primary"
               disabled={isSyncing}
               type="button"
-              onClick={
-                userSkillsGit.state === 'not_configured'
-                  ? onOpenSyncSetup
-                  : () => onRunUserSkillsSync()
-              }
+              onClick={onOpenSyncSetup}
             >
-              {isSyncing ? 'Syncing...' : syncAction}
+              {isPreparingSync ? 'Preparing...' : status === 'syncing' ? 'Syncing...' : syncAction}
             </button>
           ) : (
             <>
@@ -1587,16 +2191,6 @@ function Icon({ name }) {
   );
 }
 
-function Metric({ hint, label, tone, value }) {
-  return (
-    <div className={`metric ${tone}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-      <small>{hint}</small>
-    </div>
-  );
-}
-
 function Badge({ children, tone = 'slate' }) {
   return <span className={`badge ${tone}`}>{children}</span>;
 }
@@ -1686,17 +2280,27 @@ function normalizePreferences(preferences) {
   return {
     skipLocalImportConfirmation: Boolean(
       preferences?.skipLocalImportConfirmation ?? preferences?.skip_local_import_confirmation
+    ),
+    statusRefreshIntervalMinutes: normalizeStatusRefreshIntervalMinutes(
+      preferences?.statusRefreshIntervalMinutes ?? preferences?.status_refresh_interval_minutes
     )
   };
 }
 
 function readPreviewPreferences() {
   try {
+    const statusRefreshIntervalMinutes = window.localStorage.getItem(
+      previewStatusRefreshIntervalStorageKey
+    );
+
     return {
-      skipLocalImportConfirmation: window.localStorage.getItem(previewPreferenceStorageKey) === 'true'
+      skipLocalImportConfirmation: window.localStorage.getItem(previewPreferenceStorageKey) === 'true',
+      statusRefreshIntervalMinutes: normalizeStatusRefreshIntervalMinutes(
+        statusRefreshIntervalMinutes
+      )
     };
   } catch {
-    return { skipLocalImportConfirmation: false };
+    return normalizePreferences(null);
   }
 }
 

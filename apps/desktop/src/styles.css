@@ -244,14 +244,6 @@ button {
   gap: 10px;
 }
 
-.dashboardActions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-bottom: 18px;
-}
-
 .button {
   display: inline-flex;
   height: 38px;
@@ -319,70 +311,11 @@ button {
   transform: none;
 }
 
-.metrics {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 16px;
-}
-
-.metric,
 .panel {
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   background: #ffffff;
   box-shadow: 0 16px 36px rgba(15, 23, 42, 0.04);
-}
-
-.metric {
-  min-height: 94px;
-  padding: 14px;
-}
-
-.metric span,
-.metric small {
-  display: block;
-  color: #64748b;
-}
-
-.metric span {
-  font-size: 12px;
-  font-weight: 640;
-}
-
-.metric strong {
-  display: block;
-  margin-top: 8px;
-  color: #111827;
-  font-size: 28px;
-  font-weight: 690;
-  line-height: 1;
-}
-
-.metric small {
-  margin-top: 8px;
-  overflow: hidden;
-  font-size: 11px;
-  font-weight: 580;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.metric.blue {
-  border-top-color: rgba(10, 132, 255, 0.4);
-}
-
-.metric.green {
-  border-top-color: rgba(22, 163, 74, 0.42);
-}
-
-.metric.amber {
-  border-top-color: rgba(217, 119, 6, 0.42);
-}
-
-.metric.red {
-  border-top-color: rgba(220, 38, 38, 0.38);
 }
 
 .notice {
@@ -403,7 +336,51 @@ button {
 }
 
 .panelNotice {
-  margin: 16px 18px 0;
+  margin: 14px 18px 0;
+}
+
+.dashboardStatusNotice {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.dashboardStatusNoticeMessage {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboardStatusNoticeCountdown {
+  color: #15803d;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.noticeDismissButton {
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid rgba(22, 101, 52, 0.18);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #166534;
+  cursor: pointer;
+  padding: 0;
+}
+
+.noticeDismissButton:hover {
+  border-color: rgba(22, 101, 52, 0.32);
+  background: #ffffff;
+}
+
+.dashboardSingle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .dashboardGrid,
@@ -427,7 +404,35 @@ button {
 
 .settingsGrid {
   display: grid;
+  gap: 18px;
   max-width: 760px;
+}
+
+.settingsForm {
+  display: grid;
+  gap: 16px;
+  padding: 18px 24px 22px;
+}
+
+.settingsActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.settingsSaved,
+.settingsError {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.settingsSaved {
+  color: #166534;
+}
+
+.settingsError {
+  color: #b91c1c;
 }
 
 .setupGrid {
@@ -450,6 +455,18 @@ button {
   padding-bottom: 12px;
 }
 
+.allSkillsHeader {
+  align-items: center;
+}
+
+.panelActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .panelHeader h2,
 .subsectionHeader h2 {
   margin: 0;
@@ -464,6 +481,76 @@ button {
   margin: 5px 0 0;
   color: #64748b;
   font-size: 13px;
+}
+
+.dashboardTabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 2px;
+  margin: 14px 18px 0;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 3px;
+}
+
+.dashboardTab {
+  display: flex;
+  min-width: 0;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  padding: 0 10px;
+  text-align: center;
+  transition:
+    background 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.dashboardTab:hover {
+  background: #ffffff;
+}
+
+.dashboardTab.active {
+  background: #ffffff;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+  color: #111827;
+}
+
+.dashboardTabLabel {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 660;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboardTabCount {
+  display: inline-flex;
+  min-width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 720;
+  line-height: 1;
+  padding: 0 7px;
+}
+
+.dashboardTab.active .dashboardTabCount {
+  background: #dbeafe;
+  color: #1d4ed8;
 }
 
 .toolbar {
@@ -533,7 +620,7 @@ button {
 .tableHeader,
 .tableRow {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) 90px 160px 88px;
+  grid-template-columns: minmax(260px, 1fr) 90px 160px 128px;
   gap: 14px;
   align-items: center;
 }
@@ -1124,6 +1211,10 @@ dd {
   box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
 }
 
+.gitCommitDialog {
+  width: min(1040px, calc(100vw - 64px));
+}
+
 .localImportDialog {
   display: grid;
   width: min(620px, calc(100vw - 64px));
@@ -1138,6 +1229,18 @@ dd {
   display: grid;
   gap: 16px;
   padding: 20px 24px 24px;
+}
+
+.gitCommitForm {
+  display: grid;
+  gap: 14px;
+  padding: 18px 24px 24px;
+}
+
+.gitCommitFields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.72fr);
+  gap: 14px;
 }
 
 .remoteImportModes {
@@ -1172,10 +1275,57 @@ dd {
   gap: 7px;
 }
 
-.remoteImportField span {
+.numberFieldRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.numberFieldRow > span {
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.remoteImportField > span,
+.fieldLabelRow > span {
   color: #475569;
   font-size: 13px;
   font-weight: 650;
+}
+
+.fieldLabelRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.inlineActionButton {
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #dbe3ee;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #334155;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 680;
+  padding: 0 9px;
+}
+
+.inlineActionButton:hover:not(:disabled) {
+  border-color: #bfdbfe;
+  background: #f8fbff;
+  color: #0f172a;
+}
+
+.inlineActionButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
 }
 
 .remoteImportField input {
@@ -1187,6 +1337,12 @@ dd {
   color: #111827;
   font-size: 14px;
   padding: 0 12px;
+}
+
+.remoteImportField input[readonly] {
+  background: #f8fafc;
+  color: #475569;
+  cursor: default;
 }
 
 .remoteImportField input:focus {
@@ -1207,10 +1363,284 @@ dd {
   font-weight: 620;
 }
 
+.syncCheckbox.compact {
+  font-size: 12px;
+  gap: 6px;
+}
+
 .syncCheckbox input {
   width: 16px;
   height: 16px;
   accent-color: #0a84ff;
+}
+
+.gitCommitReview {
+  display: grid;
+  min-height: 430px;
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  grid-template-columns: 300px minmax(0, 1fr);
+}
+
+.gitFilePane {
+  display: grid;
+  min-width: 0;
+  border-right: 1px solid #e5e7eb;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.gitFilePaneHeader,
+.gitDiffHeader {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid #eef2f7;
+  background: #f8fafc;
+  padding: 0 12px;
+}
+
+.gitFilePaneHeader strong,
+.gitDiffHeader strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 670;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gitDiffHeader span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.gitFileList {
+  overflow: auto;
+}
+
+.gitFileRow {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 9px;
+  align-items: center;
+  border-bottom: 1px solid #f1f5f9;
+  cursor: pointer;
+  padding: 10px 12px;
+}
+
+.gitFileRow:hover,
+.gitFileRow.active {
+  background: #f8fafc;
+}
+
+.gitFileRow input {
+  width: 15px;
+  height: 15px;
+  accent-color: #0a84ff;
+}
+
+.gitFileRow span,
+.gitFileRow strong,
+.gitFileRow small {
+  display: block;
+  min-width: 0;
+}
+
+.gitFileRow strong {
+  overflow: hidden;
+  color: #111827;
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gitFileRow small {
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 620;
+}
+
+.gitDiffPane {
+  display: grid;
+  min-width: 0;
+  background: #ffffff;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.githubDiffScroller {
+  min-width: 0;
+  overflow: auto;
+  background: #ffffff;
+}
+
+.githubDiffTable {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  background: #ffffff;
+  color: #24292f;
+  font-family:
+    "SF Mono",
+    ui-monospace,
+    Menlo,
+    monospace;
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.githubDiffRow {
+  height: 20px;
+}
+
+.githubDiffLineNumber {
+  width: 1%;
+  min-width: 44px;
+  padding: 0 10px;
+  border-right: 1px solid #d8dee4;
+  background: #f6f8fa;
+  color: #57606a;
+  text-align: right;
+  user-select: none;
+}
+
+.githubDiffMarker {
+  width: 22px;
+  padding: 0 4px 0 9px;
+  background: #ffffff;
+  color: #57606a;
+  text-align: center;
+  user-select: none;
+}
+
+.githubDiffCode {
+  min-width: 620px;
+  padding: 0 14px 0 2px;
+  background: #ffffff;
+  color: #24292f;
+  white-space: pre;
+}
+
+.githubDiffRow.addition .githubDiffLineNumber {
+  border-right-color: #aceebb;
+  background: #ccffd8;
+}
+
+.githubDiffRow.addition .githubDiffMarker,
+.githubDiffRow.addition .githubDiffCode {
+  background: #e6ffec;
+}
+
+.githubDiffRow.deletion .githubDiffLineNumber {
+  border-right-color: #ffcecb;
+  background: #ffd7d5;
+}
+
+.githubDiffRow.deletion .githubDiffMarker,
+.githubDiffRow.deletion .githubDiffCode {
+  background: #ffebe9;
+}
+
+.githubDiffRow.hunk .githubDiffLineNumber,
+.githubDiffRow.hunk .githubDiffMarker,
+.githubDiffRow.hunk .githubDiffCode {
+  background: #ddf4ff;
+  color: #57606a;
+}
+
+.githubDiffRow.meta .githubDiffLineNumber,
+.githubDiffRow.meta .githubDiffMarker,
+.githubDiffRow.meta .githubDiffCode {
+  background: #f6f8fa;
+  color: #57606a;
+}
+
+.gitDiffEmpty {
+  display: grid;
+  min-height: 160px;
+  place-items: center;
+  background: #ffffff;
+  color: #64748b;
+  font-size: 13px;
+  text-align: center;
+}
+
+.gitEmptyState {
+  display: grid;
+  min-height: 160px;
+  place-items: center;
+  color: #64748b;
+  font-size: 13px;
+  text-align: center;
+}
+
+.syncProgressPanel {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1e3a8a;
+  padding: 12px 14px;
+}
+
+.syncSpinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(37, 99, 235, 0.22);
+  border-top-color: #2563eb;
+  border-radius: 999px;
+  animation: syncSpin 760ms linear infinite;
+  margin-top: 1px;
+}
+
+.syncProgressPanel strong {
+  display: block;
+  color: #1e3a8a;
+  font-size: 13px;
+  font-weight: 720;
+  line-height: 1.2;
+}
+
+.syncProgressPanel ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.syncProgressPanel li {
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.68);
+  color: #315086;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1;
+  padding: 6px 9px;
+}
+
+.syncProgressPanel li.active {
+  border-color: rgba(37, 99, 235, 0.32);
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+@keyframes syncSpin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .remoteImportHint {
@@ -1704,10 +2134,6 @@ dd {
     padding: 32px;
   }
 
-  .metrics {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
   .dashboardGrid,
   .detailGrid,
   .setupGrid,
@@ -1758,10 +2184,6 @@ dd {
     padding: 24px;
   }
 
-  .metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .pageHeader,
   .detailHeader,
   .toolbar {
@@ -1773,7 +2195,6 @@ dd {
     justify-content: flex-start;
   }
 
-  .metrics,
   .fieldGrid,
   .syncMeta,
   .sideStack {
@@ -1782,6 +2203,17 @@ dd {
 
   .firstUsePanel {
     grid-template-columns: 1fr;
+  }
+
+  .gitCommitFields,
+  .gitCommitReview {
+    grid-template-columns: 1fr;
+  }
+
+  .gitFilePane {
+    max-height: 220px;
+    border-right: 0;
+    border-bottom: 1px solid #e5e7eb;
   }
 
   .firstUseActions {

@@ -33,6 +33,9 @@ npm --workspace apps/desktop run tauri dev
 npm --workspace apps/desktop run build
 ```
 
+`tauri dev` 固定加载 `http://127.0.0.1:1420`。Vite dev server 必须使用同一端口并启用
+`--strictPort`；如果 1420 被占用，先释放端口再启动，避免 Tauri 打开后加载不到前端而白屏。
+
 Node CLI 兼容入口：
 
 ```sh

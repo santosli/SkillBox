@@ -17,8 +17,8 @@
 - Implemented GitHub URL normalization for tree, blob, raw, and contents API URLs.
 - Implemented a first CLI surface for the planned commands.
 - Added a Tauri + React desktop shell with scan and path bridge commands.
-- Implemented Rust/Tauri user-skills Git sync for the shared `~/SkillBox/user-skills` repository.
-- Implemented Rust/Tauri/CLI remote skill update status checks and Dashboard status refresh.
+- Implemented Rust/Tauri user-skills Git sync for the shared `~/SkillBox/user-skills` repository, including Settings-managed remote configuration, per-skill dirty status, desktop commit review with diff preview, generated Conventional Commit messages, and selected-file commits.
+- Implemented Rust/Tauri/CLI remote skill update status checks, Dashboard status refresh, last-checked timestamps, and configurable 5-minute auto refresh.
 - Added Rust crate scaffolding for the planned Tauri/Rust architecture.
 - Verified the desktop shell in browser preview at `http://127.0.0.1:1420/`.
 

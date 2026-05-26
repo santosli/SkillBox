@@ -1,3 +1,62 @@
+export const defaultStatusRefreshIntervalMinutes = 5;
+export const minStatusRefreshIntervalMinutes = 1;
+export const maxStatusRefreshIntervalMinutes = 1440;
+export const statusNoticeAutoCloseSeconds = 8;
+
+export function formatStatusNoticeCountdown(seconds) {
+  const remaining = Math.max(0, Math.ceil(Number(seconds) || 0));
+
+  if (remaining === 0) return 'Closing...';
+  return `Closes in ${remaining}s`;
+}
+
+export function normalizeStatusRefreshIntervalMinutes(value) {
+  const minutes = Number(value);
+
+  if (
+    Number.isInteger(minutes) &&
+    minutes >= minStatusRefreshIntervalMinutes &&
+    minutes <= maxStatusRefreshIntervalMinutes
+  ) {
+    return minutes;
+  }
+
+  return defaultStatusRefreshIntervalMinutes;
+}
+
+export function formatStatusCheckedAt(checkedAt, now = new Date()) {
+  if (!checkedAt) return 'not checked';
+
+  const checkedDate = new Date(checkedAt);
+  if (Number.isNaN(checkedDate.getTime())) return 'not checked';
+
+  const checkedDay = [
+    checkedDate.getFullYear(),
+    checkedDate.getMonth(),
+    checkedDate.getDate()
+  ].join('-');
+  const currentDay = [now.getFullYear(), now.getMonth(), now.getDate()].join('-');
+  const time = [
+    checkedDate.getHours(),
+    checkedDate.getMinutes(),
+    checkedDate.getSeconds()
+  ]
+    .map((part) => String(part).padStart(2, '0'))
+    .join(':');
+
+  if (checkedDay === currentDay) {
+    return time;
+  }
+
+  const date = [
+    checkedDate.getFullYear(),
+    String(checkedDate.getMonth() + 1).padStart(2, '0'),
+    String(checkedDate.getDate()).padStart(2, '0')
+  ].join('-');
+
+  return `${date} ${time.slice(0, 5)}`;
+}
+
 export function normalizeRemoteSkillUpdates(result) {
   const statuses = (result?.statuses || []).map((status) => ({
     skillName: status.skillName || status.skill_name || '',

@@ -10,6 +10,12 @@ pub struct GitStatus {
     pub raw_status: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitChangedFile {
+    pub path: String,
+    pub status: String,
+}
+
 pub fn status(repo: impl AsRef<Path>) -> Result<GitStatus, String> {
     let repo = repo.as_ref();
     if !repo.join(".git").exists() {
@@ -64,6 +70,17 @@ pub fn add_all(repo: impl AsRef<Path>) -> Result<(), String> {
     Ok(())
 }
 
+pub fn add_paths(repo: impl AsRef<Path>, paths: &[String]) -> Result<(), String> {
+    if paths.is_empty() {
+        return Err("Select at least one file to commit.".to_string());
+    }
+
+    let mut args = vec!["add".to_string(), "--".to_string()];
+    args.extend(paths.iter().cloned());
+    git_owned(repo.as_ref(), &args)?;
+    Ok(())
+}
+
 pub fn staged_changes(repo: impl AsRef<Path>) -> Result<bool, String> {
     let status = git(repo.as_ref(), &["diff", "--cached", "--name-only"])?;
     Ok(!status.trim().is_empty())
@@ -85,6 +102,50 @@ pub fn push_origin_main(repo: impl AsRef<Path>, set_upstream: bool) -> Result<()
     Ok(())
 }
 
+pub fn changed_files(repo: impl AsRef<Path>) -> Result<Vec<GitChangedFile>, String> {
+    let output = git(
+        repo.as_ref(),
+        &["status", "--porcelain=v1", "--untracked-files=all", "-z"],
+    )?;
+    let mut entries = output.split('\0').filter(|entry| !entry.is_empty());
+    let mut files = Vec::new();
+
+    while let Some(entry) = entries.next() {
+        if entry.len() < 4 {
+            continue;
+        }
+
+        let status = entry[0..2].to_string();
+        let mut path = entry[3..].to_string();
+        if status.starts_with('R') || status.starts_with('C') {
+            if let Some(new_path) = entries.next() {
+                path = new_path.to_string();
+            }
+        }
+
+        files.push(GitChangedFile { path, status });
+    }
+
+    Ok(files)
+}
+
+pub fn has_head(repo: impl AsRef<Path>) -> bool {
+    git(repo.as_ref(), &["rev-parse", "--verify", "HEAD"]).is_ok()
+}
+
+pub fn diff_head_path(repo: impl AsRef<Path>, path: &str) -> Result<String, String> {
+    git_owned(
+        repo.as_ref(),
+        &[
+            "diff".to_string(),
+            "--no-ext-diff".to_string(),
+            "HEAD".to_string(),
+            "--".to_string(),
+            path.to_string(),
+        ],
+    )
+}
+
 pub fn ls_remote(repo_url: &str, reference: &str) -> Result<Option<String>, String> {
     let output = Command::new("git")
         .arg("ls-remote")
@@ -104,6 +165,21 @@ pub fn ls_remote(repo_url: &str, reference: &str) -> Result<Option<String>, Stri
 }
 
 fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .map_err(|error| error.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn git_owned(repo: &Path, args: &[String]) -> Result<String, String> {
     let output = Command::new("git")
         .arg("-C")
         .arg(repo)

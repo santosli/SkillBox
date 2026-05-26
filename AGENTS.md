@@ -27,9 +27,9 @@ SkillBox 管理两类内容：
 
 ## 当前实现边界
 
-- Rust 已覆盖 `SKILL.md` 目录的扫描、导入、候选导入、symlink 部署、SQLite 基础索引、GitHub URL 解析和 Git 状态读取。
+- Rust 已覆盖 `SKILL.md` 目录的扫描、导入、候选导入、symlink 部署、SQLite 基础索引、GitHub URL 解析、Git 状态读取和 user-skills Git 同步。
 - Tauri 桌面桥接当前调用 Rust commands，不再通过 UI 直接 shell 到 Node CLI。
-- Node CLI 仍覆盖 GitHub install、check updates、remote rollback 和 user-skills Git sync。
+- Node CLI 仍覆盖 GitHub install、remote rollback 和部分 legacy 兼容入口。
 - Claude、OpenClaw、Cursor、Claude Code、Copilot 等非 `SKILL.md` 或非 Codex-style runtime 的支持尚需 agent adapter 层。
 - 目标方向是 CLI 和 UI 共享 Rust core；Node CLI 是 legacy transition layer。
 

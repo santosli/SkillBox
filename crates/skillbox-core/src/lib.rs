@@ -3,9 +3,13 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 pub type Result<T> = std::result::Result<T, String>;
+
+const DEFAULT_STATUS_REFRESH_INTERVAL_MINUTES: u32 = 5;
+const MIN_STATUS_REFRESH_INTERVAL_MINUTES: u32 = 1;
+const MAX_STATUS_REFRESH_INTERVAL_MINUTES: u32 = 1440;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ManagedPaths {
@@ -108,6 +112,7 @@ pub struct ManagedState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ManagedPreferences {
     pub skip_local_import_confirmation: bool,
+    pub status_refresh_interval_minutes: u32,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -128,8 +133,25 @@ pub struct UserSkillsGitStatus {
     pub remote_url: Option<String>,
     pub dirty: bool,
     pub raw_status: String,
+    pub changed_paths: Vec<String>,
     pub state: UserSkillsGitState,
     pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UserSkillsGitChangeFile {
+    pub path: String,
+    pub status: String,
+    pub diff: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UserSkillsGitChanges {
+    pub repo_path: PathBuf,
+    pub initialized: bool,
+    pub branch: String,
+    pub remote_url: Option<String>,
+    pub files: Vec<UserSkillsGitChangeFile>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -137,6 +159,12 @@ pub struct UserSkillsSyncRequest {
     pub remote_url: Option<String>,
     pub commit_message: Option<String>,
     pub push: bool,
+    pub selected_paths: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UserSkillsGitRemoteRequest {
+    pub remote_url: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -660,9 +688,13 @@ pub fn managed_preferences(managed_root: impl AsRef<Path>) -> Result<ManagedPref
     let skip_local_import_confirmation =
         read_bool_preference(&paths.database_path, "skip_local_import_confirmation")?
             .unwrap_or(false);
+    let status_refresh_interval_minutes =
+        read_u32_preference(&paths.database_path, "status_refresh_interval_minutes")?
+            .unwrap_or(DEFAULT_STATUS_REFRESH_INTERVAL_MINUTES);
 
     Ok(ManagedPreferences {
         skip_local_import_confirmation,
+        status_refresh_interval_minutes,
     })
 }
 
@@ -673,14 +705,99 @@ pub fn set_skip_local_import_confirmation(
     let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
     write_bool_preference(&paths.database_path, "skip_local_import_confirmation", skip)?;
 
-    Ok(ManagedPreferences {
-        skip_local_import_confirmation: skip,
-    })
+    managed_preferences(paths.root)
+}
+
+pub fn set_status_refresh_interval_minutes(
+    managed_root: impl AsRef<Path>,
+    minutes: u32,
+) -> Result<ManagedPreferences> {
+    if !(MIN_STATUS_REFRESH_INTERVAL_MINUTES..=MAX_STATUS_REFRESH_INTERVAL_MINUTES)
+        .contains(&minutes)
+    {
+        return Err(format!(
+            "Status refresh interval must be between {MIN_STATUS_REFRESH_INTERVAL_MINUTES} and {MAX_STATUS_REFRESH_INTERVAL_MINUTES} minutes."
+        ));
+    }
+
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    write_u32_preference(
+        &paths.database_path,
+        "status_refresh_interval_minutes",
+        minutes,
+    )?;
+
+    managed_preferences(paths.root)
 }
 
 pub fn user_skills_git_status(managed_root: impl AsRef<Path>) -> Result<UserSkillsGitStatus> {
     let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
     user_skills_git_status_for_repo(paths.user_skills_root)
+}
+
+pub fn user_skills_git_changes(managed_root: impl AsRef<Path>) -> Result<UserSkillsGitChanges> {
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let repo = paths.user_skills_root;
+    let status = user_skills_git_status_for_repo(repo.clone())?;
+    let files = if status.initialized {
+        skillbox_git::changed_files(&repo)?
+            .into_iter()
+            .map(|file| {
+                let diff = if file.status == "??" || !skillbox_git::has_head(&repo) {
+                    new_file_diff(&repo, &file.path)
+                } else {
+                    skillbox_git::diff_head_path(&repo, &file.path)
+                }?;
+
+                Ok(UserSkillsGitChangeFile {
+                    path: file.path,
+                    status: file.status,
+                    diff,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?
+    } else {
+        collect_user_skill_files(&repo)?
+            .into_iter()
+            .map(|path| {
+                let diff = new_file_diff(&repo, &path)?;
+                Ok(UserSkillsGitChangeFile {
+                    path,
+                    status: "??".to_string(),
+                    diff,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?
+    };
+
+    Ok(UserSkillsGitChanges {
+        repo_path: status.repo_path,
+        initialized: status.initialized,
+        branch: status.branch,
+        remote_url: status.remote_url,
+        files,
+    })
+}
+
+pub fn set_user_skills_git_remote(
+    request: UserSkillsGitRemoteRequest,
+    managed_root: impl AsRef<Path>,
+) -> Result<UserSkillsGitStatus> {
+    let remote_url = request.remote_url.trim();
+    if remote_url.is_empty() {
+        return Err("Git remote URL cannot be empty.".to_string());
+    }
+    if remote_url.chars().any(char::is_whitespace) {
+        return Err("Git remote URL cannot contain whitespace.".to_string());
+    }
+
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let repo = paths.user_skills_root;
+    if !skillbox_git::status(&repo)?.initialized {
+        skillbox_git::init_main(&repo)?;
+    }
+    skillbox_git::set_origin_url(&repo, remote_url)?;
+    user_skills_git_status_for_repo(repo)
 }
 
 pub fn sync_user_skills_git(
@@ -725,7 +842,12 @@ pub fn sync_user_skills_git(
         return Err("Git remote URL is required before syncing user skills.".to_string());
     }
 
-    skillbox_git::add_all(&repo)?;
+    if let Some(paths) = &request.selected_paths {
+        let selected_paths = validate_git_relative_paths(paths)?;
+        skillbox_git::add_paths(&repo, &selected_paths)?;
+    } else {
+        skillbox_git::add_all(&repo)?;
+    }
     let has_staged_changes = skillbox_git::staged_changes(&repo)?;
     let commit_message = normalized_commit_message(request.commit_message.as_deref());
     let commit_sha = if has_staged_changes {
@@ -1019,6 +1141,14 @@ fn user_skills_git_status_for_repo(repo_path: PathBuf) -> Result<UserSkillsGitSt
     } else {
         None
     };
+    let changed_paths = if git_status.initialized {
+        skillbox_git::changed_files(&repo_path)?
+            .into_iter()
+            .map(|file| file.path)
+            .collect()
+    } else {
+        Vec::new()
+    };
     let state = user_skills_git_state(git_status.initialized, git_status.dirty, &remote_url);
 
     Ok(UserSkillsGitStatus {
@@ -1028,6 +1158,7 @@ fn user_skills_git_status_for_repo(repo_path: PathBuf) -> Result<UserSkillsGitSt
         remote_url,
         dirty: git_status.dirty,
         raw_status: git_status.raw_status,
+        changed_paths,
         state,
         last_error: None,
     })
@@ -1051,8 +1182,117 @@ fn normalized_commit_message(message: Option<&str>) -> String {
     message
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or("Sync user skills")
+        .unwrap_or("chore(github): sync user skills")
         .to_string()
+}
+
+fn validate_git_relative_paths(paths: &[String]) -> Result<Vec<String>> {
+    if paths.is_empty() {
+        return Err("Select at least one file to commit.".to_string());
+    }
+
+    paths
+        .iter()
+        .map(|path| validate_git_relative_path(path))
+        .collect()
+}
+
+fn validate_git_relative_path(path: &str) -> Result<String> {
+    let path = path.trim();
+    if path.is_empty() {
+        return Err("Selected file path cannot be empty.".to_string());
+    }
+
+    let relative = Path::new(path);
+    if relative.is_absolute() {
+        return Err("Selected file paths must be relative.".to_string());
+    }
+
+    for component in relative.components() {
+        match component {
+            Component::Normal(value) if value != ".git" => {}
+            _ => return Err(format!("Invalid selected file path: {path}")),
+        }
+    }
+
+    Ok(path.replace('\\', "/"))
+}
+
+fn collect_user_skill_files(root: &Path) -> Result<Vec<String>> {
+    let mut files = Vec::new();
+    collect_user_skill_files_rec(root, root, &mut files)?;
+    files.sort();
+    Ok(files)
+}
+
+fn collect_user_skill_files_rec(
+    root: &Path,
+    current: &Path,
+    files: &mut Vec<String>,
+) -> Result<()> {
+    if !current.exists() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(current).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        let file_name = entry.file_name();
+        if file_name.to_string_lossy() == ".git" {
+            continue;
+        }
+
+        let file_type = entry.file_type().map_err(|error| error.to_string())?;
+        if file_type.is_dir() {
+            collect_user_skill_files_rec(root, &path, files)?;
+            continue;
+        }
+
+        if file_type.is_file() {
+            let relative = path
+                .strip_prefix(root)
+                .map_err(|error| error.to_string())?
+                .to_string_lossy()
+                .replace('\\', "/");
+            files.push(relative);
+        }
+    }
+
+    Ok(())
+}
+
+fn new_file_diff(repo: &Path, relative_path: &str) -> Result<String> {
+    let relative_path = validate_git_relative_path(relative_path)?;
+    let path = repo.join(&relative_path);
+    let bytes = fs::read(&path).map_err(|error| error.to_string())?;
+
+    if bytes.len() > 120_000 {
+        return Ok(format!(
+            "diff --git a/{relative_path} b/{relative_path}\nnew file mode 100644\n--- /dev/null\n+++ b/{relative_path}\n@@\n+Diff omitted because the file is larger than 120 KB.\n"
+        ));
+    }
+
+    let content = match String::from_utf8(bytes) {
+        Ok(content) => content,
+        Err(_) => {
+            return Ok(format!(
+                "diff --git a/{relative_path} b/{relative_path}\nnew file mode 100644\n--- /dev/null\n+++ b/{relative_path}\n@@\n+Binary file content is not shown.\n"
+            ))
+        }
+    };
+
+    let mut diff = format!(
+        "diff --git a/{relative_path} b/{relative_path}\nnew file mode 100644\n--- /dev/null\n+++ b/{relative_path}\n@@\n"
+    );
+    for line in content.lines() {
+        diff.push('+');
+        diff.push_str(line);
+        diff.push('\n');
+    }
+    if content.is_empty() {
+        diff.push_str("+\n");
+    }
+    Ok(diff)
 }
 
 fn import_one_candidate(
@@ -1161,6 +1401,42 @@ fn write_bool_preference(database_path: &Path, key: &str, value: bool) -> Result
               updated_at = CURRENT_TIMESTAMP
             ",
             params![key, if value { "true" } else { "false" }],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn read_u32_preference(database_path: &Path, key: &str) -> Result<Option<u32>> {
+    let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
+    let value: Option<String> = connection
+        .query_row(
+            "SELECT value FROM preferences WHERE key = ?1",
+            params![key],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+
+    value
+        .map(|raw| {
+            raw.parse::<u32>()
+                .map_err(|error| format!("Invalid numeric preference {key}: {error}"))
+        })
+        .transpose()
+}
+
+fn write_u32_preference(database_path: &Path, key: &str, value: u32) -> Result<()> {
+    let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
+    connection
+        .execute(
+            "
+            INSERT INTO preferences (key, value)
+            VALUES (?1, ?2)
+            ON CONFLICT(key) DO UPDATE SET
+              value = excluded.value,
+              updated_at = CURRENT_TIMESTAMP
+            ",
+            params![key, value.to_string()],
         )
         .map_err(|error| error.to_string())?;
     Ok(())
@@ -1704,6 +1980,7 @@ description: \"Demo skill\"
         let preferences = managed_preferences(&root.join("SkillBox")).unwrap();
 
         assert!(!preferences.skip_local_import_confirmation);
+        assert_eq!(preferences.status_refresh_interval_minutes, 5);
     }
 
     #[test]
@@ -1715,6 +1992,33 @@ description: \"Demo skill\"
         let preferences = managed_preferences(&managed_root).unwrap();
 
         assert!(preferences.skip_local_import_confirmation);
+        assert_eq!(preferences.status_refresh_interval_minutes, 5);
+    }
+
+    #[test]
+    fn managed_preferences_persist_status_refresh_interval() {
+        let root = temp_dir("preferences-refresh-interval");
+        let managed_root = root.join("SkillBox");
+
+        let preferences = set_status_refresh_interval_minutes(&managed_root, 10).unwrap();
+
+        assert_eq!(preferences.status_refresh_interval_minutes, 10);
+        assert_eq!(
+            managed_preferences(&managed_root)
+                .unwrap()
+                .status_refresh_interval_minutes,
+            10
+        );
+    }
+
+    #[test]
+    fn managed_preferences_reject_invalid_status_refresh_interval() {
+        let root = temp_dir("preferences-invalid-refresh-interval");
+        let managed_root = root.join("SkillBox");
+
+        let error = set_status_refresh_interval_minutes(&managed_root, 0).unwrap_err();
+
+        assert!(error.contains("between 1 and 1440"));
     }
 
     #[test]
@@ -1725,6 +2029,25 @@ description: \"Demo skill\"
         assert_eq!(status.state, UserSkillsGitState::NotConfigured);
         assert!(!status.initialized);
         assert!(status.remote_url.is_none());
+    }
+
+    #[test]
+    fn set_user_skills_git_remote_initializes_repo_and_sets_origin() {
+        let managed_root = temp_dir("user-skills-remote-settings").join("SkillBox");
+        let remote = bare_remote("user-skills-remote-settings-origin");
+        let remote_url = remote.to_string_lossy().to_string();
+
+        let status = set_user_skills_git_remote(
+            UserSkillsGitRemoteRequest {
+                remote_url: remote_url.clone(),
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        assert!(status.initialized);
+        assert_eq!(status.state, UserSkillsGitState::Clean);
+        assert_eq!(status.remote_url.as_deref(), Some(remote_url.as_str()));
     }
 
     #[test]
@@ -1745,6 +2068,7 @@ description: \"Demo skill\"
                 remote_url: Some(remote.to_string_lossy().to_string()),
                 commit_message: Some("Sync user skills".to_string()),
                 push: true,
+                selected_paths: None,
             },
             &managed_root,
         )
@@ -1773,6 +2097,7 @@ description: \"Demo skill\"
                 remote_url: Some("/no/such/remote.git".to_string()),
                 commit_message: Some("Sync user skills".to_string()),
                 push: true,
+                selected_paths: None,
             },
             &managed_root,
         )
@@ -1782,6 +2107,136 @@ description: \"Demo skill\"
         assert!(!result.pushed);
         assert_eq!(result.state, UserSkillsGitState::PushFailed);
         assert!(result.message.contains("push"));
+    }
+
+    #[test]
+    fn user_skills_git_changes_include_files_and_diff() {
+        let root = temp_dir("user-skills-changes");
+        let managed_root = root.join("SkillBox");
+        let paths = ensure_managed_layout(&managed_root).unwrap();
+        make_skill(
+            &paths.user_skills_root.join("alpha"),
+            "alpha",
+            "Alpha skill",
+        );
+        sync_user_skills_git(
+            UserSkillsSyncRequest {
+                remote_url: None,
+                commit_message: Some("Initial user skills".to_string()),
+                push: false,
+                selected_paths: None,
+            },
+            &managed_root,
+        )
+        .unwrap();
+        fs::write(
+            paths.user_skills_root.join("alpha").join("SKILL.md"),
+            "---\nname: alpha\ndescription: Updated alpha skill\n---\n",
+        )
+        .unwrap();
+        make_skill(&paths.user_skills_root.join("beta"), "beta", "Beta skill");
+
+        let changes = user_skills_git_changes(&managed_root).unwrap();
+
+        let paths: Vec<_> = changes
+            .files
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect();
+        assert!(paths.contains(&"alpha/SKILL.md"));
+        assert!(paths.contains(&"beta/SKILL.md"));
+        assert!(changes
+            .files
+            .iter()
+            .any(|file| file.path == "alpha/SKILL.md" && file.diff.contains("Updated alpha")));
+        assert!(changes
+            .files
+            .iter()
+            .any(|file| file.path == "beta/SKILL.md" && file.diff.contains("Beta skill")));
+    }
+
+    #[test]
+    fn user_skills_git_status_reports_changed_paths() {
+        let root = temp_dir("user-skills-status-changed-paths");
+        let managed_root = root.join("SkillBox");
+        let paths = ensure_managed_layout(&managed_root).unwrap();
+        make_skill(
+            &paths.user_skills_root.join("alpha"),
+            "alpha",
+            "Alpha skill",
+        );
+        make_skill(&paths.user_skills_root.join("beta"), "beta", "Beta skill");
+        let remote = bare_remote("user-skills-status-changed-paths-origin");
+        sync_user_skills_git(
+            UserSkillsSyncRequest {
+                remote_url: Some(remote.to_string_lossy().to_string()),
+                commit_message: Some("Initial user skills".to_string()),
+                push: false,
+                selected_paths: None,
+            },
+            &managed_root,
+        )
+        .unwrap();
+        fs::write(
+            paths.user_skills_root.join("alpha").join("SKILL.md"),
+            "---\nname: alpha\ndescription: Updated alpha skill\n---\n",
+        )
+        .unwrap();
+
+        let status = user_skills_git_status(&managed_root).unwrap();
+
+        assert_eq!(status.state, UserSkillsGitState::Dirty);
+        assert_eq!(status.changed_paths, vec!["alpha/SKILL.md".to_string()]);
+    }
+
+    #[test]
+    fn sync_user_skills_commits_only_selected_paths() {
+        let root = temp_dir("user-skills-selected-sync");
+        let managed_root = root.join("SkillBox");
+        let paths = ensure_managed_layout(&managed_root).unwrap();
+        make_skill(
+            &paths.user_skills_root.join("alpha"),
+            "alpha",
+            "Alpha skill",
+        );
+        make_skill(&paths.user_skills_root.join("beta"), "beta", "Beta skill");
+        let remote = bare_remote("user-skills-selected-sync-remote");
+        sync_user_skills_git(
+            UserSkillsSyncRequest {
+                remote_url: Some(remote.to_string_lossy().to_string()),
+                commit_message: Some("Initial user skills".to_string()),
+                push: false,
+                selected_paths: None,
+            },
+            &managed_root,
+        )
+        .unwrap();
+        fs::write(
+            paths.user_skills_root.join("alpha").join("SKILL.md"),
+            "---\nname: alpha\ndescription: Updated alpha skill\n---\n",
+        )
+        .unwrap();
+        fs::write(
+            paths.user_skills_root.join("beta").join("SKILL.md"),
+            "---\nname: beta\ndescription: Updated beta skill\n---\n",
+        )
+        .unwrap();
+
+        let result = sync_user_skills_git(
+            UserSkillsSyncRequest {
+                remote_url: None,
+                commit_message: Some("Sync selected user skill".to_string()),
+                push: false,
+                selected_paths: Some(vec!["alpha/SKILL.md".to_string()]),
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        assert!(result.committed);
+        assert_eq!(result.state, UserSkillsGitState::Dirty);
+        assert!(result.raw_status.contains("beta/SKILL.md"));
+        assert!(!result.raw_status.contains("alpha/SKILL.md"));
     }
 
     #[test]

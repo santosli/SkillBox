@@ -3,10 +3,23 @@ import test from 'node:test';
 import { normalizeImportCandidate } from './importCandidates.js';
 import {
   dashboardStatusNotice,
+  formatStatusCheckedAt,
+  formatStatusNoticeCountdown,
   normalizeRemoteSkillUpdates,
+  normalizeStatusRefreshIntervalMinutes,
   remoteSkillRowStatus
 } from './skillStatusRefresh.js';
-import { normalizeUserSkillsGitStatus, userSkillRowStatus, userSyncAction } from './userSkillsGitSync.js';
+import { parseUnifiedDiff } from './gitDiffView.js';
+import {
+  canCommitUserSkillsChanges,
+  normalizeUserSkillsGitChanges,
+  normalizeUserSkillsGitStatus,
+  suggestUserSkillsCommitMessage,
+  waitForNextPaint,
+  userSkillsSyncProgressSteps,
+  userSkillRowStatus,
+  userSyncAction
+} from './userSkillsGitSync.js';
 
 test('normalizes backend is_selected false without selecting importable candidate', () => {
   const candidate = normalizeImportCandidate({
@@ -48,9 +61,202 @@ test('normalizes user skills git status snake case fields', () => {
     branch: '',
     dirty: true,
     rawStatus: '',
+    changedPaths: [],
     state: 'push_failed',
     message: 'push failed'
   });
+});
+
+test('normalizes changed paths from user skills git status', () => {
+  const status = normalizeUserSkillsGitStatus({
+    raw_status: '## main\n M codex-chat-sync/SKILL.md\n?? dida-task-sync/SKILL.md\nR  old/SKILL.md -> new/SKILL.md\n'
+  });
+
+  assert.deepEqual(status.changedPaths, [
+    'codex-chat-sync/SKILL.md',
+    'dida-task-sync/SKILL.md',
+    'new/SKILL.md'
+  ]);
+});
+
+test('normalizes user skills git changes and selects all files by default', () => {
+  const changes = normalizeUserSkillsGitChanges({
+    repo_path: '/tmp/SkillBox/user-skills',
+    files: [
+      { path: 'alpha/SKILL.md', status: ' M', diff: 'alpha diff' },
+      { path: 'beta/SKILL.md', status: '??', diff: 'beta diff' }
+    ]
+  });
+
+  assert.equal(changes.repoPath, '/tmp/SkillBox/user-skills');
+  assert.deepEqual(changes.selectedPaths, ['alpha/SKILL.md', 'beta/SKILL.md']);
+  assert.equal(changes.activePath, 'alpha/SKILL.md');
+  assert.equal(changes.files[1].label, 'Added');
+});
+
+test('suggests conventional user skills commit messages from selected files', () => {
+  const changes = normalizeUserSkillsGitChanges({
+    files: [
+      { path: 'codex-chat-sync/SKILL.md', status: ' M', diff: 'diff' },
+      { path: 'dida-task-sync/SKILL.md', status: '??', diff: 'diff' },
+      { path: 'old-skill/SKILL.md', status: ' D', diff: 'diff' }
+    ]
+  });
+
+  assert.equal(
+    suggestUserSkillsCommitMessage(changes.files, ['codex-chat-sync/SKILL.md']),
+    'feat(github): update codex-chat-sync skill'
+  );
+  assert.equal(
+    suggestUserSkillsCommitMessage(changes.files, ['dida-task-sync/SKILL.md']),
+    'feat(github): add dida-task-sync skill'
+  );
+  assert.equal(
+    suggestUserSkillsCommitMessage(changes.files, ['codex-chat-sync/SKILL.md', 'dida-task-sync/SKILL.md']),
+    'chore(github): sync codex-chat-sync and dida-task-sync skills'
+  );
+});
+
+test('disables user skills commit when no files can be committed', () => {
+  assert.equal(canCommitUserSkillsChanges({ files: [], selectedPaths: [] }), false);
+  assert.equal(
+    canCommitUserSkillsChanges({
+      files: [{ path: 'codex-chat-sync/SKILL.md' }],
+      selectedPaths: []
+    }),
+    false
+  );
+  assert.equal(
+    canCommitUserSkillsChanges({
+      files: [{ path: 'codex-chat-sync/SKILL.md' }],
+      selectedPaths: ['codex-chat-sync/SKILL.md'],
+      push: true,
+      remoteUrl: ''
+    }),
+    false
+  );
+  assert.equal(
+    canCommitUserSkillsChanges({
+      files: [{ path: 'codex-chat-sync/SKILL.md' }],
+      selectedPaths: ['codex-chat-sync/SKILL.md'],
+      push: false,
+      remoteUrl: ''
+    }),
+    true
+  );
+});
+
+test('builds user skills sync progress steps', () => {
+  assert.deepEqual(userSkillsSyncProgressSteps({ push: true, selectedCount: 2 }), [
+    'Stage 2 files',
+    'Create Git commit',
+    'Push to origin/main'
+  ]);
+  assert.deepEqual(userSkillsSyncProgressSteps({ push: false, selectedCount: 1 }), [
+    'Stage 1 file',
+    'Create Git commit',
+    'Skip push'
+  ]);
+});
+
+test('waits for an animation frame before starting user skills sync work', async () => {
+  const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
+  const callbacks = [];
+  let resolved = false;
+
+  globalThis.requestAnimationFrame = (callback) => {
+    callbacks.push(callback);
+    return callbacks.length;
+  };
+
+  try {
+    const promise = waitForNextPaint().then(() => {
+      resolved = true;
+    });
+
+    assert.equal(resolved, false);
+    assert.equal(callbacks.length, 1);
+
+    callbacks.shift()(0);
+    await Promise.resolve();
+
+    assert.equal(resolved, false);
+    assert.equal(callbacks.length, 1);
+
+    callbacks.shift()(0);
+    await promise;
+
+    assert.equal(resolved, true);
+  } finally {
+    if (originalRequestAnimationFrame) {
+      globalThis.requestAnimationFrame = originalRequestAnimationFrame;
+    } else {
+      delete globalThis.requestAnimationFrame;
+    }
+  }
+});
+
+test('formats last status check timestamps for the dashboard table', () => {
+  assert.equal(formatStatusCheckedAt('', new Date('2026-05-26T08:00:00')), 'not checked');
+  assert.equal(
+    formatStatusCheckedAt('2026-05-26T00:27:50.818', new Date('2026-05-26T08:00:00')),
+    '00:27:50'
+  );
+  assert.equal(
+    formatStatusCheckedAt('2026-05-25T23:05:09.000', new Date('2026-05-26T08:00:00')),
+    '2026-05-25 23:05'
+  );
+});
+
+test('normalizes dashboard auto refresh intervals', () => {
+  assert.equal(normalizeStatusRefreshIntervalMinutes(10), 10);
+  assert.equal(normalizeStatusRefreshIntervalMinutes('15'), 15);
+  assert.equal(normalizeStatusRefreshIntervalMinutes(0), 5);
+  assert.equal(normalizeStatusRefreshIntervalMinutes(1441), 5);
+});
+
+test('formats dashboard status notice countdown labels', () => {
+  assert.equal(formatStatusNoticeCountdown(6), 'Closes in 6s');
+  assert.equal(formatStatusNoticeCountdown(1), 'Closes in 1s');
+  assert.equal(formatStatusNoticeCountdown(0), 'Closing...');
+});
+
+test('parses unified diff rows for GitHub-style display', () => {
+  const rows = parseUnifiedDiff(
+    'diff --git a/example/SKILL.md b/example/SKILL.md\n' +
+      'index 1111111..2222222 100644\n' +
+      '--- a/example/SKILL.md\n' +
+      '+++ b/example/SKILL.md\n' +
+      '@@ -2,3 +2,4 @@\n' +
+      ' keep\n' +
+      '-old line\n' +
+      '+new line\n' +
+      '+another line'
+  );
+
+  assert.deepEqual(
+    rows.map((row) => [row.kind, row.oldLine, row.newLine, row.marker, row.content]),
+    [
+      ['hunk', null, null, '', '@@ -2,3 +2,4 @@'],
+      ['context', 2, 2, '', 'keep'],
+      ['deletion', 3, null, '-', 'old line'],
+      ['addition', null, 3, '+', 'new line'],
+      ['addition', null, 4, '+', 'another line']
+    ]
+  );
+});
+
+test('parses simplified hunk headers for preview diffs', () => {
+  const rows = parseUnifiedDiff('--- a/file\n+++ b/file\n@@\n-old\n+new\n');
+
+  assert.deepEqual(
+    rows.map((row) => [row.kind, row.oldLine, row.newLine, row.marker, row.content]),
+    [
+      ['hunk', null, null, '', '@@'],
+      ['deletion', 1, null, '-', 'old'],
+      ['addition', null, 1, '+', 'new']
+    ]
+  );
 });
 
 test('user skill row status follows shared git sync state', () => {
@@ -59,6 +265,22 @@ test('user skill row status follows shared git sync state', () => {
     { label: 'Synced', tone: 'green' }
   );
   assert.equal(userSkillRowStatus({ type: 'remote' }, { state: 'clean' }), null);
+});
+
+test('user skill row status marks only changed skills as needing sync', () => {
+  const syncStatus = {
+    state: 'dirty',
+    changedPaths: ['codex-chat-sync/SKILL.md']
+  };
+
+  assert.deepEqual(userSkillRowStatus({ name: 'codex-chat-sync', type: 'user' }, syncStatus), {
+    label: 'Needs sync',
+    tone: 'amber'
+  });
+  assert.deepEqual(userSkillRowStatus({ name: 'dida-task-sync', type: 'user' }, syncStatus), {
+    label: 'Synced',
+    tone: 'green'
+  });
 });
 
 test('remote skill row status follows refreshed update state', () => {

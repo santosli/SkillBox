@@ -149,6 +149,8 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 比较 latest remote SHA 与 `installedSha`。
 - 返回每个 remote skill 的 `skillName`、`sourceType`、`installedSha`、`latestSha`、`updateAvailable`、`state`、`message`。
 - Dashboard 的 `Refresh status` 通过 Tauri command 刷新 user-skills Git 状态和 remote update check，再把行状态更新为 `Needs sync`、`Synced`、`Update available`、`Up to date`、`Check failed` 或 `Not checkable`。
+- Dashboard 的 `Checked` 列显示最近一次 status check 的时间；未检查前显示 `not checked`。
+- 桌面 UI 默认每 5 分钟自动执行一次 status check，间隔通过 Settings 的 `Status refresh` 设置保存到 managed preferences。
 
 失败与回滚：
 
@@ -162,7 +164,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `cargo test -p skillbox-core --offline check_remote_skill_updates`
 - `cargo run -p skillbox-cli --offline -- check-remote-updates --managed-root <temp-SkillBox>`
 - `npm test`
-- 桌面 UI 视觉验证 Dashboard `Refresh status` 按钮、状态 badge、Available updates 计数和 notice。
+- 桌面 UI 视觉验证 Dashboard `Refresh` 按钮、Checked 时间、状态 badge、Available updates 计数、notice，以及 Settings 中的自动刷新间隔。
 
 ## 6. Update Remote Skill
 
@@ -228,7 +230,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 - Rust CLI 入口：`skillbox sync-user-skills [--remote <git-url>] [--message <msg>] [--no-push]`。
 - Rust CLI 状态入口：`skillbox user-skills-status`。
-- Tauri command：`user_skills_git_status` 和 `sync_user_skills_git`。
+- Tauri command：`user_skills_git_status`、`user_skills_git_changes`、`set_user_skills_git_remote` 和 `sync_user_skills_git`。
 - Node CLI 仍保留 legacy 兼容入口：`skillbox sync-user-skills [--remote <git-url>] [--message <msg>] [--push]`。
 
 步骤：
@@ -236,8 +238,13 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 确保 `~/SkillBox/user-skills` 存在。
 - 默认所有本地 user skills 通过同一个 `~/SkillBox/user-skills` Git 仓库和同一个 `origin` remote 同步。
 - 如果没有 `.git`，初始化 `main` 分支 Git 仓库。
-- 如果提供 remote，设置或更新 `origin`。
-- `git add .`。
+- Settings 中配置 shared `origin` remote；commit review dialog 只读展示当前 remote，不直接修改 remote。
+- 桌面 UI 的 sync action 必须先打开 commit review dialog：展示 changed files、当前 diff、可编辑 commit message、只读 remote URL、push 选项，并允许用户选择本次提交的文件。
+- commit review dialog 默认根据选中文件生成 Conventional Commit message；用户手动编辑后不再因勾选变化覆盖，除非主动重新生成。
+- 没有 changed files 或没有选中文件时，commit action 必须禁用；提交过程中必须展示 loading/progress 状态，避免用户误以为界面卡住。
+- Rust core 通过 `user_skills_git_changes` 返回结构化 changed files 和 diff；React 只展示和收集选择，不直接读取文件系统或执行 Git。
+- Rust core 通过 `user_skills_git_status.changed_paths` 返回 dirty 文件路径；Dashboard 行状态必须按 skill 目录细分，只有包含 changed path 的 user skill 显示 `Needs sync`，其他 user skill 保持 `Synced` 或对应全局配置状态。
+- CLI 或未提供文件选择时执行 `git add .`；桌面 UI 提供 `selected_paths` 时只 add 这些经过校验的相对路径。
 - 如果有 staged 变更，使用提供的 commit message 创建 commit；message 为空时默认 `Sync user skills`。
 - 默认 push 到 `origin main` 并设置 upstream；Rust CLI 可用 `--no-push` 跳过 push。
 - 返回 initialized、remote_updated、branch、dirty、raw_status、committed、commit_sha、pushed、push_attempted、state、message。
@@ -247,8 +254,9 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - Git 命令失败时返回结构化错误，不吞掉 stderr。
 - 没有 commit message 时使用默认 `Sync user skills`。
 - 没有 configured remote 且要求 push 时拒绝同步。
+- 选择文件为空且存在 changed files 时拒绝提交。
 - push 失败不应修改本地提交历史；本地 commit 保留，返回 `push_failed` 状态。
-- 不应把 remote URL 或 commit message 拼成 shell 字符串。
+- 不应把 remote URL、commit message 或 selected paths 拼成 shell 字符串。
 
 完成验证：
 
@@ -256,7 +264,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `cargo test -p skillbox-core --offline user_skills`
 - `cargo run -p skillbox-cli --offline -- user-skills-status --managed-root <temp-SkillBox>`
 - `cargo run -p skillbox-cli --offline -- sync-user-skills --managed-root <temp-SkillBox> --remote <bare-repo-path> --message "test sync"`
-- UI 路径变更时，手动验证 first-time setup modal、默认 commit message、shared remote 提示和 push failure 状态。
+- UI 路径变更时，手动验证 commit review dialog、diff preview、默认 commit message、文件选择、shared remote 提示和 push failure 状态。
 
 ## 9. Add Agent Adapter
 

@@ -72,6 +72,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 remote_url: option(command_args, "--remote"),
                 commit_message: option(command_args, "--message"),
                 push: !has_flag(command_args, "--no-push"),
+                selected_paths: None,
             };
             print_json(&skillbox_core::sync_user_skills_git(
                 request,
