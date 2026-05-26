@@ -1,11 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { RefreshCw, X } from 'lucide-react';
+import { Grid3X3, List, RefreshCw, Search, Star, X } from 'lucide-react';
 import desktopPackage from '../package.json';
 import skillBoxAppIcon from '../src-tauri/icons/icon.png';
 import codexAppIcon from './assets/codex-app-icon.png';
 import codexCliIcon from './assets/codex-cli-icon.png';
-import { dashboardTabItems, skillMatchesDashboardFilter } from './dashboardFilters.js';
+import { dashboardTabItems, skillMatchesDashboardFilters } from './dashboardFilters.js';
+import {
+  dashboardFilterOptions,
+  deriveDashboardSkill,
+  normalizeFavoriteNames
+} from './dashboardMetadata.js';
 import { parseUnifiedDiff } from './gitDiffView.js';
 import { normalizeImportCandidate } from './importCandidates.js';
 import {
@@ -41,6 +46,7 @@ const previewPaths = {
 
 const previewPreferenceStorageKey = 'skillbox.skipLocalImportConfirmation';
 const previewStatusRefreshIntervalStorageKey = 'skillbox.statusRefreshIntervalMinutes';
+const dashboardFavoriteStorageKey = 'skillbox.dashboardFavorites';
 const autoRefreshBlockedStatuses = new Set([
   'checking',
   'importing',
@@ -130,6 +136,10 @@ export default function App() {
   const [paths, setPaths] = useState(null);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all');
+  const [dashboardTagFilter, setDashboardTagFilter] = useState('all');
+  const [dashboardFavoritesOnly, setDashboardFavoritesOnly] = useState(false);
+  const [dashboardViewMode, setDashboardViewMode] = useState('grid');
+  const [favoriteNames, setFavoriteNames] = useState(readDashboardFavorites);
   const [selectedName, setSelectedName] = useState('');
   const [page, setPage] = useState('dashboard');
   const [status, setStatus] = useState('idle');
@@ -219,20 +229,38 @@ export default function App() {
     }
   }, [page, selectedName, filter]);
 
-  const filtered = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
-
-    return skills.filter((skill) => {
-      const matchesFilter = skillMatchesDashboardFilter(skill, filter, remoteSkillUpdates);
-      const matchesQuery =
-        !normalized ||
-        [skill.name, skill.description, skill.sourceRoot, skill.status, skill.type]
-          .filter(Boolean)
-          .some((value) => String(value).toLowerCase().includes(normalized));
-
-      return matchesFilter && matchesQuery;
-    });
-  }, [skills, query, filter, remoteSkillUpdates]);
+  const favoriteNameSet = useMemo(() => new Set(favoriteNames), [favoriteNames]);
+  const dashboardSkills = useMemo(
+    () =>
+      skills.map((skill) =>
+        deriveDashboardSkill(skill, userSkillsGit, remoteSkillUpdates, favoriteNameSet)
+      ),
+    [skills, userSkillsGit, remoteSkillUpdates, favoriteNameSet]
+  );
+  const dashboardOptions = useMemo(
+    () => dashboardFilterOptions(dashboardSkills),
+    [dashboardSkills]
+  );
+  const filtered = useMemo(
+    () =>
+      dashboardSkills.filter((skill) =>
+        skillMatchesDashboardFilters(skill, {
+          type: filter,
+          query,
+          tag: dashboardTagFilter,
+          favoritesOnly: dashboardFavoritesOnly,
+          remoteSkillUpdates
+        })
+      ),
+    [
+      dashboardFavoritesOnly,
+      dashboardSkills,
+      dashboardTagFilter,
+      filter,
+      query,
+      remoteSkillUpdates
+    ]
+  );
 
   const selected = skills.find((skill) => skill.name === selectedName) || filtered[0] || skills[0];
 
@@ -254,6 +282,12 @@ export default function App() {
     },
     [skills, remoteSkillUpdates]
   );
+
+  useEffect(() => {
+    if (dashboardTagFilter !== 'all' && !dashboardOptions.tags.includes(dashboardTagFilter)) {
+      setDashboardTagFilter('all');
+    }
+  }, [dashboardOptions, dashboardTagFilter]);
 
   async function refresh() {
     setStatus('loading');
@@ -852,6 +886,22 @@ export default function App() {
     setPage('detail');
   }
 
+  function toggleDashboardFavorite(skillName) {
+    setFavoriteNames((current) => {
+      const next = current.includes(skillName)
+        ? current.filter((name) => name !== skillName)
+        : [...current, skillName].sort((left, right) => left.localeCompare(right));
+
+      try {
+        window.localStorage.setItem(dashboardFavoriteStorageKey, JSON.stringify(next));
+      } catch {
+        // Favorites are a local dashboard preference; if storage is unavailable, keep session state.
+      }
+
+      return next;
+    });
+  }
+
   async function saveUserSkillsGitRemote(remoteUrl) {
     const trimmed = remoteUrl.trim();
     if (!trimmed) {
@@ -938,20 +988,26 @@ export default function App() {
           />
         ) : (
           <Dashboard
+            activeTag={dashboardTagFilter}
             counts={counts}
             error={error}
             filter={filter}
+            filterOptions={dashboardOptions}
             filtered={filtered}
+            favoritesOnly={dashboardFavoritesOnly}
             isFirstUse={isFirstUse}
             lastStatusCheckedLabel={lastStatusCheckedLabel}
             notice={notice}
             query={query}
-            remoteSkillUpdates={remoteSkillUpdates}
             status={status}
-            userSkillsGit={userSkillsGit}
+            viewMode={dashboardViewMode}
+            onFavoritesOnly={setDashboardFavoritesOnly}
             onFilter={setFilter}
             onOpenSkill={openSkill}
             onQuery={setQuery}
+            onTagFilter={setDashboardTagFilter}
+            onToggleFavorite={toggleDashboardFavorite}
+            onViewMode={setDashboardViewMode}
             onInstall={openRemoteImport}
             onRefresh={scanForImportCandidates}
             onRefreshStatuses={refreshSkillStatuses}
@@ -1021,23 +1077,29 @@ export default function App() {
 }
 
 function Dashboard({
+  activeTag,
   counts,
   error,
+  favoritesOnly,
   filter,
+  filterOptions,
   filtered,
   isFirstUse,
   lastStatusCheckedLabel,
   notice,
   query,
-  remoteSkillUpdates,
   status,
-  userSkillsGit,
+  viewMode,
+  onFavoritesOnly,
   onFilter,
   onInstall,
   onOpenSkill,
   onQuery,
   onRefresh,
   onRefreshStatuses,
+  onTagFilter,
+  onToggleFavorite,
+  onViewMode,
   onDismissNotice
 }) {
   const isChecking = status === 'checking';
@@ -1051,60 +1113,107 @@ function Dashboard({
       {isFirstUse ? (
         <FirstUseDashboard status={status} onInstall={onInstall} onScan={onRefresh} />
       ) : (
-        <section className="dashboardSingle">
-          <div className="panel allSkillsPanel">
-            <div className="panelHeader allSkillsHeader">
-              <div>
-                <h2>All skills</h2>
-                <p>{filtered.length} matching skills</p>
-              </div>
-              <div className="panelActions" aria-label="Skill actions">
-                <button className="button secondary" disabled={isChecking} type="button" onClick={onRefreshStatuses}>
-                  <RefreshCw aria-hidden="true" />
-                  {isChecking ? 'Checking...' : 'Refresh'}
-                </button>
-                <button className="button secondary" type="button" onClick={onRefresh}>
-                  Scan
-                </button>
-                <button className="button primary" type="button" onClick={onInstall}>
-                  Install skill
-                </button>
-              </div>
+        <section className="dashboardFrame" aria-label="Skills dashboard">
+          <div className="dashboardTitleRow">
+            <div className="dashboardTitleGroup">
+              <h1>Skills</h1>
+              <span className="dashboardCountPill">{filtered.length}</span>
             </div>
+          </div>
 
-            <div className="dashboardTabs" role="tablist" aria-label="Skill filter">
+          <div className="dashboardControlRow">
+            <label className="searchField dashboardSearch" aria-label="Search skills">
+              <Search aria-hidden="true" />
+              <input
+                value={query}
+                onChange={(event) => onQuery(event.target.value)}
+                name="skill-search"
+                placeholder="Search skills in SkillBox..."
+                type="search"
+              />
+            </label>
+
+            <div className="dashboardTypeTabs" role="tablist" aria-label="Skill type">
               {tabs.map((tab) => (
                 <button
                   aria-selected={filter === tab.id}
-                  className={filter === tab.id ? 'dashboardTab active' : 'dashboardTab'}
+                  className={filter === tab.id ? 'active' : ''}
                   key={tab.id}
                   role="tab"
                   type="button"
                   onClick={() => onFilter(tab.id)}
                 >
-                  <span className="dashboardTabLabel">{tab.label}</span>
-                  <span className="dashboardTabCount">{tab.count}</span>
+                  <span>{tab.label}</span>
+                  <small>{tab.count}</small>
                 </button>
               ))}
             </div>
 
-            {notice ? (
-              <DashboardStatusNotice message={notice} onDismiss={onDismissNotice} />
-            ) : null}
+            <DashboardActionGroup
+              isChecking={isChecking}
+              onInstall={onInstall}
+              onRefresh={onRefresh}
+              onRefreshStatuses={onRefreshStatuses}
+            />
 
-            <div className="toolbar">
-              <label className="searchField" aria-label="Search skills">
-                <input
-                  value={query}
-                  onChange={(event) => onQuery(event.target.value)}
-                  name="skill-search"
-                  placeholder="Search skills"
-                  type="search"
-                />
-              </label>
+            <div className="viewSwitch" role="group" aria-label="Dashboard view">
+              <button
+                aria-label="Show card view"
+                aria-pressed={viewMode === 'grid'}
+                className={viewMode === 'grid' ? 'active' : ''}
+                type="button"
+                onClick={() => onViewMode('grid')}
+              >
+                <Grid3X3 aria-hidden="true" />
+              </button>
+              <button
+                aria-label="Show list view"
+                aria-pressed={viewMode === 'list'}
+                className={viewMode === 'list' ? 'active' : ''}
+                type="button"
+                onClick={() => onViewMode('list')}
+              >
+                <List aria-hidden="true" />
+              </button>
             </div>
+          </div>
 
-            <div className="skillsTable" role="table" aria-label="All skills">
+          {notice ? (
+            <DashboardStatusNotice message={notice} onDismiss={onDismissNotice} />
+          ) : null}
+
+          <div className="dashboardFilterRow" aria-label="Dashboard filters">
+            <DashboardChipGroup
+              active={activeTag}
+              allLabel="All tags"
+              label="Tags"
+              options={filterOptions.tags}
+              onSelect={onTagFilter}
+            />
+            <button
+              aria-pressed={favoritesOnly}
+              className={favoritesOnly ? 'favoriteFilterButton active' : 'favoriteFilterButton'}
+              type="button"
+              onClick={() => onFavoritesOnly(!favoritesOnly)}
+            >
+              <Star aria-hidden="true" />
+              Favorites
+            </button>
+          </div>
+
+          {viewMode === 'grid' ? (
+            <div className="skillCardGrid" aria-label="Skill cards">
+              {filtered.map((skill) => (
+                <SkillCard
+                  key={`${skill.sourceRoot}-${skill.name}`}
+                  skill={skill}
+                  onOpen={onOpenSkill}
+                  onToggleFavorite={onToggleFavorite}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="skillsTable dashboardList" role="table" aria-label="All skills">
               <div className="tableHeader" role="row">
                 <span>Name</span>
                 <span>Type</span>
@@ -1122,29 +1231,139 @@ function Dashboard({
                   <span className="skillNameCell">
                     <strong>{skill.name}</strong>
                     <small>{skill.description || 'No description in SKILL.md'}</small>
+                    <span className="tableTagLine">{skill.displayTags.join(', ')}</span>
                   </span>
                   <Badge tone={skill.type === 'user' ? 'green' : 'blue'}>{labelize(skill.type)}</Badge>
-                  <StatusBadge
-                    remoteSkillUpdates={remoteSkillUpdates}
-                    skill={skill}
-                    userSkillsGit={userSkillsGit}
-                  />
+                  <Badge tone={skill.statusTone}>{skill.statusLabel}</Badge>
                   <span className="checkedText">{lastStatusCheckedLabel}</span>
                 </button>
               ))}
-
-              {filtered.length === 0 ? (
-                <div className="emptyState">
-                  <strong>No skills found</strong>
-                  <span>Try another filter or run a fresh scan.</span>
-                </div>
-              ) : null}
             </div>
-          </div>
+          )}
+
+          {filtered.length === 0 ? (
+            <div className="emptyState dashboardEmptyState">
+              <strong>No skills found</strong>
+              <span>Try another filter or run a fresh scan.</span>
+            </div>
+          ) : null}
         </section>
       )}
     </>
   );
+}
+
+function DashboardActionGroup({ isChecking, onInstall, onRefresh, onRefreshStatuses }) {
+  return (
+    <div className="dashboardActionGroup" aria-label="Skill actions">
+      <button
+        className="dashboardActionButton"
+        disabled={isChecking}
+        type="button"
+        onClick={onRefreshStatuses}
+      >
+        <RefreshCw aria-hidden="true" />
+        {isChecking ? 'Checking...' : 'Refresh status'}
+      </button>
+      <button className="dashboardActionButton" type="button" onClick={onRefresh}>
+        Scan
+      </button>
+      <button className="dashboardActionButton primary" type="button" onClick={onInstall}>
+        Install skill
+      </button>
+    </div>
+  );
+}
+
+function DashboardChipGroup({ active, allLabel, label, options, onSelect }) {
+  return (
+    <div className="dashboardChipGroup">
+      <span>{label}</span>
+      <div>
+        <button
+          className={active === 'all' ? 'active' : ''}
+          type="button"
+          onClick={() => onSelect('all')}
+        >
+          {allLabel}
+        </button>
+        {options.map((option) => (
+          <button
+            className={active === option ? 'active' : ''}
+            key={option}
+            type="button"
+            onClick={() => onSelect(option)}
+          >
+            {option}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SkillCard({ skill, onOpen, onToggleFavorite }) {
+  return (
+    <article className={skill.isFavorite ? 'skillCard favorite' : 'skillCard'}>
+      <button className="skillCardHitArea" type="button" onClick={() => onOpen(skill)}>
+        <span className="skillCardTitleRow">
+          <strong>{skill.name}</strong>
+          <Badge tone={skill.statusTone}>{skill.statusLabel}</Badge>
+        </span>
+        <span className="skillCardDescription">
+          {skill.description || 'No description in SKILL.md'}
+        </span>
+        <span className="skillCardTags">
+          {skill.displayTags.map((tag) => (
+            <span className="tagPill" key={tag}>
+              {tag}
+            </span>
+          ))}
+        </span>
+        <span className="skillCardMeta">
+          <Badge tone={skill.type === 'user' ? 'green' : 'blue'}>{labelize(skill.type)}</Badge>
+          <AgentIconStack agents={skill.installedAgents} />
+        </span>
+      </button>
+      <button
+        aria-label={skill.isFavorite ? `Remove ${skill.name} from favorites` : `Add ${skill.name} to favorites`}
+        aria-pressed={skill.isFavorite}
+        className={skill.isFavorite ? 'skillFavoriteButton active' : 'skillFavoriteButton'}
+        type="button"
+        onClick={() => onToggleFavorite(skill.name)}
+      >
+        <Star aria-hidden="true" />
+      </button>
+    </article>
+  );
+}
+
+function AgentIconStack({ agents = [] }) {
+  const visibleAgents = agents.slice(0, 4);
+  const overflowCount = Math.max(agents.length - visibleAgents.length, 0);
+  const label = agents.length
+    ? `Installed agents: ${agents.map((agent) => agent.label).join(', ')}`
+    : 'No installed agent target';
+
+  return (
+    <span className="skillAgentIcons" aria-label={label} title={label}>
+      {visibleAgents.map((agent) => (
+        <span className={`skillAgentIcon ${agent.id}`} key={agent.id}>
+          {agent.id === 'codex' ? (
+            <img src={codexCliIcon} alt="" aria-hidden="true" />
+          ) : (
+            <span aria-hidden="true">{agentInitial(agent)}</span>
+          )}
+        </span>
+      ))}
+      {overflowCount > 0 ? <span className="skillAgentIcon overflow">+{overflowCount}</span> : null}
+    </span>
+  );
+}
+
+function agentInitial(agent) {
+  if (agent.id === 'claude-code') return 'CC';
+  return String(agent.label || agent.id || '?').slice(0, 1).toUpperCase();
 }
 
 function DashboardStatusNotice({ message, onDismiss }) {
@@ -2301,6 +2520,14 @@ function readPreviewPreferences() {
     };
   } catch {
     return normalizePreferences(null);
+  }
+}
+
+function readDashboardFavorites() {
+  try {
+    return normalizeFavoriteNames(window.localStorage.getItem(dashboardFavoriteStorageKey));
+  } catch {
+    return [];
   }
 }
 

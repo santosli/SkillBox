@@ -1,7 +1,7 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
@@ -87,6 +87,13 @@ pub struct Deployment {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ManagedSkillDeployment {
+    pub target_root: PathBuf,
+    pub target_path: PathBuf,
+    pub mode: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ManagedSkill {
     pub name: String,
     pub description: String,
@@ -100,6 +107,7 @@ pub struct ManagedSkill {
     #[serde(rename = "type")]
     pub kind: SkillKind,
     pub status: String,
+    pub deployments: Vec<ManagedSkillDeployment>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -642,12 +650,17 @@ pub fn deploy_skill(
 
 pub fn managed_state(managed_root: impl AsRef<Path>) -> Result<ManagedState> {
     let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let deployments = load_deployments(&paths.database_path)?;
     let mut skills = Vec::new();
 
     for skill in scan_skill_roots(std::slice::from_ref(&paths.user_skills_root))?.skills {
         skills.push(managed_skill(skill, SkillKind::User));
     }
     skills.extend(scan_managed_remote_skills(&paths)?);
+
+    for skill in skills.iter_mut() {
+        skill.deployments = deployments.get(&skill.name).cloned().unwrap_or_default();
+    }
 
     skills.sort_by(|left, right| left.name.cmp(&right.name));
     Ok(ManagedState {
@@ -1027,6 +1040,7 @@ fn managed_skill(skill: Skill, kind: SkillKind) -> ManagedSkill {
             SkillKind::Remote => "update not checked",
         }
         .to_string(),
+        deployments: Vec::new(),
     }
 }
 
@@ -1502,6 +1516,39 @@ fn index_deployment(
     Ok(())
 }
 
+fn load_deployments(database_path: &Path) -> Result<HashMap<String, Vec<ManagedSkillDeployment>>> {
+    let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT skill_name, target_root, target_path, mode
+            FROM deployments
+            ORDER BY skill_name, target_root
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                ManagedSkillDeployment {
+                    target_root: PathBuf::from(row.get::<_, String>(1)?),
+                    target_path: PathBuf::from(row.get::<_, String>(2)?),
+                    mode: row.get::<_, String>(3)?,
+                },
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+    let mut deployments: HashMap<String, Vec<ManagedSkillDeployment>> = HashMap::new();
+
+    for row in rows {
+        let (skill_name, deployment) = row.map_err(|error| error.to_string())?;
+        deployments.entry(skill_name).or_default().push(deployment);
+    }
+
+    Ok(deployments)
+}
+
 fn infer_import_candidate_type(skill: &Skill, paths: &ManagedPaths) -> (SkillKind, String, bool) {
     let path = skill.path.to_string_lossy();
 
@@ -1932,6 +1979,13 @@ description: \"Demo skill\"
             fs::canonicalize(&deployment.target_path).unwrap(),
             fs::canonicalize(&imported.managed_path).unwrap()
         );
+
+        let state = managed_state(&managed_root).unwrap();
+        assert_eq!(state.skills.len(), 1);
+        assert_eq!(state.skills[0].deployments.len(), 1);
+        assert_eq!(state.skills[0].deployments[0].target_root, target_root);
+        assert_eq!(state.skills[0].deployments[0].target_path, deployment.target_path);
+        assert_eq!(state.skills[0].deployments[0].mode, "symlink");
     }
 
     #[test]

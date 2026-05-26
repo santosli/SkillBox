@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { dashboardTabItems, skillMatchesDashboardFilter } from './dashboardFilters.js';
+import {
+  dashboardTabItems,
+  skillMatchesDashboardFilter,
+  skillMatchesDashboardFilters
+} from './dashboardFilters.js';
 import { normalizeRemoteSkillUpdates } from './skillStatusRefresh.js';
 
 test('dashboard tabs expose counts for all skill categories', () => {
@@ -30,4 +34,63 @@ test('updates filter matches only remote skills with an available update', () =>
   assert.equal(skillMatchesDashboardFilter({ name: 'local', type: 'user' }, 'updates', updates), false);
   assert.equal(skillMatchesDashboardFilter({ name: 'find-skills', type: 'remote' }, 'updates', updates), true);
   assert.equal(skillMatchesDashboardFilter({ name: 'frontend-design', type: 'remote' }, 'updates', updates), false);
+});
+
+test('dashboard combined filters match query, type, tag, agent, and favorites', () => {
+  const skills = [
+    {
+      name: 'note-manager',
+      description: 'Manage Obsidian notes',
+      type: 'remote',
+      displayTags: ['manage', 'obsidian'],
+      agentLabel: 'Codex',
+      isFavorite: true
+    },
+    {
+      name: 'alpha',
+      description: 'Small helper',
+      type: 'user',
+      displayTags: ['general'],
+      agentLabel: 'Agents',
+      isFavorite: false
+    },
+    {
+      name: 'github-sync',
+      description: 'Sync GitHub skills',
+      type: 'remote',
+      displayTags: ['github', 'sync'],
+      agentLabel: 'Local',
+      isFavorite: false
+    }
+  ];
+
+  assert.deepEqual(
+    skills
+      .filter((skill) =>
+        skillMatchesDashboardFilters(skill, {
+          type: 'remote',
+          query: 'obsidian',
+          tag: 'manage',
+          agent: 'Codex',
+          favoritesOnly: true
+        })
+      )
+      .map((skill) => skill.name),
+    ['note-manager']
+  );
+
+  assert.deepEqual(
+    skills
+      .filter((skill) =>
+        skillMatchesDashboardFilters(skill, {
+          type: 'all',
+          query: 'sync',
+          tag: 'all',
+          agent: 'all',
+          favoritesOnly: false
+        })
+      )
+      .map((skill) => skill.name),
+    ['github-sync']
+  );
 });

@@ -17,6 +17,46 @@ export function skillMatchesDashboardFilter(skill, filter, remoteUpdates) {
   return skill.type === filter;
 }
 
+export function skillMatchesDashboardFilters(skill, filters = {}) {
+  const type = filters.type || filters.filter || 'all';
+
+  if (!skillMatchesDashboardFilter(skill, type, filters.remoteSkillUpdates)) {
+    return false;
+  }
+
+  if (filters.favoritesOnly && !skill.isFavorite) {
+    return false;
+  }
+
+  if (filters.tag && filters.tag !== 'all' && !(skill.displayTags || []).includes(filters.tag)) {
+    return false;
+  }
+
+  if (filters.agent && filters.agent !== 'all' && skill.agentLabel !== filters.agent) {
+    return false;
+  }
+
+  const query = String(filters.query || '').trim().toLowerCase();
+  if (!query) {
+    return true;
+  }
+
+  return [
+    skill.name,
+    skill.description,
+    skill.sourceRoot,
+    skill.sourceLabel,
+    skill.agentLabel,
+    skill.status,
+    skill.statusLabel,
+    skill.type,
+    ...(skill.displayTags || []),
+    ...(skill.installedAgents || []).flatMap((agent) => [agent.id, agent.label])
+  ]
+    .filter(Boolean)
+    .some((value) => String(value).toLowerCase().includes(query));
+}
+
 function hasRemoteUpdate(skill, remoteUpdates) {
   if (skill?.type !== 'remote') {
     return false;

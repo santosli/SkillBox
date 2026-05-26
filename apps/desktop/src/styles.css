@@ -383,6 +383,584 @@ button {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.dashboardFrame {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+
+.dashboardTitleRow {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.dashboardTitleGroup {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+.dashboardTitleGroup h1 {
+  margin: 0;
+  color: #111827;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.1;
+}
+
+.dashboardCountPill {
+  display: inline-flex;
+  min-width: 40px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #d9dee7;
+  border-radius: 999px;
+  background: #f4f6f9;
+  color: #475569;
+  font-size: 15px;
+  font-weight: 680;
+  line-height: 1;
+  padding: 0 12px;
+}
+
+.dashboardControlRow {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.dashboardSearch {
+  flex: 1 1 560px;
+  min-width: 360px;
+  max-width: 840px;
+}
+
+.searchField.dashboardSearch svg {
+  position: absolute;
+  top: 50%;
+  left: 16px;
+  width: 17px;
+  height: 17px;
+  color: #64748b;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.searchField.dashboardSearch input {
+  height: 46px;
+  border-color: #dfe4ec;
+  background: #ffffff;
+  padding: 0 14px 0 46px;
+}
+
+.dashboardTypeTabs,
+.viewSwitch {
+  display: inline-flex;
+  height: 46px;
+  align-items: center;
+  border: 1px solid #dfe4ec;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 4px;
+}
+
+.dashboardTypeTabs button,
+.viewSwitch button {
+  display: inline-flex;
+  min-width: 0;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 6px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 660;
+  padding: 0 12px;
+}
+
+.dashboardTypeTabs button small {
+  display: inline-flex;
+  min-width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 720;
+  line-height: 1;
+  padding: 0 6px;
+}
+
+.dashboardTypeTabs button.active,
+.viewSwitch button.active {
+  background: #e5e7eb;
+  color: #111827;
+}
+
+.dashboardTypeTabs button.active small {
+  background: #ffffff;
+  color: #111827;
+}
+
+.viewSwitch {
+  flex: 0 0 auto;
+}
+
+.viewSwitch button {
+  width: 36px;
+  padding: 0;
+}
+
+.viewSwitch svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.dashboardActionGroup {
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 46px;
+  align-items: center;
+  border: 1px solid #dfe4ec;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+  padding: 4px;
+}
+
+.dashboardActionButton {
+  display: inline-flex;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 6px;
+  background: transparent;
+  color: #1f2937;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 680;
+  line-height: 1;
+  padding: 0 14px;
+}
+
+.dashboardActionButton + .dashboardActionButton {
+  border-left: 1px solid #eef2f7;
+  border-radius: 0;
+}
+
+.dashboardActionButton:hover:not(:disabled):not(.primary) {
+  background: #f8fafc;
+  color: #111827;
+}
+
+.dashboardActionButton.primary {
+  margin-left: 4px;
+  border-left: 0;
+  border-radius: 6px;
+  background: #0a84ff;
+  box-shadow: 0 6px 16px rgba(10, 132, 255, 0.22);
+  color: #ffffff;
+}
+
+.dashboardActionButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.64;
+}
+
+.dashboardActionButton svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.dashboardFrame .panelNotice {
+  margin: 0;
+}
+
+.dashboardFilterRow {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.dashboardChipGroup {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.dashboardChipGroup > span {
+  flex: 0 0 auto;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 720;
+  text-transform: uppercase;
+}
+
+.dashboardChipGroup > div {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dashboardChipGroup button,
+.favoriteFilterButton {
+  display: inline-flex;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: #475569;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 680;
+  padding: 0 12px;
+}
+
+.dashboardChipGroup button.active,
+.favoriteFilterButton.active {
+  border-color: #9dd6c3;
+  background: #dcfce7;
+  color: #166534;
+}
+
+.favoriteFilterButton {
+  flex: 0 0 auto;
+}
+
+.favoriteFilterButton svg,
+.skillFavoriteButton svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.favoriteFilterButton.active svg,
+.skillFavoriteButton.active svg {
+  fill: currentColor;
+}
+
+.skillCardGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  align-items: stretch;
+}
+
+.skillCard {
+  position: relative;
+  min-width: 0;
+  min-height: 236px;
+  overflow: hidden;
+  border: 1px solid #dfe4ec;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.035);
+}
+
+.skillCard::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 3px;
+  background: #38a169;
+  content: "";
+}
+
+.skillCard.favorite::before {
+  background: #d97706;
+}
+
+.skillCard:hover {
+  border-color: #b9c4d3;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+}
+
+.skillCardHitArea {
+  display: grid;
+  width: 100%;
+  min-height: 236px;
+  grid-template-rows: auto minmax(58px, 1fr) auto auto;
+  gap: 14px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 22px 22px 18px;
+  text-align: left;
+}
+
+.skillCardHitArea:focus-visible,
+.skillFavoriteButton:focus-visible,
+.dashboardChipGroup button:focus-visible,
+.favoriteFilterButton:focus-visible,
+.viewSwitch button:focus-visible,
+.dashboardTypeTabs button:focus-visible {
+  outline: 3px solid rgba(10, 132, 255, 0.2);
+  outline-offset: 2px;
+}
+
+.skillCardTitleRow {
+  display: flex;
+  min-width: 0;
+  min-height: 32px;
+  align-items: center;
+  gap: 10px;
+  padding-right: 46px;
+}
+
+.skillCardTitleRow strong {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: #111827;
+  font-size: 17px;
+  font-weight: 720;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skillCardTitleRow .badge {
+  flex: 0 0 auto;
+}
+
+.skillCardDescription {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.skillCardTags {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-content: start;
+}
+
+.tagPill {
+  display: inline-flex;
+  max-width: 140px;
+  min-height: 26px;
+  align-items: center;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e0f2fe;
+  color: #0369a1;
+  font-size: 12px;
+  font-weight: 720;
+  line-height: 1;
+  padding: 0 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tagPill:nth-child(3n + 2) {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.tagPill:nth-child(3n) {
+  background: #fce7f3;
+  color: #be185d;
+}
+
+.skillCardMeta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid #eef2f7;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1;
+  padding-top: 14px;
+}
+
+.skillCardMeta .badge {
+  flex: 0 0 auto;
+}
+
+.skillCardMeta > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skillCardMeta > .skillAgentIcons {
+  overflow: visible;
+}
+
+.skillAgentIcons {
+  display: inline-flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.skillAgentIcon {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid #d9e2ee;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.skillAgentIcon img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.skillAgentIcon.codex {
+  border-color: rgba(15, 23, 42, 0.16);
+  background: #111827;
+  color: #ffffff;
+}
+
+.skillAgentIcon.codex img {
+  width: 16px;
+  height: 16px;
+  filter: invert(1);
+  opacity: 0.96;
+}
+
+.skillAgentIcon.agents {
+  border-color: rgba(20, 184, 166, 0.26);
+  background: #ecfeff;
+  color: #0f766e;
+}
+
+.skillAgentIcon.claude,
+.skillAgentIcon.claude-code {
+  border-color: rgba(217, 119, 6, 0.26);
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.skillAgentIcon.cursor {
+  border-color: rgba(15, 23, 42, 0.18);
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+.skillAgentIcon.copilot {
+  border-color: rgba(22, 163, 74, 0.26);
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.skillAgentIcon.openclaw,
+.skillAgentIcon.overflow {
+  border-color: rgba(100, 116, 139, 0.24);
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.skillFavoriteButton {
+  position: absolute;
+  top: 20px;
+  right: 18px;
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid #dfe4ec;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #94a3b8;
+  cursor: pointer;
+}
+
+.skillFavoriteButton.active {
+  border-color: #fed7aa;
+  background: #fff7ed;
+  color: #d97706;
+}
+
+.dashboardList {
+  overflow: hidden;
+  border: 1px solid #dfe4ec;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.tableTagLine {
+  display: block;
+  margin-top: 5px;
+  overflow: hidden;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.dashboardEmptyState {
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
 .dashboardGrid,
 .detailGrid {
   display: grid;
@@ -711,6 +1289,7 @@ button {
   line-height: 1;
   padding: 0 9px;
   text-transform: capitalize;
+  white-space: nowrap;
 }
 
 .badge.blue {
@@ -2151,6 +2730,10 @@ dd {
 }
 
 @media (max-width: 1360px) {
+  .skillCardGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .dashboardGrid,
   .detailGrid,
   .setupGrid,
@@ -2199,6 +2782,10 @@ dd {
   .syncMeta,
   .sideStack {
     grid-template-columns: 1fr;
+  }
+
+  .skillCardGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .firstUsePanel {
