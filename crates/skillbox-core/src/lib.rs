@@ -619,6 +619,7 @@ pub fn deploy_skill(
     let target_path = target_root.join(skill_name);
 
     fs::create_dir_all(&target_root).map_err(|error| error.to_string())?;
+    let mut should_create_symlink = false;
     if let Ok(metadata) = fs::symlink_metadata(&target_path) {
         if !metadata.file_type().is_symlink() {
             return Err(format!(
@@ -634,7 +635,15 @@ pub fn deploy_skill(
                 target_path.display()
             ));
         }
+        if !symlink_points_to_path(&target_path, &managed_path)? {
+            fs::remove_file(&target_path).map_err(|error| error.to_string())?;
+            should_create_symlink = true;
+        }
     } else {
+        should_create_symlink = true;
+    }
+
+    if should_create_symlink {
         symlink_dir(&managed_path, &target_path)?;
     }
 
@@ -1754,7 +1763,7 @@ fn resolve_managed_skill_path(paths: &ManagedPaths, skill_name: &str) -> Result<
 
     let remote_current = paths.remote_skills_root.join(skill_name).join("current");
     if remote_current.join("SKILL.md").exists() {
-        return fs::canonicalize(remote_current).map_err(|error| error.to_string());
+        return Ok(remote_current);
     }
 
     Err(format!("Managed skill not found: {skill_name}"))
@@ -1803,6 +1812,19 @@ fn update_current_symlink(remote_root: &Path, version_path: &Path) -> Result<()>
     let current = remote_root.join("current");
     let _ = fs::remove_file(&current);
     symlink_dir(version_path, &current)
+}
+
+fn symlink_points_to_path(symlink: &Path, expected: &Path) -> Result<bool> {
+    let target = fs::read_link(symlink).map_err(|error| error.to_string())?;
+    let target = if target.is_absolute() {
+        target
+    } else {
+        symlink
+            .parent()
+            .unwrap_or_else(|| Path::new(""))
+            .join(target)
+    };
+    Ok(target == expected)
 }
 
 fn validate_skill_name(name: &str) -> Result<()> {
@@ -1986,6 +2008,49 @@ description: \"Demo skill\"
         assert_eq!(state.skills[0].deployments[0].target_root, target_root);
         assert_eq!(state.skills[0].deployments[0].target_path, deployment.target_path);
         assert_eq!(state.skills[0].deployments[0].mode, "symlink");
+    }
+
+    #[test]
+    fn deploys_remote_skill_to_current_symlink() {
+        let root = temp_dir("remote-deploy-current");
+        let source = root.join("source").join("remote-demo");
+        let managed_root = root.join("SkillBox");
+        let target_root = root.join("runtime");
+        make_skill(&source, "remote-demo", "Remote demo skill");
+        import_skill(&source, SkillKind::Remote, &managed_root).unwrap();
+
+        let deployment = deploy_skill("remote-demo", &managed_root, &target_root).unwrap();
+        let current = managed_root
+            .join("remote-skills")
+            .join("remote-demo")
+            .join("current");
+
+        assert!(fs::symlink_metadata(&deployment.target_path)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(fs::read_link(&deployment.target_path).unwrap(), current);
+    }
+
+    #[test]
+    fn redeploys_remote_skill_version_symlink_to_current() {
+        let root = temp_dir("remote-redeploy-current");
+        let source = root.join("source").join("remote-demo");
+        let managed_root = root.join("SkillBox");
+        let target_root = root.join("runtime");
+        let target_path = target_root.join("remote-demo");
+        make_skill(&source, "remote-demo", "Remote demo skill");
+        let imported = import_skill(&source, SkillKind::Remote, &managed_root).unwrap();
+        fs::create_dir_all(&target_root).unwrap();
+        symlink_dir(&imported.managed_path, &target_path).unwrap();
+
+        deploy_skill("remote-demo", &managed_root, &target_root).unwrap();
+        let current = managed_root
+            .join("remote-skills")
+            .join("remote-demo")
+            .join("current");
+
+        assert_eq!(fs::read_link(&target_path).unwrap(), current);
     }
 
     #[test]

@@ -86,6 +86,38 @@ test('imports a user skill and deploys it as a symlink', () => {
   assert.equal(fs.realpathSync(deployment.targetPath), fs.realpathSync(imported.managedPath));
 });
 
+test('deploys a remote skill as a symlink to current', () => {
+  const workspace = tempDir();
+  const source = path.join(workspace, 'source', 'remote-demo');
+  const managedRoot = path.join(workspace, 'SkillBox');
+  const targetRoot = path.join(workspace, 'runtime');
+  makeSkill(source, 'remote-demo', 'Remote demo skill');
+  importSkill({ sourceDir: source, type: 'remote', managedRoot });
+
+  const deployment = deploySkill({ skillName: 'remote-demo', managedRoot, targetRoot });
+  const currentPath = path.join(managedRoot, 'remote-skills', 'remote-demo', 'current');
+
+  assert.equal(fs.lstatSync(deployment.targetPath).isSymbolicLink(), true);
+  assert.equal(fs.readlinkSync(deployment.targetPath), currentPath);
+});
+
+test('redeploys a remote skill version symlink to current', () => {
+  const workspace = tempDir();
+  const source = path.join(workspace, 'source', 'remote-demo');
+  const managedRoot = path.join(workspace, 'SkillBox');
+  const targetRoot = path.join(workspace, 'runtime');
+  const targetPath = path.join(targetRoot, 'remote-demo');
+  makeSkill(source, 'remote-demo', 'Remote demo skill');
+  const imported = importSkill({ sourceDir: source, type: 'remote', managedRoot });
+  fs.mkdirSync(targetRoot, { recursive: true });
+  fs.symlinkSync(imported.managedPath, targetPath, 'dir');
+
+  deploySkill({ skillName: 'remote-demo', managedRoot, targetRoot });
+  const currentPath = path.join(managedRoot, 'remote-skills', 'remote-demo', 'current');
+
+  assert.equal(fs.readlinkSync(targetPath), currentPath);
+});
+
 test('refuses to overwrite an existing non-symlink deployment target', () => {
   const workspace = tempDir();
   const source = path.join(workspace, 'source', 'demo');

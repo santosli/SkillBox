@@ -248,16 +248,25 @@ export function deploySkill({ skillName, managedRoot = defaultManagedRoot(), tar
   const targetPath = path.join(targetRootPath, safeName);
 
   fs.mkdirSync(targetRootPath, { recursive: true });
+  let shouldCreateSymlink = false;
   if (fs.existsSync(targetPath) || fs.lstatSync(targetPath, { throwIfNoEntry: false })) {
     const stat = fs.lstatSync(targetPath);
     if (!stat.isSymbolicLink()) {
       throw new Error(`Refusing to overwrite existing non-symlink target: ${targetPath}`);
     }
     const linkedPath = path.resolve(path.dirname(targetPath), fs.readlinkSync(targetPath));
-    if (linkedPath !== managedPath) {
+    if (fs.realpathSync(linkedPath) !== fs.realpathSync(managedPath)) {
       throw new Error(`Refusing to replace symlink pointing elsewhere: ${targetPath}`);
     }
+    if (linkedPath !== managedPath) {
+      fs.unlinkSync(targetPath);
+      shouldCreateSymlink = true;
+    }
   } else {
+    shouldCreateSymlink = true;
+  }
+
+  if (shouldCreateSymlink) {
     fs.symlinkSync(managedPath, targetPath, 'dir');
   }
 
@@ -506,7 +515,7 @@ function resolveManagedSkillPath(paths, skillName) {
   if (fs.existsSync(path.join(userPath, 'SKILL.md'))) return userPath;
 
   const remoteCurrent = path.join(paths.remoteSkillsRoot, skillName, 'current');
-  if (fs.existsSync(path.join(remoteCurrent, 'SKILL.md'))) return fs.realpathSync(remoteCurrent);
+  if (fs.existsSync(path.join(remoteCurrent, 'SKILL.md'))) return remoteCurrent;
 
   throw new Error(`Managed skill not found: ${skillName}`);
 }
