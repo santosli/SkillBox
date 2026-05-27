@@ -12,6 +12,24 @@ pub struct GitHubSkillSource {
     pub kind: String,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GitHubRefKind {
+    Branch,
+    Tag,
+    Commit,
+    Unknown,
+}
+
+pub fn classify_ref_text(reference: &str) -> GitHubRefKind {
+    let value = reference.trim();
+    if value.len() == 40 && value.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        GitHubRefKind::Commit
+    } else {
+        GitHubRefKind::Unknown
+    }
+}
+
 pub fn parse_github_tree_url(input: &str) -> Result<GitHubSkillSource, String> {
     parse_github_skill_url(input)
 }
@@ -144,5 +162,19 @@ mod tests {
             .reference,
             "dev"
         );
+    }
+
+    #[test]
+    fn classifies_commit_ref_without_network() {
+        assert_eq!(
+            classify_ref_text("0123456789abcdef0123456789abcdef01234567"),
+            GitHubRefKind::Commit
+        );
+    }
+
+    #[test]
+    fn non_commit_ref_stays_unknown_until_resolved() {
+        assert_eq!(classify_ref_text("main"), GitHubRefKind::Unknown);
+        assert_eq!(classify_ref_text("v1.0.0"), GitHubRefKind::Unknown);
     }
 }

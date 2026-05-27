@@ -326,14 +326,18 @@ pub enum RemoteSkillUpdateState {
     UpToDate,
     UpdateAvailable,
     CheckFailed,
+    Pinned,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RemoteSkillUpdateStatus {
     pub skill_name: String,
     pub source_type: Option<String>,
+    pub current_version: Option<String>,
     pub installed_sha: Option<String>,
     pub latest_sha: Option<String>,
+    pub ref_kind: Option<String>,
+    pub tracking: bool,
     pub update_available: bool,
     pub state: RemoteSkillUpdateState,
     pub message: Option<String>,
@@ -352,8 +356,15 @@ struct RemoteSkillSource {
     repo_url: Option<String>,
     #[serde(rename = "ref", alias = "reference")]
     reference: Option<String>,
+    #[serde(rename = "refKind", alias = "ref_kind")]
+    ref_kind: Option<String>,
+    tracking: Option<bool>,
+    #[serde(rename = "currentVersion", alias = "current_version")]
+    current_version: Option<String>,
     #[serde(rename = "installedSha", alias = "installed_sha")]
     installed_sha: Option<String>,
+    #[serde(rename = "latestSha", alias = "latest_sha")]
+    latest_sha: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1389,8 +1400,11 @@ fn check_one_remote_skill_update(skill_name: &str, remote_root: &Path) -> Remote
             return RemoteSkillUpdateStatus {
                 skill_name: skill_name.to_string(),
                 source_type: None,
+                current_version: None,
                 installed_sha: None,
                 latest_sha: None,
+                ref_kind: None,
+                tracking: false,
                 update_available: false,
                 state: RemoteSkillUpdateState::NotCheckable,
                 message: Some("Remote source metadata is missing.".to_string()),
@@ -1404,8 +1418,11 @@ fn check_one_remote_skill_update(skill_name: &str, remote_root: &Path) -> Remote
             return RemoteSkillUpdateStatus {
                 skill_name: skill_name.to_string(),
                 source_type: None,
+                current_version: None,
                 installed_sha: None,
                 latest_sha: None,
+                ref_kind: None,
+                tracking: false,
                 update_available: false,
                 state: RemoteSkillUpdateState::CheckFailed,
                 message: Some(format!("Invalid source metadata: {error}")),
@@ -1413,12 +1430,23 @@ fn check_one_remote_skill_update(skill_name: &str, remote_root: &Path) -> Remote
         }
     };
 
+    let current_version = source
+        .current_version
+        .clone()
+        .or_else(|| source.installed_sha.clone());
+    let installed_sha = source.installed_sha.clone();
+    let latest_sha = source.latest_sha.clone();
+    let ref_kind = source.ref_kind.clone();
+
     if source.source_type != "github" {
         return RemoteSkillUpdateStatus {
             skill_name: skill_name.to_string(),
             source_type: Some(source.source_type),
-            installed_sha: source.installed_sha,
-            latest_sha: None,
+            current_version,
+            installed_sha,
+            latest_sha,
+            ref_kind,
+            tracking: false,
             update_available: false,
             state: RemoteSkillUpdateState::NotCheckable,
             message: Some("Only GitHub remote skills can be checked.".to_string()),
@@ -1433,8 +1461,11 @@ fn check_one_remote_skill_update(skill_name: &str, remote_root: &Path) -> Remote
         return RemoteSkillUpdateStatus {
             skill_name: skill_name.to_string(),
             source_type: Some(source.source_type),
-            installed_sha: source.installed_sha,
-            latest_sha: None,
+            current_version,
+            installed_sha,
+            latest_sha,
+            ref_kind,
+            tracking: false,
             update_available: false,
             state: RemoteSkillUpdateState::CheckFailed,
             message: Some("GitHub source is missing repoUrl.".to_string()),
@@ -1446,15 +1477,46 @@ fn check_one_remote_skill_update(skill_name: &str, remote_root: &Path) -> Remote
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("main");
+    let ref_kind = ref_kind.or_else(|| {
+        if skillbox_github::classify_ref_text(reference) == skillbox_github::GitHubRefKind::Commit {
+            Some("commit".to_string())
+        } else {
+            None
+        }
+    });
+    let ref_is_pinned = matches!(ref_kind.as_deref(), Some("tag") | Some("commit"));
+    let tracking = !ref_is_pinned && source.tracking.unwrap_or(true);
+    let status_ref_kind = ref_kind
+        .clone()
+        .or_else(|| tracking.then(|| "branch".to_string()));
+
+    if !tracking {
+        return RemoteSkillUpdateStatus {
+            skill_name: skill_name.to_string(),
+            source_type: Some(source.source_type),
+            current_version,
+            installed_sha,
+            latest_sha,
+            ref_kind: status_ref_kind,
+            tracking,
+            update_available: false,
+            state: RemoteSkillUpdateState::Pinned,
+            message: Some("Pinned GitHub source.".to_string()),
+        };
+    }
 
     match skillbox_git::ls_remote(repo_url, reference) {
         Ok(Some(latest_sha)) => {
-            let update_available = source.installed_sha.as_deref() != Some(latest_sha.as_str());
+            let active_version = current_version.as_deref().or(installed_sha.as_deref());
+            let update_available = active_version != Some(latest_sha.as_str());
             RemoteSkillUpdateStatus {
                 skill_name: skill_name.to_string(),
                 source_type: Some(source.source_type),
-                installed_sha: source.installed_sha,
+                current_version,
+                installed_sha,
                 latest_sha: Some(latest_sha),
+                ref_kind: status_ref_kind,
+                tracking,
                 update_available,
                 state: if update_available {
                     RemoteSkillUpdateState::UpdateAvailable
@@ -1467,8 +1529,11 @@ fn check_one_remote_skill_update(skill_name: &str, remote_root: &Path) -> Remote
         Ok(None) => RemoteSkillUpdateStatus {
             skill_name: skill_name.to_string(),
             source_type: Some(source.source_type),
-            installed_sha: source.installed_sha,
-            latest_sha: None,
+            current_version,
+            installed_sha,
+            latest_sha,
+            ref_kind: status_ref_kind,
+            tracking,
             update_available: false,
             state: RemoteSkillUpdateState::CheckFailed,
             message: Some(format!("Git ref not found: {reference}")),
@@ -1476,8 +1541,11 @@ fn check_one_remote_skill_update(skill_name: &str, remote_root: &Path) -> Remote
         Err(error) => RemoteSkillUpdateStatus {
             skill_name: skill_name.to_string(),
             source_type: Some(source.source_type),
-            installed_sha: source.installed_sha,
-            latest_sha: None,
+            current_version,
+            installed_sha,
+            latest_sha,
+            ref_kind: status_ref_kind,
+            tracking,
             update_available: false,
             state: RemoteSkillUpdateState::CheckFailed,
             message: Some(format!("Git update check failed: {error}")),
@@ -3566,6 +3634,85 @@ description: \"Demo skill\"
     }
 
     #[test]
+    fn check_remote_skill_updates_marks_pinned_sources() {
+        let root = temp_dir("remote-pinned-sources");
+        let managed_root = root.join("SkillBox");
+        let paths = ensure_managed_layout(&managed_root).unwrap();
+
+        write_remote_source_with_json(
+            &paths.remote_skills_root.join("tagged"),
+            r#"{
+              "type":"github",
+              "repoUrl":"https://github.com/acme/skills.git",
+              "ref":"v1.0.0",
+              "refKind":"tag",
+              "tracking":true,
+              "currentVersion":"0123456789abcdef0123456789abcdef01234567",
+              "installedSha":"0123456789abcdef0123456789abcdef01234567"
+            }"#,
+        );
+        write_remote_source_with_json(
+            &paths.remote_skills_root.join("commit"),
+            r#"{
+              "type":"github",
+              "repoUrl":"https://github.com/acme/skills.git",
+              "ref":"0123456789abcdef0123456789abcdef01234567",
+              "currentVersion":"0123456789abcdef0123456789abcdef01234567",
+              "installedSha":"0123456789abcdef0123456789abcdef01234567"
+            }"#,
+        );
+
+        let result = check_remote_skill_updates(&managed_root).unwrap();
+        let tagged = remote_status(&result.statuses, "tagged");
+        assert_eq!(tagged.state, RemoteSkillUpdateState::Pinned);
+        assert!(!tagged.update_available);
+        assert_eq!(tagged.message.as_deref(), Some("Pinned GitHub source."));
+        assert!(!tagged.tracking);
+
+        let commit = remote_status(&result.statuses, "commit");
+        assert_eq!(commit.state, RemoteSkillUpdateState::Pinned);
+        assert_eq!(commit.ref_kind.as_deref(), Some("commit"));
+        assert!(!commit.tracking);
+    }
+
+    #[test]
+    fn check_remote_skill_updates_compares_latest_sha_to_current_version_for_manual_binding() {
+        let root = temp_dir("remote-manual-bound-update");
+        let managed_root = root.join("SkillBox");
+        let paths = ensure_managed_layout(&managed_root).unwrap();
+        let remote = bare_remote_with_main("remote-manual-bound-update-origin");
+        let latest_sha = remote_head(&remote);
+
+        write_remote_source_with_json(
+            &paths.remote_skills_root.join("bound"),
+            &format!(
+                r#"{{
+                  "type":"github",
+                  "repoUrl":"{}",
+                  "ref":"main",
+                  "refKind":"branch",
+                  "tracking":true,
+                  "currentVersion":"manual-abc123def456",
+                  "installedSha":null,
+                  "latestSha":"{}"
+                }}"#,
+                remote.to_string_lossy(),
+                latest_sha
+            ),
+        );
+
+        let result = check_remote_skill_updates(&managed_root).unwrap();
+        let bound = remote_status(&result.statuses, "bound");
+        assert_eq!(bound.state, RemoteSkillUpdateState::UpdateAvailable);
+        assert_eq!(bound.latest_sha.as_deref(), Some(latest_sha.as_str()));
+        assert_eq!(
+            bound.current_version.as_deref(),
+            Some("manual-abc123def456")
+        );
+        assert_eq!(bound.installed_sha, None);
+    }
+
+    #[test]
     fn scan_import_candidates_infers_type_from_path_and_metadata() {
         let root = temp_dir("candidate-type");
         let agents_root = root.join(".agents").join("skills");
@@ -3838,6 +3985,11 @@ description: \"{description}\"
             ),
         )
         .unwrap();
+    }
+
+    fn write_remote_source_with_json(remote_root: &std::path::Path, json: &str) {
+        fs::create_dir_all(remote_root).unwrap();
+        fs::write(remote_root.join("source.json"), json).unwrap();
     }
 
     fn bare_remote(label: &str) -> PathBuf {

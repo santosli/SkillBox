@@ -52,13 +52,24 @@ GitHub remote 使用这些字段：
   "repo": "skills",
   "path": "skills/example",
   "ref": "main",
+  "refKind": "branch",
+  "tracking": true,
   "repoUrl": "https://github.com/openai/skills.git",
   "url": "https://github.com/openai/skills/tree/main/skills/example",
-  "installedSha": "full-commit-sha",
+  "currentVersion": "manual-<contentHash12>",
+  "installedSha": null,
   "latestSha": "full-commit-sha",
   "installedAt": "2026-05-23T00:00:00.000Z"
 }
 ```
+
+GitHub source 的版本语义：
+
+- `refKind: "branch"` 且 `tracking: true` 表示跟踪分支，update check 会查询远端最新 SHA。
+- `refKind: "tag"` 或 `refKind: "commit"` 表示 pinned source，update check 返回 `pinned`，不会自动判断有可用更新。
+- `currentVersion` 是当前 `current` symlink 指向的 managed version 目录名，可以是 `manual-*` 版本，也可以是 GitHub commit SHA。
+- `installedSha` 只在当前版本来自 GitHub commit 时设置；手动绑定远端但尚未替换内容时保留为 `null`。
+- `latestSha` 是最近一次远端查询到的 GitHub SHA，可作为展示缓存，不代表已经安装。
 
 Manual remote 使用这些字段：
 

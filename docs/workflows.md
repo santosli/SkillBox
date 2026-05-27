@@ -146,10 +146,11 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 - 遍历 `remote-skills/<name>/source.json`。
 - 只处理 `type: github` 的 remote skill。
-- 使用 `git ls-remote <repoUrl> <ref>` 查询最新 SHA。
-- 比较 latest remote SHA 与 `installedSha`。
-- 返回每个 remote skill 的 `skillName`、`sourceType`、`installedSha`、`latestSha`、`updateAvailable`、`state`、`message`。
-- Dashboard 的 `Refresh status` 通过 Tauri command 刷新 user-skills Git 状态和 remote update check，再把行状态更新为 `Needs sync`、`Synced`、`Update available`、`Up to date`、`Check failed` 或 `Not checkable`。
+- `refKind: tag`、`refKind: commit` 或 `tracking: false` 的 GitHub source 标记为 `pinned`，不执行远端更新判断。
+- 对 tracking branch 使用 `git ls-remote <repoUrl> <ref>` 查询最新 SHA。
+- 优先比较 latest remote SHA 与 `currentVersion`；没有 `currentVersion` 时兼容比较 `installedSha`。
+- 返回每个 remote skill 的 `skillName`、`sourceType`、`currentVersion`、`installedSha`、`latestSha`、`refKind`、`tracking`、`updateAvailable`、`state`、`message`。
+- Dashboard 的 `Refresh status` 通过 Tauri command 刷新 user-skills Git 状态和 remote update check，再把行状态更新为 `Needs sync`、`Synced`、`Update available`、`Up to date`、`Pinned`、`Check failed` 或 `Not checkable`。
 - Dashboard 的 `Checked` 列显示最近一次 status check 的时间；未检查前显示 `not checked`。
 - 桌面 UI 默认每 5 分钟自动执行一次 status check，间隔通过 Settings 的 `Status refresh` 设置保存到 managed preferences。
 
