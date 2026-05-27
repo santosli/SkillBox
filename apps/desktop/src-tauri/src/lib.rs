@@ -142,12 +142,16 @@ fn check_remote_skill_updates() -> Result<Value, String> {
 }
 
 #[tauri::command]
-fn find_remote_source_candidates(skill_name: String) -> Result<Value, String> {
-    let result = skillbox_core::find_remote_source_candidates(
-        &skill_name,
-        skillbox_core::default_managed_root(),
-    )?;
-    serde_json::to_value(result).map_err(|error| error.to_string())
+async fn find_remote_source_candidates(skill_name: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = skillbox_core::find_remote_source_candidates(
+            &skill_name,
+            skillbox_core::default_managed_root(),
+        )?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Remote source search task failed: {error}"))?
 }
 
 #[tauri::command]

@@ -1141,7 +1141,7 @@ export default function App() {
       sourceUrl: '',
       candidates: [],
       searched: false,
-      searching: false,
+      searching: true,
       searchError: '',
       preview: null,
       error: '',
@@ -3116,7 +3116,10 @@ function RemoteSourceBindingDialog({
               </button>
             </div>
             {dialog.searching ? (
-              <div className="remoteSourceCandidateNotice">Searching GitHub for matching SKILL.md files...</div>
+              <div className="remoteSourceCandidateNotice" aria-live="polite">
+                Searching Claude Marketplace in the background. You can paste a GitHub URL or close this dialog while
+                results load.
+              </div>
             ) : hasCandidates ? (
               <div className="remoteSourceCandidateList">
                 {dialog.candidates.map((candidate) => (

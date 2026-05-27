@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const css = await readFile(new URL('./styles.css', import.meta.url), 'utf8');
 const appSource = await readFile(new URL('./App.jsx', import.meta.url), 'utf8');
+const tauriSource = await readFile(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8');
 
 test('dashboard and workspace cards share a fixed auto-wrapping grid width', () => {
   const sharedGridRule = css.match(/\.skillCardGrid,\s*\.workspaceCardGrid\s*\{(?<body>[^}]*)\}/s)
@@ -90,6 +91,24 @@ test('remote source search starts after the binding dialog has painted', () => {
     openSourceDialog.indexOf('await waitForNextPaint();') <
       openSourceDialog.indexOf('void searchRemoteSourceCandidates(skill.name);')
   );
+});
+
+test('remote source search is presented as a non-blocking background task', () => {
+  const openSourceDialog = appSource.match(
+    /async function openRemoteSourceDialog\(skill\)\s*\{(?<body>[\s\S]*?)\n  \}/
+  )?.groups.body || '';
+
+  assert.match(openSourceDialog, /searching:\s*true/);
+  assert.match(appSource, /Searching Claude Marketplace in the background\./);
+  assert.match(appSource, /You can paste a GitHub URL or close this dialog while\s+results load\./);
+  assert.match(appSource, /className="iconButton" disabled=\{dialog\.loading\}/);
+  assert.match(appSource, /disabled=\{dialog\.loading\}\s+placeholder=/);
+  assert.doesNotMatch(appSource, /disabled=\{dialog\.loading \|\| dialog\.searching\}/);
+});
+
+test('remote source search command runs marketplace lookup off the command handler', () => {
+  assert.match(tauriSource, /async fn find_remote_source_candidates/);
+  assert.match(tauriSource, /tauri::async_runtime::spawn_blocking/);
 });
 
 test('remote source candidates use view and bind actions instead of inline preview', () => {
