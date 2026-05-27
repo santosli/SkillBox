@@ -192,8 +192,10 @@ button {
 .content {
   min-width: 0;
   height: 100vh;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 42px 48px 48px;
+  scrollbar-gutter: stable;
 }
 
 .pageHeader,
@@ -427,17 +429,17 @@ button {
 }
 
 .dashboardControlRow {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) max-content max-content max-content;
   min-width: 0;
-  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
 }
 
-.dashboardSearch {
-  flex: 1 1 560px;
-  min-width: 360px;
-  max-width: 840px;
+.searchField.dashboardSearch {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
 }
 
 .searchField.dashboardSearch svg {
@@ -460,13 +462,22 @@ button {
 
 .dashboardTypeTabs,
 .viewSwitch {
-  display: inline-flex;
   height: 46px;
   align-items: center;
   border: 1px solid #dfe4ec;
   border-radius: 8px;
   background: #ffffff;
   padding: 4px;
+}
+
+.dashboardTypeTabs {
+  display: grid;
+  width: 380px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.viewSwitch {
+  display: inline-flex;
 }
 
 .dashboardTypeTabs button,
@@ -484,6 +495,11 @@ button {
   font-size: 13px;
   font-weight: 660;
   padding: 0 12px;
+}
+
+.dashboardTypeTabs button {
+  gap: 5px;
+  padding: 0 8px;
 }
 
 .dashboardTypeTabs button small {
@@ -532,10 +548,14 @@ button {
 }
 
 .dashboardActionGroup {
-  display: inline-flex;
+  position: relative;
+  display: grid;
+  width: 330px;
   flex: 0 0 auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   height: 46px;
   align-items: center;
+  overflow: hidden;
   border: 1px solid #dfe4ec;
   border-radius: 8px;
   background: #ffffff;
@@ -543,12 +563,35 @@ button {
   padding: 4px;
 }
 
+.dashboardActionIndicator {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: calc((100% - 8px) / 3);
+  height: 36px;
+  border-radius: 6px;
+  background: #0a84ff;
+  box-shadow: 0 6px 16px rgba(10, 132, 255, 0.22);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(calc(var(--dashboard-action-index, 0) * 100%));
+  transition:
+    opacity 180ms ease,
+    transform 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.dashboardActionGroup.previewing .dashboardActionIndicator {
+  opacity: 1;
+}
+
 .dashboardActionButton {
+  position: relative;
+  z-index: 1;
   display: inline-flex;
   height: 36px;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 7px;
   border-radius: 6px;
   background: transparent;
   color: #1f2937;
@@ -559,22 +602,13 @@ button {
   padding: 0 14px;
 }
 
-.dashboardActionButton + .dashboardActionButton {
-  border-left: 1px solid #eef2f7;
-  border-radius: 0;
-}
-
-.dashboardActionButton:hover:not(:disabled):not(.primary) {
+.dashboardActionButton:hover:not(:disabled):not(.preview) {
   background: #f8fafc;
   color: #111827;
 }
 
-.dashboardActionButton.primary {
-  margin-left: 4px;
-  border-left: 0;
-  border-radius: 6px;
-  background: #0a84ff;
-  box-shadow: 0 6px 16px rgba(10, 132, 255, 0.22);
+.dashboardActionButton.preview {
+  background: transparent;
   color: #ffffff;
 }
 

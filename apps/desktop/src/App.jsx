@@ -4,8 +4,10 @@ import {
   FolderCode,
   Gauge,
   Grid3X3,
+  Import as ImportIcon,
   List,
   MessageCircleQuestionMark,
+  PackagePlus,
   Plus,
   RefreshCw,
   Search,
@@ -1603,23 +1605,64 @@ function Dashboard({
 }
 
 function DashboardActionGroup({ isChecking, onInstall, onRefresh, onRefreshStatuses }) {
+  const [previewAction, setPreviewAction] = useState(null);
+  const previewIndex = { refresh: 0, import: 1, install: 2 }[previewAction] || 0;
+
+  const actions = [
+    {
+      id: 'refresh',
+      icon: RefreshCw,
+      label: 'Refresh',
+      disabled: isChecking,
+      onClick: onRefreshStatuses
+    },
+    {
+      id: 'import',
+      icon: ImportIcon,
+      label: 'Import',
+      onClick: onRefresh
+    },
+    {
+      id: 'install',
+      icon: PackagePlus,
+      label: 'Install',
+      onClick: onInstall
+    }
+  ];
+
   return (
-    <div className="dashboardActionGroup" aria-label="Skill actions">
-      <button
-        className="dashboardActionButton"
-        disabled={isChecking}
-        type="button"
-        onClick={onRefreshStatuses}
-      >
-        <RefreshCw aria-hidden="true" />
-        {isChecking ? 'Checking...' : 'Refresh status'}
-      </button>
-      <button className="dashboardActionButton" type="button" onClick={onRefresh}>
-        Scan
-      </button>
-      <button className="dashboardActionButton primary" type="button" onClick={onInstall}>
-        Install skill
-      </button>
+    <div
+      className={previewAction ? 'dashboardActionGroup previewing' : 'dashboardActionGroup'}
+      aria-label="Skill actions"
+      style={{ '--dashboard-action-index': previewIndex }}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          setPreviewAction(null);
+        }
+      }}
+      onMouseLeave={() => setPreviewAction(null)}
+    >
+      <span className="dashboardActionIndicator" aria-hidden="true" />
+      {actions.map((action) => {
+        const Icon = action.icon;
+        return (
+          <button
+            className={previewAction === action.id ? 'dashboardActionButton preview' : 'dashboardActionButton'}
+            disabled={action.disabled}
+            key={action.id}
+            type="button"
+            onFocus={() => setPreviewAction(action.id)}
+            onMouseEnter={() => setPreviewAction(action.id)}
+            onClick={() => {
+              action.onClick();
+              setPreviewAction(null);
+            }}
+          >
+            <Icon aria-hidden="true" />
+            {action.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
