@@ -222,6 +222,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 - 先执行 check updates。
 - 如果没有新 SHA，返回 no-op。
+- 桌面打开 review dialog 后必须先渲染 loading 状态，再启动 `preview_remote_version_change`。
 - 预览阶段先列出 `versions/*`，标记当前 `currentVersion`。
 - 在临时工作树中 fetch 目标 ref，并只 checkout `source.json.path` 对应的 skill 目录。
 - 验证 `SKILL.md` 和 skill name。
@@ -249,6 +250,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `cargo run -p skillbox-cli --offline -- remote-apply-change <skill-name> --action update --to <sha> --managed-root <temp-SkillBox>`
 - 手动验证：安装一个固定旧 ref 后更新到新 ref，确认 `current` 指向新 SHA。
 - 桌面 UI 手动验证：update review 打开期间显示 loading，完成后展示所有变更文件，文本文件展示 unified diff，二进制或大文件展示 hash/size metadata，no-file-change 更新显示明确说明，确认后刷新版本列表和 operation history。
+- Tauri 验证：`preview_remote_version_change` 这类 Git/diff 预览 command 必须放到 blocking worker，避免点击 `Review update` 时阻塞窗口渲染。
 
 ## 8. Rollback Remote Skill
 

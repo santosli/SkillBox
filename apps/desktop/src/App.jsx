@@ -1495,6 +1495,8 @@ export default function App() {
       error: ''
     });
 
+    await waitForNextPaint();
+
     if (!window.__TAURI_INTERNALS__) {
       const preview = normalizeRemoteVersionPreview({
         skill_name: skill.name,

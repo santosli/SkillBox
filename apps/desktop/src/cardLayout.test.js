@@ -111,6 +111,29 @@ test('remote source search command runs marketplace lookup off the command handl
   assert.match(tauriSource, /tauri::async_runtime::spawn_blocking/);
 });
 
+test('remote update review starts after the loading dialog has painted', () => {
+  const reviewDialog = appSource.match(
+    /async function openRemoteVersionReview\(skill, action, targetVersion = ''\)\s*\{(?<body>[\s\S]*?)\n  \}/
+  )?.groups.body || '';
+
+  assert.match(reviewDialog, /setRemoteVersionDialog\(/);
+  assert.match(reviewDialog, /await waitForNextPaint\(\);/);
+  assert.match(reviewDialog, /invoke\('preview_remote_version_change'/);
+  assert.ok(
+    reviewDialog.indexOf('await waitForNextPaint();') <
+      reviewDialog.indexOf("invoke('preview_remote_version_change'")
+  );
+});
+
+test('remote update preview command runs off the command handler', () => {
+  const previewCommandStart = tauriSource.indexOf('async fn preview_remote_version_change');
+  const nextCommandStart = tauriSource.indexOf('#[tauri::command]', previewCommandStart + 1);
+  const previewCommand = tauriSource.slice(previewCommandStart, nextCommandStart);
+
+  assert.ok(previewCommandStart > 0);
+  assert.match(previewCommand, /tauri::async_runtime::spawn_blocking/);
+});
+
 test('remote skill async operations show loading and no-change states', () => {
   assert.match(appSource, /remoteContextLoading/);
   assert.match(appSource, /Loading remote details/);

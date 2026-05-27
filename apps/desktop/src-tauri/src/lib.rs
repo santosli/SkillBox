@@ -181,14 +181,18 @@ fn list_remote_skill_versions(skill_name: String) -> Result<Value, String> {
 }
 
 #[tauri::command]
-fn preview_remote_version_change(
+async fn preview_remote_version_change(
     request: skillbox_core::RemoteVersionChangeRequest,
 ) -> Result<Value, String> {
-    let result = skillbox_core::preview_remote_version_change(
-        request,
-        skillbox_core::default_managed_root(),
-    )?;
-    serde_json::to_value(result).map_err(|error| error.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = skillbox_core::preview_remote_version_change(
+            request,
+            skillbox_core::default_managed_root(),
+        )?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Remote version preview task failed: {error}"))?
 }
 
 #[tauri::command]
