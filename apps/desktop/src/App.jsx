@@ -2912,7 +2912,7 @@ function RemoteSourceBindingDialog({
       <section className="remoteImportDialog" role="dialog" aria-modal="true" aria-labelledby="remote-source-title">
         <div className="importSheetHeader">
           <div>
-            <h2 id="remote-source-title">Bind GitHub source</h2>
+            <h2 id="remote-source-title">Bind source</h2>
             <p>Link a GitHub source without replacing the current version.</p>
           </div>
           <button className="iconButton" disabled={dialog.loading} type="button" aria-label="Close source binding" onClick={onClose}>
@@ -3095,7 +3095,7 @@ function RemoteSkillControlPanel({
     <section className="remoteSkillPanel" aria-label="Remote skill controls">
       <div className="remoteSkillActionStack">
         <button className="button secondary" type="button" onClick={onBindRemoteSource}>
-          Bind GitHub source
+          Bind source
         </button>
         <button
           className="button primary"
