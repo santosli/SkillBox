@@ -185,7 +185,7 @@ Update checks are supported only for GitHub branch sources in the MVP.
 Flow:
 
 1. Read every remote skill `source.json`.
-2. Mark missing source metadata as `not_checkable`.
+2. Mark missing source metadata as `no_source`.
 3. Mark manual sources as `not_checkable`.
 4. Mark pinned GitHub tag or commit sources as `pinned`.
 5. For tracking GitHub branch sources, run a structured `git ls-remote` against

@@ -68,10 +68,20 @@ export function normalizeRemoteSkillUpdates(result) {
     tracking: Boolean(status.tracking),
     updateAvailable: Boolean(status.updateAvailable ?? status.update_available),
     state: status.state || 'not_checkable',
+    stateLabel: remoteUpdateStateLabel(status.state || 'not_checkable'),
     message: status.message || ''
   }));
 
   return { statuses };
+}
+
+function remoteUpdateStateLabel(state) {
+  if (state === 'no_source') return 'No source';
+  if (state === 'update_available') return 'Update available';
+  if (state === 'up_to_date') return 'Up to date';
+  if (state === 'pinned') return 'Pinned';
+  if (state === 'check_failed') return 'Check failed';
+  return 'Not checkable';
 }
 
 export function remoteSkillRowStatus(skill, remoteUpdates) {
@@ -79,6 +89,9 @@ export function remoteSkillRowStatus(skill, remoteUpdates) {
   const status = remoteUpdates?.statuses?.find((item) => item.skillName === skill.name);
   if (!status) return null;
 
+  if (status.state === 'no_source') {
+    return { label: 'No source', tone: 'slate' };
+  }
   if (status.state === 'update_available') {
     return { label: 'Update available', tone: 'amber' };
   }
@@ -100,6 +113,7 @@ export function dashboardStatusNotice({ userSkillsGit, remoteUpdates }) {
   const upToDate = statuses.filter((status) => status.state === 'up_to_date').length;
   const pinned = statuses.filter((status) => status.state === 'pinned').length;
   const failed = statuses.filter((status) => status.state === 'check_failed').length;
+  const noSource = statuses.filter((status) => status.state === 'no_source').length;
   const notCheckable = statuses.filter((status) => status.state === 'not_checkable').length;
   const parts = [];
 
@@ -107,6 +121,7 @@ export function dashboardStatusNotice({ userSkillsGit, remoteUpdates }) {
   if (upToDate) parts.push(`${upToDate} up to date`);
   if (pinned) parts.push(`${pinned} pinned`);
   if (failed) parts.push(`${failed} check ${failed === 1 ? 'failed' : 'failures'}`);
+  if (noSource) parts.push(`${noSource} missing ${noSource === 1 ? 'source' : 'sources'}`);
   if (notCheckable) parts.push(`${notCheckable} not checkable`);
 
   if (userSkillsGit?.state === 'dirty') {

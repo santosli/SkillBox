@@ -156,7 +156,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 失败与回滚：
 
-- 缺失 `source.json` 的 remote skill 标记为 `not_checkable`。
+- 缺失 `source.json` 的 remote skill 标记为 `no_source`，提示用户先绑定 GitHub source。
 - 非 GitHub remote 标记为 `not_checkable`。
 - 网络或 Git 失败应作为该 skill 的 update check error 返回，不应破坏现有版本。
 - 这个 workflow 只检查状态，不更新 `source.json`、`current` symlink 或版本目录。

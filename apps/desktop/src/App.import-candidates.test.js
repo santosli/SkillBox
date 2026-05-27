@@ -296,6 +296,11 @@ test('remote skill row status follows refreshed update state', () => {
   const updates = normalizeRemoteSkillUpdates({
     statuses: [
       {
+        skill_name: 'grill-me',
+        state: 'no_source',
+        update_available: false
+      },
+      {
         skill_name: 'find-skills',
         state: 'update_available',
         update_available: true,
@@ -308,7 +313,7 @@ test('remote skill row status follows refreshed update state', () => {
         update_available: false
       },
       {
-        skill_name: 'grill-me',
+        skill_name: 'hatch-pet',
         state: 'pinned',
         ref_kind: 'tag',
         tracking: false
@@ -320,11 +325,15 @@ test('remote skill row status follows refreshed update state', () => {
     label: 'Update available',
     tone: 'amber'
   });
+  assert.deepEqual(remoteSkillRowStatus({ name: 'grill-me', type: 'remote' }, updates), {
+    label: 'No source',
+    tone: 'slate'
+  });
   assert.deepEqual(remoteSkillRowStatus({ name: 'frontend-design', type: 'remote' }, updates), {
     label: 'Up to date',
     tone: 'green'
   });
-  assert.deepEqual(remoteSkillRowStatus({ name: 'grill-me', type: 'remote' }, updates), {
+  assert.deepEqual(remoteSkillRowStatus({ name: 'hatch-pet', type: 'remote' }, updates), {
     label: 'Pinned',
     tone: 'blue'
   });
@@ -433,6 +442,7 @@ test('dashboard status notice summarizes local sync and remote checks', () => {
     statuses: [
       { skill_name: 'newer', state: 'update_available', update_available: true },
       { skill_name: 'fresh', state: 'up_to_date', update_available: false },
+      { skill_name: 'missing', state: 'no_source', update_available: false },
       { skill_name: 'manual', state: 'not_checkable', update_available: false },
       { skill_name: 'broken', state: 'check_failed', update_available: false }
     ]
@@ -440,6 +450,6 @@ test('dashboard status notice summarizes local sync and remote checks', () => {
 
   assert.equal(
     dashboardStatusNotice({ userSkillsGit: { state: 'dirty' }, remoteUpdates: updates }),
-    '1 remote update available, 1 up to date, 1 check failed, 1 not checkable, user skills need sync.'
+    '1 remote update available, 1 up to date, 1 check failed, 1 missing source, 1 not checkable, user skills need sync.'
   );
 });

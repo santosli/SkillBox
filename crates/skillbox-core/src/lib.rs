@@ -322,6 +322,7 @@ pub struct UserSkillsSyncResult {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RemoteSkillUpdateState {
+    NoSource,
     NotCheckable,
     UpToDate,
     UpdateAvailable,
@@ -1971,7 +1972,7 @@ fn check_one_remote_skill_update(skill_name: &str, remote_root: &Path) -> Remote
                 ref_kind: None,
                 tracking: false,
                 update_available: false,
-                state: RemoteSkillUpdateState::NotCheckable,
+                state: RemoteSkillUpdateState::NoSource,
                 message: Some("Remote source metadata is missing.".to_string()),
             };
         }
@@ -4699,7 +4700,7 @@ description: \"Demo skill\"
     }
 
     #[test]
-    fn check_remote_skill_updates_marks_missing_and_manual_sources_not_checkable() {
+    fn check_remote_skill_updates_marks_missing_source_separately_from_not_checkable() {
         let root = temp_dir("remote-not-checkable");
         let managed_root = root.join("SkillBox");
         let paths = ensure_managed_layout(&managed_root).unwrap();
@@ -4718,7 +4719,7 @@ description: \"Demo skill\"
         let missing = remote_status(&result.statuses, "missing-source");
         let manual = remote_status(&result.statuses, "manual-source");
 
-        assert_eq!(missing.state, RemoteSkillUpdateState::NotCheckable);
+        assert_eq!(missing.state, RemoteSkillUpdateState::NoSource);
         assert_eq!(manual.state, RemoteSkillUpdateState::NotCheckable);
         assert!(!missing.update_available);
         assert!(!manual.update_available);
