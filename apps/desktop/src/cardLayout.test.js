@@ -111,6 +111,14 @@ test('remote source search command runs marketplace lookup off the command handl
   assert.match(tauriSource, /tauri::async_runtime::spawn_blocking/);
 });
 
+test('remote skill async operations show loading and no-change states', () => {
+  assert.match(appSource, /remoteContextLoading/);
+  assert.match(appSource, /Loading remote details/);
+  assert.match(appSource, /Loading diff/);
+  assert.match(appSource, /No file changes in this skill/);
+  assert.match(appSource, /inlineSpinner/);
+});
+
 test('remote source candidates use view and bind actions instead of inline preview', () => {
   assert.match(appSource, /onViewCandidate\(candidate\)/);
   assert.match(appSource, /onBindCandidate\(candidate\)/);
@@ -123,7 +131,8 @@ test('remote source candidates use view and bind actions instead of inline previ
 test('remote source candidate bind confirmation checks before final binding', () => {
   assert.match(appSource, /function RemoteSourceCandidateBindDialog/);
   assert.match(appSource, /Checking source/);
-  assert.match(appSource, />\s*Confirm bind\s*<\/button>/);
+  assert.match(appSource, /Confirm bind/);
+  assert.match(appSource, /Binding\.\.\./);
   assert.match(appSource, /disabled=\{!canConfirm\}/);
 });
 

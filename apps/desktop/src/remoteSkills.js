@@ -96,8 +96,8 @@ export function normalizeRemoteVersionPreview(preview = {}) {
   };
 }
 
-export function canApplyRemoteVersionChange({ files = [], loading = false } = {}) {
-  return !loading && files.length > 0;
+export function canApplyRemoteVersionChange({ allowNoFileChanges = false, files = [], loading = false } = {}) {
+  return !loading && (files.length > 0 || allowNoFileChanges);
 }
 
 export function remoteSkillUpdateVersionLabel(remoteUpdate = {}, versions = {}) {

@@ -283,6 +283,7 @@ export default function App() {
     preview: null,
     error: '',
     loading: false,
+    binding: false,
     candidateBind: closedRemoteSourceCandidateBind
   });
   const [remoteVersionDialog, setRemoteVersionDialog] = useState({
@@ -295,6 +296,7 @@ export default function App() {
   });
   const [remoteVersions, setRemoteVersions] = useState({});
   const [operationHistory, setOperationHistory] = useState({});
+  const [remoteContextLoading, setRemoteContextLoading] = useState({});
   const contentRef = useRef(null);
   const autoRefreshStateRef = useRef({ status: 'idle', isFirstUse: false });
   const refreshSkillStatusesRef = useRef(null);
@@ -1044,6 +1046,8 @@ export default function App() {
   async function loadRemoteSkillContext(skillName) {
     if (!skillName) return;
 
+    setRemoteContextLoading((current) => ({ ...current, [skillName]: true }));
+
     if (!window.__TAURI_INTERNALS__) {
       const mockLatestSha = '1234567890abcdef';
       setRemoteVersions((current) => ({
@@ -1096,6 +1100,7 @@ export default function App() {
           }
         ]
       }));
+      setRemoteContextLoading((current) => ({ ...current, [skillName]: false }));
       return;
     }
 
@@ -1131,6 +1136,8 @@ export default function App() {
           }
         ]
       }));
+    } finally {
+      setRemoteContextLoading((current) => ({ ...current, [skillName]: false }));
     }
   }
 
@@ -1146,6 +1153,7 @@ export default function App() {
       preview: null,
       error: '',
       loading: false,
+      binding: false,
       candidateBind: closedRemoteSourceCandidateBind
     });
     await waitForNextPaint();
@@ -1158,6 +1166,7 @@ export default function App() {
       open: false,
       error: '',
       loading: false,
+      binding: false,
       candidateBind: closedRemoteSourceCandidateBind
     }));
   }
@@ -1274,6 +1283,7 @@ export default function App() {
       ...current,
       sourceUrl: trimmedSourceUrl,
       loading: true,
+      binding: false,
       preview: null,
       error: ''
     }));
@@ -1445,11 +1455,11 @@ export default function App() {
   }
 
   async function bindPreviewedRemoteSource() {
-    setRemoteSourceDialog((current) => ({ ...current, loading: true, error: '' }));
+    setRemoteSourceDialog((current) => ({ ...current, loading: true, binding: true, error: '' }));
 
     if (!window.__TAURI_INTERNALS__) {
       setNotice(`Bound ${remoteSourceDialog.skillName} to GitHub source.`);
-      setRemoteSourceDialog((current) => ({ ...current, open: false, loading: false }));
+      setRemoteSourceDialog((current) => ({ ...current, open: false, loading: false, binding: false }));
       return;
     }
 
@@ -1461,7 +1471,7 @@ export default function App() {
           actor: 'desktop'
         }
       });
-      setRemoteSourceDialog((current) => ({ ...current, open: false, loading: false }));
+      setRemoteSourceDialog((current) => ({ ...current, open: false, loading: false, binding: false }));
       await refreshSkillStatuses();
       await loadRemoteSkillContext(remoteSourceDialog.skillName);
       setNotice(`Bound ${remoteSourceDialog.skillName} to GitHub source.`);
@@ -1469,6 +1479,7 @@ export default function App() {
       setRemoteSourceDialog((current) => ({
         ...current,
         loading: false,
+        binding: false,
         error: bindError.message || String(bindError)
       }));
     }
@@ -1931,6 +1942,7 @@ export default function App() {
           skill={selectedSkill}
           status={status}
           userSkillsGit={userSkillsGit}
+          remoteLoading={Boolean(remoteContextLoading[selectedSkill.name])}
           remoteUpdate={remoteSkillUpdates.statuses.find((item) => item.skillName === selectedSkill.name)}
           versions={remoteVersions[selectedSkill.name] || null}
           operations={operationHistory[selectedSkill.name] || []}
@@ -3073,6 +3085,15 @@ function UserSkillsSyncDialog({
   );
 }
 
+function LoadingNotice({ children, compact = false }) {
+  return (
+    <div className={compact ? 'loadingNotice compact' : 'loadingNotice'} aria-live="polite">
+      <span className="inlineSpinner" aria-hidden="true" />
+      <span>{children}</span>
+    </div>
+  );
+}
+
 function RemoteSourceBindingDialog({
   dialog,
   onBind,
@@ -3083,7 +3104,7 @@ function RemoteSourceBindingDialog({
   onUpdate,
   onViewCandidate
 }) {
-  const canBind = dialog.preview && dialog.preview.validation !== 'mismatch' && !dialog.loading;
+  const canBind = dialog.preview && dialog.preview.validation !== 'mismatch' && !dialog.loading && !dialog.binding;
   const hasCandidates = dialog.candidates.length > 0;
 
   return (
@@ -3117,16 +3138,16 @@ function RemoteSourceBindingDialog({
           <div className="remoteSourceCandidatePanel">
             <div className="remoteSourceCandidateHeader">
               <span>Suggested Claude Marketplace matches</span>
-              <button className="inlineActionButton" disabled={dialog.searching} type="button" onClick={onSearch}>
+              <button className="inlineActionButton" disabled={dialog.searching || dialog.binding} type="button" onClick={onSearch}>
                 <RefreshCw aria-hidden="true" size={14} />
                 {dialog.searching ? 'Searching...' : 'Search again'}
               </button>
             </div>
             {dialog.searching ? (
-              <div className="remoteSourceCandidateNotice" aria-live="polite">
+              <LoadingNotice compact>
                 Searching Claude Marketplace in the background. You can paste a GitHub URL or close this dialog while
                 results load.
-              </div>
+              </LoadingNotice>
             ) : hasCandidates ? (
               <div className="remoteSourceCandidateList">
                 {dialog.candidates.map((candidate) => (
@@ -3149,7 +3170,7 @@ function RemoteSourceBindingDialog({
                         </button>
                         <button
                           className="button primary"
-                          disabled={dialog.loading || !candidate.sourceUrl}
+                          disabled={dialog.loading || dialog.binding || !candidate.sourceUrl}
                           type="button"
                           onClick={() => onBindCandidate(candidate)}
                         >
@@ -3182,14 +3203,28 @@ function RemoteSourceBindingDialog({
           ) : null}
           {dialog.error ? <div className="formError">{dialog.error}</div> : null}
           <div className="remoteImportFooter">
-            <button className="button secondary" disabled={dialog.loading} type="button" onClick={onClose}>
+            <button className="button secondary" disabled={dialog.binding} type="button" onClick={onClose}>
               Cancel
             </button>
-            <button className="button secondary" disabled={dialog.loading || !dialog.sourceUrl.trim()} type="submit">
-              {dialog.loading ? 'Checking...' : 'Preview'}
+            <button className="button secondary" disabled={dialog.loading || dialog.binding || !dialog.sourceUrl.trim()} type="submit">
+              {dialog.loading ? (
+                <>
+                  <span className="buttonSpinner" aria-hidden="true" />
+                  Checking...
+                </>
+              ) : (
+                'Preview'
+              )}
             </button>
             <button className="button primary" disabled={!canBind} type="button" onClick={onBind}>
-              Bind source
+              {dialog.binding ? (
+                <>
+                  <span className="buttonSpinner" aria-hidden="true" />
+                  Binding...
+                </>
+              ) : (
+                'Bind source'
+              )}
             </button>
           </div>
         </form>
@@ -3237,7 +3272,7 @@ function RemoteSourceCandidateBindDialog({ dialog, skillName, onClose, onConfirm
           </div>
 
           {dialog.loading ? (
-            <div className="remoteSourceCandidateNotice">Checking source...</div>
+            <LoadingNotice>Checking source...</LoadingNotice>
           ) : dialog.preview ? (
             <div className="sourceBindingPreview">
               <strong>{dialog.preview.statusLabel}</strong>
@@ -3253,7 +3288,14 @@ function RemoteSourceCandidateBindDialog({ dialog, skillName, onClose, onConfirm
               Cancel
             </button>
             <button className="button primary" disabled={!canConfirm} type="button" onClick={onConfirm}>
-              Confirm bind
+              {dialog.binding ? (
+                <>
+                  <span className="buttonSpinner" aria-hidden="true" />
+                  Binding...
+                </>
+              ) : (
+                'Confirm bind'
+              )}
             </button>
           </div>
         </div>
@@ -3268,7 +3310,11 @@ function RemoteVersionReviewDialog({ dialog, onActivatePath, onApply, onClose })
     preview?.files.find((file) => file.path === dialog.activePath) ||
     preview?.files[0] ||
     null;
+  const hasNoFileChanges = Boolean(preview && preview.files.length === 0);
+  const allowNoFileChanges =
+    hasNoFileChanges && Boolean(preview?.fromVersion && preview?.toVersion && preview.fromVersion !== preview.toVersion);
   const canApply = canApplyRemoteVersionChange({
+    allowNoFileChanges,
     files: preview?.files || [],
     loading: dialog.loading || dialog.applying
   });
@@ -3291,7 +3337,7 @@ function RemoteVersionReviewDialog({ dialog, onActivatePath, onApply, onClose })
             <X aria-hidden="true" />
           </button>
         </div>
-        {dialog.loading ? <div className="gitEmptyState">Loading diff...</div> : null}
+        {dialog.loading ? <LoadingNotice>Loading diff...</LoadingNotice> : null}
         {preview ? (
           <div className="gitCommitReview">
             <aside className="gitFilePane">
@@ -3299,19 +3345,23 @@ function RemoteVersionReviewDialog({ dialog, onActivatePath, onApply, onClose })
                 <strong>{preview.files.length} files</strong>
               </div>
               <div className="gitFileList">
-                {preview.files.map((file) => (
-                  <button
-                    className={activeFile?.path === file.path ? 'gitFileRow remoteFileRow active' : 'gitFileRow remoteFileRow'}
-                    key={file.path}
-                    type="button"
-                    onClick={() => onActivatePath(file.path)}
-                  >
-                    <span>
-                      <strong>{file.path}</strong>
-                      <small>{file.label}</small>
-                    </span>
-                  </button>
-                ))}
+                {preview.files.length > 0 ? (
+                  preview.files.map((file) => (
+                    <button
+                      className={activeFile?.path === file.path ? 'gitFileRow remoteFileRow active' : 'gitFileRow remoteFileRow'}
+                      key={file.path}
+                      type="button"
+                      onClick={() => onActivatePath(file.path)}
+                    >
+                      <span>
+                        <strong>{file.path}</strong>
+                        <small>{file.label}</small>
+                      </span>
+                    </button>
+                  ))
+                ) : (
+                  <div className="gitEmptyState">No file changes.</div>
+                )}
               </div>
             </aside>
             <section className="gitDiffPane" aria-label="Remote version diff">
@@ -3319,7 +3369,12 @@ function RemoteVersionReviewDialog({ dialog, onActivatePath, onApply, onClose })
                 <strong>{activeFile?.path || 'Diff'}</strong>
                 {activeFile ? <span>{activeFile.label}</span> : null}
               </div>
-              {activeFile?.binary || activeFile?.tooLarge ? (
+              {hasNoFileChanges ? (
+                <div className="gitDiffEmpty noFileChanges">
+                  <strong>No file changes in this skill</strong>
+                  <span>Applying records the latest source revision without changing local files.</span>
+                </div>
+              ) : activeFile?.binary || activeFile?.tooLarge ? (
                 <div className="gitDiffEmpty">
                   <span>{`${activeFile.oldHash || 'new'} -> ${activeFile.newHash || 'deleted'}`}</span>
                 </div>
@@ -3335,7 +3390,14 @@ function RemoteVersionReviewDialog({ dialog, onActivatePath, onApply, onClose })
             Cancel
           </button>
           <button className="button primary" disabled={!canApply} type="button" onClick={onApply}>
-            {dialog.applying ? 'Applying...' : 'Apply change'}
+            {dialog.applying ? (
+              <>
+                <span className="buttonSpinner" aria-hidden="true" />
+                Applying...
+              </>
+            ) : (
+              'Apply change'
+            )}
           </button>
         </div>
       </section>
@@ -3344,6 +3406,7 @@ function RemoteVersionReviewDialog({ dialog, onActivatePath, onApply, onClose })
 }
 
 function RemoteSkillControlPanel({
+  loading,
   operations,
   remoteUpdate,
   versions,
@@ -3366,6 +3429,7 @@ function RemoteSkillControlPanel({
           Review update
         </button>
       </div>
+      {loading ? <LoadingNotice>Loading remote details...</LoadingNotice> : null}
       {remoteUpdate ? (
         <div className="remoteVersionSummary">
           <strong>{remoteUpdate.state === 'pinned' ? 'Pinned source' : remoteUpdate.stateLabel || remoteUpdate.state}</strong>
@@ -3697,6 +3761,7 @@ function CandidateRow({ candidate, onToggleSelected, onTypeChange }) {
 function SkillDetailDialog({
   skill,
   operations,
+  remoteLoading,
   remoteUpdate,
   status,
   userSkillsGit,
@@ -3809,6 +3874,7 @@ function SkillDetailDialog({
 
         {skill.type === 'remote' ? (
           <RemoteSkillControlPanel
+            loading={remoteLoading}
             operations={operations}
             remoteUpdate={remoteUpdate}
             versions={versions}
@@ -3840,7 +3906,14 @@ function SkillDetailDialog({
             </button>
           ) : (
             <button className="button secondary" disabled={isChecking} type="button" onClick={() => onCheckUpdates()}>
-              {isChecking ? 'Checking...' : 'Check update'}
+              {isChecking ? (
+                <>
+                  <span className="buttonSpinner" aria-hidden="true" />
+                  Checking...
+                </>
+              ) : (
+                'Check update'
+              )}
             </button>
           )}
         </footer>

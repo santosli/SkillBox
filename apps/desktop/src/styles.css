@@ -2315,6 +2315,29 @@ dd {
   line-height: 1.4;
 }
 
+.loadingNotice {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #315086;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+  padding: 10px 12px;
+}
+
+.loadingNotice.compact {
+  padding: 8px 10px;
+}
+
+.loadingNotice span:last-child {
+  min-width: 0;
+}
+
 .remoteSourceCandidateMeta {
   display: flex;
   min-width: 0;
@@ -2848,6 +2871,22 @@ dd {
   text-align: center;
 }
 
+.gitDiffEmpty.noFileChanges {
+  gap: 6px;
+  padding: 24px;
+}
+
+.gitDiffEmpty.noFileChanges strong {
+  color: #111827;
+  font-size: 14px;
+  font-weight: 720;
+}
+
+.gitDiffEmpty.noFileChanges span {
+  max-width: 360px;
+  line-height: 1.45;
+}
+
 .gitEmptyState {
   display: grid;
   min-height: 160px;
@@ -2877,6 +2916,26 @@ dd {
   border-radius: 999px;
   animation: syncSpin 760ms linear infinite;
   margin-top: 1px;
+}
+
+.inlineSpinner {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  border: 2px solid rgba(37, 99, 235, 0.22);
+  border-top-color: #2563eb;
+  border-radius: 999px;
+  animation: syncSpin 760ms linear infinite;
+}
+
+.buttonSpinner {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 999px;
+  animation: syncSpin 760ms linear infinite;
 }
 
 .syncProgressPanel strong {

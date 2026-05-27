@@ -440,6 +440,17 @@ test('remote version preview requires files before apply', () => {
   assert.equal(canApplyRemoteVersionChange({ files: [{ path: 'SKILL.md' }], loading: false }), true);
 });
 
+test('remote version preview can apply metadata-only updates', () => {
+  assert.equal(
+    canApplyRemoteVersionChange({
+      allowNoFileChanges: true,
+      files: [],
+      loading: false
+    }),
+    true
+  );
+});
+
 test('normalizes remote version preview files', () => {
   const preview = normalizeRemoteVersionPreview({
     skill_name: 'demo',

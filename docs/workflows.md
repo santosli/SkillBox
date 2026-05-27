@@ -227,6 +227,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 验证 `SKILL.md` 和 skill name。
 - 应用前对当前 `current` 目录和目标 snapshot 生成 no-index diff；diff 必须包含所有新增、修改、删除文件，路径规范化为 skill 内相对路径。
 - diff preview 对二进制文件或超过 120 KB 的文件保留文件行、hash 和 size，但不展开文本 diff。
+- 如果 source revision 已变化但 skill 文件内容没有变化，diff review 必须明确显示 no file changes，并允许用户确认以记录最新 revision。
 - apply 阶段写入 `versions/<latestSha>`；如果目录已存在，则复用并重新验证。
 - apply 阶段更新 `current` symlink。
 - apply 阶段更新 `source.json.currentVersion`；当目标版本是 GitHub commit SHA 时同步 `installedSha`。
@@ -247,7 +248,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `cargo run -p skillbox-cli --offline -- remote-preview-change <skill-name> --action update --managed-root <temp-SkillBox>`
 - `cargo run -p skillbox-cli --offline -- remote-apply-change <skill-name> --action update --to <sha> --managed-root <temp-SkillBox>`
 - 手动验证：安装一个固定旧 ref 后更新到新 ref，确认 `current` 指向新 SHA。
-- 桌面 UI 手动验证：update review 展示所有变更文件，文本文件展示 unified diff，二进制或大文件展示 hash/size metadata，确认后刷新版本列表和 operation history。
+- 桌面 UI 手动验证：update review 打开期间显示 loading，完成后展示所有变更文件，文本文件展示 unified diff，二进制或大文件展示 hash/size metadata，no-file-change 更新显示明确说明，确认后刷新版本列表和 operation history。
 
 ## 8. Rollback Remote Skill
 
