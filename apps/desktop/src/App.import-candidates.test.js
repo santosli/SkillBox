@@ -375,6 +375,19 @@ test('normalizes changed source binding without replacing current version', () =
   assert.equal(preview.statusLabel, 'Source can be linked; current version will stay active.');
 });
 
+test('remote update version label handles versions while they are loading', () => {
+  const label = remoteSkillUpdateVersionLabel(
+    {
+      currentVersion: '',
+      latestSha: '',
+      installedSha: ''
+    },
+    null
+  );
+
+  assert.equal(label, 'current unknown');
+});
+
 test('normalizes remote source candidates for desktop binding review', () => {
   const search = normalizeRemoteSourceCandidates({
     skill_name: 'grill-me',

@@ -101,13 +101,14 @@ export function canApplyRemoteVersionChange({ files = [], loading = false } = {}
 }
 
 export function remoteSkillUpdateVersionLabel(remoteUpdate = {}, versions = {}) {
+  const versionInfo = versions || {};
   const current =
     remoteUpdate.currentVersion ||
     remoteUpdate.current_version ||
     remoteUpdate.installedSha ||
     remoteUpdate.installed_sha ||
-    versions.currentVersion ||
-    versions.current_version ||
+    versionInfo.currentVersion ||
+    versionInfo.current_version ||
     '';
   const latest = remoteUpdate.latestSha || remoteUpdate.latest_sha || '';
 
