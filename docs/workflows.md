@@ -190,6 +190,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 自动搜索把 marketplace 结果映射回 GitHub source URL，结果按 skill name、path、marketplace install signal 和 stars 排序。
 - 自动搜索只返回候选、score 和 match reasons，不写 `source.json`，不修改版本目录，必须由用户确认后继续绑定。
 - 绑定前校验会先尝试候选 URL 的原始 path；若 marketplace path 是逻辑 skill 名称而不是仓库真实目录，继续尝试 `skills/<name>`、`skills/public/<name>`、`.claude/skills/<name>` 等常见布局，并把成功解析出的 GitHub URL 写入预览和 `source.json`。
+- 桌面 source preview / bind command 必须在线程池中执行；Git fetch 必须非交互且有界超时，避免 `Checking source...` 阻塞整个 app。
 - 校验本地 skill name，并解析 GitHub URL 的 owner、repo、ref 和 path。
 - 在临时工作树中 fetch 目标 ref，并只 checkout URL 指向的 skill path。
 - 读取远端 `SKILL.md`，和本地 `current` 指向的 skill 做本地验证。

@@ -166,20 +166,31 @@ async fn find_remote_source_candidates(skill_name: String) -> Result<Value, Stri
 }
 
 #[tauri::command]
-fn preview_remote_source_binding(
+async fn preview_remote_source_binding(
     request: skillbox_core::RemoteSourceBindingRequest,
 ) -> Result<Value, String> {
-    let result = skillbox_core::preview_remote_source_binding(
-        request,
-        skillbox_core::default_managed_root(),
-    )?;
-    serde_json::to_value(result).map_err(|error| error.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = skillbox_core::preview_remote_source_binding(
+            request,
+            skillbox_core::default_managed_root(),
+        )?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Remote source preview task failed: {error}"))?
 }
 
 #[tauri::command]
-fn bind_remote_source(request: skillbox_core::BindRemoteSourceRequest) -> Result<Value, String> {
-    let result = skillbox_core::bind_remote_source(request, skillbox_core::default_managed_root())?;
-    serde_json::to_value(result).map_err(|error| error.to_string())
+async fn bind_remote_source(
+    request: skillbox_core::BindRemoteSourceRequest,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result =
+            skillbox_core::bind_remote_source(request, skillbox_core::default_managed_root())?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Remote source bind task failed: {error}"))?
 }
 
 #[tauri::command]

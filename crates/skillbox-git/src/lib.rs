@@ -6,6 +6,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const LS_REMOTE_TIMEOUT: Duration = Duration::from_secs(8);
+const FETCH_REF_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitStatus {
@@ -233,9 +234,11 @@ pub fn fetch_ref_path(
     fs::create_dir_all(checkout_root).map_err(|error| error.to_string())?;
     git(checkout_root, &["init", "-b", "main"])?;
     git(checkout_root, &["remote", "add", "origin", repo_url])?;
-    git(
+    git_network(
         checkout_root,
         &["fetch", "--depth", "1", "origin", reference],
+        FETCH_REF_TIMEOUT,
+        "git fetch",
     )?;
     let sha = git(checkout_root, &["rev-parse", "FETCH_HEAD"])?
         .trim()
@@ -471,6 +474,29 @@ fn git_owned(repo: &Path, args: &[String]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+fn git_network(
+    repo: &Path,
+    args: &[&str],
+    timeout: Duration,
+    label: &str,
+) -> Result<String, String> {
+    let mut command = Command::new("git");
+    command
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_ASKPASS", "true")
+        .env("GCM_INTERACTIVE", "never");
+    let output = command_output_with_timeout(command, timeout, label)?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
 fn git_with_config(repo: &Path, args: &[&str]) -> Result<String, String> {
     let output = Command::new("git")
         .arg("-C")
@@ -593,6 +619,24 @@ mod tests {
     fn ls_remote_timeout_allows_slow_networks_without_unbounded_refresh() {
         assert!(LS_REMOTE_TIMEOUT >= Duration::from_secs(8));
         assert!(LS_REMOTE_TIMEOUT <= Duration::from_secs(10));
+    }
+
+    #[test]
+    fn fetch_ref_path_uses_bounded_noninteractive_fetch() {
+        let source = include_str!("lib.rs");
+        let fetch_ref_path_start = source.find("pub fn fetch_ref_path").unwrap();
+        let diff_no_index_start = source.find("pub fn diff_no_index_tree").unwrap();
+        let fetch_ref_path_source = &source[fetch_ref_path_start..diff_no_index_start];
+        let git_network_start = source.find("fn git_network").unwrap();
+        let git_with_config_start = source.find("fn git_with_config").unwrap();
+        let git_network_source = &source[git_network_start..git_with_config_start];
+
+        assert!(fetch_ref_path_source.contains("git_network"));
+        assert!(fetch_ref_path_source.contains("FETCH_REF_TIMEOUT"));
+        assert!(git_network_source.contains("command_output_with_timeout"));
+        assert!(git_network_source.contains("GIT_TERMINAL_PROMPT"));
+        assert!(git_network_source.contains("GIT_ASKPASS"));
+        assert!(git_network_source.contains("GCM_INTERACTIVE"));
     }
 
     fn temp_dir(prefix: &str) -> PathBuf {

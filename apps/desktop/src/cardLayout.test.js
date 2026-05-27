@@ -120,6 +120,17 @@ test('remote update status command runs off the command handler', () => {
   assert.match(checkCommand, /tauri::async_runtime::spawn_blocking/);
 });
 
+test('remote source bind validation commands run off the command handler', () => {
+  for (const commandName of ['preview_remote_source_binding', 'bind_remote_source']) {
+    const commandStart = tauriSource.indexOf(`async fn ${commandName}`);
+    const nextCommandStart = tauriSource.indexOf('#[tauri::command]', commandStart + 1);
+    const command = tauriSource.slice(commandStart, nextCommandStart);
+
+    assert.ok(commandStart > 0, `${commandName} should be async`);
+    assert.match(command, /tauri::async_runtime::spawn_blocking/, `${commandName} should spawn blocking work`);
+  }
+});
+
 test('dashboard startup loads cached remote update state without refreshing', () => {
   assert.match(appSource, /invoke\('cached_remote_skill_updates'\)/);
   assert.match(appSource, /setRemoteSkillUpdates\(cachedRemoteUpdates\)/);
