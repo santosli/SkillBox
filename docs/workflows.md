@@ -200,8 +200,8 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 触发条件：
 
-- 目标 workflow，当前 Rust/UI 未完整实现。
-- Node core 当前有 update check，但没有完整的 update command。
+- Rust core 提供 preview 和 apply 能力；CLI/UI 入口后续接入。
+- GitHub source 必须已经绑定，并且 update check 已取得 `latestSha`。
 
 步骤：
 
@@ -212,22 +212,22 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 验证 `SKILL.md` 和 skill name。
 - 应用前对当前 `current` 目录和目标 snapshot 生成 no-index diff；diff 必须包含所有新增、修改、删除文件，路径规范化为 skill 内相对路径。
 - diff preview 对二进制文件或超过 120 KB 的文件保留文件行、hash 和 size，但不展开文本 diff。
-- 写入 `versions/<latestSha>`。
-- 更新 `current` symlink。
-- 更新 `source.json.installedSha` 和 `latestSha`。
+- apply 阶段写入 `versions/<latestSha>`；如果目录已存在，则复用并重新验证。
+- apply 阶段更新 `current` symlink。
+- apply 阶段更新 `source.json.currentVersion`；当目标版本是 GitHub commit SHA 时同步 `installedSha`。
 - 记录 SQLite skill hash/path 状态。
-- 保留旧版本目录，供 rollback 使用。
+- 永久保留旧版本目录，供 rollback 使用。
 
 失败与回滚：
 
 - 下载失败不改变 `current`。
 - 新版本无效时拒绝更新，并保留旧版本。
-- 更新 `current` symlink 失败时恢复到旧 `current`。
+- `current` symlink 切换后的 metadata/index 写入失败必须尝试恢复到旧 `current`，并在错误中说明恢复结果。
 - 不删除旧版本目录。
 
 完成验证：
 
-- 新增 Rust tests 覆盖 no-op update、新版本写入、旧版本保留和 symlink 恢复。
+- `cargo test -p skillbox-core --offline apply_`
 - 手动验证：安装一个固定旧 ref 后更新到新 ref，确认 `current` 指向新 SHA。
 
 ## 8. Rollback Remote Skill
@@ -235,7 +235,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 触发条件：
 
 - Node CLI 当前入口：`skillbox rollback <skill-name> --to <sha>`。
-- 目标入口：Rust core + Rust CLI + Tauri command。
+- Rust core 提供 preview 和 apply 能力；CLI/UI 入口后续接入。
 
 步骤：
 
@@ -245,19 +245,21 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 验证目标版本包含 `SKILL.md`。
 - 应用前对当前版本和目标版本生成 no-index diff；diff 必须展示所有受影响文件，包括回滚后会删除的文件。
 - 更新 `current` symlink 指向目标版本。
+- 如果存在 `source.json`，更新 `currentVersion`；当目标版本不是 GitHub commit SHA 时将 `installedSha` 置空。
 - 更新必要的 SQLite 状态。
 
 失败与回滚：
 
 - 找不到版本时拒绝。
 - 短 SHA 匹配多个版本时应拒绝。
-- symlink 更新失败时恢复到原 `current`。
+- `current` symlink 切换后的 metadata/index 写入失败必须尝试恢复到原 `current`。
 - 不删除任何 version 目录。
 
 完成验证：
 
 - 当前 Node：`node packages/skillbox-cli/bin/skillbox.js rollback <skill-name> --to <sha> --managed-root <temp-SkillBox> --json`
-- Rust 迁移完成后新增 tests 覆盖完整 SHA、短 SHA、无匹配、多匹配和 symlink restore。
+- `cargo test -p skillbox-core --offline remote_version`
+- `cargo test -p skillbox-core --offline apply_`
 
 ## 9. Sync User-Skills Git
 

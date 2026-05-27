@@ -467,10 +467,31 @@ pub struct RemoteVersionChangePreview {
     pub affected_deployments: Vec<AffectedDeployment>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteVersionChangeApplyRequest {
+    pub skill_name: String,
+    pub action: RemoteVersionChangeAction,
+    pub target_version: String,
+    pub preview_id: Option<String>,
+    pub actor: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RemoteVersionChangeApplyResult {
+    pub skill_name: String,
+    pub action: RemoteVersionChangeAction,
+    pub from_version: String,
+    pub to_version: String,
+    pub current_path: PathBuf,
+    pub affected_deployments: Vec<AffectedDeployment>,
+    pub operation_id: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 struct RemoteSkillSource {
     #[serde(rename = "type")]
     source_type: String,
+    path: Option<String>,
     #[serde(rename = "repoUrl", alias = "repo_url")]
     repo_url: Option<String>,
     #[serde(rename = "ref", alias = "reference")]
@@ -1656,6 +1677,72 @@ pub fn preview_remote_version_change(
     })
 }
 
+pub fn apply_remote_version_change(
+    request: RemoteVersionChangeApplyRequest,
+    managed_root: impl AsRef<Path>,
+) -> Result<RemoteVersionChangeApplyResult> {
+    validate_skill_name(&request.skill_name)?;
+    let managed_root = managed_root.as_ref().to_path_buf();
+    let operation_type = match request.action {
+        RemoteVersionChangeAction::Update => "update_remote_skill",
+        RemoteVersionChangeAction::Rollback => "rollback_remote_skill",
+    };
+    let operation = start_operation(
+        OperationStart {
+            operation_type: operation_type.to_string(),
+            actor: request.actor.clone(),
+            entity_type: "skill".to_string(),
+            entity_name: request.skill_name.clone(),
+            summary: format!(
+                "Apply {} for {}",
+                remote_version_action_label(request.action),
+                request.skill_name
+            ),
+            payload: serde_json::json!({
+                "targetVersion": request.target_version.clone(),
+                "previewId": request.preview_id.clone()
+            }),
+        },
+        &managed_root,
+    )?;
+
+    match apply_remote_version_change_inner(&request, &managed_root, operation.id.clone()) {
+        Ok(result) => {
+            finish_operation(
+                OperationFinish {
+                    id: operation.id.clone(),
+                    status: OperationStatus::Succeeded,
+                    summary: format!(
+                        "Changed {} from {} to {}",
+                        result.skill_name, result.from_version, result.to_version
+                    ),
+                    error: None,
+                    payload: serde_json::json!({
+                        "fromVersion": result.from_version.clone(),
+                        "toVersion": result.to_version.clone(),
+                        "affectedDeployments": result.affected_deployments.clone()
+                    }),
+                },
+                &managed_root,
+            )?;
+            Ok(result)
+        }
+        Err(error) => {
+            let _ = finish_operation(
+                OperationFinish {
+                    id: operation.id,
+                    status: OperationStatus::Failed,
+                    summary: format!("Remote version change failed for {}", request.skill_name),
+                    error: Some(error.clone()),
+                    payload: serde_json::json!({"targetVersion": request.target_version.clone()}),
+                },
+                &managed_root,
+            );
+            Err(error)
+        }
+    }
+}
+
 pub fn scan_import_candidates(
     roots: &[PathBuf],
     managed_root: impl AsRef<Path>,
@@ -2182,6 +2269,144 @@ fn classify_affected_deployments(
     }
 
     Ok(affected)
+}
+
+fn apply_remote_version_change_inner(
+    request: &RemoteVersionChangeApplyRequest,
+    managed_root: &Path,
+    operation_id: String,
+) -> Result<RemoteVersionChangeApplyResult> {
+    let paths = ensure_managed_layout(managed_root.to_path_buf())?;
+    let from_version = current_remote_version(&paths, &request.skill_name)?;
+    let to_version = resolve_remote_version_apply_target(&paths, request)?;
+    let remote_root = paths.remote_skills_root.join(&request.skill_name);
+    let to_path = match request.action {
+        RemoteVersionChangeAction::Update => {
+            ensure_github_version_snapshot(&paths, &request.skill_name, &to_version)?
+        }
+        RemoteVersionChangeAction::Rollback => remote_root.join("versions").join(&to_version),
+    };
+    let target_skill = read_skill(&to_path)?;
+    if target_skill.name != request.skill_name {
+        return Err(format!(
+            "Version skill name does not match {}",
+            request.skill_name
+        ));
+    }
+
+    let affected_deployments = classify_affected_deployments(&paths, &request.skill_name)?;
+    let current_path = remote_root.join("current");
+    let old_current_target = fs::read_link(&current_path).map_err(|error| error.to_string())?;
+    update_current_symlink(&remote_root, &to_path)?;
+
+    if let Err(error) =
+        update_remote_metadata_after_change(&remote_root, &to_version).and_then(|_| {
+            index_skill(
+                &paths.database_path,
+                &target_skill,
+                SkillKind::Remote,
+                &to_path,
+            )
+        })
+    {
+        let restore_result = update_current_symlink(&remote_root, &old_current_target);
+        let restore_message = match restore_result {
+            Ok(()) => "restored current",
+            Err(_) => "failed to restore current",
+        };
+        return Err(format!("{error}; {restore_message}"));
+    }
+
+    Ok(RemoteVersionChangeApplyResult {
+        skill_name: request.skill_name.clone(),
+        action: request.action,
+        from_version,
+        to_version,
+        current_path,
+        affected_deployments,
+        operation_id,
+    })
+}
+
+fn resolve_remote_version_apply_target(
+    paths: &ManagedPaths,
+    request: &RemoteVersionChangeApplyRequest,
+) -> Result<String> {
+    let target = request.target_version.trim();
+    if target.is_empty() {
+        return Err("Target version is required.".to_string());
+    }
+
+    match request.action {
+        RemoteVersionChangeAction::Rollback => {
+            resolve_remote_version_prefix(paths, &request.skill_name, target)
+        }
+        RemoteVersionChangeAction::Update => Ok(target.to_string()),
+    }
+}
+
+fn ensure_github_version_snapshot(
+    paths: &ManagedPaths,
+    skill_name: &str,
+    target_sha: &str,
+) -> Result<PathBuf> {
+    let remote_root = paths.remote_skills_root.join(skill_name);
+    let version_path = remote_root.join("versions").join(target_sha);
+    if version_path.exists() {
+        read_skill(&version_path)?;
+        return Ok(version_path);
+    }
+
+    let source = read_remote_source(&remote_root)?;
+    let repo_url = source
+        .repo_url
+        .ok_or_else(|| "GitHub source is missing repoUrl.".to_string())?;
+    let source_path = source
+        .path
+        .ok_or_else(|| "GitHub source is missing path.".to_string())?;
+    let temp = temporary_work_dir("remote-update");
+
+    let result = (|| {
+        let checkout = temp.join("checkout");
+        skillbox_git::fetch_ref_path(&repo_url, target_sha, &source_path, &checkout)?;
+        copy_skill_dir(&checkout.join(source_path), &version_path)?;
+        read_skill(&version_path)?;
+        Ok(version_path.clone())
+    })();
+
+    let _ = fs::remove_dir_all(&temp);
+    if result.is_err() {
+        let _ = fs::remove_dir_all(&version_path);
+    }
+    result
+}
+
+fn update_remote_metadata_after_change(remote_root: &Path, to_version: &str) -> Result<()> {
+    let source_path = remote_root.join("source.json");
+    if !source_path.exists() {
+        return Ok(());
+    }
+
+    let content = fs::read_to_string(&source_path).map_err(|error| error.to_string())?;
+    let mut value: serde_json::Value =
+        serde_json::from_str(&content).map_err(|error| error.to_string())?;
+    value["currentVersion"] = serde_json::Value::String(to_version.to_string());
+    value["installedSha"] = if skillbox_github::classify_ref_text(to_version)
+        == skillbox_github::GitHubRefKind::Commit
+    {
+        serde_json::Value::String(to_version.to_string())
+    } else {
+        serde_json::Value::Null
+    };
+    let content = serde_json::to_string_pretty(&value).map_err(|error| error.to_string())?;
+    fs::write(source_path, content).map_err(|error| error.to_string())
+}
+
+fn remote_version_action_label(action: RemoteVersionChangeAction) -> &'static str {
+    match action {
+        RemoteVersionChangeAction::Update => "update",
+        RemoteVersionChangeAction::Rollback => "rollback",
+    }
 }
 
 fn user_skills_git_status_for_repo(repo_path: PathBuf) -> Result<UserSkillsGitStatus> {
@@ -4592,6 +4817,133 @@ description: \"Demo skill\"
         assert_eq!(binary.old_size, Some(3));
         assert!(binary.old_hash.is_some());
         assert_eq!(binary.diff, "");
+    }
+
+    #[test]
+    fn apply_rollback_switches_current_and_records_operation() {
+        let root = temp_dir("apply-rollback");
+        let managed_root = root.join("SkillBox");
+        let paths = ensure_managed_layout(&managed_root).unwrap();
+        let source_v1 = root.join("local-v1").join("demo");
+        make_skill(&source_v1, "demo", "Demo skill");
+        import_skill(&source_v1, SkillKind::Remote, &managed_root).unwrap();
+        let v1 = current_remote_version(&paths, "demo").unwrap();
+        let remote_root = paths.remote_skills_root.join("demo");
+        let v2 = "0123456789abcdef0123456789abcdef01234567";
+        let v2_path = remote_root.join("versions").join(v2);
+        copy_skill_dir(&source_v1, &v2_path).unwrap();
+        fs::write(
+            v2_path.join("SKILL.md"),
+            "---\nname: demo\ndescription: Demo skill\n---\nupdated\n",
+        )
+        .unwrap();
+        update_current_symlink(&remote_root, &v2_path).unwrap();
+
+        let result = apply_remote_version_change(
+            RemoteVersionChangeApplyRequest {
+                skill_name: "demo".to_string(),
+                action: RemoteVersionChangeAction::Rollback,
+                target_version: v1.clone(),
+                preview_id: None,
+                actor: "cli".to_string(),
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        assert_eq!(result.from_version, v2);
+        assert_eq!(result.to_version, v1);
+        assert_eq!(
+            current_remote_version(&paths, "demo").unwrap(),
+            result.to_version
+        );
+        let operations = list_operations(OperationFilter::default(), &managed_root).unwrap();
+        assert!(operations
+            .operations
+            .iter()
+            .any(
+                |operation| operation.operation_type == "rollback_remote_skill"
+                    && operation.status == OperationStatus::Succeeded
+            ));
+    }
+
+    #[test]
+    fn apply_update_writes_latest_version_and_preserves_old_version() {
+        let root = temp_dir("apply-update");
+        let managed_root = root.join("SkillBox");
+        let paths = ensure_managed_layout(&managed_root).unwrap();
+        let source = root.join("local").join("find-skills");
+        make_skill(&source, "find-skills", "Find skills");
+        import_skill(&source, SkillKind::Remote, &managed_root).unwrap();
+        let old_version = current_remote_version(&paths, "find-skills").unwrap();
+        let remote = bare_remote_with_skill_content(
+            "apply-update-origin",
+            "find-skills",
+            "Find skills",
+            "Updated remote body\n",
+        );
+        let _rewrite = github_repo_rewrite("acme", "apply-update", &remote);
+        let source_url = github_source_url("acme", "apply-update", "find-skills");
+        bind_remote_source(
+            BindRemoteSourceRequest {
+                skill_name: "find-skills".to_string(),
+                source_url,
+                actor: "cli".to_string(),
+            },
+            &managed_root,
+        )
+        .unwrap();
+        let latest_sha = read_remote_source(&paths.remote_skills_root.join("find-skills"))
+            .unwrap()
+            .latest_sha
+            .unwrap();
+
+        let result = apply_remote_version_change(
+            RemoteVersionChangeApplyRequest {
+                skill_name: "find-skills".to_string(),
+                action: RemoteVersionChangeAction::Update,
+                target_version: latest_sha.clone(),
+                preview_id: None,
+                actor: "cli".to_string(),
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        assert_eq!(result.to_version, latest_sha);
+        assert!(paths
+            .remote_skills_root
+            .join("find-skills")
+            .join("versions")
+            .join(&old_version)
+            .exists());
+        assert!(paths
+            .remote_skills_root
+            .join("find-skills")
+            .join("versions")
+            .join(&result.to_version)
+            .exists());
+        assert_eq!(
+            current_remote_version(&paths, "find-skills").unwrap(),
+            result.to_version
+        );
+        let source = read_remote_source(&paths.remote_skills_root.join("find-skills")).unwrap();
+        assert_eq!(
+            source.current_version.as_deref(),
+            Some(result.to_version.as_str())
+        );
+        assert_eq!(
+            source.installed_sha.as_deref(),
+            Some(result.to_version.as_str())
+        );
+        let operations = list_operations(OperationFilter::default(), &managed_root).unwrap();
+        assert!(operations
+            .operations
+            .iter()
+            .any(
+                |operation| operation.operation_type == "update_remote_skill"
+                    && operation.status == OperationStatus::Succeeded
+            ));
     }
 
     #[test]
