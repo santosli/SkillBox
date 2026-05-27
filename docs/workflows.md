@@ -207,9 +207,11 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 - 先执行 check updates。
 - 如果没有新 SHA，返回 no-op。
+- 预览阶段先列出 `versions/*`，标记当前 `currentVersion`。
 - 在临时工作树中 fetch 目标 ref，并只 checkout `source.json.path` 对应的 skill 目录。
 - 验证 `SKILL.md` 和 skill name。
 - 应用前对当前 `current` 目录和目标 snapshot 生成 no-index diff；diff 必须包含所有新增、修改、删除文件，路径规范化为 skill 内相对路径。
+- diff preview 对二进制文件或超过 120 KB 的文件保留文件行、hash 和 size，但不展开文本 diff。
 - 写入 `versions/<latestSha>`。
 - 更新 `current` symlink。
 - 更新 `source.json.installedSha` 和 `latestSha`。
@@ -238,8 +240,10 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 步骤：
 
 - 校验 skill name。
+- 预览阶段先列出 `versions/*`，标记当前 `currentVersion`。
 - 在 `remote-skills/<name>/versions` 查找等于 rollback 参数或以该参数开头的版本目录。
 - 验证目标版本包含 `SKILL.md`。
+- 应用前对当前版本和目标版本生成 no-index diff；diff 必须展示所有受影响文件，包括回滚后会删除的文件。
 - 更新 `current` symlink 指向目标版本。
 - 更新必要的 SQLite 状态。
 

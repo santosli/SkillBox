@@ -401,6 +401,72 @@ pub struct BindRemoteSourceResult {
     pub operation_id: String,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteVersionChangeAction {
+    Update,
+    Rollback,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteVersionChangeRequest {
+    pub skill_name: String,
+    pub action: RemoteVersionChangeAction,
+    pub target_version: Option<String>,
+    pub actor: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RemoteSkillVersion {
+    pub version: String,
+    pub is_current: bool,
+    pub kind: String,
+    pub short_label: String,
+    pub path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RemoteSkillVersionList {
+    pub skill_name: String,
+    pub current_version: String,
+    pub versions: Vec<RemoteSkillVersion>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RemoteDiffFile {
+    pub path: String,
+    pub old_path: Option<String>,
+    pub status: String,
+    pub label: String,
+    pub diff: String,
+    pub old_hash: Option<String>,
+    pub new_hash: Option<String>,
+    pub old_size: Option<u64>,
+    pub new_size: Option<u64>,
+    pub binary: bool,
+    pub too_large: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AffectedDeployment {
+    pub target_root: PathBuf,
+    pub target_path: PathBuf,
+    pub mode: String,
+    pub state: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RemoteVersionChangePreview {
+    pub preview_id: String,
+    pub skill_name: String,
+    pub action: RemoteVersionChangeAction,
+    pub from_version: String,
+    pub to_version: String,
+    pub files: Vec<RemoteDiffFile>,
+    pub affected_deployments: Vec<AffectedDeployment>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 struct RemoteSkillSource {
     #[serde(rename = "type")]
@@ -1505,6 +1571,91 @@ pub fn bind_remote_source(
     })
 }
 
+pub fn list_remote_skill_versions(
+    skill_name: &str,
+    managed_root: impl AsRef<Path>,
+) -> Result<RemoteSkillVersionList> {
+    validate_skill_name(skill_name)?;
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let current_version = current_remote_version(&paths, skill_name)?;
+    let versions_root = paths.remote_skills_root.join(skill_name).join("versions");
+    let mut versions = Vec::new();
+
+    for entry in fs::read_dir(&versions_root).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if !entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let version = entry.file_name().to_string_lossy().to_string();
+        versions.push(RemoteSkillVersion {
+            short_label: short_version_label(&version),
+            kind: if version.starts_with("manual-") {
+                "manual"
+            } else {
+                "github"
+            }
+            .to_string(),
+            is_current: version == current_version,
+            path: entry.path(),
+            version,
+        });
+    }
+
+    versions.sort_by(|left, right| {
+        right
+            .is_current
+            .cmp(&left.is_current)
+            .then(left.version.cmp(&right.version))
+    });
+    Ok(RemoteSkillVersionList {
+        skill_name: skill_name.to_string(),
+        current_version,
+        versions,
+    })
+}
+
+pub fn preview_remote_version_change(
+    request: RemoteVersionChangeRequest,
+    managed_root: impl AsRef<Path>,
+) -> Result<RemoteVersionChangePreview> {
+    validate_skill_name(&request.skill_name)?;
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let from_version = current_remote_version(&paths, &request.skill_name)?;
+    let to_version = resolve_remote_version_change_target(&paths, &request)?;
+    let remote_root = paths.remote_skills_root.join(&request.skill_name);
+    let from_path = remote_root.join("versions").join(&from_version);
+    let to_path = remote_root.join("versions").join(&to_version);
+    let from_skill = read_skill(&from_path)?;
+    let to_skill = read_skill(&to_path)?;
+    if from_skill.name != to_skill.name || to_skill.name != request.skill_name {
+        return Err(format!(
+            "Version skill name does not match {}",
+            request.skill_name
+        ));
+    }
+
+    let git_files = skillbox_git::diff_no_index_tree(&from_path, &to_path)?;
+    let files = git_files
+        .into_iter()
+        .map(|file| remote_diff_file(&from_path, &to_path, file))
+        .collect::<Result<Vec<_>>>()?;
+    let affected_deployments = classify_affected_deployments(&paths, &request.skill_name)?;
+    let preview_id = content_hash_text(&format!(
+        "{}:{}:{}",
+        request.skill_name, from_version, to_version
+    ));
+
+    Ok(RemoteVersionChangePreview {
+        preview_id,
+        skill_name: request.skill_name,
+        action: request.action,
+        from_version,
+        to_version,
+        files,
+        affected_deployments,
+    })
+}
+
 pub fn scan_import_candidates(
     roots: &[PathBuf],
     managed_root: impl AsRef<Path>,
@@ -1856,6 +2007,181 @@ fn read_remote_source(remote_root: &Path) -> Result<RemoteSkillSource> {
     let source_path = remote_root.join("source.json");
     let content = fs::read_to_string(&source_path).map_err(|error| error.to_string())?;
     serde_json::from_str(&content).map_err(|error| error.to_string())
+}
+
+fn resolve_remote_version_change_target(
+    paths: &ManagedPaths,
+    request: &RemoteVersionChangeRequest,
+) -> Result<String> {
+    match request.action {
+        RemoteVersionChangeAction::Rollback => {
+            let target = request
+                .target_version
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| "Rollback target version is required.".to_string())?;
+            resolve_remote_version_prefix(paths, &request.skill_name, target)
+        }
+        RemoteVersionChangeAction::Update => {
+            let source = read_remote_source(&paths.remote_skills_root.join(&request.skill_name))?;
+            source
+                .latest_sha
+                .ok_or_else(|| "No latest GitHub SHA is available.".to_string())
+        }
+    }
+}
+
+fn resolve_remote_version_prefix(
+    paths: &ManagedPaths,
+    skill_name: &str,
+    input: &str,
+) -> Result<String> {
+    let versions_root = paths.remote_skills_root.join(skill_name).join("versions");
+    let mut matches = Vec::new();
+    for entry in fs::read_dir(&versions_root).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if !entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let version = entry.file_name().to_string_lossy().to_string();
+        if version == input {
+            return Ok(version);
+        }
+        if version.starts_with(input) {
+            matches.push(version);
+        }
+    }
+
+    match matches.len() {
+        0 => Err(format!("Version not found: {input}")),
+        1 => Ok(matches.remove(0)),
+        _ => Err(format!("Version prefix is ambiguous: {input}")),
+    }
+}
+
+fn short_version_label(version: &str) -> String {
+    if version.starts_with("manual-") {
+        version.to_string()
+    } else {
+        version.chars().take(12).collect()
+    }
+}
+
+fn remote_diff_file(
+    old_root: &Path,
+    new_root: &Path,
+    file: skillbox_git::GitDiffFile,
+) -> Result<RemoteDiffFile> {
+    let old_relative = file.old_path.as_deref().unwrap_or(&file.path);
+    let old_path = old_root.join(old_relative);
+    let new_path = new_root.join(&file.path);
+    let old_metadata = file_metadata(&old_path)?;
+    let new_metadata = file_metadata(&new_path)?;
+    let binary = old_metadata.binary || new_metadata.binary;
+    let too_large = old_metadata.too_large || new_metadata.too_large;
+
+    Ok(RemoteDiffFile {
+        path: file.path,
+        old_path: file.old_path,
+        status: file.status.clone(),
+        label: remote_diff_label(&file.status).to_string(),
+        diff: if binary || too_large {
+            String::new()
+        } else {
+            file.diff
+        },
+        old_hash: old_metadata.hash,
+        new_hash: new_metadata.hash,
+        old_size: old_metadata.size,
+        new_size: new_metadata.size,
+        binary,
+        too_large,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FileMetadata {
+    hash: Option<String>,
+    size: Option<u64>,
+    binary: bool,
+    too_large: bool,
+}
+
+fn file_metadata(path: &Path) -> Result<FileMetadata> {
+    if !path.exists() {
+        return Ok(FileMetadata {
+            hash: None,
+            size: None,
+            binary: false,
+            too_large: false,
+        });
+    }
+
+    let bytes = fs::read(path).map_err(|error| error.to_string())?;
+    let size = bytes.len() as u64;
+    let too_large = bytes.len() > 120_000;
+    let binary = std::str::from_utf8(&bytes).is_err();
+    Ok(FileMetadata {
+        hash: Some(sha256_bytes(&bytes)),
+        size: Some(size),
+        binary,
+        too_large,
+    })
+}
+
+fn remote_diff_label(status: &str) -> &'static str {
+    match status.chars().next() {
+        Some('A') => "Added",
+        Some('D') => "Deleted",
+        Some('M') => "Modified",
+        Some('R') => "Renamed",
+        Some('C') => "Copied",
+        _ => "Changed",
+    }
+}
+
+fn content_hash_text(text: &str) -> String {
+    sha256_bytes(text.as_bytes())
+}
+
+fn classify_affected_deployments(
+    paths: &ManagedPaths,
+    skill_name: &str,
+) -> Result<Vec<AffectedDeployment>> {
+    let deployments = load_deployments(&paths.database_path)?;
+    let current = paths.remote_skills_root.join(skill_name).join("current");
+    let versions_root = paths.remote_skills_root.join(skill_name).join("versions");
+    let mut affected = Vec::new();
+
+    for deployment in deployments.get(skill_name).cloned().unwrap_or_default() {
+        let link_target = fs::read_link(&deployment.target_path).ok();
+        let state = if link_target.as_ref() == Some(&current) {
+            "follows_current"
+        } else if link_target
+            .as_ref()
+            .map(|target| target.starts_with(&versions_root))
+            .unwrap_or(false)
+        {
+            "pinned_version"
+        } else {
+            "unmanaged"
+        };
+        let message = match state {
+            "follows_current" => "Deployment follows current and will update automatically.",
+            "pinned_version" => "Deployment is pinned to an old version.",
+            _ => "Deployment target is not a SkillBox-managed current symlink.",
+        };
+        affected.push(AffectedDeployment {
+            target_root: deployment.target_root,
+            target_path: deployment.target_path,
+            mode: deployment.mode,
+            state: state.to_string(),
+            message: message.to_string(),
+        });
+    }
+
+    Ok(affected)
 }
 
 fn user_skills_git_status_for_repo(repo_path: PathBuf) -> Result<UserSkillsGitStatus> {
@@ -3028,7 +3354,11 @@ fn unquote(value: &str) -> String {
 }
 
 fn sha256(content: &str) -> String {
-    format!("{:x}", Sha256::digest(content.as_bytes()))
+    sha256_bytes(content.as_bytes())
+}
+
+fn sha256_bytes(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
 }
 
 #[cfg(unix)]
@@ -4165,6 +4495,103 @@ description: \"Demo skill\"
             .iter()
             .any(|operation| operation.operation_type == "bind_remote_source"
                 && operation.status == OperationStatus::Failed));
+    }
+
+    #[test]
+    fn remote_version_list_marks_current() {
+        let root = temp_dir("remote-version-list");
+        let managed_root = root.join("SkillBox");
+        let source = root.join("local").join("demo");
+        make_skill(&source, "demo", "Demo skill");
+        import_skill(&source, SkillKind::Remote, &managed_root).unwrap();
+
+        let versions = list_remote_skill_versions("demo", &managed_root).unwrap();
+
+        assert_eq!(versions.skill_name, "demo");
+        assert_eq!(versions.versions.len(), 1);
+        assert!(versions.versions[0].is_current);
+        assert!(versions.versions[0].version.starts_with("manual-"));
+    }
+
+    #[test]
+    fn remote_version_preview_rollback_lists_every_changed_file() {
+        let root = temp_dir("remote-preview-rollback");
+        let managed_root = root.join("SkillBox");
+        let paths = ensure_managed_layout(&managed_root).unwrap();
+        let source_v1 = root.join("local-v1").join("demo");
+        make_skill(&source_v1, "demo", "Demo skill");
+        import_skill(&source_v1, SkillKind::Remote, &managed_root).unwrap();
+        let v1 = current_remote_version(&paths, "demo").unwrap();
+
+        let remote_root = paths.remote_skills_root.join("demo");
+        let v2 = "0123456789abcdef0123456789abcdef01234567";
+        let v2_path = remote_root.join("versions").join(v2);
+        copy_skill_dir(&source_v1, &v2_path).unwrap();
+        fs::write(
+            v2_path.join("SKILL.md"),
+            "---\nname: demo\ndescription: Demo skill\n---\nupdated\n",
+        )
+        .unwrap();
+        fs::write(v2_path.join("extra.txt"), "extra\n").unwrap();
+        update_current_symlink(&remote_root, &v2_path).unwrap();
+
+        let preview = preview_remote_version_change(
+            RemoteVersionChangeRequest {
+                skill_name: "demo".to_string(),
+                action: RemoteVersionChangeAction::Rollback,
+                target_version: Some(v1.clone()),
+                actor: "cli".to_string(),
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        assert_eq!(preview.from_version, v2);
+        assert_eq!(preview.to_version, v1);
+        assert!(preview.files.iter().any(|file| file.path == "SKILL.md"));
+        assert!(preview.files.iter().any(|file| file.path == "extra.txt"));
+        assert!(preview
+            .files
+            .iter()
+            .any(|file| file.path == "extra.txt" && file.diff.contains("-extra")));
+    }
+
+    #[test]
+    fn remote_version_preview_keeps_binary_file_metadata() {
+        let root = temp_dir("remote-preview-binary");
+        let managed_root = root.join("SkillBox");
+        let paths = ensure_managed_layout(&managed_root).unwrap();
+        let source_v1 = root.join("local-v1").join("demo");
+        make_skill(&source_v1, "demo", "Demo skill");
+        import_skill(&source_v1, SkillKind::Remote, &managed_root).unwrap();
+        let v1 = current_remote_version(&paths, "demo").unwrap();
+        let remote_root = paths.remote_skills_root.join("demo");
+        let v2 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let v2_path = remote_root.join("versions").join(v2);
+        copy_skill_dir(&source_v1, &v2_path).unwrap();
+        fs::write(v2_path.join("asset.bin"), [0xff, 0x00, 0x10]).unwrap();
+        update_current_symlink(&remote_root, &v2_path).unwrap();
+
+        let preview = preview_remote_version_change(
+            RemoteVersionChangeRequest {
+                skill_name: "demo".to_string(),
+                action: RemoteVersionChangeAction::Rollback,
+                target_version: Some(v1),
+                actor: "cli".to_string(),
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        let binary = preview
+            .files
+            .iter()
+            .find(|file| file.path == "asset.bin")
+            .unwrap();
+        assert!(binary.binary);
+        assert_eq!(binary.old_size, Some(3));
+        assert!(binary.old_hash.is_some());
+        assert_eq!(binary.diff, "");
     }
 
     #[test]
