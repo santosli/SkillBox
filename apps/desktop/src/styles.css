@@ -2516,7 +2516,7 @@ dd {
 .operationHistoryRow {
   display: grid;
   min-width: 0;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 8px;
   align-items: center;
 }
@@ -2525,6 +2525,13 @@ dd {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.operationHistoryRow time {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 650;
   white-space: nowrap;
 }
 

@@ -12,6 +12,7 @@ import {
 import { parseUnifiedDiff } from './gitDiffView.js';
 import {
   canApplyRemoteVersionChange,
+  formatOperationTimestamp,
   formatRemoteRefBehavior,
   normalizeRemoteSourceCandidates,
   normalizeRemoteSourceBindingPreview,
@@ -449,6 +450,15 @@ test('remote version preview can apply metadata-only updates', () => {
     }),
     true
   );
+});
+
+test('formats operation timestamps for compact log rows', () => {
+  const localTime = new Date('2026-05-27T09:08:07');
+  const epochSeconds = String(Math.floor(localTime.getTime() / 1000));
+
+  assert.equal(formatOperationTimestamp(epochSeconds), '05-27 09:08');
+  assert.equal(formatOperationTimestamp('not-a-date'), 'not-a-date');
+  assert.equal(formatOperationTimestamp(''), '');
 });
 
 test('normalizes remote version preview files', () => {

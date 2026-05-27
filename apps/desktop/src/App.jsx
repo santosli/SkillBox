@@ -33,6 +33,7 @@ import { normalizeImportCandidate } from './importCandidates.js';
 import { closeOnBackdropClick } from './modalEvents.js';
 import {
   canApplyRemoteVersionChange,
+  formatOperationTimestamp,
   formatRemoteRefBehavior,
   normalizeRemoteSourceCandidates,
   normalizeRemoteSourceBindingPreview,
@@ -3483,12 +3484,19 @@ function OperationHistoryPanel({ operations }) {
         <small>{operations.length} events</small>
       </summary>
       <div className="operationHistoryRows">
-        {operations.slice(0, 4).map((operation) => (
-          <div className="operationHistoryRow" key={operation.id}>
-            <span>{operation.summary || operation.operationType}</span>
-            <Badge tone={operation.status === 'failed' ? 'red' : 'slate'}>{operation.status}</Badge>
-          </div>
-        ))}
+        {operations.slice(0, 4).map((operation) => {
+          const operationTimestamp = formatOperationTimestamp(operation.finishedAt || operation.startedAt);
+
+          return (
+            <div className="operationHistoryRow" key={operation.id}>
+              <span>{operation.summary || operation.operationType}</span>
+              {operationTimestamp ? (
+                <time dateTime={operation.finishedAt || operation.startedAt}>{operationTimestamp}</time>
+              ) : null}
+              <Badge tone={operation.status === 'failed' ? 'red' : 'slate'}>{operation.status}</Badge>
+            </div>
+          );
+        })}
       </div>
     </details>
   );

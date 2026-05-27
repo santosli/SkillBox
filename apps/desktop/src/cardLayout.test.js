@@ -149,6 +149,12 @@ test('remote operation history is collapsed by default', () => {
   assert.doesNotMatch(appSource, /<div className="operationHistoryPanel" aria-label="Operation history">/);
 });
 
+test('remote operation history rows include timestamps', () => {
+  assert.match(appSource, /formatOperationTimestamp\(operation\.finishedAt \|\| operation\.startedAt\)/);
+  assert.match(appSource, /<time dateTime=\{operation\.finishedAt \|\| operation\.startedAt\}>/);
+  assert.match(css, /\.operationHistoryRow time/);
+});
+
 test('remote source candidates use view and bind actions instead of inline preview', () => {
   assert.match(appSource, /onViewCandidate\(candidate\)/);
   assert.match(appSource, /onBindCandidate\(candidate\)/);

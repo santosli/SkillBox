@@ -296,7 +296,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 当前 remote source bind、remote update apply、remote rollback apply 必须写 operation log；后续其它 side-effect workflow 接入同一能力。
 - Rust CLI 入口：`operations`。
 - Tauri command：`list_operations`。
-- 桌面 UI：remote skill detail 默认折叠最近的 skill operation history，只显示日志入口和事件数；未来 Settings 或 Operations 页面可展示全局日志。
+- 桌面 UI：remote skill detail 默认折叠最近的 skill operation history，只显示日志入口和事件数；展开后每条记录显示完成时间，未完成时显示开始时间；未来 Settings 或 Operations 页面可展示全局日志。
 
 步骤：
 
