@@ -178,6 +178,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 用户为已有 remote skill 手动添加 GitHub source URL。
 - 用户触发 GitHub candidate search，为已有 remote skill 自动寻找可能的 source。
 - MVP 只接受 GitHub skill directory 或 `SKILL.md` URL。
+- GitHub code search 需要认证；core 会优先读取 `GITHUB_TOKEN` / `GH_TOKEN`，否则尝试 `gh auth token`。
 
 步骤：
 

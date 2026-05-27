@@ -2550,19 +2550,93 @@ fn remote_version_action_label(action: RemoteVersionChangeAction) -> &'static st
 }
 
 fn github_api_get(url: &str) -> Result<String> {
-    let output = std::process::Command::new("curl")
-        .arg("-fsSL")
-        .arg("-H")
-        .arg("Accept: application/vnd.github+json")
-        .arg("-H")
-        .arg("User-Agent: SkillBox")
-        .arg(url)
-        .output()
+    let token = github_api_auth_token();
+    let args = github_api_curl_args(url);
+    let mut child = std::process::Command::new("curl")
+        .args(&args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
         .map_err(|error| error.to_string())?;
+    if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write;
+        stdin
+            .write_all(github_api_curl_config(token.as_deref()).as_bytes())
+            .map_err(|error| error.to_string())?;
+    }
+    let output = child.wait_with_output().map_err(|error| error.to_string())?;
     if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        return Err(github_api_error_message(
+            String::from_utf8_lossy(&output.stderr).trim(),
+            token.is_some(),
+        ));
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn github_api_curl_args(url: &str) -> Vec<String> {
+    vec![
+        "-fsSL".to_string(),
+        "--config".to_string(),
+        "-".to_string(),
+        url.to_string(),
+    ]
+}
+
+fn github_api_curl_config(token: Option<&str>) -> String {
+    let mut lines = vec![
+        "header = \"Accept: application/vnd.github+json\"".to_string(),
+        "header = \"X-GitHub-Api-Version: 2022-11-28\"".to_string(),
+        "header = \"User-Agent: SkillBox\"".to_string(),
+    ];
+    if let Some(token) = token.filter(|value| !value.trim().is_empty()) {
+        lines.push(format!("header = \"Authorization: Bearer {}\"", token.trim()));
+    }
+    lines.push(String::new());
+    lines.join("\n")
+}
+
+fn github_api_auth_token() -> Option<String> {
+    github_api_token_from_env().or_else(github_cli_auth_token)
+}
+
+fn github_api_token_from_env() -> Option<String> {
+    ["GITHUB_TOKEN", "GH_TOKEN"]
+        .iter()
+        .filter_map(|key| std::env::var(key).ok())
+        .map(|value| value.trim().to_string())
+        .find(|value| !value.is_empty())
+}
+
+fn github_cli_auth_token() -> Option<String> {
+    let output = std::process::Command::new("gh")
+        .args(["auth", "token"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!token.is_empty()).then_some(token)
+}
+
+fn github_api_error_message(stderr: &str, authenticated: bool) -> String {
+    if stderr.contains("401")
+        || stderr.contains("Requires authentication")
+        || stderr.contains("Bad credentials")
+    {
+        if authenticated {
+            return "GitHub source search authentication failed. Run `gh auth status` or refresh `GITHUB_TOKEN` / `GH_TOKEN`, then search again.".to_string();
+        }
+        return "GitHub source search requires GitHub authentication. Run `gh auth login` or set `GITHUB_TOKEN` / `GH_TOKEN`, then search again.".to_string();
+    }
+
+    if stderr.trim().is_empty() {
+        "GitHub source search failed.".to_string()
+    } else {
+        stderr.trim().to_string()
+    }
 }
 
 fn parse_github_code_search_candidates(response: &str) -> Result<Vec<RemoteSourceCandidate>> {
@@ -5292,6 +5366,31 @@ description: \"Demo skill\"
         assert!(candidates[0]
             .match_reasons
             .contains(&"Exact skill name match".to_string()));
+    }
+
+    #[test]
+    fn github_api_curl_args_do_not_expose_bearer_token() {
+        let args = github_api_curl_args("https://api.github.com/search/code?q=demo");
+        let config = github_api_curl_config(Some("ghp_demo"));
+
+        assert!(!args.iter().any(|arg| arg.contains("ghp_demo")));
+        assert!(config.contains("Authorization: Bearer ghp_demo"));
+        assert_eq!(
+            args.last().map(String::as_str),
+            Some("https://api.github.com/search/code?q=demo")
+        );
+    }
+
+    #[test]
+    fn github_api_error_message_explains_search_authentication() {
+        let message = github_api_error_message(
+            "curl: (56) The requested URL returned error: 401",
+            false,
+        );
+
+        assert!(message.contains("requires GitHub authentication"));
+        assert!(message.contains("gh auth login"));
+        assert!(!message.contains("curl:"));
     }
 
     #[test]

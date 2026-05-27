@@ -110,6 +110,9 @@ Flow:
 2. The user clicks `Find source`.
 3. SkillBox searches GitHub public repositories using the local skill name,
    description, path hints, and a short content summary.
+   GitHub code search requires authenticated REST API requests, so SkillBox
+   should use `GITHUB_TOKEN`, `GH_TOKEN`, or the local GitHub CLI token when
+   available.
 4. The candidate list shows repository, path, ref, source URL, owner, archived
    or fork status, star count, updated time, and match reasons.
 5. The user chooses one candidate to preview.
