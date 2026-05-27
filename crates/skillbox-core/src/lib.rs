@@ -487,6 +487,30 @@ pub struct RemoteVersionChangeApplyResult {
     pub operation_id: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RemoteSourceCandidate {
+    pub owner: String,
+    pub repo: String,
+    pub path: String,
+    pub reference: String,
+    pub source_url: String,
+    pub repo_url: String,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub stars: u32,
+    pub archived: bool,
+    pub fork: bool,
+    pub updated_at: String,
+    pub match_reasons: Vec<String>,
+    pub score: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RemoteSourceCandidateSearch {
+    pub skill_name: String,
+    pub candidates: Vec<RemoteSourceCandidate>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 struct RemoteSkillSource {
     #[serde(rename = "type")]
@@ -1743,6 +1767,87 @@ pub fn apply_remote_version_change(
     }
 }
 
+pub fn rank_remote_source_candidates(
+    skill_name: &str,
+    candidates: Vec<RemoteSourceCandidate>,
+) -> Vec<RemoteSourceCandidate> {
+    let normalized_skill = skill_name.to_ascii_lowercase();
+    let mut ranked = candidates
+        .into_iter()
+        .map(|mut candidate| {
+            let mut score = 0;
+            if candidate
+                .name
+                .as_deref()
+                .map(|name| name.eq_ignore_ascii_case(skill_name))
+                .unwrap_or(false)
+            {
+                score += 500;
+                candidate
+                    .match_reasons
+                    .push("Exact skill name match".to_string());
+            }
+            if candidate
+                .path
+                .to_ascii_lowercase()
+                .contains(&normalized_skill)
+            {
+                score += 300;
+                candidate
+                    .match_reasons
+                    .push("Path contains skill name".to_string());
+            }
+            if candidate
+                .description
+                .as_deref()
+                .map(|description| description.to_ascii_lowercase().contains(&normalized_skill))
+                .unwrap_or(false)
+            {
+                score += 100;
+                candidate
+                    .match_reasons
+                    .push("Description mentions skill name".to_string());
+            }
+            if !candidate.archived {
+                score += 40;
+            }
+            if !candidate.fork {
+                score += 30;
+            }
+            score += i32::try_from(candidate.stars.min(1000) / 25).unwrap_or(0);
+            candidate.score = score;
+            candidate
+        })
+        .collect::<Vec<_>>();
+    ranked.sort_by(|left, right| {
+        right
+            .score
+            .cmp(&left.score)
+            .then(left.path.cmp(&right.path))
+    });
+    ranked
+}
+
+pub fn find_remote_source_candidates(
+    skill_name: &str,
+    managed_root: impl AsRef<Path>,
+) -> Result<RemoteSourceCandidateSearch> {
+    validate_skill_name(skill_name)?;
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    read_skill(paths.remote_skills_root.join(skill_name).join("current"))?;
+    let query = format!("filename:SKILL.md {skill_name}");
+    let url = format!(
+        "https://api.github.com/search/code?q={}&per_page=10",
+        url_encode_query(&query)
+    );
+    let response = github_api_get(&url)?;
+    let candidates = parse_github_code_search_candidates(&response)?;
+    Ok(RemoteSourceCandidateSearch {
+        skill_name: skill_name.to_string(),
+        candidates: rank_remote_source_candidates(skill_name, candidates),
+    })
+}
+
 pub fn scan_import_candidates(
     roots: &[PathBuf],
     managed_root: impl AsRef<Path>,
@@ -2407,6 +2512,117 @@ fn remote_version_action_label(action: RemoteVersionChangeAction) -> &'static st
         RemoteVersionChangeAction::Update => "update",
         RemoteVersionChangeAction::Rollback => "rollback",
     }
+}
+
+fn github_api_get(url: &str) -> Result<String> {
+    let output = std::process::Command::new("curl")
+        .arg("-fsSL")
+        .arg("-H")
+        .arg("Accept: application/vnd.github+json")
+        .arg("-H")
+        .arg("User-Agent: SkillBox")
+        .arg(url)
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn parse_github_code_search_candidates(response: &str) -> Result<Vec<RemoteSourceCandidate>> {
+    let value: serde_json::Value =
+        serde_json::from_str(response).map_err(|error| error.to_string())?;
+    let items = value
+        .get("items")
+        .and_then(|items| items.as_array())
+        .ok_or_else(|| "GitHub search response is missing items.".to_string())?;
+    let mut candidates = Vec::new();
+
+    for item in items {
+        let html_url = item
+            .get("html_url")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        let Ok(source) = skillbox_github::parse_github_skill_url(html_url) else {
+            continue;
+        };
+        let repository = item
+            .get("repository")
+            .and_then(|value| value.as_object())
+            .ok_or_else(|| "GitHub search item is missing repository.".to_string())?;
+        let owner = repository
+            .get("owner")
+            .and_then(|owner| owner.get("login"))
+            .and_then(|value| value.as_str())
+            .unwrap_or(source.owner.as_str())
+            .to_string();
+        let repo = repository
+            .get("name")
+            .and_then(|value| value.as_str())
+            .unwrap_or(source.repo.as_str())
+            .to_string();
+        let repo_url = repository
+            .get("clone_url")
+            .and_then(|value| value.as_str())
+            .unwrap_or(source.repo_url.as_str())
+            .to_string();
+        let path = source.path;
+        let name = Path::new(&path)
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(str::to_string);
+
+        candidates.push(RemoteSourceCandidate {
+            owner,
+            repo,
+            path,
+            reference: source.reference,
+            source_url: source.url,
+            repo_url,
+            name,
+            description: repository
+                .get("description")
+                .and_then(|value| value.as_str())
+                .map(str::to_string),
+            stars: repository
+                .get("stargazers_count")
+                .and_then(|value| value.as_u64())
+                .and_then(|value| u32::try_from(value).ok())
+                .unwrap_or(0),
+            archived: repository
+                .get("archived")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false),
+            fork: repository
+                .get("fork")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false),
+            updated_at: repository
+                .get("updated_at")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            match_reasons: Vec::new(),
+            score: 0,
+        });
+    }
+
+    Ok(candidates)
+}
+
+fn url_encode_query(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(byte as char)
+            }
+            b' ' => encoded.push('+'),
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
 }
 
 fn user_skills_git_status_for_repo(repo_path: PathBuf) -> Result<UserSkillsGitStatus> {
@@ -4944,6 +5160,53 @@ description: \"Demo skill\"
                 |operation| operation.operation_type == "update_remote_skill"
                     && operation.status == OperationStatus::Succeeded
             ));
+    }
+
+    #[test]
+    fn source_candidates_rank_by_name_path_trust_and_popularity() {
+        let candidates = rank_remote_source_candidates(
+            "find-skills",
+            vec![
+                RemoteSourceCandidate {
+                    owner: "small".to_string(),
+                    repo: "misc".to_string(),
+                    path: "tools/other".to_string(),
+                    reference: "main".to_string(),
+                    source_url: "https://github.com/small/misc/tree/main/tools/other".to_string(),
+                    repo_url: "https://github.com/small/misc.git".to_string(),
+                    name: Some("other".to_string()),
+                    description: Some("Other".to_string()),
+                    stars: 1000,
+                    archived: false,
+                    fork: false,
+                    updated_at: "2026-01-01T00:00:00Z".to_string(),
+                    match_reasons: vec![],
+                    score: 0,
+                },
+                RemoteSourceCandidate {
+                    owner: "acme".to_string(),
+                    repo: "skills".to_string(),
+                    path: "skills/find-skills".to_string(),
+                    reference: "main".to_string(),
+                    source_url: "https://github.com/acme/skills/tree/main/skills/find-skills"
+                        .to_string(),
+                    repo_url: "https://github.com/acme/skills.git".to_string(),
+                    name: Some("find-skills".to_string()),
+                    description: Some("Find skills".to_string()),
+                    stars: 10,
+                    archived: false,
+                    fork: false,
+                    updated_at: "2025-01-01T00:00:00Z".to_string(),
+                    match_reasons: vec![],
+                    score: 0,
+                },
+            ],
+        );
+
+        assert_eq!(candidates[0].path, "skills/find-skills");
+        assert!(candidates[0]
+            .match_reasons
+            .contains(&"Exact skill name match".to_string()));
     }
 
     #[test]
