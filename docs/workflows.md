@@ -149,6 +149,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 只处理 `type: github` 的 remote skill。
 - `refKind: tag`、`refKind: commit` 或 `tracking: false` 的 GitHub source 标记为 `pinned`，不执行远端更新判断。
 - 对 tracking branch 使用 `git ls-remote <repoUrl> <ref>` 查询最新 SHA。
+- `git ls-remote` 必须以非交互方式执行，并设置短超时；超时或网络错误只标记对应 skill 为 `Check failed`，不能拖住整个 Refresh。
 - 优先比较 latest remote SHA 与 `currentVersion`；没有 `currentVersion` 时兼容比较 `installedSha`。
 - 返回每个 remote skill 的 `skillName`、`sourceType`、`currentVersion`、`installedSha`、`latestSha`、`refKind`、`tracking`、`updateAvailable`、`state`、`message`。
 - 成功执行远端检查后，把完整检查结果和检查时间缓存到 managed SQLite preferences；下次桌面启动复用缓存状态，只有用户刷新或自动刷新后才更新缓存。

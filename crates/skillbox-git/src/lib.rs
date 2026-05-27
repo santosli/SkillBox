@@ -1,7 +1,11 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Output, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
+
+const LS_REMOTE_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitStatus {
@@ -156,12 +160,15 @@ pub fn diff_head_path(repo: impl AsRef<Path>, path: &str) -> Result<String, Stri
 }
 
 pub fn ls_remote(repo_url: &str, reference: &str) -> Result<Option<String>, String> {
-    let output = Command::new("git")
+    let mut command = Command::new("git");
+    command
         .arg("ls-remote")
         .arg(repo_url)
         .arg(reference)
-        .output()
-        .map_err(|error| error.to_string())?;
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_ASKPASS", "true")
+        .env("GCM_INTERACTIVE", "never");
+    let output = command_output_with_timeout(command, LS_REMOTE_TIMEOUT, "git ls-remote")?;
 
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
@@ -171,6 +178,49 @@ pub fn ls_remote(repo_url: &str, reference: &str) -> Result<Option<String>, Stri
         .split_whitespace()
         .next()
         .map(str::to_string))
+}
+
+fn command_output_with_timeout(
+    mut command: Command,
+    timeout: Duration,
+    label: &str,
+) -> Result<Output, String> {
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| error.to_string())?;
+    let started_at = Instant::now();
+
+    loop {
+        if child
+            .try_wait()
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
+            return child.wait_with_output().map_err(|error| error.to_string());
+        }
+
+        if started_at.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!(
+                "{label} timed out after {}",
+                format_duration(timeout)
+            ));
+        }
+
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn format_duration(duration: Duration) -> String {
+    let millis = duration.as_millis();
+    if millis % 1000 == 0 {
+        format!("{}s", millis / 1000)
+    } else {
+        format!("{millis}ms")
+    }
 }
 
 pub fn fetch_ref_path(
@@ -522,6 +572,21 @@ mod tests {
         assert!(skill_diff.contains("--- a/SKILL.md"));
         assert!(skill_diff.contains("+++ b/SKILL.md"));
         assert!(skill_diff.contains("+version: 2"));
+    }
+
+    #[test]
+    fn command_output_times_out_slow_processes() {
+        let mut command = Command::new("sleep");
+        command.arg("5");
+
+        let error = command_output_with_timeout(
+            command,
+            std::time::Duration::from_millis(100),
+            "slow command",
+        )
+        .unwrap_err();
+
+        assert!(error.contains("timed out"));
     }
 
     fn temp_dir(prefix: &str) -> PathBuf {
