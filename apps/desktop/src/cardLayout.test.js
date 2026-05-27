@@ -173,6 +173,27 @@ test('remote update review starts after the loading dialog has painted', () => {
   );
 });
 
+test('diff review dialogs keep large diffs inside the modal viewport', () => {
+  const dialogRule = css.match(/\.gitCommitDialog\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const dialogBodyRule = css.match(/\.gitCommitDialogBody\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const formRule = css.match(/\.gitCommitForm\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const reviewRule = css.match(/\.gitCommitReview\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const diffPaneRule = css.match(/\.gitDiffPane\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const diffScrollerRule = css.match(/\.githubDiffScroller\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(dialogRule, /max-height:\s*min\(760px,\s*calc\(100vh - 64px\)\);/);
+  assert.match(dialogRule, /grid-template-rows:\s*auto minmax\(0,\s*1fr\) auto;/);
+  assert.match(dialogBodyRule, /min-height:\s*0;/);
+  assert.match(dialogBodyRule, /overflow:\s*hidden;/);
+  assert.match(formRule, /min-height:\s*0;/);
+  assert.match(formRule, /overflow-y:\s*auto;/);
+  assert.match(reviewRule, /min-height:\s*0;/);
+  assert.match(diffPaneRule, /overflow:\s*hidden;/);
+  assert.match(diffScrollerRule, /min-height:\s*0;/);
+  assert.match(diffScrollerRule, /max-width:\s*100%;/);
+  assert.match(appSource, /<div className="gitCommitDialogBody">/);
+});
+
 test('remote update preview command runs off the command handler', () => {
   const previewCommandStart = tauriSource.indexOf('async fn preview_remote_version_change');
   const nextCommandStart = tauriSource.indexOf('#[tauri::command]', previewCommandStart + 1);

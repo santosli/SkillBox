@@ -3351,54 +3351,56 @@ function RemoteVersionReviewDialog({ dialog, onActivatePath, onApply, onClose })
             <X aria-hidden="true" />
           </button>
         </div>
-        {dialog.loading ? <LoadingNotice>Loading diff...</LoadingNotice> : null}
-        {preview ? (
-          <div className="gitCommitReview">
-            <aside className="gitFilePane">
-              <div className="gitFilePaneHeader">
-                <strong>{preview.files.length} files</strong>
-              </div>
-              <div className="gitFileList">
-                {preview.files.length > 0 ? (
-                  preview.files.map((file) => (
-                    <button
-                      className={activeFile?.path === file.path ? 'gitFileRow remoteFileRow active' : 'gitFileRow remoteFileRow'}
-                      key={file.path}
-                      type="button"
-                      onClick={() => onActivatePath(file.path)}
-                    >
-                      <span>
-                        <strong>{file.path}</strong>
-                        <small>{file.label}</small>
-                      </span>
-                    </button>
-                  ))
+        <div className="gitCommitDialogBody">
+          {dialog.loading ? <LoadingNotice>Loading diff...</LoadingNotice> : null}
+          {preview ? (
+            <div className="gitCommitReview">
+              <aside className="gitFilePane">
+                <div className="gitFilePaneHeader">
+                  <strong>{preview.files.length} files</strong>
+                </div>
+                <div className="gitFileList">
+                  {preview.files.length > 0 ? (
+                    preview.files.map((file) => (
+                      <button
+                        className={activeFile?.path === file.path ? 'gitFileRow remoteFileRow active' : 'gitFileRow remoteFileRow'}
+                        key={file.path}
+                        type="button"
+                        onClick={() => onActivatePath(file.path)}
+                      >
+                        <span>
+                          <strong>{file.path}</strong>
+                          <small>{file.label}</small>
+                        </span>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="gitEmptyState">No file changes.</div>
+                  )}
+                </div>
+              </aside>
+              <section className="gitDiffPane" aria-label="Remote version diff">
+                <div className="gitDiffHeader">
+                  <strong>{activeFile?.path || 'Diff'}</strong>
+                  {activeFile ? <span>{activeFile.label}</span> : null}
+                </div>
+                {hasNoFileChanges ? (
+                  <div className="gitDiffEmpty noFileChanges">
+                    <strong>No file changes in this skill</strong>
+                    <span>Applying records the latest source revision without changing local files.</span>
+                  </div>
+                ) : activeFile?.binary || activeFile?.tooLarge ? (
+                  <div className="gitDiffEmpty">
+                    <span>{`${activeFile.oldHash || 'new'} -> ${activeFile.newHash || 'deleted'}`}</span>
+                  </div>
                 ) : (
-                  <div className="gitEmptyState">No file changes.</div>
+                  <GitDiffView diff={activeFile?.diff || ''} />
                 )}
-              </div>
-            </aside>
-            <section className="gitDiffPane" aria-label="Remote version diff">
-              <div className="gitDiffHeader">
-                <strong>{activeFile?.path || 'Diff'}</strong>
-                {activeFile ? <span>{activeFile.label}</span> : null}
-              </div>
-              {hasNoFileChanges ? (
-                <div className="gitDiffEmpty noFileChanges">
-                  <strong>No file changes in this skill</strong>
-                  <span>Applying records the latest source revision without changing local files.</span>
-                </div>
-              ) : activeFile?.binary || activeFile?.tooLarge ? (
-                <div className="gitDiffEmpty">
-                  <span>{`${activeFile.oldHash || 'new'} -> ${activeFile.newHash || 'deleted'}`}</span>
-                </div>
-              ) : (
-                <GitDiffView diff={activeFile?.diff || ''} />
-              )}
-            </section>
-          </div>
-        ) : null}
-        {dialog.error ? <div className="formError remoteDialogError">{dialog.error}</div> : null}
+              </section>
+            </div>
+          ) : null}
+          {dialog.error ? <div className="formError remoteDialogError">{dialog.error}</div> : null}
+        </div>
         <div className="remoteImportFooter remoteDialogFooter">
           <button className="button secondary" disabled={dialog.applying} type="button" onClick={onClose}>
             Cancel

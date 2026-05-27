@@ -2039,6 +2039,8 @@ dd {
 
 .gitCommitDialog {
   width: min(1040px, calc(100vw - 64px));
+  max-height: min(760px, calc(100vh - 64px));
+  grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
 .localImportDialog {
@@ -2599,7 +2601,9 @@ dd {
 
 .gitCommitForm {
   display: grid;
+  min-height: 0;
   gap: 14px;
+  overflow-y: auto;
   padding: 18px 24px 24px;
 }
 
@@ -2742,11 +2746,33 @@ dd {
 
 .gitCommitReview {
   display: grid;
-  min-height: 430px;
+  min-height: 0;
   overflow: hidden;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   grid-template-columns: 300px minmax(0, 1fr);
+}
+
+.gitCommitForm .gitCommitReview {
+  min-height: min(430px, calc(100vh - 300px));
+}
+
+.gitCommitDialogBody {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.gitCommitDialogBody > .loadingNotice {
+  margin: 16px 24px;
+}
+
+.gitCommitDialogBody > .gitCommitReview {
+  flex: 1 1 auto;
+  border-right: 0;
+  border-left: 0;
+  border-radius: 0;
 }
 
 .gitFilePane {
@@ -2844,11 +2870,14 @@ dd {
 .gitDiffPane {
   display: grid;
   min-width: 0;
+  overflow: hidden;
   background: #ffffff;
   grid-template-rows: auto minmax(0, 1fr);
 }
 
 .githubDiffScroller {
+  max-width: 100%;
+  min-height: 0;
   min-width: 0;
   overflow: auto;
   background: #ffffff;
