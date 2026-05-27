@@ -331,7 +331,7 @@ pub enum RemoteSkillUpdateState {
     Pinned,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RemoteSkillUpdateStatus {
     pub skill_name: String,
     pub source_type: Option<String>,
@@ -345,8 +345,9 @@ pub struct RemoteSkillUpdateStatus {
     pub message: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RemoteSkillUpdateCheck {
+    pub checked_at: Option<String>,
     pub statuses: Vec<RemoteSkillUpdateStatus>,
 }
 
@@ -1451,22 +1452,50 @@ pub fn check_remote_skill_updates(
     managed_root: impl AsRef<Path>,
 ) -> Result<RemoteSkillUpdateCheck> {
     let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
-    let mut remote_roots = fs::read_dir(&paths.remote_skills_root)
-        .map_err(|error| error.to_string())?
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false))
-        .collect::<Vec<_>>();
-    remote_roots.sort_by_key(|entry| entry.file_name());
-
-    let statuses = remote_roots
+    let checked_at = operation_timestamp();
+    let statuses = remote_skill_roots(&paths)?
         .into_iter()
-        .map(|entry| {
-            let skill_name = entry.file_name().to_string_lossy().to_string();
-            check_one_remote_skill_update(&skill_name, &entry.path())
-        })
-        .collect();
+        .map(|(skill_name, remote_root)| check_one_remote_skill_update(&skill_name, &remote_root))
+        .collect::<Vec<_>>();
+    let result = RemoteSkillUpdateCheck {
+        checked_at: Some(checked_at),
+        statuses,
+    };
 
-    Ok(RemoteSkillUpdateCheck { statuses })
+    write_remote_update_cache(&paths.database_path, &result)?;
+    Ok(result)
+}
+
+pub fn cached_remote_skill_updates(
+    managed_root: impl AsRef<Path>,
+) -> Result<RemoteSkillUpdateCheck> {
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let cached =
+        read_remote_update_cache(&paths.database_path)?.unwrap_or(RemoteSkillUpdateCheck {
+            checked_at: None,
+            statuses: Vec::new(),
+        });
+    let mut statuses = Vec::new();
+
+    for (skill_name, remote_root) in remote_skill_roots(&paths)? {
+        if !remote_root.join("source.json").exists() {
+            statuses.push(no_source_remote_update_status(&skill_name));
+            continue;
+        }
+
+        if let Some(status) = cached
+            .statuses
+            .iter()
+            .find(|status| status.skill_name == skill_name)
+        {
+            statuses.push(status.clone());
+        }
+    }
+
+    Ok(RemoteSkillUpdateCheck {
+        checked_at: cached.checked_at,
+        statuses,
+    })
 }
 
 pub fn preview_remote_source_binding(
@@ -1975,23 +2004,43 @@ fn managed_skill(skill: Skill, kind: SkillKind) -> ManagedSkill {
     }
 }
 
+fn remote_skill_roots(paths: &ManagedPaths) -> Result<Vec<(String, PathBuf)>> {
+    let mut remote_roots = fs::read_dir(&paths.remote_skills_root)
+        .map_err(|error| error.to_string())?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false))
+        .map(|entry| {
+            (
+                entry.file_name().to_string_lossy().to_string(),
+                entry.path(),
+            )
+        })
+        .collect::<Vec<_>>();
+    remote_roots.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(remote_roots)
+}
+
+fn no_source_remote_update_status(skill_name: &str) -> RemoteSkillUpdateStatus {
+    RemoteSkillUpdateStatus {
+        skill_name: skill_name.to_string(),
+        source_type: None,
+        current_version: None,
+        installed_sha: None,
+        latest_sha: None,
+        ref_kind: None,
+        tracking: false,
+        update_available: false,
+        state: RemoteSkillUpdateState::NoSource,
+        message: Some("Remote source metadata is missing.".to_string()),
+    }
+}
+
 fn check_one_remote_skill_update(skill_name: &str, remote_root: &Path) -> RemoteSkillUpdateStatus {
     let source_path = remote_root.join("source.json");
     let source_content = match fs::read_to_string(&source_path) {
         Ok(content) => content,
         Err(_) => {
-            return RemoteSkillUpdateStatus {
-                skill_name: skill_name.to_string(),
-                source_type: None,
-                current_version: None,
-                installed_sha: None,
-                latest_sha: None,
-                ref_kind: None,
-                tracking: false,
-                update_available: false,
-                state: RemoteSkillUpdateState::NoSource,
-                message: Some("Remote source metadata is missing.".to_string()),
-            };
+            return no_source_remote_update_status(skill_name);
         }
     };
 
@@ -3214,6 +3263,40 @@ fn write_u32_preference(database_path: &Path, key: &str, value: u32) -> Result<(
               updated_at = CURRENT_TIMESTAMP
             ",
             params![key, value.to_string()],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn read_remote_update_cache(database_path: &Path) -> Result<Option<RemoteSkillUpdateCheck>> {
+    let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
+    let value: Option<String> = connection
+        .query_row(
+            "SELECT value FROM preferences WHERE key = ?1",
+            params!["remote_skill_update_cache"],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+
+    value
+        .map(|raw| serde_json::from_str(&raw).map_err(|error| error.to_string()))
+        .transpose()
+}
+
+fn write_remote_update_cache(database_path: &Path, result: &RemoteSkillUpdateCheck) -> Result<()> {
+    let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
+    let value = serde_json::to_string(result).map_err(|error| error.to_string())?;
+    connection
+        .execute(
+            "
+            INSERT INTO preferences (key, value)
+            VALUES (?1, ?2)
+            ON CONFLICT(key) DO UPDATE SET
+              value = excluded.value,
+              updated_at = CURRENT_TIMESTAMP
+            ",
+            params!["remote_skill_update_cache", value],
         )
         .map_err(|error| error.to_string())?;
     Ok(())
@@ -4845,6 +4928,32 @@ description: \"Demo skill\"
         assert_eq!(manual.state, RemoteSkillUpdateState::NotCheckable);
         assert!(!missing.update_available);
         assert!(!manual.update_available);
+    }
+
+    #[test]
+    fn cached_remote_skill_updates_reuses_last_check_and_marks_missing_sources() {
+        let root = temp_dir("remote-update-cache");
+        let managed_root = root.join("SkillBox");
+        let paths = ensure_managed_layout(&managed_root).unwrap();
+        let remote = bare_remote_with_main("remote-update-cache-origin");
+        let latest_sha = remote_head(&remote);
+
+        write_remote_source(
+            &paths.remote_skills_root.join("fresh"),
+            &remote,
+            &latest_sha,
+        );
+        fs::create_dir_all(paths.remote_skills_root.join("missing-source")).unwrap();
+
+        let checked = check_remote_skill_updates(&managed_root).unwrap();
+        let cached = cached_remote_skill_updates(&managed_root).unwrap();
+        let fresh = remote_status(&cached.statuses, "fresh");
+        let missing = remote_status(&cached.statuses, "missing-source");
+
+        assert_eq!(cached.checked_at, checked.checked_at);
+        assert_eq!(fresh.state, RemoteSkillUpdateState::UpToDate);
+        assert_eq!(fresh.latest_sha.as_deref(), Some(latest_sha.as_str()));
+        assert_eq!(missing.state, RemoteSkillUpdateState::NoSource);
     }
 
     #[test]

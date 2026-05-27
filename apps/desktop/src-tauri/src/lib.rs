@@ -142,6 +142,12 @@ fn check_remote_skill_updates() -> Result<Value, String> {
 }
 
 #[tauri::command]
+fn cached_remote_skill_updates() -> Result<Value, String> {
+    let result = skillbox_core::cached_remote_skill_updates(skillbox_core::default_managed_root())?;
+    serde_json::to_value(result).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn find_remote_source_candidates(skill_name: String) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let result = skillbox_core::find_remote_source_candidates(
@@ -253,6 +259,7 @@ pub fn run() {
             set_user_skills_git_remote,
             sync_user_skills_git,
             check_remote_skill_updates,
+            cached_remote_skill_updates,
             find_remote_source_candidates,
             preview_remote_source_binding,
             bind_remote_source,

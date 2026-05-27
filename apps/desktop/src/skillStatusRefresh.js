@@ -27,7 +27,10 @@ export function normalizeStatusRefreshIntervalMinutes(value) {
 export function formatStatusCheckedAt(checkedAt, now = new Date()) {
   if (!checkedAt) return 'not checked';
 
-  const checkedDate = new Date(checkedAt);
+  const checkedValue = String(checkedAt).trim();
+  const checkedDate = /^\d+$/.test(checkedValue)
+    ? new Date(Number(checkedValue) * 1000)
+    : new Date(checkedValue);
   if (Number.isNaN(checkedDate.getTime())) return 'not checked';
 
   const checkedDay = [
@@ -72,7 +75,10 @@ export function normalizeRemoteSkillUpdates(result) {
     message: status.message || ''
   }));
 
-  return { statuses };
+  return {
+    checkedAt: result?.checkedAt || result?.checked_at || '',
+    statuses
+  };
 }
 
 function remoteUpdateStateLabel(state) {

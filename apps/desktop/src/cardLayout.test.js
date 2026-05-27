@@ -111,6 +111,12 @@ test('remote source search command runs marketplace lookup off the command handl
   assert.match(tauriSource, /tauri::async_runtime::spawn_blocking/);
 });
 
+test('dashboard startup loads cached remote update state without refreshing', () => {
+  assert.match(appSource, /invoke\('cached_remote_skill_updates'\)/);
+  assert.match(appSource, /setRemoteSkillUpdates\(cachedRemoteUpdates\)/);
+  assert.match(appSource, /setLastStatusCheckedAt\(cachedRemoteUpdates\.checkedAt \|\| ''\)/);
+});
+
 test('remote update review starts after the loading dialog has painted', () => {
   const reviewDialog = appSource.match(
     /async function openRemoteVersionReview\(skill, action, targetVersion = ''\)\s*\{(?<body>[\s\S]*?)\n  \}/

@@ -209,6 +209,13 @@ test('waits for an animation frame before starting user skills sync work', async
 test('formats last status check timestamps for the dashboard table', () => {
   assert.equal(formatStatusCheckedAt('', new Date('2026-05-26T08:00:00')), 'not checked');
   assert.equal(
+    formatStatusCheckedAt(
+      String(Math.floor(new Date('2026-05-26T08:00:00').getTime() / 1000)),
+      new Date('2026-05-26T08:00:00')
+    ),
+    '08:00:00'
+  );
+  assert.equal(
     formatStatusCheckedAt('2026-05-26T00:27:50.818', new Date('2026-05-26T08:00:00')),
     '00:27:50'
   );
@@ -295,6 +302,7 @@ test('user skill row status marks only changed skills as needing sync', () => {
 
 test('remote skill row status follows refreshed update state', () => {
   const updates = normalizeRemoteSkillUpdates({
+    checked_at: '1779840000',
     statuses: [
       {
         skill_name: 'grill-me',
@@ -322,6 +330,7 @@ test('remote skill row status follows refreshed update state', () => {
     ]
   });
 
+  assert.equal(updates.checkedAt, '1779840000');
   assert.deepEqual(remoteSkillRowStatus({ name: 'find-skills', type: 'remote' }, updates), {
     label: 'Update available',
     tone: 'amber'

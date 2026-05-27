@@ -426,21 +426,23 @@ export default function App() {
         throw new Error('Browser preview is mocking an empty managed store. Run inside Tauri to use the local skill bridge.');
       }
 
-      const [state, storedPreferences, gitStatus, workspaceRows] = await Promise.all([
+      const [state, storedPreferences, gitStatus, cachedRemoteUpdatesResult, workspaceRows] = await Promise.all([
         invoke('managed_state'),
         invoke('managed_preferences').catch(() => null),
         invoke('user_skills_git_status').catch(() => null),
+        invoke('cached_remote_skill_updates').catch(() => null),
         invoke('list_workspaces').catch(() => [])
       ]);
       const managedSkills = state.skills?.map(normalizeSkill) || [];
+      const cachedRemoteUpdates = normalizeRemoteSkillUpdates(cachedRemoteUpdatesResult);
 
       setSkills(managedSkills);
       setWorkspaces(normalizeWorkspaces(workspaceRows));
       setPaths(normalizePaths(state.paths));
       setPreferences(normalizePreferences(storedPreferences));
       setUserSkillsGit(normalizeUserSkillsGitStatus(gitStatus));
-      setRemoteSkillUpdates(normalizeRemoteSkillUpdates(null));
-      setLastStatusCheckedAt('');
+      setRemoteSkillUpdates(cachedRemoteUpdates);
+      setLastStatusCheckedAt(cachedRemoteUpdates.checkedAt || '');
       setIsFirstUse(Boolean(state.isFirstUse ?? state.is_first_use));
       setSelectedName((currentName) =>
         currentName && managedSkills.some((skill) => skill.name === currentName) ? currentName : ''
@@ -471,6 +473,7 @@ export default function App() {
 
     if (!window.__TAURI_INTERNALS__) {
       const nextRemoteUpdates = normalizeRemoteSkillUpdates({
+        checked_at: new Date().toISOString(),
         statuses: skills
           .filter((skill) => skill.type === 'remote')
           .map((skill, index) => ({
@@ -481,7 +484,7 @@ export default function App() {
       });
 
       setRemoteSkillUpdates(nextRemoteUpdates);
-      setLastStatusCheckedAt(new Date().toISOString());
+      setLastStatusCheckedAt(nextRemoteUpdates.checkedAt || new Date().toISOString());
       if (!automatic) {
         setNotice(dashboardStatusNotice({ userSkillsGit, remoteUpdates: nextRemoteUpdates }));
       }
@@ -503,7 +506,7 @@ export default function App() {
       setPaths(normalizePaths(state.paths));
       setUserSkillsGit(nextUserSkillsGit);
       setRemoteSkillUpdates(nextRemoteUpdates);
-      setLastStatusCheckedAt(new Date().toISOString());
+      setLastStatusCheckedAt(nextRemoteUpdates.checkedAt || new Date().toISOString());
       setIsFirstUse(Boolean(state.isFirstUse ?? state.is_first_use));
       setSelectedName((currentName) =>
         currentName && managedSkills.some((skill) => skill.name === currentName) ? currentName : ''

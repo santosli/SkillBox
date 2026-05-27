@@ -140,6 +140,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 - Rust CLI 当前入口：`cargo run -p skillbox-cli --offline -- check-remote-updates [--managed-root <temp-SkillBox>]`。
 - Tauri command：`check_remote_skill_updates`。
+- 桌面启动只调用 `cached_remote_skill_updates` 读取上一次检查结果，不主动查询远端。
 - Node CLI 兼容入口仍有 `skillbox check-updates [skill-name]`，但桌面 UI 不调用 Node。
 
 步骤：
@@ -150,7 +151,9 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 对 tracking branch 使用 `git ls-remote <repoUrl> <ref>` 查询最新 SHA。
 - 优先比较 latest remote SHA 与 `currentVersion`；没有 `currentVersion` 时兼容比较 `installedSha`。
 - 返回每个 remote skill 的 `skillName`、`sourceType`、`currentVersion`、`installedSha`、`latestSha`、`refKind`、`tracking`、`updateAvailable`、`state`、`message`。
-- Dashboard 的 `Refresh status` 通过 Tauri command 刷新 user-skills Git 状态和 remote update check，再把行状态更新为 `Needs sync`、`Synced`、`Update available`、`Up to date`、`Pinned`、`Check failed` 或 `Not checkable`。
+- 成功执行远端检查后，把完整检查结果和检查时间缓存到 managed SQLite preferences；下次桌面启动复用缓存状态，只有用户刷新或自动刷新后才更新缓存。
+- 读取缓存时仍会基于当前本地 `remote-skills/<name>/source.json` 判定缺失 source 的 skill，并显示为 `No source`，避免把未绑定 source 的 remote skill 显示为未检查。
+- Dashboard 的 `Refresh status` 通过 Tauri command 刷新 user-skills Git 状态和 remote update check，再把行状态更新为 `Needs sync`、`Synced`、`Update available`、`Up to date`、`Pinned`、`No source`、`Check failed` 或 `Not checkable`。
 - Dashboard 的 `Checked` 列显示最近一次 status check 的时间；未检查前显示 `not checked`。
 - 桌面 UI 默认每 5 分钟自动执行一次 status check，间隔通过 Settings 的 `Status refresh` 设置保存到 managed preferences。
 
