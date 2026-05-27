@@ -61,8 +61,11 @@ export function normalizeRemoteSkillUpdates(result) {
   const statuses = (result?.statuses || []).map((status) => ({
     skillName: status.skillName || status.skill_name || '',
     sourceType: status.sourceType || status.source_type || '',
+    currentVersion: status.currentVersion || status.current_version || '',
     installedSha: status.installedSha || status.installed_sha || '',
     latestSha: status.latestSha || status.latest_sha || '',
+    refKind: status.refKind || status.ref_kind || '',
+    tracking: Boolean(status.tracking),
     updateAvailable: Boolean(status.updateAvailable ?? status.update_available),
     state: status.state || 'not_checkable',
     message: status.message || ''
@@ -82,6 +85,9 @@ export function remoteSkillRowStatus(skill, remoteUpdates) {
   if (status.state === 'up_to_date') {
     return { label: 'Up to date', tone: 'green' };
   }
+  if (status.state === 'pinned') {
+    return { label: 'Pinned', tone: 'blue' };
+  }
   if (status.state === 'check_failed') {
     return { label: 'Check failed', tone: 'red' };
   }
@@ -92,12 +98,14 @@ export function dashboardStatusNotice({ userSkillsGit, remoteUpdates }) {
   const statuses = remoteUpdates?.statuses || [];
   const updates = statuses.filter((status) => status.state === 'update_available').length;
   const upToDate = statuses.filter((status) => status.state === 'up_to_date').length;
+  const pinned = statuses.filter((status) => status.state === 'pinned').length;
   const failed = statuses.filter((status) => status.state === 'check_failed').length;
   const notCheckable = statuses.filter((status) => status.state === 'not_checkable').length;
   const parts = [];
 
   if (updates) parts.push(`${updates} remote ${updates === 1 ? 'update' : 'updates'} available`);
   if (upToDate) parts.push(`${upToDate} up to date`);
+  if (pinned) parts.push(`${pinned} pinned`);
   if (failed) parts.push(`${failed} check ${failed === 1 ? 'failed' : 'failures'}`);
   if (notCheckable) parts.push(`${notCheckable} not checkable`);
 

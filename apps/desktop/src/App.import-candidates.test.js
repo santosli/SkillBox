@@ -11,6 +11,13 @@ import {
 } from './skillStatusRefresh.js';
 import { parseUnifiedDiff } from './gitDiffView.js';
 import {
+  canApplyRemoteVersionChange,
+  formatRemoteRefBehavior,
+  normalizeRemoteSourceBindingPreview,
+  normalizeRemoteVersionPreview,
+  remoteVersionActionLabel
+} from './remoteSkills.js';
+import {
   canCommitUserSkillsChanges,
   normalizeUserSkillsGitChanges,
   normalizeUserSkillsGitStatus,
@@ -297,6 +304,12 @@ test('remote skill row status follows refreshed update state', () => {
         skill_name: 'frontend-design',
         state: 'up_to_date',
         update_available: false
+      },
+      {
+        skill_name: 'grill-me',
+        state: 'pinned',
+        ref_kind: 'tag',
+        tracking: false
       }
     ]
   });
@@ -309,7 +322,62 @@ test('remote skill row status follows refreshed update state', () => {
     label: 'Up to date',
     tone: 'green'
   });
+  assert.deepEqual(remoteSkillRowStatus({ name: 'grill-me', type: 'remote' }, updates), {
+    label: 'Pinned',
+    tone: 'blue'
+  });
   assert.equal(remoteSkillRowStatus({ name: 'local', type: 'user' }, updates), null);
+});
+
+test('formats remote ref behavior for tracking and pinned sources', () => {
+  assert.equal(
+    formatRemoteRefBehavior({ refKind: 'branch', reference: 'main', tracking: true }),
+    'Tracking branch: main'
+  );
+  assert.equal(
+    formatRemoteRefBehavior({ refKind: 'tag', reference: 'v1.0.0', tracking: false }),
+    'Pinned tag: v1.0.0'
+  );
+  assert.equal(
+    formatRemoteRefBehavior({ refKind: 'commit', reference: 'abc123', tracking: false }),
+    'Pinned commit: abc123'
+  );
+});
+
+test('normalizes changed source binding without replacing current version', () => {
+  const preview = normalizeRemoteSourceBindingPreview({
+    skill_name: 'find-skills',
+    validation: 'same_skill_changed',
+    current_version: 'manual-abc',
+    latest_sha: '1234567890abcdef',
+    ref_kind: 'branch',
+    tracking: true,
+    message: 'Skill names match but content differs.'
+  });
+
+  assert.equal(preview.validation, 'same_skill_changed');
+  assert.equal(preview.replacesCurrent, false);
+  assert.equal(preview.statusLabel, 'Source can be linked; current version will stay active.');
+});
+
+test('remote version preview requires files before apply', () => {
+  assert.equal(canApplyRemoteVersionChange({ files: [], loading: false }), false);
+  assert.equal(canApplyRemoteVersionChange({ files: [{ path: 'SKILL.md' }], loading: true }), false);
+  assert.equal(canApplyRemoteVersionChange({ files: [{ path: 'SKILL.md' }], loading: false }), true);
+});
+
+test('normalizes remote version preview files', () => {
+  const preview = normalizeRemoteVersionPreview({
+    skill_name: 'demo',
+    action: 'rollback',
+    from_version: 'abcdef',
+    to_version: 'manual-123',
+    files: [{ path: 'SKILL.md', status: 'M', diff: '@@\n-old\n+new\n' }]
+  });
+
+  assert.equal(preview.skillName, 'demo');
+  assert.equal(preview.files[0].label, 'Modified');
+  assert.equal(remoteVersionActionLabel(preview), 'Rollback');
 });
 
 test('dashboard status notice summarizes local sync and remote checks', () => {
