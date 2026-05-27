@@ -200,14 +200,18 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 完成验证：
 
 - `cargo test -p skillbox-core --offline source_binding`
+- `cargo run -p skillbox-cli --offline -- remote-source-candidates <skill-name> --managed-root <temp-SkillBox>`
+- `cargo run -p skillbox-cli --offline -- remote-source-preview <skill-name> <github-url> --managed-root <temp-SkillBox>`
+- `cargo run -p skillbox-cli --offline -- bind-remote-source <skill-name> <github-url> --managed-root <temp-SkillBox>`
+- 桌面 UI 手动验证 source binding dialog：`exact_match` 可绑定，`same_skill_changed` 明确提示当前版本不会被替换，`mismatch` 禁用绑定。
 
 ## 7. Update Remote Skill
 
 触发条件：
 
-- Rust core 提供 preview 和 apply 能力；CLI/UI 入口后续接入。
 - Rust CLI 当前入口：`remote-versions`、`remote-preview-change --action update`、`remote-apply-change --action update`。
 - Tauri command：`list_remote_skill_versions`、`preview_remote_version_change`、`apply_remote_version_change`。
+- 桌面 UI：remote skill detail 中的 `Review update` 打开 diff review dialog，用户确认后调用 apply。
 - GitHub source 必须已经绑定，并且 update check 已取得 `latestSha`。
 
 步骤：
@@ -235,15 +239,20 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 完成验证：
 
 - `cargo test -p skillbox-core --offline apply_`
+- `cargo run -p skillbox-cli --offline -- remote-versions <skill-name> --managed-root <temp-SkillBox>`
+- `cargo run -p skillbox-cli --offline -- remote-preview-change <skill-name> --action update --managed-root <temp-SkillBox>`
+- `cargo run -p skillbox-cli --offline -- remote-apply-change <skill-name> --action update --to <sha> --managed-root <temp-SkillBox>`
 - 手动验证：安装一个固定旧 ref 后更新到新 ref，确认 `current` 指向新 SHA。
+- 桌面 UI 手动验证：update review 展示所有变更文件，文本文件展示 unified diff，二进制或大文件展示 hash/size metadata，确认后刷新版本列表和 operation history。
 
 ## 8. Rollback Remote Skill
 
 触发条件：
 
-- Node CLI 当前入口：`skillbox rollback <skill-name> --to <sha>`。
+- Node CLI legacy 入口：`skillbox rollback <skill-name> --to <sha>`。
 - Rust CLI 当前入口：`remote-versions`、`remote-preview-change --action rollback`、`remote-apply-change --action rollback`。
 - Tauri command：`list_remote_skill_versions`、`preview_remote_version_change`、`apply_remote_version_change`。
+- 桌面 UI：remote skill detail 的 version list 对非当前版本显示 `Rollback`，复用 update 的 diff review dialog。
 
 步骤：
 
@@ -268,8 +277,42 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 当前 Node：`node packages/skillbox-cli/bin/skillbox.js rollback <skill-name> --to <sha> --managed-root <temp-SkillBox> --json`
 - `cargo test -p skillbox-core --offline remote_version`
 - `cargo test -p skillbox-core --offline apply_`
+- `cargo run -p skillbox-cli --offline -- remote-preview-change <skill-name> --action rollback --to <sha-or-prefix> --managed-root <temp-SkillBox>`
+- `cargo run -p skillbox-cli --offline -- remote-apply-change <skill-name> --action rollback --to <sha-or-prefix> --managed-root <temp-SkillBox>`
+- 桌面 UI 手动验证：rollback review 展示回滚后会新增、修改、删除的所有文件，确认后 `current` 和版本列表同步刷新。
 
-## 9. Sync User-Skills Git
+## 9. Operation Log
+
+触发条件：
+
+- Rust core 执行会改变 managed store、runtime、SQLite、Git state 或偏好设置的动作。
+- 当前 remote source bind、remote update apply、remote rollback apply 必须写 operation log；后续其它 side-effect workflow 接入同一能力。
+- Rust CLI 入口：`operations`。
+- Tauri command：`list_operations`。
+- 桌面 UI：remote skill detail 显示最近的 skill operation history；未来 Settings 或 Operations 页面可展示全局日志。
+
+步骤：
+
+- 操作开始时写入 `started` record，包含 operation type、actor、entity type/name、started time、summary 和 payload。
+- 操作成功时更新为 `succeeded`，写入 finished time 和最终 payload。
+- 操作失败、验证拒绝或恢复失败时更新为 `failed`，写入 finished time、error 和恢复相关 payload。
+- 记录由 Rust core append/update；React 只能读取展示，不能编辑、删除或伪造记录。
+- MVP 永久保留 operation log，不自动清理。
+
+失败与回滚：
+
+- 业务操作失败时必须尽量把对应 operation 标记为 `failed`。
+- operation 写入失败不能静默吞掉；调用方应收到错误或包含日志失败说明的结果。
+- UI 无法加载 operation history 时，只在该 skill 的操作区展示加载失败，不阻断其它 skill 管理能力。
+
+完成验证：
+
+- `cargo test -p skillbox-core --offline operation`
+- `cargo run -p skillbox-cli --offline -- operations --managed-root <temp-SkillBox>`
+- `cargo run -p skillbox-cli --offline -- operations --entity-type skill --entity-name <skill-name> --managed-root <temp-SkillBox>`
+- 桌面 UI 手动验证 remote skill detail 中成功和失败 operation 都可见。
+
+## 10. Sync User-Skills Git
 
 触发条件：
 
@@ -311,7 +354,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `cargo run -p skillbox-cli --offline -- sync-user-skills --managed-root <temp-SkillBox> --remote <bare-repo-path> --message "test sync"`
 - UI 路径变更时，手动验证 commit review dialog、diff preview、默认 commit message、文件选择、shared remote 提示和 push failure 状态。
 
-## 10. Add Agent Adapter
+## 11. Add Agent Adapter
 
 触发条件：
 
@@ -342,7 +385,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 如果 adapter 影响 legacy Node CLI 兼容入口，也运行 `npm test`。
 - 用临时目录模拟该 agent runtime，不直接修改真实用户 runtime。
 
-## 11. Manage Workspaces
+## 12. Manage Workspaces
 
 触发条件：
 

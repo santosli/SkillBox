@@ -18,6 +18,7 @@ export function normalizeRemoteSourceBindingPreview(preview = {}) {
     validation,
     currentVersion: preview.currentVersion || preview.current_version || '',
     latestSha: preview.latestSha || preview.latest_sha || '',
+    reference: preview.reference || preview.ref || '',
     refKind: preview.refKind || preview.ref_kind || '',
     tracking: Boolean(preview.tracking),
     message: preview.message || '',

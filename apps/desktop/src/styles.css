@@ -2227,6 +2227,98 @@ dd {
   gap: 12px;
 }
 
+.remoteSkillPanel {
+  display: grid;
+  gap: 12px;
+}
+
+.remoteSkillActionStack {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sourceBindingPreview,
+.remoteVersionSummary,
+.operationHistoryPanel {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 13px;
+  padding: 12px;
+}
+
+.sourceBindingPreview strong,
+.remoteVersionSummary strong {
+  color: #111827;
+  font-size: 13px;
+}
+
+.sourceBindingPreview small,
+.remoteVersionSummary span {
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.remoteVersionList {
+  display: grid;
+  gap: 8px;
+}
+
+.remoteVersionRow {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.remoteVersionRow span,
+.remoteVersionRow strong,
+.remoteVersionRow small {
+  display: block;
+  min-width: 0;
+}
+
+.remoteVersionRow strong {
+  overflow: hidden;
+  color: #111827;
+  font-size: 12px;
+  font-weight: 680;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remoteVersionRow small {
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.operationHistoryRow {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.operationHistoryRow span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .detailFavoriteButton {
   display: inline-flex;
   height: 38px;
@@ -2483,6 +2575,13 @@ dd {
   accent-color: #0a84ff;
 }
 
+.gitFileRow.remoteFileRow {
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr);
+  background: transparent;
+  text-align: left;
+}
+
 .gitFileRow span,
 .gitFileRow strong,
 .gitFileRow small {
@@ -2701,6 +2800,11 @@ dd {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+
+.remoteDialogFooter,
+.remoteDialogError {
+  margin: 0 24px 24px;
 }
 
 .localImportBody {

@@ -1,3 +1,4 @@
+import React from 'react';
 import { parseUnifiedDiff } from './gitDiffView.js';
 
 export function GitDiffView({ diff }) {

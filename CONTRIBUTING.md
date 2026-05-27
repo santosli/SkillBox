@@ -54,6 +54,14 @@ cargo run -p skillbox-cli --offline -- parse-github-url <github-url>
 cargo run -p skillbox-cli --offline -- import <source-dir> --type user --managed-root <temp-SkillBox>
 cargo run -p skillbox-cli --offline -- deploy <skill-name> --target <target-root> --managed-root <temp-SkillBox>
 cargo run -p skillbox-cli --offline -- check-remote-updates --managed-root <temp-SkillBox>
+cargo run -p skillbox-cli --offline -- remote-source-preview <skill-name> <github-url> --managed-root <temp-SkillBox>
+cargo run -p skillbox-cli --offline -- bind-remote-source <skill-name> <github-url> --managed-root <temp-SkillBox>
+cargo run -p skillbox-cli --offline -- remote-versions <skill-name> --managed-root <temp-SkillBox>
+cargo run -p skillbox-cli --offline -- remote-preview-change <skill-name> --action update --managed-root <temp-SkillBox>
+cargo run -p skillbox-cli --offline -- remote-apply-change <skill-name> --action update --to <sha> --managed-root <temp-SkillBox>
+cargo run -p skillbox-cli --offline -- remote-preview-change <skill-name> --action rollback --to <sha-or-prefix> --managed-root <temp-SkillBox>
+cargo run -p skillbox-cli --offline -- remote-apply-change <skill-name> --action rollback --to <sha-or-prefix> --managed-root <temp-SkillBox>
+cargo run -p skillbox-cli --offline -- operations --managed-root <temp-SkillBox>
 ```
 
 ## 代码约定
@@ -98,6 +106,6 @@ PR 前检查：
 
 - `cargo` 不在 `PATH`：运行 `source ~/.cargo/env` 或使用完整路径。
 - Browser preview 不是 Tauri：`apps/desktop` 在普通 Vite 预览中会使用 mock 状态，不能验证真实 Tauri command。
-- Rust CLI 和 Node CLI 能力不完全相同：GitHub install、check updates、rollback 仍在 Node 侧；user-skills Git sync 已有 Rust/Tauri 入口。
+- Rust CLI 和 Node CLI 能力不完全相同：GitHub install 仍在 Node 侧；remote source binding、check updates、update/rollback review/apply、operation log 和 user-skills Git sync 已有 Rust/Tauri 入口。
 - Rust SQLite schema 和 Node MVP schema 有差异：改 schema 时必须考虑旧数据读取。
 - `~/.codex/skills`、`~/.agents/skills` 和其它 agent runtime 都不是真相源，不能把 runtime 目录当作唯一状态。

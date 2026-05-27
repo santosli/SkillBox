@@ -1667,38 +1667,44 @@ pub fn preview_remote_version_change(
     let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
     let from_version = current_remote_version(&paths, &request.skill_name)?;
     let to_version = resolve_remote_version_change_target(&paths, &request)?;
-    let remote_root = paths.remote_skills_root.join(&request.skill_name);
-    let from_path = remote_root.join("versions").join(&from_version);
-    let to_path = remote_root.join("versions").join(&to_version);
-    let from_skill = read_skill(&from_path)?;
-    let to_skill = read_skill(&to_path)?;
-    if from_skill.name != to_skill.name || to_skill.name != request.skill_name {
-        return Err(format!(
-            "Version skill name does not match {}",
-            request.skill_name
+    let temp = temporary_work_dir("remote-preview");
+    let result = (|| {
+        let remote_root = paths.remote_skills_root.join(&request.skill_name);
+        let from_path = remote_root.join("versions").join(&from_version);
+        let to_path = remote_version_preview_target(&paths, &request, &to_version, &temp)?;
+        let from_skill = read_skill(&from_path)?;
+        let to_skill = read_skill(&to_path)?;
+        if from_skill.name != to_skill.name || to_skill.name != request.skill_name {
+            return Err(format!(
+                "Version skill name does not match {}",
+                request.skill_name
+            ));
+        }
+
+        let git_files = skillbox_git::diff_no_index_tree(&from_path, &to_path)?;
+        let files = git_files
+            .into_iter()
+            .map(|file| remote_diff_file(&from_path, &to_path, file))
+            .collect::<Result<Vec<_>>>()?;
+        let affected_deployments = classify_affected_deployments(&paths, &request.skill_name)?;
+        let preview_id = content_hash_text(&format!(
+            "{}:{}:{}",
+            request.skill_name, from_version, to_version
         ));
-    }
 
-    let git_files = skillbox_git::diff_no_index_tree(&from_path, &to_path)?;
-    let files = git_files
-        .into_iter()
-        .map(|file| remote_diff_file(&from_path, &to_path, file))
-        .collect::<Result<Vec<_>>>()?;
-    let affected_deployments = classify_affected_deployments(&paths, &request.skill_name)?;
-    let preview_id = content_hash_text(&format!(
-        "{}:{}:{}",
-        request.skill_name, from_version, to_version
-    ));
+        Ok(RemoteVersionChangePreview {
+            preview_id,
+            skill_name: request.skill_name,
+            action: request.action,
+            from_version,
+            to_version,
+            files,
+            affected_deployments,
+        })
+    })();
 
-    Ok(RemoteVersionChangePreview {
-        preview_id,
-        skill_name: request.skill_name,
-        action: request.action,
-        from_version,
-        to_version,
-        files,
-        affected_deployments,
-    })
+    let _ = fs::remove_dir_all(&temp);
+    result
 }
 
 pub fn apply_remote_version_change(
@@ -2250,6 +2256,34 @@ fn resolve_remote_version_prefix(
         1 => Ok(matches.remove(0)),
         _ => Err(format!("Version prefix is ambiguous: {input}")),
     }
+}
+
+fn remote_version_preview_target(
+    paths: &ManagedPaths,
+    request: &RemoteVersionChangeRequest,
+    to_version: &str,
+    temp: &Path,
+) -> Result<PathBuf> {
+    let remote_root = paths.remote_skills_root.join(&request.skill_name);
+    let version_path = remote_root.join("versions").join(to_version);
+    if version_path.exists() {
+        return Ok(version_path);
+    }
+
+    if request.action == RemoteVersionChangeAction::Rollback {
+        return Ok(version_path);
+    }
+
+    let source = read_remote_source(&remote_root)?;
+    let repo_url = source
+        .repo_url
+        .ok_or_else(|| "GitHub source is missing repoUrl.".to_string())?;
+    let source_path = source
+        .path
+        .ok_or_else(|| "GitHub source is missing path.".to_string())?;
+    let checkout = temp.join("checkout");
+    skillbox_git::fetch_ref_path(&repo_url, to_version, &source_path, &checkout)?;
+    Ok(checkout.join(source_path))
 }
 
 fn short_version_label(version: &str) -> String {
@@ -5033,6 +5067,56 @@ description: \"Demo skill\"
         assert_eq!(binary.old_size, Some(3));
         assert!(binary.old_hash.is_some());
         assert_eq!(binary.diff, "");
+    }
+
+    #[test]
+    fn remote_version_preview_update_uses_temp_snapshot_without_installing_version() {
+        let root = temp_dir("remote-preview-update");
+        let managed_root = root.join("SkillBox");
+        let paths = ensure_managed_layout(&managed_root).unwrap();
+        let source = root.join("local").join("find-skills");
+        make_skill(&source, "find-skills", "Find skills");
+        import_skill(&source, SkillKind::Remote, &managed_root).unwrap();
+        let remote = bare_remote_with_skill_content(
+            "remote-preview-update-origin",
+            "find-skills",
+            "Find skills",
+            "Updated remote body\n",
+        );
+        let _rewrite = github_repo_rewrite("acme", "remote-preview-update", &remote);
+        bind_remote_source(
+            BindRemoteSourceRequest {
+                skill_name: "find-skills".to_string(),
+                source_url: github_source_url("acme", "remote-preview-update", "find-skills"),
+                actor: "cli".to_string(),
+            },
+            &managed_root,
+        )
+        .unwrap();
+        let latest_sha = read_remote_source(&paths.remote_skills_root.join("find-skills"))
+            .unwrap()
+            .latest_sha
+            .unwrap();
+
+        let preview = preview_remote_version_change(
+            RemoteVersionChangeRequest {
+                skill_name: "find-skills".to_string(),
+                action: RemoteVersionChangeAction::Update,
+                target_version: None,
+                actor: "cli".to_string(),
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        assert_eq!(preview.to_version, latest_sha);
+        assert!(preview.files.iter().any(|file| file.path == "SKILL.md"));
+        assert!(!paths
+            .remote_skills_root
+            .join("find-skills")
+            .join("versions")
+            .join(&preview.to_version)
+            .exists());
     }
 
     #[test]
