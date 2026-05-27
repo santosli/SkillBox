@@ -185,6 +185,74 @@ pub struct WorkspaceScanResult {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum OperationStatus {
+    Started,
+    Succeeded,
+    Failed,
+    Cancelled,
+}
+
+impl OperationStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            OperationStatus::Started => "started",
+            OperationStatus::Succeeded => "succeeded",
+            OperationStatus::Failed => "failed",
+            OperationStatus::Cancelled => "cancelled",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OperationStart {
+    pub operation_type: String,
+    pub actor: String,
+    pub entity_type: String,
+    pub entity_name: String,
+    pub summary: String,
+    pub payload: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OperationFinish {
+    pub id: String,
+    pub status: OperationStatus,
+    pub summary: String,
+    pub error: Option<String>,
+    pub payload: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct OperationFilter {
+    pub entity_type: Option<String>,
+    pub entity_name: Option<String>,
+    pub status: Option<OperationStatus>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct OperationRecord {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub operation_type: String,
+    pub status: OperationStatus,
+    pub actor: String,
+    pub entity_type: String,
+    pub entity_name: String,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub summary: String,
+    pub error: Option<String>,
+    pub payload: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct OperationList {
+    pub operations: Vec<OperationRecord>,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum UserSkillsGitState {
     NotConfigured,
     Clean,
@@ -910,6 +978,116 @@ pub fn forget_workspace(
     load_workspaces(&paths.database_path)
 }
 
+pub fn start_operation(
+    request: OperationStart,
+    managed_root: impl AsRef<Path>,
+) -> Result<OperationRecord> {
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let id = operation_id();
+    let started_at = operation_timestamp();
+    let payload_json =
+        serde_json::to_string(&request.payload).map_err(|error| error.to_string())?;
+    let connection = Connection::open(&paths.database_path).map_err(|error| error.to_string())?;
+
+    connection
+        .execute(
+            "
+            INSERT INTO operations (
+              id, type, status, actor, entity_type, entity_name,
+              started_at, finished_at, summary, error, payload_json
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8, NULL, ?9)
+            ",
+            params![
+                id,
+                request.operation_type,
+                OperationStatus::Started.as_str(),
+                request.actor,
+                request.entity_type,
+                request.entity_name,
+                started_at,
+                request.summary,
+                payload_json
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+
+    load_operation(&connection, &id)
+}
+
+pub fn finish_operation(
+    request: OperationFinish,
+    managed_root: impl AsRef<Path>,
+) -> Result<OperationRecord> {
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let id = request.id.clone();
+    let finished_at = operation_timestamp();
+    let payload_json =
+        serde_json::to_string(&request.payload).map_err(|error| error.to_string())?;
+    let connection = Connection::open(&paths.database_path).map_err(|error| error.to_string())?;
+
+    connection
+        .execute(
+            "
+            UPDATE operations
+            SET status = ?2,
+                finished_at = ?3,
+                summary = ?4,
+                error = ?5,
+                payload_json = ?6
+            WHERE id = ?1
+            ",
+            params![
+                id,
+                request.status.as_str(),
+                finished_at,
+                request.summary,
+                request.error,
+                payload_json
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+
+    load_operation(&connection, &id)
+}
+
+pub fn list_operations(
+    filter: OperationFilter,
+    managed_root: impl AsRef<Path>,
+) -> Result<OperationList> {
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let connection = Connection::open(&paths.database_path).map_err(|error| error.to_string())?;
+    let limit = i64::from(filter.limit.unwrap_or(50).clamp(1, 500));
+    let status = filter.status.map(OperationStatus::as_str);
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT id, type, status, actor, entity_type, entity_name,
+                   started_at, finished_at, summary, error, payload_json
+            FROM operations
+            WHERE (?1 IS NULL OR entity_type = ?1)
+              AND (?2 IS NULL OR entity_name = ?2)
+              AND (?3 IS NULL OR status = ?3)
+            ORDER BY started_at DESC, id DESC
+            LIMIT ?4
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(
+            params![filter.entity_type, filter.entity_name, status, limit],
+            operation_from_row,
+        )
+        .map_err(|error| error.to_string())?;
+    let mut operations = Vec::new();
+
+    for row in rows {
+        operations.push(row.map_err(|error| error.to_string())?);
+    }
+
+    Ok(OperationList { operations })
+}
+
 pub fn user_skills_git_status(managed_root: impl AsRef<Path>) -> Result<UserSkillsGitStatus> {
     let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
     user_skills_git_status_for_repo(paths.user_skills_root)
@@ -1554,6 +1732,20 @@ fn init_database(database_path: &Path) -> Result<()> {
               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS operations (
+              id TEXT PRIMARY KEY,
+              type TEXT NOT NULL,
+              status TEXT NOT NULL,
+              actor TEXT NOT NULL,
+              entity_type TEXT NOT NULL,
+              entity_name TEXT NOT NULL,
+              started_at TEXT NOT NULL,
+              finished_at TEXT,
+              summary TEXT NOT NULL,
+              error TEXT,
+              payload_json TEXT NOT NULL
+            );
             ",
         )
         .map_err(|error| error.to_string())?;
@@ -1592,6 +1784,70 @@ fn ensure_database_column(
         )
         .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+fn operation_id() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    format!("op-{nanos}")
+}
+
+fn operation_timestamp() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default();
+    seconds.to_string()
+}
+
+fn load_operation(connection: &Connection, id: &str) -> Result<OperationRecord> {
+    connection
+        .query_row(
+            "
+            SELECT id, type, status, actor, entity_type, entity_name,
+                   started_at, finished_at, summary, error, payload_json
+            FROM operations
+            WHERE id = ?1
+            ",
+            params![id],
+            operation_from_row,
+        )
+        .map_err(|error| error.to_string())
+}
+
+fn operation_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<OperationRecord> {
+    let status: String = row.get(2)?;
+    let payload_json: String = row.get(10)?;
+
+    Ok(OperationRecord {
+        id: row.get(0)?,
+        operation_type: row.get(1)?,
+        status: parse_operation_status(&status).unwrap_or(OperationStatus::Failed),
+        actor: row.get(3)?,
+        entity_type: row.get(4)?,
+        entity_name: row.get(5)?,
+        started_at: row.get(6)?,
+        finished_at: row.get(7)?,
+        summary: row.get(8)?,
+        error: row.get(9)?,
+        payload: serde_json::from_str(&payload_json).unwrap_or_else(|_| serde_json::json!({})),
+    })
+}
+
+fn parse_operation_status(value: &str) -> Option<OperationStatus> {
+    match value {
+        "started" => Some(OperationStatus::Started),
+        "succeeded" => Some(OperationStatus::Succeeded),
+        "failed" => Some(OperationStatus::Failed),
+        "cancelled" => Some(OperationStatus::Cancelled),
+        _ => None,
+    }
 }
 
 fn read_bool_preference(database_path: &Path, key: &str) -> Result<Option<bool>> {
@@ -2849,6 +3105,170 @@ description: \"Demo skill\"
         let error = set_status_refresh_interval_minutes(&managed_root, 0).unwrap_err();
 
         assert!(error.contains("between 1 and 1440"));
+    }
+
+    #[test]
+    fn operation_log_records_success_failure_and_cancellation() {
+        let managed_root = temp_dir("operation-log-statuses").join("SkillBox");
+        ensure_managed_layout(&managed_root).unwrap();
+
+        let started = start_operation(
+            OperationStart {
+                operation_type: "bind_remote_source".to_string(),
+                actor: "cli".to_string(),
+                entity_type: "skill".to_string(),
+                entity_name: "find-skills".to_string(),
+                summary: "Bind find-skills to GitHub source".to_string(),
+                payload: serde_json::json!({
+                    "sourceUrl": "https://github.com/acme/skills/tree/main/find-skills"
+                }),
+            },
+            &managed_root,
+        )
+        .unwrap();
+        assert_eq!(started.status, OperationStatus::Started);
+
+        let succeeded = finish_operation(
+            OperationFinish {
+                id: started.id.clone(),
+                status: OperationStatus::Succeeded,
+                summary: "Bound find-skills to GitHub source".to_string(),
+                error: None,
+                payload: serde_json::json!({"validation": "same_skill_changed"}),
+            },
+            &managed_root,
+        )
+        .unwrap();
+        assert_eq!(succeeded.status, OperationStatus::Succeeded);
+
+        let failed = start_operation(
+            OperationStart {
+                operation_type: "update_remote_skill".to_string(),
+                actor: "desktop".to_string(),
+                entity_type: "skill".to_string(),
+                entity_name: "find-skills".to_string(),
+                summary: "Update find-skills".to_string(),
+                payload: serde_json::json!({
+                    "fromVersion": "manual-abc",
+                    "toVersion": "123"
+                }),
+            },
+            &managed_root,
+        )
+        .unwrap();
+        let failed = finish_operation(
+            OperationFinish {
+                id: failed.id,
+                status: OperationStatus::Failed,
+                summary: "Update find-skills failed".to_string(),
+                error: Some("Missing SKILL.md".to_string()),
+                payload: serde_json::json!({"restoredCurrent": true}),
+            },
+            &managed_root,
+        )
+        .unwrap();
+        assert_eq!(failed.status, OperationStatus::Failed);
+        assert_eq!(failed.error.as_deref(), Some("Missing SKILL.md"));
+
+        let cancelled = start_operation(
+            OperationStart {
+                operation_type: "preview_version_change".to_string(),
+                actor: "desktop".to_string(),
+                entity_type: "skill".to_string(),
+                entity_name: "find-skills".to_string(),
+                summary: "Preview rollback for find-skills".to_string(),
+                payload: serde_json::json!({"action": "rollback"}),
+            },
+            &managed_root,
+        )
+        .unwrap();
+        let cancelled = finish_operation(
+            OperationFinish {
+                id: cancelled.id,
+                status: OperationStatus::Cancelled,
+                summary: "Rollback preview cancelled".to_string(),
+                error: None,
+                payload: serde_json::json!({"cancelledBy": "user"}),
+            },
+            &managed_root,
+        )
+        .unwrap();
+        assert_eq!(cancelled.status, OperationStatus::Cancelled);
+
+        let list = list_operations(OperationFilter::default(), &managed_root).unwrap();
+        assert_eq!(list.operations.len(), 3);
+        assert_eq!(list.operations[0].status, OperationStatus::Cancelled);
+        assert_eq!(list.operations[1].status, OperationStatus::Failed);
+        assert_eq!(list.operations[2].status, OperationStatus::Succeeded);
+    }
+
+    #[test]
+    fn operation_log_filters_by_entity_and_status() {
+        let managed_root = temp_dir("operation-log-filters").join("SkillBox");
+        ensure_managed_layout(&managed_root).unwrap();
+
+        let alpha = start_operation(
+            OperationStart {
+                operation_type: "deploy_skill".to_string(),
+                actor: "cli".to_string(),
+                entity_type: "skill".to_string(),
+                entity_name: "alpha".to_string(),
+                summary: "Deploy alpha".to_string(),
+                payload: serde_json::json!({}),
+            },
+            &managed_root,
+        )
+        .unwrap();
+        finish_operation(
+            OperationFinish {
+                id: alpha.id,
+                status: OperationStatus::Succeeded,
+                summary: "Deployed alpha".to_string(),
+                error: None,
+                payload: serde_json::json!({}),
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        let beta = start_operation(
+            OperationStart {
+                operation_type: "deploy_skill".to_string(),
+                actor: "cli".to_string(),
+                entity_type: "skill".to_string(),
+                entity_name: "beta".to_string(),
+                summary: "Deploy beta".to_string(),
+                payload: serde_json::json!({}),
+            },
+            &managed_root,
+        )
+        .unwrap();
+        finish_operation(
+            OperationFinish {
+                id: beta.id,
+                status: OperationStatus::Failed,
+                summary: "Deploy beta failed".to_string(),
+                error: Some("target exists".to_string()),
+                payload: serde_json::json!({}),
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        let filtered = list_operations(
+            OperationFilter {
+                entity_type: Some("skill".to_string()),
+                entity_name: Some("beta".to_string()),
+                status: Some(OperationStatus::Failed),
+                limit: Some(20),
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        assert_eq!(filtered.operations.len(), 1);
+        assert_eq!(filtered.operations[0].entity_name, "beta");
+        assert_eq!(filtered.operations[0].status, OperationStatus::Failed);
     }
 
     #[test]
