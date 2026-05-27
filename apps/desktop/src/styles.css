@@ -2511,6 +2511,12 @@ dd {
   padding: 10px;
 }
 
+.remoteVersionRow.current {
+  border-color: #86efac;
+  background: #f0fdf4;
+  box-shadow: inset 4px 0 0 #22c55e;
+}
+
 .remoteVersionRow span,
 .remoteVersionRow strong,
 .remoteVersionRow small {
@@ -2527,11 +2533,19 @@ dd {
   white-space: nowrap;
 }
 
+.remoteVersionRow.current strong {
+  color: #052e16;
+}
+
 .remoteVersionRow small {
   margin-top: 3px;
   color: #64748b;
   font-size: 11px;
   font-weight: 650;
+}
+
+.remoteVersionRow.current small {
+  color: #166534;
 }
 
 .operationHistoryRow {

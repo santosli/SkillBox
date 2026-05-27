@@ -133,6 +133,12 @@ export function remoteSkillUpdateVersionLabel(remoteUpdate = {}, versions = {}) 
   return latest ? `${current} -> ${latest}` : current;
 }
 
+export function shouldShowRemoteUpdateSummary(remoteUpdate = {}) {
+  if (!remoteUpdate) return false;
+  if (remoteUpdate.updateAvailable || remoteUpdate.message) return true;
+  return remoteUpdate.state !== 'up_to_date';
+}
+
 export function remoteVersionActionLabel(preview = {}) {
   return preview.action === 'rollback' ? 'Rollback' : 'Update';
 }

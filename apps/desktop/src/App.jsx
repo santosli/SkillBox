@@ -20,7 +20,7 @@ import desktopPackage from '../package.json';
 import skillBoxAppIcon from '../src-tauri/icons/icon.png';
 import codexAppIcon from './assets/codex-app-icon.png';
 import codexCliIcon from './assets/codex-cli-icon.png';
-import { dashboardTabItems, skillMatchesDashboardFilters } from './dashboardFilters.js';
+import { dashboardTabItems, skillMatchesDashboardFilters, sortDashboardSkills } from './dashboardFilters.js';
 import {
   dashboardFilterOptions,
   deriveDashboardSkill,
@@ -39,7 +39,8 @@ import {
   normalizeRemoteSourceBindingPreview,
   normalizeRemoteVersionPreview,
   remoteSkillUpdateVersionLabel,
-  remoteVersionActionLabel
+  remoteVersionActionLabel,
+  shouldShowRemoteUpdateSummary
 } from './remoteSkills.js';
 import {
   dashboardStatusNotice,
@@ -372,14 +373,16 @@ export default function App() {
   );
   const filtered = useMemo(
     () =>
-      dashboardSkills.filter((skill) =>
-        skillMatchesDashboardFilters(skill, {
-          type: filter,
-          query,
-          tag: dashboardTagFilter,
-          favoritesOnly: dashboardFavoritesOnly,
-          remoteSkillUpdates
-        })
+      sortDashboardSkills(
+        dashboardSkills.filter((skill) =>
+          skillMatchesDashboardFilters(skill, {
+            type: filter,
+            query,
+            tag: dashboardTagFilter,
+            favoritesOnly: dashboardFavoritesOnly,
+            remoteSkillUpdates
+          })
+        )
       ),
     [
       dashboardFavoritesOnly,
@@ -3514,7 +3517,7 @@ function RemoteSkillControlPanel({
         </button>
       </div>
       {loading ? <LoadingNotice>Loading remote details...</LoadingNotice> : null}
-      {remoteUpdate ? (
+      {shouldShowRemoteUpdateSummary(remoteUpdate) ? (
         <div className="remoteVersionSummary">
           <strong>{remoteUpdate.state === 'pinned' ? 'Pinned source' : remoteUpdate.stateLabel || remoteUpdate.state}</strong>
           <span>{remoteSkillUpdateVersionLabel(remoteUpdate, versions)}</span>
@@ -3535,7 +3538,11 @@ function RemoteVersionsPanel({ versions, onReviewRollback }) {
   return (
     <div className="remoteVersionList" aria-label="Remote skill versions">
       {versions.versions.map((version) => (
-        <div className="remoteVersionRow" key={version.version}>
+        <div
+          className={`remoteVersionRow${version.isCurrent ? ' current' : ''}`}
+          aria-current={version.isCurrent ? 'true' : undefined}
+          key={version.version}
+        >
           <span>
             <strong>{version.shortLabel || version.version}</strong>
             <small>{version.isCurrent ? 'Current' : version.kind}</small>

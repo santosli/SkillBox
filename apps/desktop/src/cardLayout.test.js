@@ -230,6 +230,13 @@ test('remote skill async operations show loading and no-change states', () => {
   assert.match(appSource, /inlineSpinner/);
 });
 
+test('remote version list highlights the current version', () => {
+  assert.match(appSource, /remoteVersionRow\$\{version\.isCurrent \? ' current' : ''\}/);
+  assert.match(appSource, /aria-current=\{version\.isCurrent \? 'true' : undefined\}/);
+  assert.match(css, /\.remoteVersionRow\.current\s*\{[^}]*background:\s*#f0fdf4;/s);
+  assert.match(css, /\.remoteVersionRow\.current\s*\{[^}]*box-shadow:\s*inset 4px 0 0 #22c55e;/s);
+});
+
 test('remote operation history is collapsed by default', () => {
   assert.match(appSource, /<details className="operationHistoryPanel" aria-label="Operation history">/);
   assert.match(appSource, /<summary className="operationHistorySummary">/);

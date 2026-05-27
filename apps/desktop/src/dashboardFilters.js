@@ -57,6 +57,29 @@ export function skillMatchesDashboardFilters(skill, filters = {}) {
     .some((value) => String(value).toLowerCase().includes(query));
 }
 
+export function sortDashboardSkills(skills = []) {
+  const typeRank = { user: 0, remote: 1 };
+
+  return [...skills].sort((left, right) => {
+    const leftRank = typeRank[left.type] ?? 2;
+    const rightRank = typeRank[right.type] ?? 2;
+    if (leftRank !== rightRank) {
+      return leftRank - rightRank;
+    }
+
+    const nameCompare = String(left.name || '').localeCompare(String(right.name || ''), undefined, {
+      sensitivity: 'base'
+    });
+    if (nameCompare !== 0) {
+      return nameCompare;
+    }
+
+    return String(left.sourceRoot || '').localeCompare(String(right.sourceRoot || ''), undefined, {
+      sensitivity: 'base'
+    });
+  });
+}
+
 function hasRemoteUpdate(skill, remoteUpdates) {
   if (skill?.type !== 'remote') {
     return false;

@@ -19,7 +19,8 @@ import {
   normalizeRemoteSourceBindingPreview,
   normalizeRemoteVersionPreview,
   remoteSkillUpdateVersionLabel,
-  remoteVersionActionLabel
+  remoteVersionActionLabel,
+  shouldShowRemoteUpdateSummary
 } from './remoteSkills.js';
 import {
   canCommitUserSkillsChanges,
@@ -404,6 +405,35 @@ test('remote update version label handles versions while they are loading', () =
   );
 
   assert.equal(label, 'current unknown');
+});
+
+test('remote update summary hides successful no-change checks', () => {
+  assert.equal(
+    shouldShowRemoteUpdateSummary({
+      state: 'up_to_date',
+      updateAvailable: false,
+      currentVersion: 'abc123',
+      latestSha: 'abc123'
+    }),
+    false
+  );
+  assert.equal(
+    shouldShowRemoteUpdateSummary({
+      state: 'update_available',
+      updateAvailable: true,
+      currentVersion: 'abc123',
+      latestSha: 'def456'
+    }),
+    true
+  );
+  assert.equal(
+    shouldShowRemoteUpdateSummary({
+      state: 'up_to_date',
+      updateAvailable: false,
+      message: 'Last check failed: timeout'
+    }),
+    true
+  );
 });
 
 test('normalizes remote source candidates for desktop binding review', () => {

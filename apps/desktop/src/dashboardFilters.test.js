@@ -4,7 +4,8 @@ import test from 'node:test';
 import {
   dashboardTabItems,
   skillMatchesDashboardFilter,
-  skillMatchesDashboardFilters
+  skillMatchesDashboardFilters,
+  sortDashboardSkills
 } from './dashboardFilters.js';
 import { normalizeRemoteSkillUpdates } from './skillStatusRefresh.js';
 
@@ -92,5 +93,25 @@ test('dashboard combined filters match query, type, tag, agent, and favorites', 
       )
       .map((skill) => skill.name),
     ['github-sync']
+  );
+});
+
+test('dashboard skills sort by type then name', () => {
+  const skills = [
+    { name: 'zeta-remote', type: 'remote' },
+    { name: 'beta-user', type: 'user' },
+    { name: 'alpha-remote', type: 'remote' },
+    { name: 'Alpha-user', type: 'user' }
+  ];
+
+  const sorted = sortDashboardSkills(skills);
+
+  assert.deepEqual(
+    sorted.map((skill) => skill.name),
+    ['Alpha-user', 'beta-user', 'alpha-remote', 'zeta-remote']
+  );
+  assert.deepEqual(
+    skills.map((skill) => skill.name),
+    ['zeta-remote', 'beta-user', 'alpha-remote', 'Alpha-user']
   );
 });
