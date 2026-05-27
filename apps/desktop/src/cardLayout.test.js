@@ -230,11 +230,63 @@ test('remote skill async operations show loading and no-change states', () => {
   assert.match(appSource, /inlineSpinner/);
 });
 
+test('skill detail modal uses a two-column workbench layout', () => {
+  assert.match(appSource, /className="skillDetailBodyGrid"/);
+  assert.match(appSource, /className="skillDetailMetaColumn"/);
+  assert.match(appSource, /className="skillDetailControlRail"/);
+  assert.match(appSource, /className="skillDetailVersionHistory"/);
+  assert.match(css, /\.skillDetailBodyGrid\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+248px;/s);
+  assert.match(css, /\.skillDetailBodyGrid\s*\{[^}]*align-items:\s*start;/s);
+  assert.match(css, /\.skillDetailControlRail\s*\{[^}]*box-shadow:\s*0 14px 36px rgba\(15,\s*23,\s*42,\s*0\.08\);/s);
+});
+
+test('skill detail metadata starts with deploy workspace', () => {
+  assert.match(appSource, /className="skillDetailMetaColumn"[\s\S]*aria-label="Deploy workspace"[\s\S]*<RemoteVersionHistoryPanel/);
+  assert.match(appSource, /<span>Deploy workspace<\/span>[\s\S]*<small>\{skill\.installedAgents\.length \|\| 0\} workspaces<\/small>/);
+  assert.match(appSource, /<strong>Deployed to<\/strong>/);
+  assert.match(appSource, /labelPrefix="Deploy workspaces"/);
+  assert.match(appSource, /className="button secondary skillDetailDeployButton" type="button"[\s\S]*Deploy/);
+  assert.match(css, /\.skillDetailDeployRow\s*\{[^}]*justify-content:\s*space-between;/s);
+});
+
+test('skill detail tags live inside controls rail', () => {
+  assert.match(appSource, /<aside className="skillDetailControlRail" aria-label="Skill controls">[\s\S]*aria-label="Skill tags"[\s\S]*<RemoteSkillControlPanel/);
+  assert.match(appSource, /<div className="skillDetailRailHeader">[\s\S]*<span>Controls<\/span>[\s\S]*<section className="skillDetailControlSection skillDetailTagsControl"/);
+  assert.match(css, /\.skillDetailTagsControl \+ \.remoteSkillPanel,\s*\.skillDetailTagsControl \+ \.userSkillPanel\s*\{[^}]*border-top:\s*1px solid #eef2f7;/s);
+});
+
+test('remote update actions live in the detail control rail', () => {
+  const detailFooter = appSource.match(
+    /<footer className="skillDetailActions">(?<body>[\s\S]*?)<\/footer>/
+  )?.groups.body || '';
+
+  assert.match(appSource, /<RemoteSkillControlPanel[\s\S]*onCheckUpdates=\{onCheckUpdates\}/);
+  assert.match(appSource, /className="skillDetailControlRail"[\s\S]*<RemoteSkillControlPanel/);
+  assert.match(appSource, /const showReviewUpdate = remoteUpdate\?\.updateAvailable === true;/);
+  assert.match(appSource, /\{showReviewUpdate \? \(\s*<button\s+className="button primary"[\s\S]*Review update/);
+  assert.doesNotMatch(appSource, /disabled=\{!remoteUpdate\?\.updateAvailable\}[\s\S]*Review update/);
+  assert.doesNotMatch(detailFooter, /Check update/);
+  assert.doesNotMatch(detailFooter, /onCheckUpdates/);
+});
+
 test('remote version list highlights the current version', () => {
   assert.match(appSource, /remoteVersionRow\$\{version\.isCurrent \? ' current' : ''\}/);
   assert.match(appSource, /aria-current=\{version\.isCurrent \? 'true' : undefined\}/);
-  assert.match(css, /\.remoteVersionRow\.current\s*\{[^}]*background:\s*#f0fdf4;/s);
-  assert.match(css, /\.remoteVersionRow\.current\s*\{[^}]*box-shadow:\s*inset 4px 0 0 #22c55e;/s);
+  assert.match(appSource, /\{version\.isCurrent \? \(\s*<span className="remoteVersionCurrentBadge">Active<\/span>/);
+  assert.match(css, /\.remoteVersionRow\.current\s*\{[^}]*background:\s*#f7fff9;/s);
+  assert.match(css, /\.remoteVersionRow\.current\s*\{[^}]*box-shadow:\s*inset 3px 0 0 #22c55e;/s);
+  assert.match(css, /\.remoteVersionCurrentBadge\s*\{[^}]*background:\s*#ecfdf5;/s);
+});
+
+test('skill detail layout collapses controls before metadata on narrow screens', () => {
+  assert.match(css, /@media \(max-width:\s*920px\)\s*\{[\s\S]*\.skillDetailBodyGrid\s*\{[^}]*grid-template-columns:\s*1fr;/s);
+  assert.match(css, /@media \(max-width:\s*920px\)\s*\{[\s\S]*\.skillDetailControlRail\s*\{[^}]*order:\s*1;/s);
+  assert.match(css, /@media \(max-width:\s*920px\)\s*\{[\s\S]*\.skillDetailMetaColumn\s*\{[^}]*order:\s*2;/s);
+});
+
+test('remote version history stays in the metadata column before the log', () => {
+  assert.match(appSource, /className="skillDetailMetaColumn"[\s\S]*<RemoteVersionHistoryPanel[\s\S]*<OperationHistoryPanel operations=\{operations\} \/>[\s\S]*<\/div>\s*<aside className="skillDetailControlRail"/);
+  assert.doesNotMatch(css, /\.skillDetailVersionHistory\s*\{[^}]*grid-column:\s*1 \/ -1;/s);
 });
 
 test('remote operation history is collapsed by default', () => {

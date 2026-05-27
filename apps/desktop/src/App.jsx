@@ -2425,12 +2425,12 @@ function SkillCard({ skill, onOpen, onToggleFavorite }) {
   );
 }
 
-function AgentIconStack({ agents = [] }) {
+function AgentIconStack({ agents = [], emptyLabel = 'No installed agent target', labelPrefix = 'Installed agents' }) {
   const visibleAgents = agents.slice(0, 4);
   const overflowCount = Math.max(agents.length - visibleAgents.length, 0);
   const label = agents.length
-    ? `Installed agents: ${agents.map((agent) => agent.label).join(', ')}`
-    : 'No installed agent target';
+    ? `${labelPrefix}: ${agents.map((agent) => agent.label).join(', ')}`
+    : emptyLabel;
 
   return (
     <span className="skillAgentIcons" aria-label={label} title={label}>
@@ -3493,39 +3493,124 @@ function RemoteVersionReviewDialog({ dialog, onActivatePath, onApply, onClose })
 }
 
 function RemoteSkillControlPanel({
+  isChecking,
   loading,
-  operations,
   remoteUpdate,
-  versions,
   onBindRemoteSource,
-  onReviewRollback,
+  onCheckUpdates,
   onReviewUpdate
 }) {
+  const sourceMissing = remoteUpdate?.state === 'no_source';
+  const sourceLabel = sourceMissing
+    ? 'No source configured'
+    : remoteUpdate?.state === 'pinned'
+      ? 'Pinned source'
+      : remoteUpdate
+        ? 'GitHub source linked'
+        : 'Source not checked';
+  const updateLabel = remoteUpdate?.stateLabel || 'Update not checked';
+  const showUpdateSummary = remoteUpdate?.state !== 'no_source' && shouldShowRemoteUpdateSummary(remoteUpdate);
+  const showReviewUpdate = remoteUpdate?.updateAvailable === true;
+
   return (
     <section className="remoteSkillPanel" aria-label="Remote skill controls">
-      <div className="remoteSkillActionStack">
-        <button className="button secondary" type="button" onClick={onBindRemoteSource}>
+      <div className="skillDetailControlSection">
+        <div className="skillDetailSectionHeader">
+          <span>Remote source</span>
+          <small>{sourceLabel}</small>
+        </div>
+        <p className="skillDetailControlCopy">
+          {sourceMissing
+            ? 'Bind a source before checking or applying remote updates.'
+            : 'Source changes are linked without replacing the current version.'}
+        </p>
+        <button
+          className={sourceMissing ? 'button primary' : 'button secondary'}
+          type="button"
+          onClick={onBindRemoteSource}
+        >
           Bind source
         </button>
+      </div>
+
+      {!sourceMissing ? <div className="skillDetailControlSection">
+        <div className="skillDetailSectionHeader">
+          <span>Updates</span>
+          <small>{updateLabel}</small>
+        </div>
+        {loading ? <LoadingNotice compact>Loading remote details...</LoadingNotice> : null}
+        {showUpdateSummary ? (
+          <div className="remoteVersionSummary">
+            <strong>{remoteUpdate.state === 'pinned' ? 'Pinned source' : remoteUpdate.stateLabel || remoteUpdate.state}</strong>
+            <span>{remoteSkillUpdateVersionLabel(remoteUpdate)}</span>
+            {remoteUpdate.message ? <small>{remoteUpdate.message}</small> : null}
+          </div>
+        ) : null}
+        <div className="skillDetailControlActions">
+          {showReviewUpdate ? (
+            <button
+              className="button primary"
+              type="button"
+              onClick={onReviewUpdate}
+            >
+              Review update
+            </button>
+          ) : null}
+          <button className="button secondary" disabled={isChecking} type="button" onClick={() => onCheckUpdates()}>
+            {isChecking ? (
+              <>
+                <span className="buttonSpinner" aria-hidden="true" />
+                Checking...
+              </>
+            ) : (
+              'Check update'
+            )}
+          </button>
+        </div>
+      </div> : null}
+    </section>
+  );
+}
+
+function UserSkillControlPanel({ isPreparingSync, isSyncing, syncAction, onOpenSyncSetup }) {
+  return (
+    <section className="userSkillPanel" aria-label="User skill controls">
+      <div className="skillDetailControlSection">
+        <div className="skillDetailSectionHeader">
+          <span>User sync</span>
+          <small>{isSyncing ? 'Sync in progress' : 'Local skill'}</small>
+        </div>
+        <p className="skillDetailControlCopy">
+          Commit and push user skill changes from the managed SkillBox store.
+        </p>
         <button
           className="button primary"
-          disabled={!remoteUpdate?.updateAvailable}
+          disabled={isSyncing}
           type="button"
-          onClick={onReviewUpdate}
+          onClick={onOpenSyncSetup}
         >
-          Review update
+          {isPreparingSync ? 'Preparing...' : isSyncing ? 'Syncing...' : syncAction}
         </button>
       </div>
-      {loading ? <LoadingNotice>Loading remote details...</LoadingNotice> : null}
-      {shouldShowRemoteUpdateSummary(remoteUpdate) ? (
-        <div className="remoteVersionSummary">
-          <strong>{remoteUpdate.state === 'pinned' ? 'Pinned source' : remoteUpdate.stateLabel || remoteUpdate.state}</strong>
-          <span>{remoteSkillUpdateVersionLabel(remoteUpdate, versions)}</span>
-          {remoteUpdate.message ? <small>{remoteUpdate.message}</small> : null}
-        </div>
+    </section>
+  );
+}
+
+function RemoteVersionHistoryPanel({ loading, versions, onReviewRollback }) {
+  const versionCount = versions?.versions?.length || 0;
+
+  return (
+    <section className="skillDetailVersionHistory" aria-label="Version history">
+      <div className="skillDetailSectionHeader">
+        <span>Version history</span>
+        <small>{versionCount ? `${versionCount} versions` : loading ? 'Loading' : 'No versions loaded'}</small>
+      </div>
+      {loading ? <LoadingNotice compact>Loading remote details...</LoadingNotice> : null}
+      {versionCount ? (
+        <RemoteVersionsPanel versions={versions} onReviewRollback={onReviewRollback} />
+      ) : !loading ? (
+        <div className="skillDetailEmptyPanel">No version history loaded.</div>
       ) : null}
-      {versions ? <RemoteVersionsPanel versions={versions} onReviewRollback={onReviewRollback} /> : null}
-      <OperationHistoryPanel operations={operations} />
     </section>
   );
 }
@@ -3547,14 +3632,17 @@ function RemoteVersionsPanel({ versions, onReviewRollback }) {
             <strong>{version.shortLabel || version.version}</strong>
             <small>{version.isCurrent ? 'Current' : version.kind}</small>
           </span>
-          <button
-            className="button secondary"
-            disabled={version.isCurrent}
-            type="button"
-            onClick={() => onReviewRollback(version)}
-          >
-            Rollback
-          </button>
+          {version.isCurrent ? (
+            <span className="remoteVersionCurrentBadge">Active</span>
+          ) : (
+            <button
+              className="button secondary"
+              type="button"
+              onClick={() => onReviewRollback(version)}
+            >
+              Rollback
+            </button>
+          )}
         </div>
       ))}
     </div>
@@ -3934,60 +4022,107 @@ function SkillDetailDialog({
               <Badge tone={skill.statusTone}>{skill.statusLabel}</Badge>
             </div>
             <h2 id="skill-detail-title">{skill.name}</h2>
+            <p className="skillDetailDescription">
+              {skill.description || 'No description in SKILL.md frontmatter.'}
+            </p>
           </div>
           <button className="iconButton skillDetailCloseButton" type="button" aria-label="Close skill detail" onClick={onClose}>
             <X aria-hidden="true" />
           </button>
         </header>
 
-        <p className="skillDetailDescription">
-          {skill.description || 'No description in SKILL.md frontmatter.'}
-        </p>
-
-        <form className="skillDetailTagEditor" onSubmit={addTag}>
-          <div className="skillDetailTagList" aria-label="Skill tags">
-            {skill.displayTags.map((tag) => (
-              <button
-                aria-label={`Remove ${tag} tag`}
-                className="editableTagPill"
-                key={tag}
-                type="button"
-                onClick={() => removeTag(tag)}
-              >
-                <span>{tag}</span>
-                <X aria-hidden="true" />
+        <div className="skillDetailBodyGrid">
+          <div className="skillDetailMetaColumn">
+            <section className="skillDetailSection skillDetailDeploySection" aria-label="Deploy workspace">
+              <div className="skillDetailSectionHeader">
+                <span>Deploy workspace</span>
+                <small>{skill.installedAgents.length || 0} workspaces</small>
+              </div>
+              <div className="skillDetailDeployRow">
+                <div>
+                  <strong>Deployed to</strong>
+                  <small>{skill.installedAgents.length ? 'Active runtime workspaces' : 'No workspace deployed'}</small>
+                </div>
+                <AgentIconStack
+                  agents={skill.installedAgents}
+                  emptyLabel="No deployed workspace"
+                  labelPrefix="Deploy workspaces"
+                />
+              </div>
+              <button className="button secondary skillDetailDeployButton" type="button">
+                Deploy
               </button>
-            ))}
-          </div>
-          <div className="skillDetailTagInput">
-            <input
-              aria-label="Add tag"
-              placeholder="new tag"
-              value={tagInput}
-              onChange={(event) => setTagInput(event.target.value)}
-            />
-            <button disabled={!pendingTag} type="submit">
-              Add
-            </button>
-          </div>
-        </form>
+            </section>
 
-        <div className="skillDetailAgentRow">
-          <span>Installed agents</span>
-          <AgentIconStack agents={skill.installedAgents} />
+            {skill.type === 'remote' ? (
+              <>
+                <RemoteVersionHistoryPanel
+                  loading={remoteLoading}
+                  versions={versions}
+                  onReviewRollback={onReviewRollback}
+                />
+                <OperationHistoryPanel operations={operations} />
+              </>
+            ) : null}
+          </div>
+
+          <aside className="skillDetailControlRail" aria-label="Skill controls">
+            <div className="skillDetailRailHeader">
+              <span>Controls</span>
+              <small>{isChecking ? 'Checking remote' : isSyncing ? 'Working' : 'Ready'}</small>
+            </div>
+            <section className="skillDetailControlSection skillDetailTagsControl" aria-label="Skill tags">
+              <div className="skillDetailSectionHeader">
+                <span>Tags</span>
+                <small>{skill.displayTags.length} labels</small>
+              </div>
+              <form className="skillDetailTagEditor" onSubmit={addTag}>
+                <div className="skillDetailTagList" aria-label="Skill tags">
+                  {skill.displayTags.map((tag) => (
+                    <button
+                      aria-label={`Remove ${tag} tag`}
+                      className="editableTagPill"
+                      key={tag}
+                      type="button"
+                      onClick={() => removeTag(tag)}
+                    >
+                      <span>{tag}</span>
+                      <X aria-hidden="true" />
+                    </button>
+                  ))}
+                </div>
+                <div className="skillDetailTagInput">
+                  <input
+                    aria-label="Add tag"
+                    placeholder="new tag"
+                    value={tagInput}
+                    onChange={(event) => setTagInput(event.target.value)}
+                  />
+                  <button disabled={!pendingTag} type="submit">
+                    Add
+                  </button>
+                </div>
+              </form>
+            </section>
+            {skill.type === 'remote' ? (
+              <RemoteSkillControlPanel
+                isChecking={isChecking}
+                loading={remoteLoading}
+                remoteUpdate={remoteUpdate}
+                onBindRemoteSource={onBindRemoteSource}
+                onCheckUpdates={onCheckUpdates}
+                onReviewUpdate={onReviewUpdate}
+              />
+            ) : (
+              <UserSkillControlPanel
+                isPreparingSync={isPreparingSync}
+                isSyncing={isSyncing}
+                syncAction={syncAction}
+                onOpenSyncSetup={onOpenSyncSetup}
+              />
+            )}
+          </aside>
         </div>
-
-        {skill.type === 'remote' ? (
-          <RemoteSkillControlPanel
-            loading={remoteLoading}
-            operations={operations}
-            remoteUpdate={remoteUpdate}
-            versions={versions}
-            onBindRemoteSource={onBindRemoteSource}
-            onReviewRollback={onReviewRollback}
-            onReviewUpdate={onReviewUpdate}
-          />
-        ) : null}
 
         <footer className="skillDetailActions">
           <button
@@ -3999,28 +4134,6 @@ function SkillDetailDialog({
             <Star aria-hidden="true" />
             {skill.isFavorite ? 'Favorited' : 'Favorite'}
           </button>
-
-          {skill.type === 'user' ? (
-            <button
-              className="button primary"
-              disabled={isSyncing}
-              type="button"
-              onClick={onOpenSyncSetup}
-            >
-              {isPreparingSync ? 'Preparing...' : status === 'syncing' ? 'Syncing...' : syncAction}
-            </button>
-          ) : (
-            <button className="button secondary" disabled={isChecking} type="button" onClick={() => onCheckUpdates()}>
-              {isChecking ? (
-                <>
-                  <span className="buttonSpinner" aria-hidden="true" />
-                  Checking...
-                </>
-              ) : (
-                'Check update'
-              )}
-            </button>
-          )}
         </footer>
       </section>
     </div>

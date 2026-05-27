@@ -2055,15 +2055,14 @@ dd {
 
 .skillDetailDialog {
   display: grid;
-  width: min(560px, calc(100vw - 48px));
+  width: min(780px, calc(100vw - 48px));
   max-height: calc(100vh - 64px);
-  gap: 18px;
-  overflow: auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
   border: 1px solid #dbe3ee;
-  border-radius: 12px;
-  background: #ffffff;
+  border-radius: 16px;
+  background: #f8fafc;
   box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
-  padding: 24px;
 }
 
 .skillDetailDialogHeader {
@@ -2072,12 +2071,15 @@ dd {
   align-items: flex-start;
   justify-content: space-between;
   gap: 18px;
+  border-bottom: 1px solid #e5e7eb;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+  padding: 22px 24px 20px;
 }
 
 .skillDetailTitleBlock {
   display: grid;
   min-width: 0;
-  gap: 12px;
+  gap: 10px;
 }
 
 .skillDetailBadges {
@@ -2114,13 +2116,84 @@ dd {
 .skillDetailDescription {
   display: -webkit-box;
   min-width: 0;
+  max-width: 640px;
   margin: 0;
   overflow: hidden;
   color: #64748b;
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.5;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
+  -webkit-line-clamp: 3;
+}
+
+.skillDetailBodyGrid {
+  display: grid;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) 248px;
+  align-items: start;
+  gap: 16px;
+  overflow: auto;
+  padding: 16px;
+}
+
+.skillDetailMetaColumn {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.skillDetailControlRail {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  border: 1px solid #dbe3ee;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 14px 36px rgba(15, 23, 42, 0.08);
+  padding: 14px;
+}
+
+.skillDetailSection,
+.skillDetailControlSection,
+.skillDetailVersionHistory {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+}
+
+.skillDetailSection,
+.skillDetailVersionHistory {
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.04);
+  padding: 14px;
+}
+
+.skillDetailSectionHeader {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.skillDetailSectionHeader span {
+  min-width: 0;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 760;
+  letter-spacing: 0.01em;
+}
+
+.skillDetailSectionHeader small {
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .skillDetailTagList {
@@ -2222,15 +2295,57 @@ dd {
   opacity: 0.55;
 }
 
-.skillDetailAgentRow {
+.skillDetailDeploySection {
+  gap: 14px;
+}
+
+.skillDetailDeployRow {
   display: flex;
   min-width: 0;
-  min-height: 44px;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   border-top: 1px solid #eef2f7;
-  border-bottom: 1px solid #eef2f7;
+  padding-top: 12px;
+}
+
+.skillDetailDeployRow > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.skillDetailDeployRow strong {
+  overflow: hidden;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skillDetailDeployRow small {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skillDetailDeployButton {
+  justify-self: start;
+  min-width: 108px;
+}
+
+.skillDetailAgentRow {
+  display: flex;
+  min-width: 0;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px solid #eef2f7;
   color: #64748b;
   font-size: 13px;
   font-weight: 680;
@@ -2245,20 +2360,81 @@ dd {
   min-width: 0;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
+  border-top: 1px solid #e5e7eb;
+  background: #ffffff;
+  padding: 12px 20px;
 }
 
-.remoteSkillPanel {
+.remoteSkillPanel,
+.userSkillPanel {
   display: grid;
+  align-content: start;
   gap: 12px;
 }
 
-.remoteSkillActionStack {
+.skillDetailRailHeader {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid #eef2f7;
+  padding-bottom: 10px;
+}
+
+.skillDetailRailHeader span {
+  color: #111827;
+  font-size: 13px;
+  font-weight: 780;
+}
+
+.skillDetailRailHeader small {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.skillDetailControlCopy {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.skillDetailControlSection + .skillDetailControlSection {
+  border-top: 1px solid #eef2f7;
+  padding-top: 12px;
+}
+
+.skillDetailTagsControl + .remoteSkillPanel,
+.skillDetailTagsControl + .userSkillPanel {
+  border-top: 1px solid #eef2f7;
+  padding-top: 12px;
+}
+
+.skillDetailControlActions {
   display: flex;
   min-width: 0;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.skillDetailControlActions .button,
+.skillDetailControlSection > .button,
+.userSkillPanel .button {
+  width: 100%;
+}
+
+.skillDetailVersionHistory {
+  grid-template-columns: 1fr;
+  align-items: start;
+}
+
+.skillDetailVersionHistory > .skillDetailSectionHeader {
+  border-bottom: 1px solid #eef2f7;
+  padding-bottom: 10px;
 }
 
 .sourceBindingPreview,
@@ -2266,9 +2442,9 @@ dd {
 .operationHistoryPanel {
   display: grid;
   gap: 6px;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #ffffff;
   color: #334155;
   font-size: 13px;
   padding: 12px;
@@ -2276,6 +2452,20 @@ dd {
 
 .operationHistoryPanel {
   padding: 0;
+}
+
+.skillDetailBodyGrid > .operationHistoryPanel {
+  margin: 0;
+}
+
+.skillDetailEmptyPanel {
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 650;
+  padding: 12px;
 }
 
 .operationHistorySummary {
@@ -2496,25 +2686,25 @@ dd {
 
 .remoteVersionList {
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
 .remoteVersionRow {
   display: grid;
   min-width: 0;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
+  gap: 12px;
   align-items: center;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
   background: #ffffff;
-  padding: 10px;
+  padding: 12px 14px;
 }
 
 .remoteVersionRow.current {
-  border-color: #86efac;
-  background: #f0fdf4;
-  box-shadow: inset 4px 0 0 #22c55e;
+  border-color: #bbf7d0;
+  background: #f7fff9;
+  box-shadow: inset 3px 0 0 #22c55e;
 }
 
 .remoteVersionRow span,
@@ -2527,8 +2717,8 @@ dd {
 .remoteVersionRow strong {
   overflow: hidden;
   color: #111827;
-  font-size: 12px;
-  font-weight: 680;
+  font-size: 13px;
+  font-weight: 720;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2546,6 +2736,22 @@ dd {
 
 .remoteVersionRow.current small {
   color: #166534;
+}
+
+.remoteVersionCurrentBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  min-height: 28px;
+  border: 1px solid #bbf7d0;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #166534;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1;
+  padding: 0 11px;
 }
 
 .operationHistoryRow {
@@ -3675,7 +3881,29 @@ dd {
 
   .skillDetailDialog {
     width: calc(100vw - 40px);
-    padding: 20px;
+  }
+
+  .skillDetailBodyGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .skillDetailControlRail {
+    order: 1;
+    border-left: 0;
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  .skillDetailMetaColumn {
+    order: 2;
+  }
+
+  .skillDetailVersionHistory {
+    order: 3;
+    grid-template-columns: 1fr;
+  }
+
+  .skillDetailBodyGrid > .operationHistoryPanel {
+    order: 4;
   }
 
   .skillDetailActions {
