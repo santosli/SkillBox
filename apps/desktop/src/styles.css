@@ -2254,6 +2254,55 @@ dd {
   padding: 12px;
 }
 
+.operationHistoryPanel {
+  padding: 0;
+}
+
+.operationHistorySummary {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  cursor: pointer;
+  list-style: none;
+  padding: 12px;
+}
+
+.operationHistorySummary::-webkit-details-marker {
+  display: none;
+}
+
+.operationHistorySummary span {
+  min-width: 0;
+  color: #334155;
+  font-weight: 680;
+}
+
+.operationHistorySummary small {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.operationHistorySummary::after {
+  content: "Show";
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.operationHistoryPanel[open] .operationHistorySummary::after {
+  content: "Hide";
+}
+
+.operationHistoryRows {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid #e5e7eb;
+  padding: 10px 12px 12px;
+}
+
 .remoteSourceCandidatePanel {
   display: grid;
   gap: 10px;

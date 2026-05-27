@@ -3477,14 +3477,20 @@ function OperationHistoryPanel({ operations }) {
   }
 
   return (
-    <div className="operationHistoryPanel" aria-label="Operation history">
-      {operations.slice(0, 4).map((operation) => (
-        <div className="operationHistoryRow" key={operation.id}>
-          <span>{operation.summary || operation.operationType}</span>
-          <Badge tone={operation.status === 'failed' ? 'red' : 'slate'}>{operation.status}</Badge>
-        </div>
-      ))}
-    </div>
+    <details className="operationHistoryPanel" aria-label="Operation history">
+      <summary className="operationHistorySummary">
+        <span>Operation log</span>
+        <small>{operations.length} events</small>
+      </summary>
+      <div className="operationHistoryRows">
+        {operations.slice(0, 4).map((operation) => (
+          <div className="operationHistoryRow" key={operation.id}>
+            <span>{operation.summary || operation.operationType}</span>
+            <Badge tone={operation.status === 'failed' ? 'red' : 'slate'}>{operation.status}</Badge>
+          </div>
+        ))}
+      </div>
+    </details>
   );
 }
 

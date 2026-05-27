@@ -142,6 +142,13 @@ test('remote skill async operations show loading and no-change states', () => {
   assert.match(appSource, /inlineSpinner/);
 });
 
+test('remote operation history is collapsed by default', () => {
+  assert.match(appSource, /<details className="operationHistoryPanel" aria-label="Operation history">/);
+  assert.match(appSource, /<summary className="operationHistorySummary">/);
+  assert.match(appSource, /\{operations\.length\} events/);
+  assert.doesNotMatch(appSource, /<div className="operationHistoryPanel" aria-label="Operation history">/);
+});
+
 test('remote source candidates use view and bind actions instead of inline preview', () => {
   assert.match(appSource, /onViewCandidate\(candidate\)/);
   assert.match(appSource, /onBindCandidate\(candidate\)/);
