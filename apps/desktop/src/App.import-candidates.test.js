@@ -361,12 +361,16 @@ test('normalizes changed source binding without replacing current version', () =
     validation: 'same_skill_changed',
     current_version: 'manual-abc',
     latest_sha: '1234567890abcdef',
+    source_url: 'https://github.com/vercel-labs/skills/tree/main/skills/find-skills',
+    path: 'skills/find-skills',
     ref_kind: 'branch',
     tracking: true,
     message: 'Skill names match but content differs.'
   });
 
   assert.equal(preview.validation, 'same_skill_changed');
+  assert.equal(preview.sourceUrl, 'https://github.com/vercel-labs/skills/tree/main/skills/find-skills');
+  assert.equal(preview.path, 'skills/find-skills');
   assert.equal(preview.replacesCurrent, false);
   assert.equal(preview.statusLabel, 'Source can be linked; current version will stay active.');
 });

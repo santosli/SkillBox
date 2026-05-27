@@ -1282,6 +1282,7 @@ export default function App() {
       const preview = await loadRemoteSourceBindingPreview(skillName, trimmedSourceUrl);
       setRemoteSourceDialog((current) => ({
         ...current,
+        sourceUrl: preview.sourceUrl || trimmedSourceUrl,
         preview,
         loading: false
       }));
@@ -1343,8 +1344,14 @@ export default function App() {
 
         return {
           ...current,
+          sourceUrl: preview.sourceUrl || sourceUrl,
           candidateBind: {
             ...current.candidateBind,
+            candidate: {
+              ...current.candidateBind.candidate,
+              path: preview.path || current.candidateBind.candidate?.path,
+              sourceUrl: preview.sourceUrl || sourceUrl
+            },
             preview,
             loading: false,
             error: ''

@@ -1488,13 +1488,20 @@ pub fn preview_remote_source_binding(
 
     let result = (|| {
         let checkout = temp.join("checkout");
-        let latest_sha = skillbox_git::fetch_ref_path(
+        let (latest_sha, resolved_path) = fetch_remote_source_skill_path(
             &source.repo_url,
             &source.reference,
             &source.path,
+            &request.skill_name,
             &checkout,
         )?;
-        let remote_skill_path = checkout.join(&source.path);
+        let resolved_source_url = github_tree_source_url(
+            &source.owner,
+            &source.repo,
+            &source.reference,
+            &resolved_path,
+        );
+        let remote_skill_path = checkout.join(&resolved_path);
         let remote_skill = read_skill(&remote_skill_path)?;
         let ref_kind = resolve_ref_kind(&source.repo_url, &source.reference)?;
         let tracking = ref_kind == "branch";
@@ -1509,11 +1516,11 @@ pub fn preview_remote_source_binding(
 
         Ok(RemoteSourceBindingPreview {
             skill_name: request.skill_name,
-            source_url: source.url,
+            source_url: resolved_source_url,
             repo_url: source.repo_url,
             owner: source.owner,
             repo: source.repo,
-            path: source.path,
+            path: resolved_path,
             reference: source.reference,
             ref_kind: Some(ref_kind),
             tracking,
@@ -2592,6 +2599,80 @@ fn claude_marketplace_api_error_message(stderr: &str) -> String {
     } else {
         format!("Claude Marketplace source search failed: {}", stderr.trim())
     }
+}
+
+fn fetch_remote_source_skill_path(
+    repo_url: &str,
+    reference: &str,
+    requested_path: &str,
+    skill_name: &str,
+    checkout: &Path,
+) -> Result<(String, String)> {
+    let candidates = remote_source_path_candidates(skill_name, requested_path);
+    let mut first_error = None;
+
+    for candidate in &candidates {
+        if checkout.exists() {
+            fs::remove_dir_all(checkout).map_err(|error| error.to_string())?;
+        }
+
+        match skillbox_git::fetch_ref_path(repo_url, reference, candidate, checkout) {
+            Ok(sha) => return Ok((sha, candidate.clone())),
+            Err(error) => {
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
+        }
+    }
+
+    Err(format!(
+        "{}\nTried source paths: {}",
+        first_error.unwrap_or_else(|| "Unable to fetch source path.".to_string()),
+        candidates.join(", ")
+    ))
+}
+
+fn remote_source_path_candidates(skill_name: &str, requested_path: &str) -> Vec<String> {
+    let requested = requested_path.trim_matches('/');
+    let leaf = Path::new(requested)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or(skill_name);
+    let mut candidates = Vec::new();
+
+    push_unique_candidate(&mut candidates, requested);
+    if !requested.starts_with("skills/") {
+        push_unique_candidate(&mut candidates, &format!("skills/{requested}"));
+    }
+    push_unique_candidate(&mut candidates, &format!("skills/{leaf}"));
+    push_unique_candidate(&mut candidates, &format!("skills/{skill_name}"));
+    if !requested.starts_with("skills/public/") {
+        push_unique_candidate(&mut candidates, &format!("skills/public/{requested}"));
+    }
+    push_unique_candidate(&mut candidates, &format!("skills/public/{leaf}"));
+    push_unique_candidate(&mut candidates, &format!("skills/public/{skill_name}"));
+    if !requested.starts_with(".claude/skills/") {
+        push_unique_candidate(&mut candidates, &format!(".claude/skills/{requested}"));
+    }
+    push_unique_candidate(&mut candidates, &format!(".claude/skills/{leaf}"));
+    push_unique_candidate(&mut candidates, &format!(".claude/skills/{skill_name}"));
+
+    candidates
+}
+
+fn push_unique_candidate(candidates: &mut Vec<String>, path: &str) {
+    let path = path.trim_matches('/');
+    if path.is_empty() || candidates.iter().any(|candidate| candidate == path) {
+        return;
+    }
+
+    candidates.push(path.to_string());
+}
+
+fn github_tree_source_url(owner: &str, repo: &str, reference: &str, path: &str) -> String {
+    format!("https://github.com/{owner}/{repo}/tree/{reference}/{path}")
 }
 
 fn parse_claude_marketplace_skill_candidates(
@@ -4889,6 +4970,41 @@ description: \"Demo skill\"
         assert_eq!(preview.skill_name, "demo");
         assert_eq!(preview.ref_kind.as_deref(), Some("branch"));
         assert!(preview.tracking);
+    }
+
+    #[test]
+    fn source_binding_preview_resolves_marketplace_skill_path() {
+        let root = temp_dir("source-binding-marketplace-path");
+        let managed_root = root.join("SkillBox");
+        let source = root.join("local").join("find-skills");
+        make_skill(&source, "find-skills", "Find skills");
+        import_skill(&source, SkillKind::Remote, &managed_root).unwrap();
+        let remote = bare_remote_with_skill_content(
+            "source-binding-marketplace-path-origin",
+            "find-skills",
+            "Find skills",
+            "",
+        );
+        let _rewrite = github_repo_rewrite("acme", "source-binding-marketplace-path", &remote);
+
+        let preview = preview_remote_source_binding(
+            RemoteSourceBindingRequest {
+                skill_name: "find-skills".to_string(),
+                source_url:
+                    "https://github.com/acme/source-binding-marketplace-path/tree/main/find-skills"
+                        .to_string(),
+                actor: "cli".to_string(),
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        assert_eq!(preview.path, "skills/find-skills");
+        assert_eq!(
+            preview.source_url,
+            "https://github.com/acme/source-binding-marketplace-path/tree/main/skills/find-skills"
+        );
+        assert_eq!(preview.validation, SourceBindingValidation::ExactMatch);
     }
 
     #[test]

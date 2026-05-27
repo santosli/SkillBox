@@ -16,6 +16,8 @@ export function normalizeRemoteSourceBindingPreview(preview = {}) {
   return {
     skillName: preview.skillName || preview.skill_name || '',
     validation,
+    sourceUrl: preview.sourceUrl || preview.source_url || '',
+    path: preview.path || '',
     currentVersion: preview.currentVersion || preview.current_version || '',
     latestSha: preview.latestSha || preview.latest_sha || '',
     reference: preview.reference || preview.ref || '',
