@@ -10,6 +10,7 @@ pub type Result<T> = std::result::Result<T, String>;
 const DEFAULT_STATUS_REFRESH_INTERVAL_MINUTES: u32 = 5;
 const MIN_STATUS_REFRESH_INTERVAL_MINUTES: u32 = 1;
 const MAX_STATUS_REFRESH_INTERVAL_MINUTES: u32 = 1440;
+const CLAUDE_MARKETPLACE_SKILLS_API: &str = "https://claudemarketplaces.com/api/skills";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ManagedPaths {
@@ -510,6 +511,20 @@ pub struct RemoteSourceCandidate {
 pub struct RemoteSourceCandidateSearch {
     pub skill_name: String,
     pub candidates: Vec<RemoteSourceCandidate>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ClaudeMarketplaceSkill {
+    name: Option<String>,
+    description: Option<String>,
+    repo: Option<String>,
+    path: Option<String>,
+    stars: Option<u64>,
+    installs: Option<u64>,
+    #[serde(rename = "lastUpdated", alias = "last_updated")]
+    last_updated: Option<String>,
+    #[serde(rename = "listingStatus", alias = "listing_status")]
+    listing_status: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -1782,7 +1797,7 @@ pub fn rank_remote_source_candidates(
     let mut ranked = candidates
         .into_iter()
         .map(|mut candidate| {
-            let mut score = 0;
+            let mut score = candidate.score;
             if candidate
                 .name
                 .as_deref()
@@ -1842,13 +1857,8 @@ pub fn find_remote_source_candidates(
     validate_skill_name(skill_name)?;
     let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
     read_skill(paths.remote_skills_root.join(skill_name).join("current"))?;
-    let query = format!("filename:SKILL.md {skill_name}");
-    let url = format!(
-        "https://api.github.com/search/code?q={}&per_page=10",
-        url_encode_query(&query)
-    );
-    let response = github_api_get(&url)?;
-    let candidates = parse_github_code_search_candidates(&response)?;
+    let response = claude_marketplace_api_get()?;
+    let candidates = parse_claude_marketplace_skill_candidates(skill_name, &response)?;
     Ok(RemoteSourceCandidateSearch {
         skill_name: skill_name.to_string(),
         candidates: rank_remote_source_candidates(skill_name, candidates),
@@ -2549,189 +2559,146 @@ fn remote_version_action_label(action: RemoteVersionChangeAction) -> &'static st
     }
 }
 
-fn github_api_get(url: &str) -> Result<String> {
-    let token = github_api_auth_token();
-    let args = github_api_curl_args(url);
-    let mut child = std::process::Command::new("curl")
+fn claude_marketplace_api_get() -> Result<String> {
+    let args = claude_marketplace_api_curl_args();
+    let output = std::process::Command::new("curl")
         .args(&args)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
+        .output()
         .map_err(|error| error.to_string())?;
-    if let Some(mut stdin) = child.stdin.take() {
-        use std::io::Write;
-        stdin
-            .write_all(github_api_curl_config(token.as_deref()).as_bytes())
-            .map_err(|error| error.to_string())?;
-    }
-    let output = child.wait_with_output().map_err(|error| error.to_string())?;
+
     if !output.status.success() {
-        return Err(github_api_error_message(
+        return Err(claude_marketplace_api_error_message(
             String::from_utf8_lossy(&output.stderr).trim(),
-            token.is_some(),
         ));
     }
+
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-fn github_api_curl_args(url: &str) -> Vec<String> {
+fn claude_marketplace_api_curl_args() -> Vec<String> {
     vec![
         "-fsSL".to_string(),
-        "--config".to_string(),
-        "-".to_string(),
-        url.to_string(),
+        "-H".to_string(),
+        "Accept: application/json".to_string(),
+        "-H".to_string(),
+        "User-Agent: SkillBox".to_string(),
+        CLAUDE_MARKETPLACE_SKILLS_API.to_string(),
     ]
 }
 
-fn github_api_curl_config(token: Option<&str>) -> String {
-    let mut lines = vec![
-        "header = \"Accept: application/vnd.github+json\"".to_string(),
-        "header = \"X-GitHub-Api-Version: 2022-11-28\"".to_string(),
-        "header = \"User-Agent: SkillBox\"".to_string(),
-    ];
-    if let Some(token) = token.filter(|value| !value.trim().is_empty()) {
-        lines.push(format!("header = \"Authorization: Bearer {}\"", token.trim()));
-    }
-    lines.push(String::new());
-    lines.join("\n")
-}
-
-fn github_api_auth_token() -> Option<String> {
-    github_api_token_from_env().or_else(github_cli_auth_token)
-}
-
-fn github_api_token_from_env() -> Option<String> {
-    ["GITHUB_TOKEN", "GH_TOKEN"]
-        .iter()
-        .filter_map(|key| std::env::var(key).ok())
-        .map(|value| value.trim().to_string())
-        .find(|value| !value.is_empty())
-}
-
-fn github_cli_auth_token() -> Option<String> {
-    let output = std::process::Command::new("gh")
-        .args(["auth", "token"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    (!token.is_empty()).then_some(token)
-}
-
-fn github_api_error_message(stderr: &str, authenticated: bool) -> String {
-    if stderr.contains("401")
-        || stderr.contains("Requires authentication")
-        || stderr.contains("Bad credentials")
-    {
-        if authenticated {
-            return "GitHub source search authentication failed. Run `gh auth status` or refresh `GITHUB_TOKEN` / `GH_TOKEN`, then search again.".to_string();
-        }
-        return "GitHub source search requires GitHub authentication. Run `gh auth login` or set `GITHUB_TOKEN` / `GH_TOKEN`, then search again.".to_string();
-    }
-
+fn claude_marketplace_api_error_message(stderr: &str) -> String {
     if stderr.trim().is_empty() {
-        "GitHub source search failed.".to_string()
+        "Claude Marketplace source search failed.".to_string()
     } else {
-        stderr.trim().to_string()
+        format!("Claude Marketplace source search failed: {}", stderr.trim())
     }
 }
 
-fn parse_github_code_search_candidates(response: &str) -> Result<Vec<RemoteSourceCandidate>> {
-    let value: serde_json::Value =
+fn parse_claude_marketplace_skill_candidates(
+    skill_name: &str,
+    response: &str,
+) -> Result<Vec<RemoteSourceCandidate>> {
+    let items: Vec<ClaudeMarketplaceSkill> =
         serde_json::from_str(response).map_err(|error| error.to_string())?;
-    let items = value
-        .get("items")
-        .and_then(|items| items.as_array())
-        .ok_or_else(|| "GitHub search response is missing items.".to_string())?;
-    let mut candidates = Vec::new();
+    let mut exact_candidates = Vec::new();
+    let mut fuzzy_candidates = Vec::new();
 
     for item in items {
-        let html_url = item
-            .get("html_url")
-            .and_then(|value| value.as_str())
-            .unwrap_or_default();
-        let Ok(source) = skillbox_github::parse_github_skill_url(html_url) else {
+        if !claude_marketplace_skill_is_listed(&item)
+            || !claude_marketplace_skill_matches(skill_name, &item)
+        {
+            continue;
+        }
+
+        let Some(candidate) = claude_marketplace_skill_to_candidate(&item) else {
             continue;
         };
-        let repository = item
-            .get("repository")
-            .and_then(|value| value.as_object())
-            .ok_or_else(|| "GitHub search item is missing repository.".to_string())?;
-        let owner = repository
-            .get("owner")
-            .and_then(|owner| owner.get("login"))
-            .and_then(|value| value.as_str())
-            .unwrap_or(source.owner.as_str())
-            .to_string();
-        let repo = repository
-            .get("name")
-            .and_then(|value| value.as_str())
-            .unwrap_or(source.repo.as_str())
-            .to_string();
-        let repo_url = repository
-            .get("clone_url")
-            .and_then(|value| value.as_str())
-            .unwrap_or(source.repo_url.as_str())
-            .to_string();
-        let path = source.path;
-        let name = Path::new(&path)
-            .file_name()
-            .and_then(|value| value.to_str())
-            .map(str::to_string);
 
-        candidates.push(RemoteSourceCandidate {
-            owner,
-            repo,
-            path,
-            reference: source.reference,
-            source_url: source.url,
-            repo_url,
-            name,
-            description: repository
-                .get("description")
-                .and_then(|value| value.as_str())
-                .map(str::to_string),
-            stars: repository
-                .get("stargazers_count")
-                .and_then(|value| value.as_u64())
-                .and_then(|value| u32::try_from(value).ok())
-                .unwrap_or(0),
-            archived: repository
-                .get("archived")
-                .and_then(|value| value.as_bool())
-                .unwrap_or(false),
-            fork: repository
-                .get("fork")
-                .and_then(|value| value.as_bool())
-                .unwrap_or(false),
-            updated_at: repository
-                .get("updated_at")
-                .and_then(|value| value.as_str())
-                .unwrap_or_default()
-                .to_string(),
-            match_reasons: Vec::new(),
-            score: 0,
-        });
-    }
-
-    Ok(candidates)
-}
-
-fn url_encode_query(value: &str) -> String {
-    let mut encoded = String::new();
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                encoded.push(byte as char)
-            }
-            b' ' => encoded.push('+'),
-            _ => encoded.push_str(&format!("%{byte:02X}")),
+        if item
+            .name
+            .as_deref()
+            .map(|name| name.eq_ignore_ascii_case(skill_name))
+            .unwrap_or(false)
+        {
+            exact_candidates.push(candidate);
+        } else {
+            fuzzy_candidates.push(candidate);
         }
     }
-    encoded
+
+    let candidates = if exact_candidates.is_empty() {
+        fuzzy_candidates
+    } else {
+        exact_candidates
+    };
+
+    Ok(candidates.into_iter().take(20).collect())
+}
+
+fn claude_marketplace_skill_is_listed(item: &ClaudeMarketplaceSkill) -> bool {
+    item.listing_status
+        .as_deref()
+        .map(|status| status.eq_ignore_ascii_case("listed"))
+        .unwrap_or(true)
+}
+
+fn claude_marketplace_skill_matches(skill_name: &str, item: &ClaudeMarketplaceSkill) -> bool {
+    let normalized_skill = skill_name.to_ascii_lowercase();
+    let name = item
+        .name
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let path = item
+        .path
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    name == normalized_skill || name.contains(&normalized_skill) || path.contains(&normalized_skill)
+}
+
+fn claude_marketplace_skill_to_candidate(
+    item: &ClaudeMarketplaceSkill,
+) -> Option<RemoteSourceCandidate> {
+    let repo_label = item.repo.as_deref()?.trim();
+    let path = item.path.as_deref()?.trim().trim_matches('/');
+    if repo_label.is_empty() || path.is_empty() || repo_label.chars().any(char::is_whitespace) {
+        return None;
+    }
+
+    let source_url = format!("https://github.com/{repo_label}/tree/main/{path}");
+    let source = skillbox_github::parse_github_skill_url(&source_url).ok()?;
+    let mut match_reasons = vec!["Claude Marketplace listed skill".to_string()];
+    if item.installs.unwrap_or(0) > 0 {
+        match_reasons.push("Claude Marketplace install signal".to_string());
+    }
+
+    Some(RemoteSourceCandidate {
+        owner: source.owner,
+        repo: source.repo,
+        path: source.path,
+        reference: source.reference,
+        source_url: source.url,
+        repo_url: source.repo_url,
+        name: item.name.clone(),
+        description: item.description.clone(),
+        stars: item
+            .stars
+            .and_then(|value| u32::try_from(value).ok())
+            .unwrap_or(0),
+        archived: false,
+        fork: false,
+        updated_at: item.last_updated.clone().unwrap_or_default(),
+        match_reasons,
+        score: claude_marketplace_popularity_score(item),
+    })
+}
+
+fn claude_marketplace_popularity_score(item: &ClaudeMarketplaceSkill) -> i32 {
+    let install_score = item.installs.unwrap_or(0).min(1_000_000) / 5_000;
+    let star_score = item.stars.unwrap_or(0).min(100_000) / 1_000;
+    i32::try_from(install_score + star_score).unwrap_or(0)
 }
 
 fn user_skills_git_status_for_repo(repo_path: PathBuf) -> Result<UserSkillsGitStatus> {
@@ -5369,28 +5336,57 @@ description: \"Demo skill\"
     }
 
     #[test]
-    fn github_api_curl_args_do_not_expose_bearer_token() {
-        let args = github_api_curl_args("https://api.github.com/search/code?q=demo");
-        let config = github_api_curl_config(Some("ghp_demo"));
+    fn parses_claude_marketplace_skill_candidates_with_exact_name_priority() {
+        let response = r#"[
+          {
+            "id": "vercel-labs/skills/find-skills",
+            "name": "find-skills",
+            "description": "Discover and install specialized agent skills.",
+            "repo": "vercel-labs/skills",
+            "path": "find-skills",
+            "stars": 18600,
+            "installs": 1500000,
+            "installCommand": "npx skills add https://github.com/vercel-labs/skills --skill find-skills",
+            "lastUpdated": "2026-05-16T17:00:48.907+00:00",
+            "listingStatus": "listed"
+          },
+          {
+            "id": "example/misc/find-skills-helper",
+            "name": "find-skills-helper",
+            "description": "Helper",
+            "repo": "example/misc",
+            "path": ".claude/skills/find-skills-helper/SKILL.md",
+            "stars": 1,
+            "installs": 1,
+            "listingStatus": "listed"
+          }
+        ]"#;
 
-        assert!(!args.iter().any(|arg| arg.contains("ghp_demo")));
-        assert!(config.contains("Authorization: Bearer ghp_demo"));
+        let candidates =
+            parse_claude_marketplace_skill_candidates("find-skills", response).unwrap();
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].owner, "vercel-labs");
+        assert_eq!(candidates[0].repo, "skills");
+        assert_eq!(candidates[0].path, "find-skills");
         assert_eq!(
-            args.last().map(String::as_str),
-            Some("https://api.github.com/search/code?q=demo")
+            candidates[0].source_url,
+            "https://github.com/vercel-labs/skills/tree/main/find-skills"
         );
+        assert!(candidates[0]
+            .match_reasons
+            .contains(&"Claude Marketplace listed skill".to_string()));
     }
 
     #[test]
-    fn github_api_error_message_explains_search_authentication() {
-        let message = github_api_error_message(
-            "curl: (56) The requested URL returned error: 401",
-            false,
-        );
+    fn claude_marketplace_api_curl_args_target_skills_api() {
+        let args = claude_marketplace_api_curl_args();
 
-        assert!(message.contains("requires GitHub authentication"));
-        assert!(message.contains("gh auth login"));
-        assert!(!message.contains("curl:"));
+        assert_eq!(
+            args.last().map(String::as_str),
+            Some(CLAUDE_MARKETPLACE_SKILLS_API)
+        );
+        assert!(args.iter().any(|arg| arg == "Accept: application/json"));
     }
 
     #[test]

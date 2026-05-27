@@ -3109,7 +3109,7 @@ function RemoteSourceBindingDialog({
           </label>
           <div className="remoteSourceCandidatePanel">
             <div className="remoteSourceCandidateHeader">
-              <span>Suggested GitHub matches</span>
+              <span>Suggested Claude Marketplace matches</span>
               <button className="inlineActionButton" disabled={dialog.searching} type="button" onClick={onSearch}>
                 <RefreshCw aria-hidden="true" size={14} />
                 {dialog.searching ? 'Searching...' : 'Search again'}
@@ -3159,7 +3159,7 @@ function RemoteSourceBindingDialog({
               </div>
             ) : dialog.searched ? (
               <div className="remoteSourceCandidateNotice">
-                {dialog.searchError || 'No GitHub candidates found. Paste a URL manually.'}
+                {dialog.searchError || 'No Claude Marketplace candidates found. Paste a URL manually.'}
               </div>
             ) : null}
           </div>

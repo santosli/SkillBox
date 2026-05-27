@@ -2078,22 +2078,23 @@ pub fn rank_remote_source_candidates(
 Add `find_remote_source_candidates(skill_name, managed_root)` that:
 
 1. Reads the current local remote skill.
-2. Builds a GitHub search URL for `SKILL.md` and the skill name.
-3. Calls GitHub Search with a clear user agent.
-4. Maps the JSON result to `RemoteSourceCandidate`.
+2. Calls Claude Marketplace's skills API with a clear user agent.
+3. Filters listed skills by exact skill name first, then name/path contains.
+4. Maps each accepted marketplace listing to a GitHub source URL and
+   `RemoteSourceCandidate`.
 5. Ranks candidates with `rank_remote_source_candidates`.
 
 Use a dependency-free structured `curl` invocation so the first implementation does not introduce a new Rust HTTP dependency:
 
 ```rust
-fn github_api_get(url: &str) -> Result<String> {
+fn claude_marketplace_api_get() -> Result<String> {
     let output = std::process::Command::new("curl")
         .arg("-fsSL")
         .arg("-H")
-        .arg("Accept: application/vnd.github+json")
+        .arg("Accept: application/json")
         .arg("-H")
         .arg("User-Agent: SkillBox")
-        .arg(url)
+        .arg("https://claudemarketplaces.com/api/skills")
         .output()
         .map_err(|error| error.to_string())?;
     if !output.status.success() {
@@ -2103,7 +2104,7 @@ fn github_api_get(url: &str) -> Result<String> {
 }
 ```
 
-Build the search URL with structured URL encoding from the existing `url` crate in `skillbox-github` or by adding `url = "2"` to `skillbox-core` if direct encoding is simpler. The command must pass the whole URL as one argument and must not use shell strings.
+The command must pass the whole URL as one argument and must not use shell strings.
 
 - [ ] **Step 6: Verify ranking tests pass**
 
@@ -2115,7 +2116,7 @@ Expected: PASS. Network-backed search is manually verified later because automat
 
 ```bash
 git add crates/skillbox-core/Cargo.toml crates/skillbox-core/src/lib.rs Cargo.lock
-git commit -m "feat(github): search remote skill sources"
+git commit -m "feat(github): search marketplace remote skill sources"
 ```
 
 ## Task 8: CLI And Tauri Commands

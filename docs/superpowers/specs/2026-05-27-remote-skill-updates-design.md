@@ -108,13 +108,10 @@ Flow:
 1. The user opens a remote skill with missing manual source metadata or a
    `manual` source.
 2. The user clicks `Find source`.
-3. SkillBox searches GitHub public repositories using the local skill name,
-   description, path hints, and a short content summary.
-   GitHub code search requires authenticated REST API requests, so SkillBox
-   should use `GITHUB_TOKEN`, `GH_TOKEN`, or the local GitHub CLI token when
-   available.
-4. The candidate list shows repository, path, ref, source URL, owner, archived
-   or fork status, star count, updated time, and match reasons.
+3. SkillBox searches Claude Marketplace skills using the local skill name and
+   path hints, then maps each accepted listing back to a GitHub source URL.
+4. The candidate list shows repository, path, ref, source URL, owner,
+   marketplace install signal, star count, updated time, and match reasons.
 5. The user chooses one candidate to preview.
 6. SkillBox fetches the candidate `SKILL.md` and validates it against the local
    skill.
@@ -124,10 +121,9 @@ Candidate ranking:
 
 1. Exact frontmatter `name` match.
 2. GitHub path or directory name match.
-3. Description, README, or skill content similarity.
-4. Repository trust signals such as owner, stars, fork status, and archived
-   status.
-5. Recent repository activity.
+3. Claude Marketplace install signal.
+4. Repository trust signals such as owner and stars.
+5. Recent listing activity.
 
 Ranking is only a hint. The user must confirm the candidate explicitly.
 
