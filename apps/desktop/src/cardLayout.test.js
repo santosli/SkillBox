@@ -106,3 +106,9 @@ test('remote source candidate bind confirmation checks before final binding', ()
   assert.match(appSource, />\s*Confirm bind\s*<\/button>/);
   assert.match(appSource, /disabled=\{!canConfirm\}/);
 });
+
+test('remote source candidate view opens through the desktop bridge with a browser fallback', () => {
+  assert.match(appSource, /async function viewRemoteSourceCandidate\(candidate\)/);
+  assert.match(appSource, /invoke\('open_external_url'/);
+  assert.match(appSource, /window\.open\(sourceUrl,\s*'_blank',\s*'noopener,noreferrer'\)/);
+});

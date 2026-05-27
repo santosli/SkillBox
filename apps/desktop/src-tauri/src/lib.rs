@@ -1,5 +1,38 @@
 use serde_json::Value;
 
+fn validate_external_github_url(url: &str) -> Result<&str, String> {
+    let trimmed = url.trim();
+    let Some(rest) = trimmed.strip_prefix("https://github.com/") else {
+        return Err("Only GitHub HTTPS URLs can be opened.".to_string());
+    };
+
+    if rest.is_empty()
+        || trimmed.chars().any(char::is_whitespace)
+        || trimmed
+            .chars()
+            .any(|character| matches!(character, '"' | '\'' | '<' | '>' | '\\'))
+    {
+        return Err("Invalid GitHub URL.".to_string());
+    }
+
+    Ok(trimmed)
+}
+
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    let url = validate_external_github_url(&url)?;
+    let status = std::process::Command::new("open")
+        .arg(url)
+        .status()
+        .map_err(|error| format!("Unable to open browser: {error}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("Browser open command failed with status {status}."))
+    }
+}
+
 #[tauri::command]
 fn managed_paths() -> Result<Value, String> {
     serde_json::to_value(skillbox_core::managed_paths(
@@ -196,6 +229,7 @@ fn forget_workspace(path: String) -> Result<Value, String> {
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
+            open_external_url,
             managed_paths,
             managed_state,
             managed_preferences,
@@ -225,4 +259,25 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to run SkillBox");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_external_github_url;
+
+    #[test]
+    fn validates_github_https_urls_for_external_open() {
+        assert_eq!(
+            validate_external_github_url("https://github.com/owner/repo/tree/main/path/to/skill")
+                .unwrap(),
+            "https://github.com/owner/repo/tree/main/path/to/skill"
+        );
+    }
+
+    #[test]
+    fn rejects_non_github_external_urls() {
+        assert!(validate_external_github_url("https://example.com/owner/repo").is_err());
+        assert!(validate_external_github_url("http://github.com/owner/repo").is_err());
+        assert!(validate_external_github_url("https://github.com/owner repo").is_err());
+    }
 }

@@ -1294,10 +1294,23 @@ export default function App() {
     }
   }
 
-  function viewRemoteSourceCandidate(candidate) {
-    if (!candidate.sourceUrl) return;
+  async function viewRemoteSourceCandidate(candidate) {
+    const sourceUrl = (candidate.sourceUrl || '').trim();
+    if (!sourceUrl) return;
 
-    window.open(candidate.sourceUrl, '_blank', 'noopener,noreferrer');
+    if (window.__TAURI_INTERNALS__) {
+      try {
+        await invoke('open_external_url', { url: sourceUrl });
+        return;
+      } catch (viewError) {
+        setRemoteSourceDialog((current) => ({
+          ...current,
+          error: viewError.message || String(viewError)
+        }));
+      }
+    }
+
+    window.open(sourceUrl, '_blank', 'noopener,noreferrer');
   }
 
   async function bindRemoteSourceCandidate(candidate) {
