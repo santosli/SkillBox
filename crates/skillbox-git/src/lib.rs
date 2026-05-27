@@ -5,7 +5,7 @@ use std::process::{Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const LS_REMOTE_TIMEOUT: Duration = Duration::from_secs(2);
+const LS_REMOTE_TIMEOUT: Duration = Duration::from_secs(8);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitStatus {
@@ -494,7 +494,7 @@ fn git_with_config(repo: &Path, args: &[&str]) -> Result<String, String> {
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     #[test]
     fn init_add_commit_and_status_report_clean_repo() {
@@ -587,6 +587,12 @@ mod tests {
         .unwrap_err();
 
         assert!(error.contains("timed out"));
+    }
+
+    #[test]
+    fn ls_remote_timeout_allows_slow_networks_without_unbounded_refresh() {
+        assert!(LS_REMOTE_TIMEOUT >= Duration::from_secs(8));
+        assert!(LS_REMOTE_TIMEOUT <= Duration::from_secs(10));
     }
 
     fn temp_dir(prefix: &str) -> PathBuf {
