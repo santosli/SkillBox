@@ -111,6 +111,15 @@ test('remote source search command runs marketplace lookup off the command handl
   assert.match(tauriSource, /tauri::async_runtime::spawn_blocking/);
 });
 
+test('remote update status command runs off the command handler', () => {
+  const checkCommandStart = tauriSource.indexOf('async fn check_remote_skill_updates');
+  const nextCommandStart = tauriSource.indexOf('#[tauri::command]', checkCommandStart + 1);
+  const checkCommand = tauriSource.slice(checkCommandStart, nextCommandStart);
+
+  assert.ok(checkCommandStart > 0);
+  assert.match(checkCommand, /tauri::async_runtime::spawn_blocking/);
+});
+
 test('dashboard startup loads cached remote update state without refreshing', () => {
   assert.match(appSource, /invoke\('cached_remote_skill_updates'\)/);
   assert.match(appSource, /setRemoteSkillUpdates\(cachedRemoteUpdates\)/);

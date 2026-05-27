@@ -136,9 +136,14 @@ fn sync_user_skills_git(request: skillbox_core::UserSkillsSyncRequest) -> Result
 }
 
 #[tauri::command]
-fn check_remote_skill_updates() -> Result<Value, String> {
-    let result = skillbox_core::check_remote_skill_updates(skillbox_core::default_managed_root())?;
-    serde_json::to_value(result).map_err(|error| error.to_string())
+async fn check_remote_skill_updates() -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result =
+            skillbox_core::check_remote_skill_updates(skillbox_core::default_managed_root())?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Remote update status check task failed: {error}"))?
 }
 
 #[tauri::command]
