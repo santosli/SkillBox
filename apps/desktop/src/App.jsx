@@ -94,6 +94,15 @@ const autoRefreshBlockedStatuses = new Set([
   'syncing'
 ]);
 
+const closedRemoteSourceCandidateBind = {
+  open: false,
+  candidate: null,
+  preview: null,
+  loading: false,
+  binding: false,
+  error: ''
+};
+
 const previewImportCandidates = [
   {
     name: 'personal-wiki-updater',
@@ -273,7 +282,8 @@ export default function App() {
     searchError: '',
     preview: null,
     error: '',
-    loading: false
+    loading: false,
+    candidateBind: closedRemoteSourceCandidateBind
   });
   const [remoteVersionDialog, setRemoteVersionDialog] = useState({
     open: false,
@@ -1135,14 +1145,21 @@ export default function App() {
       searchError: '',
       preview: null,
       error: '',
-      loading: false
+      loading: false,
+      candidateBind: closedRemoteSourceCandidateBind
     });
     await waitForNextPaint();
     void searchRemoteSourceCandidates(skill.name);
   }
 
   function closeRemoteSourceDialog() {
-    setRemoteSourceDialog((current) => ({ ...current, open: false, error: '', loading: false }));
+    setRemoteSourceDialog((current) => ({
+      ...current,
+      open: false,
+      error: '',
+      loading: false,
+      candidateBind: closedRemoteSourceCandidateBind
+    }));
   }
 
   function updateRemoteSourceDialog(patch) {
@@ -1216,6 +1233,34 @@ export default function App() {
     await previewRemoteSourceBindingForUrl(remoteSourceDialog.sourceUrl);
   }
 
+  async function loadRemoteSourceBindingPreview(skillName, sourceUrl) {
+    const trimmedSourceUrl = sourceUrl.trim();
+    if (!trimmedSourceUrl) {
+      throw new Error('Enter or select a GitHub source URL.');
+    }
+
+    if (!window.__TAURI_INTERNALS__) {
+      return normalizeRemoteSourceBindingPreview({
+        skill_name: skillName,
+        validation: 'same_skill_changed',
+        current_version: 'manual-preview',
+        latest_sha: '1234567890abcdef',
+        ref_kind: 'branch',
+        tracking: true,
+        message: 'Skill names match but content differs. Binding will not replace current.'
+      });
+    }
+
+    const result = await invoke('preview_remote_source_binding', {
+      request: {
+        skill_name: skillName,
+        source_url: trimmedSourceUrl,
+        actor: 'desktop'
+      }
+    });
+    return normalizeRemoteSourceBindingPreview(result);
+  }
+
   async function previewRemoteSourceBindingForUrl(sourceUrl) {
     const trimmedSourceUrl = sourceUrl.trim();
     if (!trimmedSourceUrl) {
@@ -1223,41 +1268,21 @@ export default function App() {
       return;
     }
 
+    const skillName = remoteSourceDialog.skillName;
+
     setRemoteSourceDialog((current) => ({
       ...current,
       sourceUrl: trimmedSourceUrl,
       loading: true,
+      preview: null,
       error: ''
     }));
 
-    if (!window.__TAURI_INTERNALS__) {
-      setRemoteSourceDialog((current) => ({
-        ...current,
-        loading: false,
-        preview: normalizeRemoteSourceBindingPreview({
-          skill_name: current.skillName,
-          validation: 'same_skill_changed',
-          current_version: 'manual-preview',
-          latest_sha: '1234567890abcdef',
-          ref_kind: 'branch',
-          tracking: true,
-          message: 'Skill names match but content differs. Binding will not replace current.'
-        })
-      }));
-      return;
-    }
-
     try {
-      const result = await invoke('preview_remote_source_binding', {
-        request: {
-          skill_name: remoteSourceDialog.skillName,
-          source_url: trimmedSourceUrl,
-          actor: 'desktop'
-        }
-      });
+      const preview = await loadRemoteSourceBindingPreview(skillName, trimmedSourceUrl);
       setRemoteSourceDialog((current) => ({
         ...current,
-        preview: normalizeRemoteSourceBindingPreview(result),
+        preview,
         loading: false
       }));
     } catch (previewError) {
@@ -1269,8 +1294,134 @@ export default function App() {
     }
   }
 
-  function previewRemoteSourceCandidate(candidate) {
-    void previewRemoteSourceBindingForUrl(candidate.sourceUrl);
+  function viewRemoteSourceCandidate(candidate) {
+    if (!candidate.sourceUrl) return;
+
+    window.open(candidate.sourceUrl, '_blank', 'noopener,noreferrer');
+  }
+
+  async function bindRemoteSourceCandidate(candidate) {
+    const sourceUrl = (candidate.sourceUrl || '').trim();
+    const skillName = remoteSourceDialog.skillName;
+
+    setRemoteSourceDialog((current) => ({
+      ...current,
+      sourceUrl,
+      preview: null,
+      error: '',
+      candidateBind: {
+        open: true,
+        candidate: { ...candidate, sourceUrl },
+        preview: null,
+        loading: true,
+        binding: false,
+        error: ''
+      }
+    }));
+
+    await waitForNextPaint();
+
+    try {
+      const preview = await loadRemoteSourceBindingPreview(skillName, sourceUrl);
+      setRemoteSourceDialog((current) => {
+        if (current.candidateBind.candidate?.sourceUrl !== sourceUrl) {
+          return current;
+        }
+
+        return {
+          ...current,
+          candidateBind: {
+            ...current.candidateBind,
+            preview,
+            loading: false,
+            error: ''
+          }
+        };
+      });
+    } catch (previewError) {
+      setRemoteSourceDialog((current) => {
+        if (current.candidateBind.candidate?.sourceUrl !== sourceUrl) {
+          return current;
+        }
+
+        return {
+          ...current,
+          candidateBind: {
+            ...current.candidateBind,
+            preview: null,
+            loading: false,
+            error: previewError.message || String(previewError)
+          }
+        };
+      });
+    }
+  }
+
+  function closeRemoteSourceCandidateBind() {
+    setRemoteSourceDialog((current) => ({
+      ...current,
+      candidateBind: closedRemoteSourceCandidateBind
+    }));
+  }
+
+  async function confirmRemoteSourceCandidateBind() {
+    const candidateBind = remoteSourceDialog.candidateBind;
+    const candidate = candidateBind.candidate;
+    const sourceUrl = (candidate?.sourceUrl || '').trim();
+    const preview = candidateBind.preview;
+    const skillName = remoteSourceDialog.skillName;
+
+    if (!sourceUrl || !preview || preview.validation === 'mismatch' || candidateBind.loading || candidateBind.binding) {
+      return;
+    }
+
+    setRemoteSourceDialog((current) => ({
+      ...current,
+      candidateBind: {
+        ...current.candidateBind,
+        binding: true,
+        error: ''
+      }
+    }));
+
+    if (!window.__TAURI_INTERNALS__) {
+      setNotice(`Bound ${skillName} to GitHub source.`);
+      setRemoteSourceDialog((current) => ({
+        ...current,
+        open: false,
+        loading: false,
+        candidateBind: closedRemoteSourceCandidateBind
+      }));
+      return;
+    }
+
+    try {
+      await invoke('bind_remote_source', {
+        request: {
+          skill_name: skillName,
+          source_url: sourceUrl,
+          actor: 'desktop'
+        }
+      });
+      setRemoteSourceDialog((current) => ({
+        ...current,
+        open: false,
+        loading: false,
+        candidateBind: closedRemoteSourceCandidateBind
+      }));
+      await refreshSkillStatuses();
+      await loadRemoteSkillContext(skillName);
+      setNotice(`Bound ${skillName} to GitHub source.`);
+    } catch (bindError) {
+      setRemoteSourceDialog((current) => ({
+        ...current,
+        candidateBind: {
+          ...current.candidateBind,
+          binding: false,
+          error: bindError.message || String(bindError)
+        }
+      }));
+    }
   }
 
   async function bindPreviewedRemoteSource() {
@@ -1838,11 +1989,21 @@ export default function App() {
         <RemoteSourceBindingDialog
           dialog={remoteSourceDialog}
           onBind={bindPreviewedRemoteSource}
+          onBindCandidate={bindRemoteSourceCandidate}
           onClose={closeRemoteSourceDialog}
           onPreview={previewRemoteSourceBinding}
-          onPreviewCandidate={previewRemoteSourceCandidate}
           onSearch={() => searchRemoteSourceCandidates(remoteSourceDialog.skillName)}
           onUpdate={updateRemoteSourceDialog}
+          onViewCandidate={viewRemoteSourceCandidate}
+        />
+      ) : null}
+
+      {remoteSourceDialog.candidateBind.open ? (
+        <RemoteSourceCandidateBindDialog
+          dialog={remoteSourceDialog.candidateBind}
+          skillName={remoteSourceDialog.skillName}
+          onClose={closeRemoteSourceCandidateBind}
+          onConfirm={confirmRemoteSourceCandidateBind}
         />
       ) : null}
 
@@ -2895,11 +3056,12 @@ function UserSkillsSyncDialog({
 function RemoteSourceBindingDialog({
   dialog,
   onBind,
+  onBindCandidate,
   onClose,
   onPreview,
-  onPreviewCandidate,
   onSearch,
-  onUpdate
+  onUpdate,
+  onViewCandidate
 }) {
   const canBind = dialog.preview && dialog.preview.validation !== 'mismatch' && !dialog.loading;
   const hasCandidates = dialog.candidates.length > 0;
@@ -2953,14 +3115,24 @@ function RemoteSourceBindingDialog({
                     </span>
                     <div className="remoteSourceCandidateMeta">
                       <small>score {candidate.score}</small>
-                      <button
-                        className="button secondary"
-                        disabled={dialog.loading}
-                        type="button"
-                        onClick={() => onPreviewCandidate(candidate)}
-                      >
-                        Preview
-                      </button>
+                      <div className="remoteSourceCandidateActions">
+                        <button
+                          className="button secondary"
+                          disabled={!candidate.sourceUrl}
+                          type="button"
+                          onClick={() => onViewCandidate(candidate)}
+                        >
+                          View
+                        </button>
+                        <button
+                          className="button primary"
+                          disabled={dialog.loading || !candidate.sourceUrl}
+                          type="button"
+                          onClick={() => onBindCandidate(candidate)}
+                        >
+                          Bind
+                        </button>
+                      </div>
                     </div>
                     {candidate.matchReasons.length > 0 ? (
                       <div className="remoteSourceCandidateReasons">
@@ -2998,6 +3170,70 @@ function RemoteSourceBindingDialog({
             </button>
           </div>
         </form>
+      </section>
+    </div>
+  );
+}
+
+function RemoteSourceCandidateBindDialog({ dialog, skillName, onClose, onConfirm }) {
+  const candidate = dialog.candidate || {};
+  const canConfirm = dialog.preview && dialog.preview.validation !== 'mismatch' && !dialog.loading && !dialog.binding;
+
+  return (
+    <div
+      className="modalBackdrop"
+      role="presentation"
+      onMouseDown={(event) => closeOnBackdropClick(event, onClose)}
+    >
+      <section
+        className="remoteImportDialog remoteSourceConfirmDialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="remote-source-confirm-title"
+      >
+        <div className="importSheetHeader">
+          <div>
+            <h2 id="remote-source-confirm-title">Bind source</h2>
+            <p>Confirm the GitHub source for {skillName} after validation passes.</p>
+          </div>
+          <button
+            className="iconButton"
+            disabled={dialog.binding}
+            type="button"
+            aria-label="Close source confirmation"
+            onClick={onClose}
+          >
+            <X aria-hidden="true" />
+          </button>
+        </div>
+        <div className="remoteImportForm">
+          <div className="remoteSourceCandidateConfirmSummary">
+            <strong>{candidate.repoLabel || candidate.repoUrl || 'Selected source'}</strong>
+            {candidate.path ? <small>{candidate.path}</small> : null}
+            {candidate.sourceUrl ? <small>{candidate.sourceUrl}</small> : null}
+          </div>
+
+          {dialog.loading ? (
+            <div className="remoteSourceCandidateNotice">Checking source...</div>
+          ) : dialog.preview ? (
+            <div className="sourceBindingPreview">
+              <strong>{dialog.preview.statusLabel}</strong>
+              <span>{formatRemoteRefBehavior(dialog.preview)}</span>
+              {dialog.preview.message ? <small>{dialog.preview.message}</small> : null}
+            </div>
+          ) : null}
+
+          {dialog.error ? <div className="formError">{dialog.error}</div> : null}
+
+          <div className="remoteImportFooter">
+            <button className="button secondary" disabled={dialog.binding} type="button" onClick={onClose}>
+              Cancel
+            </button>
+            <button className="button primary" disabled={!canConfirm} type="button" onClick={onConfirm}>
+              Confirm bind
+            </button>
+          </div>
+        </div>
       </section>
     </div>
   );

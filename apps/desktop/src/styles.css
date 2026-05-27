@@ -2275,6 +2275,7 @@ dd {
   display: grid;
   max-height: min(420px, 42vh);
   gap: 8px;
+  overflow-x: hidden;
   overflow-y: auto;
   padding-right: 4px;
 }
@@ -2316,8 +2317,23 @@ dd {
 
 .remoteSourceCandidateMeta {
   display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
+}
+
+.remoteSourceCandidateActions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.remoteSourceCandidateActions .button {
+  min-width: 72px;
 }
 
 .remoteSourceCandidateReasons {
@@ -2337,6 +2353,40 @@ dd {
   color: #475569;
   font-weight: 650;
   padding: 3px 8px;
+}
+
+.remoteSourceConfirmDialog {
+  width: min(520px, calc(100vw - 64px));
+}
+
+.remoteSourceCandidateConfirmSummary {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 12px;
+}
+
+.remoteSourceCandidateConfirmSummary strong,
+.remoteSourceCandidateConfirmSummary small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remoteSourceCandidateConfirmSummary strong {
+  color: #111827;
+  font-size: 13px;
+  font-weight: 680;
+}
+
+.remoteSourceCandidateConfirmSummary small {
+  color: #64748b;
+  font-size: 12px;
 }
 
 .sourceBindingPreview strong,

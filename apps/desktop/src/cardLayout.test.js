@@ -91,3 +91,18 @@ test('remote source search starts after the binding dialog has painted', () => {
       openSourceDialog.indexOf('void searchRemoteSourceCandidates(skill.name);')
   );
 });
+
+test('remote source candidates use view and bind actions instead of inline preview', () => {
+  assert.match(appSource, /onViewCandidate\(candidate\)/);
+  assert.match(appSource, /onBindCandidate\(candidate\)/);
+  assert.match(appSource, />\s*View\s*<\/button>/);
+  assert.match(appSource, />\s*Bind\s*<\/button>/);
+  assert.doesNotMatch(appSource, /onPreviewCandidate\(candidate\)/);
+});
+
+test('remote source candidate bind confirmation checks before final binding', () => {
+  assert.match(appSource, /function RemoteSourceCandidateBindDialog/);
+  assert.match(appSource, /Checking source/);
+  assert.match(appSource, />\s*Confirm bind\s*<\/button>/);
+  assert.match(appSource, /disabled=\{!canConfirm\}/);
+});
