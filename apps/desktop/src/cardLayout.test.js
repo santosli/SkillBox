@@ -58,7 +58,7 @@ test('dashboard actions stay in one equal segmented row', () => {
   assert.match(indicatorRule, /opacity:\s*0;/);
   assert.match(indicatorRule, /transform:\s*translateX\(calc\(var\(--dashboard-action-index,\s*0\) \* 100%\)\);/);
   assert.match(indicatorRule, /transform 280ms cubic-bezier\(0\.2,\s*0\.8,\s*0\.2,\s*1\);/);
-  assert.match(appSource, /label:\s*'Refresh'/);
+  assert.match(appSource, /label:\s*isChecking \? 'Refreshing' : 'Refresh'/);
   assert.match(appSource, /label:\s*'Import'/);
   assert.match(appSource, /label:\s*'Install'/);
   assert.match(appSource, /onMouseEnter=\{\(\) => setPreviewAction\(action\.id\)\}/);
@@ -115,6 +115,28 @@ test('dashboard startup loads cached remote update state without refreshing', ()
   assert.match(appSource, /invoke\('cached_remote_skill_updates'\)/);
   assert.match(appSource, /setRemoteSkillUpdates\(cachedRemoteUpdates\)/);
   assert.match(appSource, /setLastStatusCheckedAt\(cachedRemoteUpdates\.checkedAt \|\| ''\)/);
+});
+
+test('dashboard status refresh paints loading state before checking remotes', () => {
+  const refreshStatuses = appSource.match(
+    /async function refreshSkillStatuses\(\{ automatic = false \} = \{\}\)\s*\{(?<body>[\s\S]*?)\n  \}/
+  )?.groups.body || '';
+
+  assert.match(refreshStatuses, /setStatus\('checking'\);/);
+  assert.match(refreshStatuses, /await waitForNextPaint\(\);/);
+  assert.match(refreshStatuses, /invoke\('check_remote_skill_updates'\)/);
+  assert.ok(
+    refreshStatuses.indexOf('await waitForNextPaint();') <
+      refreshStatuses.indexOf("invoke('check_remote_skill_updates'")
+  );
+});
+
+test('dashboard refresh action shows an explicit loading affordance', () => {
+  assert.match(appSource, /label:\s*isChecking \? 'Refreshing' : 'Refresh'/);
+  assert.match(appSource, /loading:\s*isChecking/);
+  assert.match(appSource, /aria-busy=\{action\.loading \? 'true' : undefined\}/);
+  assert.match(appSource, /dashboardActionButton loading/);
+  assert.match(css, /\.dashboardActionButton\.loading svg\s*\{[^}]*animation:\s*syncSpin 760ms linear infinite;/s);
 });
 
 test('remote update review starts after the loading dialog has painted', () => {

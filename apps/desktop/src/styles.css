@@ -588,6 +588,7 @@ button {
   position: relative;
   z-index: 1;
   display: inline-flex;
+  min-width: 0;
   height: 36px;
   align-items: center;
   justify-content: center;
@@ -600,6 +601,7 @@ button {
   font-weight: 680;
   line-height: 1;
   padding: 0 14px;
+  white-space: nowrap;
 }
 
 .dashboardActionButton:hover:not(:disabled):not(.preview) {
@@ -612,12 +614,24 @@ button {
   color: #ffffff;
 }
 
+.dashboardActionButton.loading,
+.dashboardActionButton.loading:disabled {
+  background: #0a84ff;
+  box-shadow: 0 6px 16px rgba(10, 132, 255, 0.22);
+  color: #ffffff;
+  cursor: progress;
+  font-size: 13px;
+  opacity: 1;
+  padding: 0 8px;
+}
+
 .dashboardActionButton:disabled {
   cursor: not-allowed;
   opacity: 0.64;
 }
 
 .dashboardActionButton svg {
+  flex: 0 0 auto;
   width: 16px;
   height: 16px;
   fill: none;
@@ -625,6 +639,10 @@ button {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2;
+}
+
+.dashboardActionButton.loading svg {
+  animation: syncSpin 760ms linear infinite;
 }
 
 .dashboardFrame .panelNotice {

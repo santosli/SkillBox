@@ -470,6 +470,7 @@ export default function App() {
     if (!automatic) {
       setNotice('');
     }
+    await waitForNextPaint();
 
     if (!window.__TAURI_INTERNALS__) {
       const nextRemoteUpdates = normalizeRemoteSkillUpdates({
@@ -2252,7 +2253,8 @@ function DashboardActionGroup({ isChecking, onInstall, onRefresh, onRefreshStatu
     {
       id: 'refresh',
       icon: RefreshCw,
-      label: 'Refresh',
+      label: isChecking ? 'Refreshing' : 'Refresh',
+      loading: isChecking,
       disabled: isChecking,
       onClick: onRefreshStatuses
     },
@@ -2285,9 +2287,15 @@ function DashboardActionGroup({ isChecking, onInstall, onRefresh, onRefreshStatu
       <span className="dashboardActionIndicator" aria-hidden="true" />
       {actions.map((action) => {
         const Icon = action.icon;
+        const actionClassName = action.loading
+          ? 'dashboardActionButton loading'
+          : previewAction === action.id
+            ? 'dashboardActionButton preview'
+            : 'dashboardActionButton';
         return (
           <button
-            className={previewAction === action.id ? 'dashboardActionButton preview' : 'dashboardActionButton'}
+            aria-busy={action.loading ? 'true' : undefined}
+            className={actionClassName}
             disabled={action.disabled}
             key={action.id}
             type="button"
