@@ -1124,19 +1124,20 @@ export default function App() {
     }
   }
 
-  function openRemoteSourceDialog(skill) {
+  async function openRemoteSourceDialog(skill) {
     setRemoteSourceDialog({
       open: true,
       skillName: skill.name,
       sourceUrl: '',
       candidates: [],
       searched: false,
-      searching: true,
+      searching: false,
       searchError: '',
       preview: null,
       error: '',
       loading: false
     });
+    await waitForNextPaint();
     void searchRemoteSourceCandidates(skill.name);
   }
 

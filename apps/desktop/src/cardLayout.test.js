@@ -64,3 +64,30 @@ test('dashboard actions stay in one equal segmented row', () => {
   assert.match(appSource, /onBlur=\{\(event\) =>/);
   assert.match(appSource, /setPreviewAction\(null\);/);
 });
+
+test('remote source binding dialog keeps long candidate lists inside the viewport', () => {
+  const dialogRule = css.match(/\.remoteImportDialog\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const formRule = css.match(/\.remoteImportForm\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const candidateListRule = css.match(/\.remoteSourceCandidateList\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(dialogRule, /max-height:\s*min\(760px,\s*calc\(100vh - 64px\)\);/);
+  assert.match(dialogRule, /grid-template-rows:\s*auto minmax\(0,\s*1fr\);/);
+  assert.match(formRule, /min-height:\s*0;/);
+  assert.match(formRule, /overflow-y:\s*auto;/);
+  assert.match(candidateListRule, /max-height:\s*min\(420px,\s*42vh\);/);
+  assert.match(candidateListRule, /overflow-y:\s*auto;/);
+});
+
+test('remote source search starts after the binding dialog has painted', () => {
+  const openSourceDialog = appSource.match(
+    /async function openRemoteSourceDialog\(skill\)\s*\{(?<body>[\s\S]*?)\n  \}/
+  )?.groups.body || '';
+
+  assert.match(openSourceDialog, /setRemoteSourceDialog\(/);
+  assert.match(openSourceDialog, /await waitForNextPaint\(\);/);
+  assert.match(openSourceDialog, /void searchRemoteSourceCandidates\(skill\.name\);/);
+  assert.ok(
+    openSourceDialog.indexOf('await waitForNextPaint();') <
+      openSourceDialog.indexOf('void searchRemoteSourceCandidates(skill.name);')
+  );
+});

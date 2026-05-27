@@ -1990,6 +1990,8 @@ dd {
 .remoteImportDialog {
   display: grid;
   width: min(640px, calc(100vw - 64px));
+  max-height: min(760px, calc(100vh - 64px));
+  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid #dbe3ee;
   border-radius: 12px;
@@ -2271,7 +2273,10 @@ dd {
 
 .remoteSourceCandidateList {
   display: grid;
+  max-height: min(420px, 42vh);
   gap: 8px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .remoteSourceCandidateRow {
@@ -2439,7 +2444,9 @@ dd {
 
 .remoteImportForm {
   display: grid;
+  min-height: 0;
   gap: 16px;
+  overflow-y: auto;
   padding: 20px 24px 24px;
 }
 
