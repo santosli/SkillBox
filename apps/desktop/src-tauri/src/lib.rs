@@ -109,6 +109,67 @@ fn check_remote_skill_updates() -> Result<Value, String> {
 }
 
 #[tauri::command]
+fn find_remote_source_candidates(skill_name: String) -> Result<Value, String> {
+    let result = skillbox_core::find_remote_source_candidates(
+        &skill_name,
+        skillbox_core::default_managed_root(),
+    )?;
+    serde_json::to_value(result).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn preview_remote_source_binding(
+    request: skillbox_core::RemoteSourceBindingRequest,
+) -> Result<Value, String> {
+    let result = skillbox_core::preview_remote_source_binding(
+        request,
+        skillbox_core::default_managed_root(),
+    )?;
+    serde_json::to_value(result).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn bind_remote_source(request: skillbox_core::BindRemoteSourceRequest) -> Result<Value, String> {
+    let result = skillbox_core::bind_remote_source(request, skillbox_core::default_managed_root())?;
+    serde_json::to_value(result).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn list_remote_skill_versions(skill_name: String) -> Result<Value, String> {
+    let result = skillbox_core::list_remote_skill_versions(
+        &skill_name,
+        skillbox_core::default_managed_root(),
+    )?;
+    serde_json::to_value(result).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn preview_remote_version_change(
+    request: skillbox_core::RemoteVersionChangeRequest,
+) -> Result<Value, String> {
+    let result = skillbox_core::preview_remote_version_change(
+        request,
+        skillbox_core::default_managed_root(),
+    )?;
+    serde_json::to_value(result).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn apply_remote_version_change(
+    request: skillbox_core::RemoteVersionChangeApplyRequest,
+) -> Result<Value, String> {
+    let result =
+        skillbox_core::apply_remote_version_change(request, skillbox_core::default_managed_root())?;
+    serde_json::to_value(result).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn list_operations(request: skillbox_core::OperationFilter) -> Result<Value, String> {
+    let result = skillbox_core::list_operations(request, skillbox_core::default_managed_root())?;
+    serde_json::to_value(result).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn list_workspaces() -> Result<Value, String> {
     let result = skillbox_core::list_workspaces(skillbox_core::default_managed_root())?;
     serde_json::to_value(result).map_err(|error| error.to_string())
@@ -150,6 +211,13 @@ pub fn run() {
             set_user_skills_git_remote,
             sync_user_skills_git,
             check_remote_skill_updates,
+            find_remote_source_candidates,
+            preview_remote_source_binding,
+            bind_remote_source,
+            list_remote_skill_versions,
+            preview_remote_version_change,
+            apply_remote_version_change,
+            list_operations,
             list_workspaces,
             scan_workspaces,
             add_workspace,

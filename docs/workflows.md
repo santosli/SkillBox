@@ -172,6 +172,8 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 触发条件：
 
+- Rust CLI 当前入口：`remote-source-candidates`、`remote-source-preview`、`bind-remote-source`。
+- Tauri command：`find_remote_source_candidates`、`preview_remote_source_binding`、`bind_remote_source`。
 - 用户为已有 remote skill 手动添加 GitHub source URL。
 - 用户触发 GitHub candidate search，为已有 remote skill 自动寻找可能的 source。
 - MVP 只接受 GitHub skill directory 或 `SKILL.md` URL。
@@ -204,6 +206,8 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 触发条件：
 
 - Rust core 提供 preview 和 apply 能力；CLI/UI 入口后续接入。
+- Rust CLI 当前入口：`remote-versions`、`remote-preview-change --action update`、`remote-apply-change --action update`。
+- Tauri command：`list_remote_skill_versions`、`preview_remote_version_change`、`apply_remote_version_change`。
 - GitHub source 必须已经绑定，并且 update check 已取得 `latestSha`。
 
 步骤：
@@ -238,7 +242,8 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 触发条件：
 
 - Node CLI 当前入口：`skillbox rollback <skill-name> --to <sha>`。
-- Rust core 提供 preview 和 apply 能力；CLI/UI 入口后续接入。
+- Rust CLI 当前入口：`remote-versions`、`remote-preview-change --action rollback`、`remote-apply-change --action rollback`。
+- Tauri command：`list_remote_skill_versions`、`preview_remote_version_change`、`apply_remote_version_change`。
 
 步骤：
 

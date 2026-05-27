@@ -67,6 +67,104 @@ fn run(args: Vec<String>) -> Result<(), String> {
         "check-remote-updates" => print_json(&skillbox_core::check_remote_skill_updates(
             managed_root(command_args),
         )?),
+        "remote-source-candidates" => {
+            let skill_name = positional(command_args).into_iter().next().ok_or_else(|| {
+                "Usage: skillbox remote-source-candidates <skill-name>".to_string()
+            })?;
+            print_json(&skillbox_core::find_remote_source_candidates(
+                &skill_name,
+                managed_root(command_args),
+            )?)
+        }
+        "remote-source-preview" => {
+            let values = positional(command_args);
+            let skill_name = values.first().cloned().ok_or_else(|| {
+                "Usage: skillbox remote-source-preview <skill-name> <github-url>".to_string()
+            })?;
+            let source_url = values.get(1).cloned().ok_or_else(|| {
+                "Usage: skillbox remote-source-preview <skill-name> <github-url>".to_string()
+            })?;
+            print_json(&skillbox_core::preview_remote_source_binding(
+                skillbox_core::RemoteSourceBindingRequest {
+                    skill_name,
+                    source_url,
+                    actor: "cli".to_string(),
+                },
+                managed_root(command_args),
+            )?)
+        }
+        "bind-remote-source" => {
+            let values = positional(command_args);
+            let skill_name = values.first().cloned().ok_or_else(|| {
+                "Usage: skillbox bind-remote-source <skill-name> <github-url>".to_string()
+            })?;
+            let source_url = values.get(1).cloned().ok_or_else(|| {
+                "Usage: skillbox bind-remote-source <skill-name> <github-url>".to_string()
+            })?;
+            print_json(&skillbox_core::bind_remote_source(
+                skillbox_core::BindRemoteSourceRequest {
+                    skill_name,
+                    source_url,
+                    actor: "cli".to_string(),
+                },
+                managed_root(command_args),
+            )?)
+        }
+        "remote-versions" => {
+            let skill_name = positional(command_args)
+                .into_iter()
+                .next()
+                .ok_or_else(|| "Usage: skillbox remote-versions <skill-name>".to_string())?;
+            print_json(&skillbox_core::list_remote_skill_versions(
+                &skill_name,
+                managed_root(command_args),
+            )?)
+        }
+        "remote-preview-change" => {
+            let skill_name = positional(command_args).into_iter().next().ok_or_else(|| {
+                "Usage: skillbox remote-preview-change <skill-name> --action update|rollback [--to <version>]".to_string()
+            })?;
+            print_json(&skillbox_core::preview_remote_version_change(
+                skillbox_core::RemoteVersionChangeRequest {
+                    skill_name,
+                    action: remote_change_action(option(command_args, "--action"))?,
+                    target_version: option(command_args, "--to"),
+                    actor: "cli".to_string(),
+                },
+                managed_root(command_args),
+            )?)
+        }
+        "remote-apply-change" => {
+            let skill_name = positional(command_args).into_iter().next().ok_or_else(|| {
+                "Usage: skillbox remote-apply-change <skill-name> --action update|rollback --to <version>".to_string()
+            })?;
+            let target_version = option(command_args, "--to").ok_or_else(|| {
+                "Usage: skillbox remote-apply-change <skill-name> --action update|rollback --to <version>".to_string()
+            })?;
+            print_json(&skillbox_core::apply_remote_version_change(
+                skillbox_core::RemoteVersionChangeApplyRequest {
+                    skill_name,
+                    action: remote_change_action(option(command_args, "--action"))?,
+                    target_version,
+                    preview_id: option(command_args, "--preview-id"),
+                    actor: "cli".to_string(),
+                },
+                managed_root(command_args),
+            )?)
+        }
+        "operations" => print_json(&skillbox_core::list_operations(
+            skillbox_core::OperationFilter {
+                entity_type: option(command_args, "--entity-type"),
+                entity_name: option(command_args, "--entity-name"),
+                status: option(command_args, "--status")
+                    .map(|status| operation_status(&status))
+                    .transpose()?,
+                limit: option(command_args, "--limit")
+                    .map(|limit| limit.parse::<u32>().map_err(|error| error.to_string()))
+                    .transpose()?,
+            },
+            managed_root(command_args),
+        )?),
         "workspaces" => print_json(&skillbox_core::list_workspaces(managed_root(command_args))?),
         "workspace-scan" => {
             print_json(&skillbox_core::scan_workspaces(managed_root(command_args))?)
@@ -163,6 +261,26 @@ fn workspace_kind(args: &[String]) -> Result<WorkspaceKind, String> {
     }
 }
 
+fn remote_change_action(
+    value: Option<String>,
+) -> Result<skillbox_core::RemoteVersionChangeAction, String> {
+    match value.as_deref() {
+        Some("update") => Ok(skillbox_core::RemoteVersionChangeAction::Update),
+        Some("rollback") => Ok(skillbox_core::RemoteVersionChangeAction::Rollback),
+        _ => Err("Use --action update|rollback".to_string()),
+    }
+}
+
+fn operation_status(value: &str) -> Result<skillbox_core::OperationStatus, String> {
+    match value {
+        "started" => Ok(skillbox_core::OperationStatus::Started),
+        "succeeded" => Ok(skillbox_core::OperationStatus::Succeeded),
+        "failed" => Ok(skillbox_core::OperationStatus::Failed),
+        "cancelled" => Ok(skillbox_core::OperationStatus::Cancelled),
+        other => Err(format!("Invalid operation status: {other}")),
+    }
+}
+
 fn help_text() -> &'static str {
     "SkillBox Rust CLI
 
@@ -174,6 +292,13 @@ Commands:
   skillbox deploy <skill-name> --target <path> [--managed-root <path>]
   skillbox user-skills-status [--managed-root <path>]
   skillbox check-remote-updates [--managed-root <path>]
+  skillbox remote-source-candidates <skill-name> [--managed-root <path>]
+  skillbox remote-source-preview <skill-name> <github-url> [--managed-root <path>]
+  skillbox bind-remote-source <skill-name> <github-url> [--managed-root <path>]
+  skillbox remote-versions <skill-name> [--managed-root <path>]
+  skillbox remote-preview-change <skill-name> --action update|rollback [--to <version>] [--managed-root <path>]
+  skillbox remote-apply-change <skill-name> --action update|rollback --to <version> [--preview-id <id>] [--managed-root <path>]
+  skillbox operations [--entity-type <type>] [--entity-name <name>] [--status started|succeeded|failed|cancelled] [--limit <n>] [--managed-root <path>]
   skillbox workspaces [--managed-root <path>]
   skillbox workspace-scan [--managed-root <path>]
   skillbox workspace-add <path> --kind global|user [--managed-root <path>]
