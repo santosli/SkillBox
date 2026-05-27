@@ -34,8 +34,10 @@ import { closeOnBackdropClick } from './modalEvents.js';
 import {
   canApplyRemoteVersionChange,
   formatRemoteRefBehavior,
+  normalizeRemoteSourceCandidates,
   normalizeRemoteSourceBindingPreview,
   normalizeRemoteVersionPreview,
+  remoteSkillUpdateVersionLabel,
   remoteVersionActionLabel
 } from './remoteSkills.js';
 import {
@@ -265,6 +267,10 @@ export default function App() {
     open: false,
     skillName: '',
     sourceUrl: '',
+    candidates: [],
+    searched: false,
+    searching: false,
+    searchError: '',
     preview: null,
     error: '',
     loading: false
@@ -1123,10 +1129,15 @@ export default function App() {
       open: true,
       skillName: skill.name,
       sourceUrl: '',
+      candidates: [],
+      searched: false,
+      searching: true,
+      searchError: '',
       preview: null,
       error: '',
       loading: false
     });
+    void searchRemoteSourceCandidates(skill.name);
   }
 
   function closeRemoteSourceDialog() {
@@ -1137,9 +1148,86 @@ export default function App() {
     setRemoteSourceDialog((current) => ({ ...current, ...patch, error: '' }));
   }
 
+  async function searchRemoteSourceCandidates(skillName) {
+    if (!skillName) return;
+
+    setRemoteSourceDialog((current) =>
+      current.skillName === skillName
+        ? { ...current, searching: true, searched: false, searchError: '', candidates: [] }
+        : current
+    );
+
+    if (!window.__TAURI_INTERNALS__) {
+      const search = normalizeRemoteSourceCandidates({
+        skill_name: skillName,
+        candidates: [
+          {
+            owner: 'santos',
+            repo: 'skillbox-preview',
+            path: `remote-skills/${skillName}`,
+            reference: 'main',
+            source_url: `https://github.com/santos/skillbox-preview/tree/main/remote-skills/${skillName}`,
+            repo_url: 'https://github.com/santos/skillbox-preview.git',
+            name: skillName,
+            description: 'Mock GitHub source candidate for browser preview.',
+            stars: 12,
+            archived: false,
+            fork: false,
+            updated_at: new Date().toISOString(),
+            match_reasons: ['Exact skill name match'],
+            score: 570
+          }
+        ]
+      });
+      setRemoteSourceDialog((current) =>
+        current.skillName === skillName
+          ? { ...current, candidates: search.candidates, searching: false, searched: true }
+          : current
+      );
+      return;
+    }
+
+    try {
+      const result = await invoke('find_remote_source_candidates', { skillName });
+      const search = normalizeRemoteSourceCandidates(result);
+      setRemoteSourceDialog((current) =>
+        current.skillName === skillName
+          ? { ...current, candidates: search.candidates, searching: false, searched: true }
+          : current
+      );
+    } catch (searchError) {
+      setRemoteSourceDialog((current) =>
+        current.skillName === skillName
+          ? {
+              ...current,
+              candidates: [],
+              searching: false,
+              searched: true,
+              searchError: searchError.message || String(searchError)
+            }
+          : current
+      );
+    }
+  }
+
   async function previewRemoteSourceBinding(event) {
     event.preventDefault();
-    setRemoteSourceDialog((current) => ({ ...current, loading: true, error: '' }));
+    await previewRemoteSourceBindingForUrl(remoteSourceDialog.sourceUrl);
+  }
+
+  async function previewRemoteSourceBindingForUrl(sourceUrl) {
+    const trimmedSourceUrl = sourceUrl.trim();
+    if (!trimmedSourceUrl) {
+      setRemoteSourceDialog((current) => ({ ...current, error: 'Enter or select a GitHub source URL.' }));
+      return;
+    }
+
+    setRemoteSourceDialog((current) => ({
+      ...current,
+      sourceUrl: trimmedSourceUrl,
+      loading: true,
+      error: ''
+    }));
 
     if (!window.__TAURI_INTERNALS__) {
       setRemoteSourceDialog((current) => ({
@@ -1162,7 +1250,7 @@ export default function App() {
       const result = await invoke('preview_remote_source_binding', {
         request: {
           skill_name: remoteSourceDialog.skillName,
-          source_url: remoteSourceDialog.sourceUrl,
+          source_url: trimmedSourceUrl,
           actor: 'desktop'
         }
       });
@@ -1178,6 +1266,10 @@ export default function App() {
         error: previewError.message || String(previewError)
       }));
     }
+  }
+
+  function previewRemoteSourceCandidate(candidate) {
+    void previewRemoteSourceBindingForUrl(candidate.sourceUrl);
   }
 
   async function bindPreviewedRemoteSource() {
@@ -1747,6 +1839,8 @@ export default function App() {
           onBind={bindPreviewedRemoteSource}
           onClose={closeRemoteSourceDialog}
           onPreview={previewRemoteSourceBinding}
+          onPreviewCandidate={previewRemoteSourceCandidate}
+          onSearch={() => searchRemoteSourceCandidates(remoteSourceDialog.skillName)}
           onUpdate={updateRemoteSourceDialog}
         />
       ) : null}
@@ -2797,8 +2891,17 @@ function UserSkillsSyncDialog({
   );
 }
 
-function RemoteSourceBindingDialog({ dialog, onBind, onClose, onPreview, onUpdate }) {
+function RemoteSourceBindingDialog({
+  dialog,
+  onBind,
+  onClose,
+  onPreview,
+  onPreviewCandidate,
+  onSearch,
+  onUpdate
+}) {
   const canBind = dialog.preview && dialog.preview.validation !== 'mismatch' && !dialog.loading;
+  const hasCandidates = dialog.candidates.length > 0;
 
   return (
     <div
@@ -2828,6 +2931,52 @@ function RemoteSourceBindingDialog({ dialog, onBind, onClose, onPreview, onUpdat
               onChange={(event) => onUpdate({ sourceUrl: event.target.value, preview: null })}
             />
           </label>
+          <div className="remoteSourceCandidatePanel">
+            <div className="remoteSourceCandidateHeader">
+              <span>Suggested GitHub matches</span>
+              <button className="inlineActionButton" disabled={dialog.searching} type="button" onClick={onSearch}>
+                <RefreshCw aria-hidden="true" size={14} />
+                {dialog.searching ? 'Searching...' : 'Search again'}
+              </button>
+            </div>
+            {dialog.searching ? (
+              <div className="remoteSourceCandidateNotice">Searching GitHub for matching SKILL.md files...</div>
+            ) : hasCandidates ? (
+              <div className="remoteSourceCandidateList">
+                {dialog.candidates.map((candidate) => (
+                  <div className="remoteSourceCandidateRow" key={candidate.sourceUrl}>
+                    <span>
+                      <strong>{candidate.repoLabel || candidate.repoUrl}</strong>
+                      <small>{candidate.path}</small>
+                      {candidate.description ? <small>{candidate.description}</small> : null}
+                    </span>
+                    <div className="remoteSourceCandidateMeta">
+                      <small>score {candidate.score}</small>
+                      <button
+                        className="button secondary"
+                        disabled={dialog.loading}
+                        type="button"
+                        onClick={() => onPreviewCandidate(candidate)}
+                      >
+                        Preview
+                      </button>
+                    </div>
+                    {candidate.matchReasons.length > 0 ? (
+                      <div className="remoteSourceCandidateReasons">
+                        {candidate.matchReasons.slice(0, 3).map((reason) => (
+                          <small key={reason}>{reason}</small>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : dialog.searched ? (
+              <div className="remoteSourceCandidateNotice">
+                {dialog.searchError || 'No GitHub candidates found. Paste a URL manually.'}
+              </div>
+            ) : null}
+          </div>
           {dialog.preview ? (
             <div className="sourceBindingPreview">
               <strong>{dialog.preview.statusLabel}</strong>
@@ -2960,10 +3109,7 @@ function RemoteSkillControlPanel({
       {remoteUpdate ? (
         <div className="remoteVersionSummary">
           <strong>{remoteUpdate.state === 'pinned' ? 'Pinned source' : remoteUpdate.stateLabel || remoteUpdate.state}</strong>
-          <span>
-            {remoteUpdate.currentVersion || remoteUpdate.installedSha || 'current unknown'}
-            {remoteUpdate.latestSha ? ` -> ${remoteUpdate.latestSha}` : ''}
-          </span>
+          <span>{remoteSkillUpdateVersionLabel(remoteUpdate, versions)}</span>
         </div>
       ) : null}
       {versions ? <RemoteVersionsPanel versions={versions} onReviewRollback={onReviewRollback} /> : null}

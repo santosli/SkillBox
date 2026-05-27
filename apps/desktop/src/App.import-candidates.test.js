@@ -13,8 +13,10 @@ import { parseUnifiedDiff } from './gitDiffView.js';
 import {
   canApplyRemoteVersionChange,
   formatRemoteRefBehavior,
+  normalizeRemoteSourceCandidates,
   normalizeRemoteSourceBindingPreview,
   normalizeRemoteVersionPreview,
+  remoteSkillUpdateVersionLabel,
   remoteVersionActionLabel
 } from './remoteSkills.js';
 import {
@@ -358,6 +360,52 @@ test('normalizes changed source binding without replacing current version', () =
   assert.equal(preview.validation, 'same_skill_changed');
   assert.equal(preview.replacesCurrent, false);
   assert.equal(preview.statusLabel, 'Source can be linked; current version will stay active.');
+});
+
+test('normalizes remote source candidates for desktop binding review', () => {
+  const search = normalizeRemoteSourceCandidates({
+    skill_name: 'grill-me',
+    candidates: [
+      {
+        owner: 'santos',
+        repo: 'skills',
+        path: 'remote-skills/grill-me',
+        reference: 'main',
+        source_url: 'https://github.com/santos/skills/tree/main/remote-skills/grill-me',
+        repo_url: 'https://github.com/santos/skills.git',
+        name: 'grill-me',
+        description: 'Interview helper',
+        stars: 42,
+        archived: false,
+        fork: false,
+        updated_at: '2026-05-27T00:00:00Z',
+        match_reasons: ['Exact skill name match'],
+        score: 570
+      }
+    ]
+  });
+
+  assert.equal(search.skillName, 'grill-me');
+  assert.equal(search.candidates[0].sourceUrl, 'https://github.com/santos/skills/tree/main/remote-skills/grill-me');
+  assert.equal(search.candidates[0].repoLabel, 'santos/skills');
+  assert.deepEqual(search.candidates[0].matchReasons, ['Exact skill name match']);
+});
+
+test('remote skill update summary falls back to listed current version', () => {
+  assert.equal(
+    remoteSkillUpdateVersionLabel(
+      { currentVersion: '', installedSha: '', latestSha: '' },
+      { currentVersion: 'manual-74147eb6010a' }
+    ),
+    'manual-74147eb6010a'
+  );
+  assert.equal(
+    remoteSkillUpdateVersionLabel(
+      { currentVersion: 'abcdef', latestSha: '123456' },
+      { currentVersion: 'manual-74147eb6010a' }
+    ),
+    'abcdef -> 123456'
+  );
 });
 
 test('remote version preview requires files before apply', () => {

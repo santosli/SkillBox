@@ -174,6 +174,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 - Rust CLI 当前入口：`remote-source-candidates`、`remote-source-preview`、`bind-remote-source`。
 - Tauri command：`find_remote_source_candidates`、`preview_remote_source_binding`、`bind_remote_source`。
+- 桌面 `Bind GitHub source` 弹窗打开时会自动调用 `find_remote_source_candidates`，候选只用于预览，仍需用户确认后才绑定。
 - 用户为已有 remote skill 手动添加 GitHub source URL。
 - 用户触发 GitHub candidate search，为已有 remote skill 自动寻找可能的 source。
 - MVP 只接受 GitHub skill directory 或 `SKILL.md` URL。

@@ -2252,6 +2252,88 @@ dd {
   padding: 12px;
 }
 
+.remoteSourceCandidatePanel {
+  display: grid;
+  gap: 10px;
+}
+
+.remoteSourceCandidateHeader {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 720;
+  text-transform: uppercase;
+}
+
+.remoteSourceCandidateList {
+  display: grid;
+  gap: 8px;
+}
+
+.remoteSourceCandidateRow {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  align-items: center;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.remoteSourceCandidateRow > span,
+.remoteSourceCandidateRow strong,
+.remoteSourceCandidateRow small {
+  display: block;
+  min-width: 0;
+}
+
+.remoteSourceCandidateRow strong {
+  overflow: hidden;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 680;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remoteSourceCandidateRow small,
+.remoteSourceCandidateNotice {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.remoteSourceCandidateMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.remoteSourceCandidateReasons {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  grid-column: 1 / -1;
+  gap: 6px;
+}
+
+.remoteSourceCandidateReasons small {
+  display: inline-flex;
+  width: max-content;
+  max-width: 100%;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: #475569;
+  font-weight: 650;
+  padding: 3px 8px;
+}
+
 .sourceBindingPreview strong,
 .remoteVersionSummary strong {
   color: #111827;

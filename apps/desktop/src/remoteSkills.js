@@ -32,6 +32,39 @@ export function normalizeRemoteSourceBindingPreview(preview = {}) {
   };
 }
 
+export function normalizeRemoteSourceCandidates(search = {}) {
+  const candidates = (search.candidates || [])
+    .map((candidate) => {
+      const owner = candidate.owner || '';
+      const repo = candidate.repo || '';
+      const sourceUrl = candidate.sourceUrl || candidate.source_url || '';
+
+      return {
+        owner,
+        repo,
+        repoLabel: [owner, repo].filter(Boolean).join('/'),
+        path: candidate.path || '',
+        reference: candidate.reference || '',
+        sourceUrl,
+        repoUrl: candidate.repoUrl || candidate.repo_url || '',
+        name: candidate.name || '',
+        description: candidate.description || '',
+        stars: Number(candidate.stars || 0),
+        archived: Boolean(candidate.archived),
+        fork: Boolean(candidate.fork),
+        updatedAt: candidate.updatedAt || candidate.updated_at || '',
+        matchReasons: candidate.matchReasons || candidate.match_reasons || [],
+        score: Number(candidate.score || 0)
+      };
+    })
+    .filter((candidate) => candidate.sourceUrl);
+
+  return {
+    skillName: search.skillName || search.skill_name || '',
+    candidates
+  };
+}
+
 export function normalizeRemoteVersionPreview(preview = {}) {
   const files = (preview.files || [])
     .map((file) => ({
@@ -63,6 +96,21 @@ export function normalizeRemoteVersionPreview(preview = {}) {
 
 export function canApplyRemoteVersionChange({ files = [], loading = false } = {}) {
   return !loading && files.length > 0;
+}
+
+export function remoteSkillUpdateVersionLabel(remoteUpdate = {}, versions = {}) {
+  const current =
+    remoteUpdate.currentVersion ||
+    remoteUpdate.current_version ||
+    remoteUpdate.installedSha ||
+    remoteUpdate.installed_sha ||
+    versions.currentVersion ||
+    versions.current_version ||
+    '';
+  const latest = remoteUpdate.latestSha || remoteUpdate.latest_sha || '';
+
+  if (!current) return 'current unknown';
+  return latest ? `${current} -> ${latest}` : current;
 }
 
 export function remoteVersionActionLabel(preview = {}) {
