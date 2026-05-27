@@ -145,14 +145,16 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 步骤：
 
-- 遍历 `remote-skills/<name>/source.json`。
+- Dashboard `Refresh status` 遍历所有 `remote-skills/<name>/source.json`；remote skill detail 的 `Check update` 只检查当前 skill。
 - 只处理 `type: github` 的 remote skill。
 - `refKind: tag`、`refKind: commit` 或 `tracking: false` 的 GitHub source 标记为 `pinned`，不执行远端更新判断。
 - 对 tracking branch 使用 `git ls-remote <repoUrl> <ref>` 查询最新 SHA。
-- `git ls-remote` 必须以非交互方式执行，并设置有界超时；超时或网络错误只标记对应 skill 为 `Check failed`，不能拖住整个 Refresh。
+- `git ls-remote` 必须以非交互方式执行，并设置有界超时；默认超时为 30 秒，用户可在 Settings 调整。
+- 全量 remote update check 必须限制并发，当前上限为 3，避免多个慢 Git 连接拖住整个 app。
 - 优先比较 latest remote SHA 与 `currentVersion`；没有 `currentVersion` 时兼容比较 `installedSha`。
 - 返回每个 remote skill 的 `skillName`、`sourceType`、`currentVersion`、`installedSha`、`latestSha`、`refKind`、`tracking`、`updateAvailable`、`state`、`message`。
 - 成功执行远端检查后，把完整检查结果和检查时间缓存到 managed SQLite preferences；下次桌面启动复用缓存状态，只有用户刷新或自动刷新后才更新缓存。
+- 如果某个 skill 上一次检测成功，本次远端检测超时或 Git 失败时保留上一次成功状态，只在 `message` 中记录 `Last check failed`。
 - 读取缓存时仍会基于当前本地 `remote-skills/<name>/source.json` 判定缺失 source 的 skill，并显示为 `No source`，避免把未绑定 source 的 remote skill 显示为未检查。
 - Dashboard 的 `Refresh status` 通过 Tauri command 刷新 user-skills Git 状态和 remote update check，再把行状态更新为 `Needs sync`、`Synced`、`Update available`、`Up to date`、`Pinned`、`No source`、`Check failed` 或 `Not checkable`。
 - Dashboard 的 `Checked` 列显示最近一次 status check 的时间；未检查前显示 `not checked`。

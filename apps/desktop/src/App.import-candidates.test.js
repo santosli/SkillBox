@@ -6,6 +6,7 @@ import {
   formatStatusCheckedAt,
   formatStatusNoticeCountdown,
   normalizeRemoteSkillUpdates,
+  normalizeRemoteUpdateTimeoutSeconds,
   normalizeStatusRefreshIntervalMinutes,
   remoteSkillRowStatus
 } from './skillStatusRefresh.js';
@@ -230,6 +231,13 @@ test('normalizes dashboard auto refresh intervals', () => {
   assert.equal(normalizeStatusRefreshIntervalMinutes('15'), 15);
   assert.equal(normalizeStatusRefreshIntervalMinutes(0), 5);
   assert.equal(normalizeStatusRefreshIntervalMinutes(1441), 5);
+});
+
+test('normalizes remote update git timeout seconds', () => {
+  assert.equal(normalizeRemoteUpdateTimeoutSeconds(30), 30);
+  assert.equal(normalizeRemoteUpdateTimeoutSeconds('45'), 45);
+  assert.equal(normalizeRemoteUpdateTimeoutSeconds(4), 30);
+  assert.equal(normalizeRemoteUpdateTimeoutSeconds(301), 30);
 });
 
 test('formats dashboard status notice countdown labels', () => {

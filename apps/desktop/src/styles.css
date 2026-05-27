@@ -2488,7 +2488,8 @@ dd {
 }
 
 .sourceBindingPreview small,
-.remoteVersionSummary span {
+.remoteVersionSummary span,
+.remoteVersionSummary small {
   color: #64748b;
   line-height: 1.45;
 }

@@ -72,6 +72,15 @@ fn set_status_refresh_interval_minutes(minutes: u32) -> Result<Value, String> {
 }
 
 #[tauri::command]
+fn set_remote_update_timeout_seconds(seconds: u32) -> Result<Value, String> {
+    let preferences = skillbox_core::set_remote_update_timeout_seconds(
+        skillbox_core::default_managed_root(),
+        seconds,
+    )?;
+    serde_json::to_value(preferences).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn scan_skills() -> Result<Value, String> {
     let scan = skillbox_core::scan_skill_roots(&skillbox_core::global_runtime_roots())?;
     serde_json::to_value(scan).map_err(|error| error.to_string())
@@ -136,10 +145,40 @@ fn sync_user_skills_git(request: skillbox_core::UserSkillsSyncRequest) -> Result
 }
 
 #[tauri::command]
-async fn check_remote_skill_updates() -> Result<Value, String> {
+async fn check_remote_skill_updates(timeout_seconds: Option<u32>) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let result =
-            skillbox_core::check_remote_skill_updates(skillbox_core::default_managed_root())?;
+        let result = if let Some(timeout_seconds) = timeout_seconds {
+            skillbox_core::check_remote_skill_updates_with_timeout(
+                skillbox_core::default_managed_root(),
+                timeout_seconds,
+            )?
+        } else {
+            skillbox_core::check_remote_skill_updates(skillbox_core::default_managed_root())?
+        };
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Remote update status check task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn check_remote_skill_update(
+    skill_name: String,
+    timeout_seconds: Option<u32>,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = if let Some(timeout_seconds) = timeout_seconds {
+            skillbox_core::check_remote_skill_update_with_timeout(
+                skillbox_core::default_managed_root(),
+                &skill_name,
+                timeout_seconds,
+            )?
+        } else {
+            skillbox_core::check_remote_skill_update(
+                skillbox_core::default_managed_root(),
+                &skill_name,
+            )?
+        };
         serde_json::to_value(result).map_err(|error| error.to_string())
     })
     .await
@@ -265,6 +304,7 @@ pub fn run() {
             managed_preferences,
             set_skip_local_import_confirmation,
             set_status_refresh_interval_minutes,
+            set_remote_update_timeout_seconds,
             scan_skills,
             scan_import_candidates,
             scan_workspace_import_candidates,
@@ -275,6 +315,7 @@ pub fn run() {
             set_user_skills_git_remote,
             sync_user_skills_git,
             check_remote_skill_updates,
+            check_remote_skill_update,
             cached_remote_skill_updates,
             find_remote_source_candidates,
             preview_remote_source_binding,

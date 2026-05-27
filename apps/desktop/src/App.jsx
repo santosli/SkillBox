@@ -46,6 +46,7 @@ import {
   formatStatusCheckedAt,
   formatStatusNoticeCountdown,
   normalizeRemoteSkillUpdates,
+  normalizeRemoteUpdateTimeoutSeconds,
   normalizeStatusRefreshIntervalMinutes,
   statusNoticeAutoCloseSeconds
 } from './skillStatusRefresh.js';
@@ -82,6 +83,7 @@ const previewPaths = {
 
 const previewPreferenceStorageKey = 'skillbox.skipLocalImportConfirmation';
 const previewStatusRefreshIntervalStorageKey = 'skillbox.statusRefreshIntervalMinutes';
+const previewRemoteUpdateTimeoutStorageKey = 'skillbox.remoteUpdateTimeoutSeconds';
 const dashboardFavoriteStorageKey = 'skillbox.dashboardFavorites';
 const dashboardTagStorageKey = 'skillbox.dashboardTags';
 const autoRefreshBlockedStatuses = new Set([
@@ -236,7 +238,8 @@ export default function App() {
   });
   const [preferences, setPreferences] = useState({
     skipLocalImportConfirmation: false,
-    statusRefreshIntervalMinutes: 5
+    statusRefreshIntervalMinutes: 5,
+    remoteUpdateTimeoutSeconds: 30
   });
   const [localImportConfirmation, setLocalImportConfirmation] = useState({
     open: false,
@@ -464,7 +467,7 @@ export default function App() {
     }
   }
 
-  async function refreshSkillStatuses({ automatic = false } = {}) {
+  async function refreshSkillStatuses({ automatic = false, skillName = '' } = {}) {
     setStatus('checking');
     setError('');
     if (!automatic) {
@@ -494,10 +497,18 @@ export default function App() {
     }
 
     try {
+      const remoteUpdateRequest = skillName
+        ? invoke('check_remote_skill_update', {
+            skillName,
+            timeoutSeconds: preferences.remoteUpdateTimeoutSeconds
+          })
+        : invoke('check_remote_skill_updates', {
+            timeoutSeconds: preferences.remoteUpdateTimeoutSeconds
+          });
       const [state, gitStatus, remoteUpdatesResult] = await Promise.all([
         invoke('managed_state'),
         invoke('user_skills_git_status').catch(() => null),
-        invoke('check_remote_skill_updates')
+        remoteUpdateRequest
       ]);
       const managedSkills = state.skills?.map(normalizeSkill) || [];
       const nextUserSkillsGit = normalizeUserSkillsGitStatus(gitStatus);
@@ -794,6 +805,38 @@ export default function App() {
 
     const storedPreferences = await invoke('set_status_refresh_interval_minutes', {
       minutes: intervalMinutes
+    });
+    const nextPreferences = normalizePreferences(storedPreferences);
+    setPreferences(nextPreferences);
+    return nextPreferences;
+  }
+
+  async function saveRemoteUpdateTimeoutSeconds(seconds) {
+    const timeoutSeconds = Number(seconds);
+
+    if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 5 || timeoutSeconds > 300) {
+      throw new Error('Git check timeout must be between 5 and 300 seconds.');
+    }
+
+    if (!window.__TAURI_INTERNALS__) {
+      try {
+        window.localStorage.setItem(
+          previewRemoteUpdateTimeoutStorageKey,
+          String(timeoutSeconds)
+        );
+      } catch {
+        // Browser preview can run without durable storage; keep the session preference in React state.
+      }
+      const nextPreferences = {
+        ...preferences,
+        remoteUpdateTimeoutSeconds: timeoutSeconds
+      };
+      setPreferences(nextPreferences);
+      return nextPreferences;
+    }
+
+    const storedPreferences = await invoke('set_remote_update_timeout_seconds', {
+      seconds: timeoutSeconds
     });
     const nextPreferences = normalizePreferences(storedPreferences);
     setPreferences(nextPreferences);
@@ -1897,6 +1940,7 @@ export default function App() {
             status={status}
             userSkillsGit={userSkillsGit}
             onSaveStatusRefreshInterval={saveStatusRefreshIntervalMinutes}
+            onSaveRemoteUpdateTimeout={saveRemoteUpdateTimeoutSeconds}
             onSaveUserSkillsRemote={saveUserSkillsGitRemote}
           />
         ) : page === 'workspaces' ? (
@@ -1954,7 +1998,7 @@ export default function App() {
           versions={remoteVersions[selectedSkill.name] || null}
           operations={operationHistory[selectedSkill.name] || []}
           onBindRemoteSource={() => openRemoteSourceDialog(selectedSkill)}
-          onCheckUpdates={refreshSkillStatuses}
+          onCheckUpdates={() => refreshSkillStatuses({ skillName: selectedSkill.name })}
           onClose={closeSkillDetail}
           onOpenSyncSetup={openSyncDialog}
           onReviewRollback={(version) => openRemoteVersionReview(selectedSkill, 'rollback', version.version)}
@@ -2671,6 +2715,7 @@ function SettingsPage({
   preferences,
   status,
   userSkillsGit,
+  onSaveRemoteUpdateTimeout,
   onSaveStatusRefreshInterval,
   onSaveUserSkillsRemote
 }) {
@@ -2692,6 +2737,7 @@ function SettingsPage({
         <StatusRefreshSettingsPanel
           preferences={preferences}
           status={status}
+          onSaveRemoteUpdateTimeout={onSaveRemoteUpdateTimeout}
           onSave={onSaveStatusRefreshInterval}
         />
       </section>
@@ -2699,16 +2745,20 @@ function SettingsPage({
   );
 }
 
-function StatusRefreshSettingsPanel({ preferences, status, onSave }) {
+function StatusRefreshSettingsPanel({ preferences, status, onSave, onSaveRemoteUpdateTimeout }) {
   const [intervalMinutes, setIntervalMinutes] = useState(
     String(preferences.statusRefreshIntervalMinutes || 5)
+  );
+  const [timeoutSeconds, setTimeoutSeconds] = useState(
+    String(preferences.remoteUpdateTimeoutSeconds || 30)
   );
   const [saveStatus, setSaveStatus] = useState('idle');
   const [message, setMessage] = useState('');
 
   useEffect(() => {
     setIntervalMinutes(String(preferences.statusRefreshIntervalMinutes || 5));
-  }, [preferences.statusRefreshIntervalMinutes]);
+    setTimeoutSeconds(String(preferences.remoteUpdateTimeoutSeconds || 30));
+  }, [preferences.statusRefreshIntervalMinutes, preferences.remoteUpdateTimeoutSeconds]);
 
   async function submit(event) {
     event.preventDefault();
@@ -2717,6 +2767,7 @@ function StatusRefreshSettingsPanel({ preferences, status, onSave }) {
 
     try {
       await onSave(Number(intervalMinutes));
+      await onSaveRemoteUpdateTimeout(Number(timeoutSeconds));
       setSaveStatus('saved');
       setMessage('Saved.');
     } catch (error) {
@@ -2751,10 +2802,27 @@ function StatusRefreshSettingsPanel({ preferences, status, onSave }) {
             <span>minutes</span>
           </div>
         </label>
+        <label className="remoteImportField">
+          <span>Git check timeout</span>
+          <div className="numberFieldRow">
+            <input
+              min="5"
+              max="300"
+              step="1"
+              type="number"
+              value={timeoutSeconds}
+              onChange={(event) => {
+                setTimeoutSeconds(event.target.value);
+                setMessage('');
+              }}
+            />
+            <span>seconds</span>
+          </div>
+        </label>
         <div className="settingsActions">
           {message ? <span className={saveStatus === 'error' ? 'settingsError' : 'settingsSaved'}>{message}</span> : <span />}
           <button className="button primary" disabled={status === 'checking' || saveStatus === 'saving'} type="submit">
-            {saveStatus === 'saving' ? 'Saving...' : 'Save interval'}
+            {saveStatus === 'saving' ? 'Saving...' : 'Save status settings'}
           </button>
         </div>
       </form>
@@ -3450,6 +3518,7 @@ function RemoteSkillControlPanel({
         <div className="remoteVersionSummary">
           <strong>{remoteUpdate.state === 'pinned' ? 'Pinned source' : remoteUpdate.stateLabel || remoteUpdate.state}</strong>
           <span>{remoteSkillUpdateVersionLabel(remoteUpdate, versions)}</span>
+          {remoteUpdate.message ? <small>{remoteUpdate.message}</small> : null}
         </div>
       ) : null}
       {versions ? <RemoteVersionsPanel versions={versions} onReviewRollback={onReviewRollback} /> : null}
@@ -4152,6 +4221,9 @@ function normalizePreferences(preferences) {
     ),
     statusRefreshIntervalMinutes: normalizeStatusRefreshIntervalMinutes(
       preferences?.statusRefreshIntervalMinutes ?? preferences?.status_refresh_interval_minutes
+    ),
+    remoteUpdateTimeoutSeconds: normalizeRemoteUpdateTimeoutSeconds(
+      preferences?.remoteUpdateTimeoutSeconds ?? preferences?.remote_update_timeout_seconds
     )
   };
 }
@@ -4161,11 +4233,17 @@ function readPreviewPreferences() {
     const statusRefreshIntervalMinutes = window.localStorage.getItem(
       previewStatusRefreshIntervalStorageKey
     );
+    const remoteUpdateTimeoutSeconds = window.localStorage.getItem(
+      previewRemoteUpdateTimeoutStorageKey
+    );
 
     return {
       skipLocalImportConfirmation: window.localStorage.getItem(previewPreferenceStorageKey) === 'true',
       statusRefreshIntervalMinutes: normalizeStatusRefreshIntervalMinutes(
         statusRefreshIntervalMinutes
+      ),
+      remoteUpdateTimeoutSeconds: normalizeRemoteUpdateTimeoutSeconds(
+        remoteUpdateTimeoutSeconds
       )
     };
   } catch {

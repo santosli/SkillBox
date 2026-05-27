@@ -139,16 +139,35 @@ test('dashboard startup loads cached remote update state without refreshing', ()
 
 test('dashboard status refresh paints loading state before checking remotes', () => {
   const refreshStatuses = appSource.match(
-    /async function refreshSkillStatuses\(\{ automatic = false \} = \{\}\)\s*\{(?<body>[\s\S]*?)\n  \}/
+    /async function refreshSkillStatuses\(\{ automatic = false, skillName = '' \} = \{\}\)\s*\{(?<body>[\s\S]*?)\n  \}/
   )?.groups.body || '';
 
   assert.match(refreshStatuses, /setStatus\('checking'\);/);
   assert.match(refreshStatuses, /await waitForNextPaint\(\);/);
-  assert.match(refreshStatuses, /invoke\('check_remote_skill_updates'\)/);
+  assert.match(refreshStatuses, /invoke\('check_remote_skill_updates'/);
   assert.ok(
     refreshStatuses.indexOf('await waitForNextPaint();') <
       refreshStatuses.indexOf("invoke('check_remote_skill_updates'")
   );
+});
+
+test('dashboard refresh checks all remote skills while detail check targets one skill', () => {
+  const refreshStatuses = appSource.match(
+    /async function refreshSkillStatuses\(\{ automatic = false, skillName = '' \} = \{\}\)\s*\{(?<body>[\s\S]*?)\n  \}/
+  )?.groups.body || '';
+
+  assert.match(refreshStatuses, /skillName\s*\?\s*invoke\('check_remote_skill_update'/);
+  assert.match(refreshStatuses, /:\s*invoke\('check_remote_skill_updates'/);
+  assert.match(appSource, /onRefreshStatuses=\{refreshSkillStatuses\}/);
+  assert.match(appSource, /onCheckUpdates=\{\(\) => refreshSkillStatuses\(\{ skillName: selectedSkill\.name \}\)\}/);
+});
+
+test('remote update checks pass the configured git timeout', () => {
+  assert.match(appSource, /remoteUpdateTimeoutSeconds:\s*30/);
+  assert.match(appSource, /remoteUpdateTimeoutSeconds: normalizeRemoteUpdateTimeoutSeconds/);
+  assert.match(appSource, /timeoutSeconds:\s*preferences\.remoteUpdateTimeoutSeconds/);
+  assert.match(tauriSource, /fn set_remote_update_timeout_seconds\(seconds: u32\)/);
+  assert.match(tauriSource, /async fn check_remote_skill_update/);
 });
 
 test('dashboard refresh action shows an explicit loading affordance', () => {

@@ -5,7 +5,7 @@ use std::process::{Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const LS_REMOTE_TIMEOUT: Duration = Duration::from_secs(8);
+const DEFAULT_LS_REMOTE_TIMEOUT: Duration = Duration::from_secs(30);
 const FETCH_REF_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -161,6 +161,14 @@ pub fn diff_head_path(repo: impl AsRef<Path>, path: &str) -> Result<String, Stri
 }
 
 pub fn ls_remote(repo_url: &str, reference: &str) -> Result<Option<String>, String> {
+    ls_remote_with_timeout(repo_url, reference, DEFAULT_LS_REMOTE_TIMEOUT)
+}
+
+pub fn ls_remote_with_timeout(
+    repo_url: &str,
+    reference: &str,
+    timeout: Duration,
+) -> Result<Option<String>, String> {
     let mut command = Command::new("git");
     command
         .arg("ls-remote")
@@ -169,7 +177,7 @@ pub fn ls_remote(repo_url: &str, reference: &str) -> Result<Option<String>, Stri
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_ASKPASS", "true")
         .env("GCM_INTERACTIVE", "never");
-    let output = command_output_with_timeout(command, LS_REMOTE_TIMEOUT, "git ls-remote")?;
+    let output = command_output_with_timeout(command, timeout, "git ls-remote")?;
 
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
@@ -616,9 +624,19 @@ mod tests {
     }
 
     #[test]
-    fn ls_remote_timeout_allows_slow_networks_without_unbounded_refresh() {
-        assert!(LS_REMOTE_TIMEOUT >= Duration::from_secs(8));
-        assert!(LS_REMOTE_TIMEOUT <= Duration::from_secs(10));
+    fn ls_remote_timeout_defaults_to_slow_network_budget() {
+        assert_eq!(DEFAULT_LS_REMOTE_TIMEOUT, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn ls_remote_supports_configured_timeout() {
+        let source = include_str!("lib.rs");
+        let ls_remote_start = source.find("pub fn ls_remote(").unwrap();
+        let fetch_ref_path_start = source.find("pub fn fetch_ref_path").unwrap();
+        let ls_remote_source = &source[ls_remote_start..fetch_ref_path_start];
+
+        assert!(ls_remote_source.contains("ls_remote_with_timeout"));
+        assert!(ls_remote_source.contains("timeout"));
     }
 
     #[test]

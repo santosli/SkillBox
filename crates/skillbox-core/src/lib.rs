@@ -4,12 +4,18 @@ use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::thread;
+use std::time::Duration;
 
 pub type Result<T> = std::result::Result<T, String>;
 
 const DEFAULT_STATUS_REFRESH_INTERVAL_MINUTES: u32 = 5;
 const MIN_STATUS_REFRESH_INTERVAL_MINUTES: u32 = 1;
 const MAX_STATUS_REFRESH_INTERVAL_MINUTES: u32 = 1440;
+const DEFAULT_REMOTE_UPDATE_TIMEOUT_SECONDS: u32 = 30;
+const MIN_REMOTE_UPDATE_TIMEOUT_SECONDS: u32 = 5;
+const MAX_REMOTE_UPDATE_TIMEOUT_SECONDS: u32 = 300;
+const REMOTE_UPDATE_CHECK_CONCURRENCY: usize = 3;
 const CLAUDE_MARKETPLACE_SKILLS_API: &str = "https://claudemarketplaces.com/api/skills";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -122,6 +128,7 @@ pub struct ManagedState {
 pub struct ManagedPreferences {
     pub skip_local_import_confirmation: bool,
     pub status_refresh_interval_minutes: u32,
+    pub remote_update_timeout_seconds: u32,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1038,10 +1045,14 @@ pub fn managed_preferences(managed_root: impl AsRef<Path>) -> Result<ManagedPref
     let status_refresh_interval_minutes =
         read_u32_preference(&paths.database_path, "status_refresh_interval_minutes")?
             .unwrap_or(DEFAULT_STATUS_REFRESH_INTERVAL_MINUTES);
+    let remote_update_timeout_seconds =
+        read_u32_preference(&paths.database_path, "remote_update_timeout_seconds")?
+            .unwrap_or(DEFAULT_REMOTE_UPDATE_TIMEOUT_SECONDS);
 
     Ok(ManagedPreferences {
         skip_local_import_confirmation,
         status_refresh_interval_minutes,
+        remote_update_timeout_seconds,
     })
 }
 
@@ -1072,6 +1083,22 @@ pub fn set_status_refresh_interval_minutes(
         &paths.database_path,
         "status_refresh_interval_minutes",
         minutes,
+    )?;
+
+    managed_preferences(paths.root)
+}
+
+pub fn set_remote_update_timeout_seconds(
+    managed_root: impl AsRef<Path>,
+    seconds: u32,
+) -> Result<ManagedPreferences> {
+    validate_remote_update_timeout_seconds(seconds)?;
+
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    write_u32_preference(
+        &paths.database_path,
+        "remote_update_timeout_seconds",
+        seconds,
     )?;
 
     managed_preferences(paths.root)
@@ -1451,12 +1478,92 @@ pub fn sync_user_skills_git(
 pub fn check_remote_skill_updates(
     managed_root: impl AsRef<Path>,
 ) -> Result<RemoteSkillUpdateCheck> {
+    let preferences = managed_preferences(managed_root.as_ref())?;
+    check_remote_skill_updates_with_timeout(managed_root, preferences.remote_update_timeout_seconds)
+}
+
+pub fn check_remote_skill_updates_with_timeout(
+    managed_root: impl AsRef<Path>,
+    timeout_seconds: u32,
+) -> Result<RemoteSkillUpdateCheck> {
+    validate_remote_update_timeout_seconds(timeout_seconds)?;
     let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
     let checked_at = operation_timestamp();
-    let statuses = remote_skill_roots(&paths)?
-        .into_iter()
-        .map(|(skill_name, remote_root)| check_one_remote_skill_update(&skill_name, &remote_root))
-        .collect::<Vec<_>>();
+    let cached = read_remote_update_cache(&paths.database_path)?;
+    let timeout = Duration::from_secs(timeout_seconds.into());
+    let mut statuses = Vec::new();
+    for batch in remote_skill_roots(&paths)?.chunks(REMOTE_UPDATE_CHECK_CONCURRENCY) {
+        statuses.extend(
+            check_remote_skill_update_batch(batch.to_vec(), timeout)
+                .into_iter()
+                .map(|status| preserve_cached_remote_status_on_failure(status, cached.as_ref())),
+        );
+    }
+    let result = RemoteSkillUpdateCheck {
+        checked_at: Some(checked_at),
+        statuses,
+    };
+
+    write_remote_update_cache(&paths.database_path, &result)?;
+    Ok(result)
+}
+
+pub fn check_remote_skill_update(
+    managed_root: impl AsRef<Path>,
+    skill_name: &str,
+) -> Result<RemoteSkillUpdateCheck> {
+    let preferences = managed_preferences(managed_root.as_ref())?;
+    check_remote_skill_update_with_timeout(
+        managed_root,
+        skill_name,
+        preferences.remote_update_timeout_seconds,
+    )
+}
+
+pub fn check_remote_skill_update_with_timeout(
+    managed_root: impl AsRef<Path>,
+    skill_name: &str,
+    timeout_seconds: u32,
+) -> Result<RemoteSkillUpdateCheck> {
+    validate_skill_name(skill_name)?;
+    validate_remote_update_timeout_seconds(timeout_seconds)?;
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let checked_at = operation_timestamp();
+    let cached = read_remote_update_cache(&paths.database_path)?;
+    let timeout = Duration::from_secs(timeout_seconds.into());
+    let remote_root = paths.remote_skills_root.join(skill_name);
+    let checked = check_one_remote_skill_update(skill_name, &remote_root, timeout);
+    let checked = preserve_cached_remote_status_on_failure(checked, cached.as_ref());
+    let mut statuses = Vec::new();
+
+    for (name, remote_root) in remote_skill_roots(&paths)? {
+        if name == skill_name {
+            statuses.push(checked.clone());
+            continue;
+        }
+
+        if !remote_root.join("source.json").exists() {
+            statuses.push(no_source_remote_update_status(&name));
+            continue;
+        }
+
+        if let Some(status) = cached.as_ref().and_then(|cached| {
+            cached
+                .statuses
+                .iter()
+                .find(|status| status.skill_name == name)
+        }) {
+            statuses.push(status.clone());
+        }
+    }
+
+    if !statuses
+        .iter()
+        .any(|status| status.skill_name == skill_name)
+    {
+        statuses.push(checked);
+    }
+
     let result = RemoteSkillUpdateCheck {
         checked_at: Some(checked_at),
         statuses,
@@ -2035,7 +2142,85 @@ fn no_source_remote_update_status(skill_name: &str) -> RemoteSkillUpdateStatus {
     }
 }
 
-fn check_one_remote_skill_update(skill_name: &str, remote_root: &Path) -> RemoteSkillUpdateStatus {
+fn validate_remote_update_timeout_seconds(seconds: u32) -> Result<()> {
+    if !(MIN_REMOTE_UPDATE_TIMEOUT_SECONDS..=MAX_REMOTE_UPDATE_TIMEOUT_SECONDS).contains(&seconds) {
+        return Err(format!(
+            "Remote update timeout must be between {MIN_REMOTE_UPDATE_TIMEOUT_SECONDS} and {MAX_REMOTE_UPDATE_TIMEOUT_SECONDS} seconds."
+        ));
+    }
+    Ok(())
+}
+
+fn check_remote_skill_update_batch(
+    batch: Vec<(String, PathBuf)>,
+    timeout: Duration,
+) -> Vec<RemoteSkillUpdateStatus> {
+    let mut handles = Vec::new();
+    for (skill_name, remote_root) in batch {
+        let thread_skill_name = skill_name.clone();
+        let handle = thread::spawn(move || {
+            check_one_remote_skill_update(&thread_skill_name, &remote_root, timeout)
+        });
+        handles.push((skill_name, handle));
+    }
+
+    handles
+        .into_iter()
+        .map(|(skill_name, handle)| {
+            handle.join().unwrap_or_else(|_| RemoteSkillUpdateStatus {
+                skill_name,
+                source_type: None,
+                current_version: None,
+                installed_sha: None,
+                latest_sha: None,
+                ref_kind: None,
+                tracking: false,
+                update_available: false,
+                state: RemoteSkillUpdateState::CheckFailed,
+                message: Some("Remote update check panicked.".to_string()),
+            })
+        })
+        .collect()
+}
+
+fn preserve_cached_remote_status_on_failure(
+    status: RemoteSkillUpdateStatus,
+    cached: Option<&RemoteSkillUpdateCheck>,
+) -> RemoteSkillUpdateStatus {
+    if status.state != RemoteSkillUpdateState::CheckFailed {
+        return status;
+    }
+
+    let Some(cached_status) = cached.and_then(|cached| {
+        cached
+            .statuses
+            .iter()
+            .find(|cached_status| cached_status.skill_name == status.skill_name)
+    }) else {
+        return status;
+    };
+
+    if matches!(
+        cached_status.state,
+        RemoteSkillUpdateState::CheckFailed | RemoteSkillUpdateState::NoSource
+    ) {
+        return status;
+    }
+
+    let mut preserved = cached_status.clone();
+    let message = status
+        .message
+        .filter(|message| !message.trim().is_empty())
+        .unwrap_or_else(|| "Remote update check failed.".to_string());
+    preserved.message = Some(format!("Last check failed: {message}"));
+    preserved
+}
+
+fn check_one_remote_skill_update(
+    skill_name: &str,
+    remote_root: &Path,
+    timeout: Duration,
+) -> RemoteSkillUpdateStatus {
     let source_path = remote_root.join("source.json");
     let source_content = match fs::read_to_string(&source_path) {
         Ok(content) => content,
@@ -2137,7 +2322,7 @@ fn check_one_remote_skill_update(skill_name: &str, remote_root: &Path) -> Remote
         };
     }
 
-    match skillbox_git::ls_remote(repo_url, reference) {
+    match skillbox_git::ls_remote_with_timeout(repo_url, reference, timeout) {
         Ok(Some(latest_sha)) => {
             let active_version = current_version.as_deref().or(installed_sha.as_deref());
             let update_available = active_version != Some(latest_sha.as_str());
@@ -4451,6 +4636,7 @@ description: \"Demo skill\"
 
         assert!(!preferences.skip_local_import_confirmation);
         assert_eq!(preferences.status_refresh_interval_minutes, 5);
+        assert_eq!(preferences.remote_update_timeout_seconds, 30);
     }
 
     #[test]
@@ -4463,6 +4649,7 @@ description: \"Demo skill\"
 
         assert!(preferences.skip_local_import_confirmation);
         assert_eq!(preferences.status_refresh_interval_minutes, 5);
+        assert_eq!(preferences.remote_update_timeout_seconds, 30);
     }
 
     #[test]
@@ -4489,6 +4676,32 @@ description: \"Demo skill\"
         let error = set_status_refresh_interval_minutes(&managed_root, 0).unwrap_err();
 
         assert!(error.contains("between 1 and 1440"));
+    }
+
+    #[test]
+    fn managed_preferences_persist_remote_update_timeout() {
+        let root = temp_dir("preferences-remote-timeout");
+        let managed_root = root.join("SkillBox");
+
+        let preferences = set_remote_update_timeout_seconds(&managed_root, 45).unwrap();
+
+        assert_eq!(preferences.remote_update_timeout_seconds, 45);
+        assert_eq!(
+            managed_preferences(&managed_root)
+                .unwrap()
+                .remote_update_timeout_seconds,
+            45
+        );
+    }
+
+    #[test]
+    fn managed_preferences_reject_invalid_remote_update_timeout() {
+        let root = temp_dir("preferences-invalid-remote-timeout");
+        let managed_root = root.join("SkillBox");
+
+        let error = set_remote_update_timeout_seconds(&managed_root, 4).unwrap_err();
+
+        assert!(error.contains("between 5 and 300"));
     }
 
     #[test]
@@ -4973,6 +5186,80 @@ description: \"Demo skill\"
         assert_eq!(broken.state, RemoteSkillUpdateState::CheckFailed);
         assert!(!broken.update_available);
         assert!(broken.message.as_deref().unwrap_or("").contains("Git"));
+    }
+
+    #[test]
+    fn check_remote_skill_update_preserves_cached_success_on_failure() {
+        let root = temp_dir("remote-check-preserve-cache");
+        let managed_root = root.join("SkillBox");
+        let paths = ensure_managed_layout(&managed_root).unwrap();
+        let remote = bare_remote_with_main("remote-check-preserve-cache-origin");
+        let latest_sha = remote_head(&remote);
+        let skill_root = paths.remote_skills_root.join("fresh");
+        write_remote_source(&skill_root, &remote, &latest_sha);
+
+        let checked = check_remote_skill_updates(&managed_root).unwrap();
+        assert_eq!(
+            remote_status(&checked.statuses, "fresh").state,
+            RemoteSkillUpdateState::UpToDate
+        );
+        write_remote_source(&skill_root, &root.join("missing.git"), &latest_sha);
+
+        let failed = check_remote_skill_updates(&managed_root).unwrap();
+        let fresh = remote_status(&failed.statuses, "fresh");
+
+        assert_eq!(fresh.state, RemoteSkillUpdateState::UpToDate);
+        assert_eq!(fresh.latest_sha.as_deref(), Some(latest_sha.as_str()));
+        assert!(fresh
+            .message
+            .as_deref()
+            .unwrap_or("")
+            .starts_with("Last check failed: Git update check failed:"));
+    }
+
+    #[test]
+    fn check_single_remote_skill_update_only_refreshes_requested_skill() {
+        let root = temp_dir("remote-check-one");
+        let managed_root = root.join("SkillBox");
+        let paths = ensure_managed_layout(&managed_root).unwrap();
+        let remote = bare_remote_with_main("remote-check-one-origin");
+        let latest_sha = remote_head(&remote);
+        write_remote_source(
+            &paths.remote_skills_root.join("target"),
+            &remote,
+            "0000000000000000000000000000000000000000",
+        );
+        write_remote_source(
+            &paths.remote_skills_root.join("other"),
+            &remote,
+            &latest_sha,
+        );
+        check_remote_skill_updates(&managed_root).unwrap();
+        write_remote_source(
+            &paths.remote_skills_root.join("other"),
+            &root.join("missing.git"),
+            &latest_sha,
+        );
+
+        let result = check_remote_skill_update(&managed_root, "target").unwrap();
+        let target = remote_status(&result.statuses, "target");
+        let other = remote_status(&result.statuses, "other");
+
+        assert_eq!(target.state, RemoteSkillUpdateState::UpdateAvailable);
+        assert_eq!(other.state, RemoteSkillUpdateState::UpToDate);
+        assert_eq!(other.message, None);
+    }
+
+    #[test]
+    fn check_remote_skill_updates_uses_limited_concurrency() {
+        let source = include_str!("lib.rs");
+        let check_start = source.find("pub fn check_remote_skill_updates").unwrap();
+        let cached_start = source.find("pub fn cached_remote_skill_updates").unwrap();
+        let check_source = &source[check_start..cached_start];
+
+        assert!(source.contains("const REMOTE_UPDATE_CHECK_CONCURRENCY: usize = 3;"));
+        assert!(check_source.contains("check_remote_skill_update_batch"));
+        assert!(check_source.contains("REMOTE_UPDATE_CHECK_CONCURRENCY"));
     }
 
     #[test]

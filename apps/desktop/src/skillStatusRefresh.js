@@ -1,6 +1,9 @@
 export const defaultStatusRefreshIntervalMinutes = 5;
 export const minStatusRefreshIntervalMinutes = 1;
 export const maxStatusRefreshIntervalMinutes = 1440;
+export const defaultRemoteUpdateTimeoutSeconds = 30;
+export const minRemoteUpdateTimeoutSeconds = 5;
+export const maxRemoteUpdateTimeoutSeconds = 300;
 export const statusNoticeAutoCloseSeconds = 8;
 
 export function formatStatusNoticeCountdown(seconds) {
@@ -22,6 +25,20 @@ export function normalizeStatusRefreshIntervalMinutes(value) {
   }
 
   return defaultStatusRefreshIntervalMinutes;
+}
+
+export function normalizeRemoteUpdateTimeoutSeconds(value) {
+  const seconds = Number(value);
+
+  if (
+    Number.isInteger(seconds) &&
+    seconds >= minRemoteUpdateTimeoutSeconds &&
+    seconds <= maxRemoteUpdateTimeoutSeconds
+  ) {
+    return seconds;
+  }
+
+  return defaultRemoteUpdateTimeoutSeconds;
 }
 
 export function formatStatusCheckedAt(checkedAt, now = new Date()) {
