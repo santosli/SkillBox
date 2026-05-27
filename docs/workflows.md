@@ -168,7 +168,35 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `npm test`
 - 桌面 UI 视觉验证 Dashboard `Refresh` 按钮、Checked 时间、状态 badge、Available updates 计数、notice，以及 Settings 中的自动刷新间隔。
 
-## 6. Update Remote Skill
+## 6. Bind Remote Source
+
+触发条件：
+
+- 用户为已有 remote skill 手动添加 GitHub source URL。
+- MVP 只接受 GitHub skill directory 或 `SKILL.md` URL。
+
+步骤：
+
+- 校验本地 skill name，并解析 GitHub URL 的 owner、repo、ref 和 path。
+- 在临时工作树中 fetch 目标 ref，并只 checkout URL 指向的 skill path。
+- 读取远端 `SKILL.md`，和本地 `current` 指向的 skill 做本地验证。
+- `exact_match`：远端 skill name 和内容 hash 都匹配，可以绑定 source。
+- `same_skill_changed`：远端 skill name 匹配但内容 hash 不同，可以绑定 source，但必须告知用户当前内容不会被替换。
+- `mismatch`：远端 skill name 与本地 skill name 不一致，拒绝绑定。
+- 对 `exact_match` 和 `same_skill_changed` 写入 `remote-skills/<name>/source.json`，包含 GitHub 来源、`refKind`、`tracking`、`currentVersion`、`installedSha`、`latestSha`。
+- `same_skill_changed` 不写入 `versions/<latestSha>`，不切换 `current`，不 redeploy runtime。
+- 所有 bind 执行都记录 `bind_remote_source` operation；成功、失败和 mismatch 拒绝都必须有最终状态。
+
+失败与回滚：
+
+- Git fetch、路径 checkout、`SKILL.md` 读取或 metadata 写入失败时，不改变 `current` 和版本目录。
+- mismatch 拒绝不会写 `source.json`。
+
+完成验证：
+
+- `cargo test -p skillbox-core --offline source_binding`
+
+## 7. Update Remote Skill
 
 触发条件：
 
@@ -200,7 +228,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 新增 Rust tests 覆盖 no-op update、新版本写入、旧版本保留和 symlink 恢复。
 - 手动验证：安装一个固定旧 ref 后更新到新 ref，确认 `current` 指向新 SHA。
 
-## 7. Rollback Remote Skill
+## 8. Rollback Remote Skill
 
 触发条件：
 
@@ -227,7 +255,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 当前 Node：`node packages/skillbox-cli/bin/skillbox.js rollback <skill-name> --to <sha> --managed-root <temp-SkillBox> --json`
 - Rust 迁移完成后新增 tests 覆盖完整 SHA、短 SHA、无匹配、多匹配和 symlink restore。
 
-## 8. Sync User-Skills Git
+## 9. Sync User-Skills Git
 
 触发条件：
 
@@ -269,7 +297,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `cargo run -p skillbox-cli --offline -- sync-user-skills --managed-root <temp-SkillBox> --remote <bare-repo-path> --message "test sync"`
 - UI 路径变更时，手动验证 commit review dialog、diff preview、默认 commit message、文件选择、shared remote 提示和 push failure 状态。
 
-## 9. Add Agent Adapter
+## 10. Add Agent Adapter
 
 触发条件：
 
@@ -300,7 +328,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 如果 adapter 影响 legacy Node CLI 兼容入口，也运行 `npm test`。
 - 用临时目录模拟该 agent runtime，不直接修改真实用户 runtime。
 
-## 10. Manage Workspaces
+## 11. Manage Workspaces
 
 触发条件：
 

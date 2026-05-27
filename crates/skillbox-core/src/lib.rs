@@ -348,6 +348,59 @@ pub struct RemoteSkillUpdateCheck {
     pub statuses: Vec<RemoteSkillUpdateStatus>,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceBindingValidation {
+    ExactMatch,
+    SameSkillChanged,
+    Mismatch,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteSourceBindingRequest {
+    pub skill_name: String,
+    pub source_url: String,
+    pub actor: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RemoteSourceBindingPreview {
+    pub skill_name: String,
+    pub source_url: String,
+    pub repo_url: String,
+    pub owner: String,
+    pub repo: String,
+    pub path: String,
+    pub reference: String,
+    pub ref_kind: Option<String>,
+    pub tracking: bool,
+    pub current_version: String,
+    pub installed_sha: Option<String>,
+    pub latest_sha: Option<String>,
+    pub validation: SourceBindingValidation,
+    pub local_hash: String,
+    pub remote_hash: Option<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BindRemoteSourceRequest {
+    pub skill_name: String,
+    pub source_url: String,
+    pub actor: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BindRemoteSourceResult {
+    pub skill_name: String,
+    pub validation: SourceBindingValidation,
+    pub current_version: String,
+    pub installed_sha: Option<String>,
+    pub latest_sha: Option<String>,
+    pub source_path: PathBuf,
+    pub operation_id: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 struct RemoteSkillSource {
     #[serde(rename = "type")]
@@ -1289,6 +1342,169 @@ pub fn check_remote_skill_updates(
     Ok(RemoteSkillUpdateCheck { statuses })
 }
 
+pub fn preview_remote_source_binding(
+    request: RemoteSourceBindingRequest,
+    managed_root: impl AsRef<Path>,
+) -> Result<RemoteSourceBindingPreview> {
+    validate_skill_name(&request.skill_name)?;
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let remote_root = paths.remote_skills_root.join(&request.skill_name);
+    let local_current = remote_root.join("current");
+    let local_skill = read_skill(&local_current)?;
+    let current_version = current_remote_version(&paths, &request.skill_name)?;
+    let existing_source = read_remote_source(&remote_root).ok();
+    let installed_sha = existing_source
+        .and_then(|source| source.installed_sha)
+        .filter(|sha| sha == &current_version);
+    let source = skillbox_github::parse_github_skill_url(&request.source_url)?;
+    let temp = temporary_work_dir("source-binding");
+
+    let result = (|| {
+        let checkout = temp.join("checkout");
+        let latest_sha = skillbox_git::fetch_ref_path(
+            &source.repo_url,
+            &source.reference,
+            &source.path,
+            &checkout,
+        )?;
+        let remote_skill_path = checkout.join(&source.path);
+        let remote_skill = read_skill(&remote_skill_path)?;
+        let ref_kind = resolve_ref_kind(&source.repo_url, &source.reference)?;
+        let tracking = ref_kind == "branch";
+        let validation = if remote_skill.name != request.skill_name {
+            SourceBindingValidation::Mismatch
+        } else if remote_skill.content_hash == local_skill.content_hash {
+            SourceBindingValidation::ExactMatch
+        } else {
+            SourceBindingValidation::SameSkillChanged
+        };
+        let message = source_binding_message(&request.skill_name, &remote_skill.name, validation);
+
+        Ok(RemoteSourceBindingPreview {
+            skill_name: request.skill_name,
+            source_url: source.url,
+            repo_url: source.repo_url,
+            owner: source.owner,
+            repo: source.repo,
+            path: source.path,
+            reference: source.reference,
+            ref_kind: Some(ref_kind),
+            tracking,
+            current_version,
+            installed_sha,
+            latest_sha: Some(latest_sha),
+            validation,
+            local_hash: local_skill.content_hash,
+            remote_hash: Some(remote_skill.content_hash),
+            message,
+        })
+    })();
+
+    let _ = fs::remove_dir_all(&temp);
+    result
+}
+
+pub fn bind_remote_source(
+    request: BindRemoteSourceRequest,
+    managed_root: impl AsRef<Path>,
+) -> Result<BindRemoteSourceResult> {
+    let managed_root = managed_root.as_ref().to_path_buf();
+    let operation = start_operation(
+        OperationStart {
+            operation_type: "bind_remote_source".to_string(),
+            actor: request.actor.clone(),
+            entity_type: "skill".to_string(),
+            entity_name: request.skill_name.clone(),
+            summary: format!("Bind {} to GitHub source", request.skill_name),
+            payload: serde_json::json!({"sourceUrl": request.source_url}),
+        },
+        &managed_root,
+    )?;
+    let operation_id = operation.id.clone();
+    let preview = match preview_remote_source_binding(
+        RemoteSourceBindingRequest {
+            skill_name: request.skill_name.clone(),
+            source_url: request.source_url.clone(),
+            actor: request.actor,
+        },
+        &managed_root,
+    ) {
+        Ok(preview) => preview,
+        Err(error) => {
+            let _ = finish_operation(
+                OperationFinish {
+                    id: operation_id,
+                    status: OperationStatus::Failed,
+                    summary: format!("Bind {} failed", request.skill_name),
+                    error: Some(error.clone()),
+                    payload: serde_json::json!({}),
+                },
+                &managed_root,
+            );
+            return Err(error);
+        }
+    };
+
+    if preview.validation == SourceBindingValidation::Mismatch {
+        finish_operation(
+            OperationFinish {
+                id: operation_id,
+                status: OperationStatus::Failed,
+                summary: format!("Bind {} rejected", request.skill_name),
+                error: Some(preview.message.clone()),
+                payload: serde_json::json!({"validation": "mismatch"}),
+            },
+            &managed_root,
+        )?;
+        return Err(preview.message);
+    }
+
+    let paths = ensure_managed_layout(managed_root.clone())?;
+    let source_path = paths
+        .remote_skills_root
+        .join(&preview.skill_name)
+        .join("source.json");
+    if let Err(error) = write_github_source_metadata(&source_path, &preview) {
+        let _ = finish_operation(
+            OperationFinish {
+                id: operation_id,
+                status: OperationStatus::Failed,
+                summary: format!("Bind {} failed", request.skill_name),
+                error: Some(error.clone()),
+                payload: serde_json::json!({}),
+            },
+            &managed_root,
+        );
+        return Err(error);
+    }
+
+    finish_operation(
+        OperationFinish {
+            id: operation_id.clone(),
+            status: OperationStatus::Succeeded,
+            summary: format!("Bound {} to GitHub source", preview.skill_name),
+            error: None,
+            payload: serde_json::json!({
+                "validation": source_binding_validation_label(preview.validation),
+                "currentVersion": preview.current_version,
+                "latestSha": preview.latest_sha,
+                "tracking": preview.tracking
+            }),
+        },
+        &managed_root,
+    )?;
+
+    Ok(BindRemoteSourceResult {
+        skill_name: preview.skill_name,
+        validation: preview.validation,
+        current_version: preview.current_version,
+        installed_sha: preview.installed_sha,
+        latest_sha: preview.latest_sha,
+        source_path,
+        operation_id,
+    })
+}
+
 pub fn scan_import_candidates(
     roots: &[PathBuf],
     managed_root: impl AsRef<Path>,
@@ -1551,6 +1767,95 @@ fn check_one_remote_skill_update(skill_name: &str, remote_root: &Path) -> Remote
             message: Some(format!("Git update check failed: {error}")),
         },
     }
+}
+
+fn current_remote_version(paths: &ManagedPaths, skill_name: &str) -> Result<String> {
+    let current = paths.remote_skills_root.join(skill_name).join("current");
+    let target = fs::read_link(&current).map_err(|error| error.to_string())?;
+    target
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_string)
+        .ok_or_else(|| format!("Current version target is invalid: {}", current.display()))
+}
+
+fn temporary_work_dir(label: &str) -> PathBuf {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    std::env::temp_dir().join(format!("skillbox-{label}-{nanos}"))
+}
+
+fn resolve_ref_kind(repo_url: &str, reference: &str) -> Result<String> {
+    if skillbox_github::classify_ref_text(reference) == skillbox_github::GitHubRefKind::Commit {
+        return Ok("commit".to_string());
+    }
+    if skillbox_git::ls_remote(repo_url, &format!("refs/heads/{reference}"))?.is_some() {
+        return Ok("branch".to_string());
+    }
+    if skillbox_git::ls_remote(repo_url, &format!("refs/tags/{reference}"))?.is_some() {
+        return Ok("tag".to_string());
+    }
+    Ok("branch".to_string())
+}
+
+fn source_binding_message(
+    requested_name: &str,
+    remote_name: &str,
+    validation: SourceBindingValidation,
+) -> String {
+    match validation {
+        SourceBindingValidation::ExactMatch => {
+            "Remote source matches the current skill content.".to_string()
+        }
+        SourceBindingValidation::SameSkillChanged => {
+            "Skill names match but content differs. Binding will not replace current.".to_string()
+        }
+        SourceBindingValidation::Mismatch => {
+            format!("Remote skill name {remote_name} does not match {requested_name}.")
+        }
+    }
+}
+
+fn source_binding_validation_label(validation: SourceBindingValidation) -> &'static str {
+    match validation {
+        SourceBindingValidation::ExactMatch => "exact_match",
+        SourceBindingValidation::SameSkillChanged => "same_skill_changed",
+        SourceBindingValidation::Mismatch => "mismatch",
+    }
+}
+
+fn write_github_source_metadata(path: &Path, preview: &RemoteSourceBindingPreview) -> Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "Source metadata path has no parent.".to_string())?;
+    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let json = serde_json::json!({
+        "type": "github",
+        "owner": preview.owner,
+        "repo": preview.repo,
+        "path": preview.path,
+        "ref": preview.reference,
+        "refKind": preview.ref_kind,
+        "tracking": preview.tracking,
+        "repoUrl": preview.repo_url,
+        "url": preview.source_url,
+        "currentVersion": preview.current_version,
+        "installedSha": preview.installed_sha,
+        "latestSha": preview.latest_sha,
+        "sourceLinkedAt": operation_timestamp()
+    });
+    let content = serde_json::to_string_pretty(&json).map_err(|error| error.to_string())?;
+    fs::write(path, content).map_err(|error| error.to_string())
+}
+
+fn read_remote_source(remote_root: &Path) -> Result<RemoteSkillSource> {
+    let source_path = remote_root.join("source.json");
+    let content = fs::read_to_string(&source_path).map_err(|error| error.to_string())?;
+    serde_json::from_str(&content).map_err(|error| error.to_string())
 }
 
 fn user_skills_git_status_for_repo(repo_path: PathBuf) -> Result<UserSkillsGitStatus> {
@@ -3713,6 +4018,156 @@ description: \"Demo skill\"
     }
 
     #[test]
+    fn source_binding_preview_detects_exact_match() {
+        let root = temp_dir("source-binding-exact");
+        let managed_root = root.join("SkillBox");
+        let source = root.join("local").join("demo");
+        make_skill(&source, "demo", "Demo skill");
+        import_skill(&source, SkillKind::Remote, &managed_root).unwrap();
+        let remote =
+            bare_remote_with_skill_content("source-binding-exact-origin", "demo", "Demo skill", "");
+        let _rewrite = github_repo_rewrite("acme", "source-binding-exact", &remote);
+
+        let preview = preview_remote_source_binding(
+            RemoteSourceBindingRequest {
+                skill_name: "demo".to_string(),
+                source_url: github_source_url("acme", "source-binding-exact", "demo"),
+                actor: "cli".to_string(),
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        assert_eq!(preview.validation, SourceBindingValidation::ExactMatch);
+        assert_eq!(preview.skill_name, "demo");
+        assert_eq!(preview.ref_kind.as_deref(), Some("branch"));
+        assert!(preview.tracking);
+    }
+
+    #[test]
+    fn source_binding_changed_source_does_not_switch_current() {
+        let root = temp_dir("source-binding-changed");
+        let managed_root = root.join("SkillBox");
+        let paths = ensure_managed_layout(&managed_root).unwrap();
+        let source = root.join("local").join("find-skills");
+        make_skill(&source, "find-skills", "Find skills");
+        let imported = import_skill(&source, SkillKind::Remote, &managed_root).unwrap();
+        let before_current =
+            fs::read_link(paths.remote_skills_root.join("find-skills").join("current")).unwrap();
+        let remote = bare_remote_with_skill_content(
+            "source-binding-changed-origin",
+            "find-skills",
+            "Find skills",
+            "Updated body\n",
+        );
+        let _rewrite = github_repo_rewrite("acme", "source-binding-changed", &remote);
+        let source_url = github_source_url("acme", "source-binding-changed", "find-skills");
+        let preview = preview_remote_source_binding(
+            RemoteSourceBindingRequest {
+                skill_name: "find-skills".to_string(),
+                source_url: source_url.clone(),
+                actor: "desktop".to_string(),
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        assert_eq!(
+            preview.validation,
+            SourceBindingValidation::SameSkillChanged
+        );
+        let result = bind_remote_source(
+            BindRemoteSourceRequest {
+                skill_name: "find-skills".to_string(),
+                source_url,
+                actor: "desktop".to_string(),
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        let after_current =
+            fs::read_link(paths.remote_skills_root.join("find-skills").join("current")).unwrap();
+        assert_eq!(after_current, before_current);
+        assert_eq!(result.validation, SourceBindingValidation::SameSkillChanged);
+        assert!(result.source_path.exists());
+        let source_json: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&result.source_path).unwrap()).unwrap();
+        assert_eq!(source_json["type"], "github");
+        assert_eq!(source_json["refKind"], "branch");
+        assert_eq!(source_json["tracking"], true);
+        assert_eq!(
+            source_json["currentVersion"],
+            before_current
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap()
+        );
+        let latest_sha = result.latest_sha.clone().unwrap();
+        assert!(!paths
+            .remote_skills_root
+            .join("find-skills")
+            .join("versions")
+            .join(latest_sha)
+            .exists());
+        assert!(imported.managed_path.exists());
+        let operations = list_operations(OperationFilter::default(), &managed_root).unwrap();
+        assert!(operations
+            .operations
+            .iter()
+            .any(|operation| operation.operation_type == "bind_remote_source"
+                && operation.status == OperationStatus::Succeeded));
+    }
+
+    #[test]
+    fn source_binding_preview_rejects_name_mismatch() {
+        let root = temp_dir("source-binding-mismatch");
+        let managed_root = root.join("SkillBox");
+        let source = root.join("local").join("alpha");
+        make_skill(&source, "alpha", "Alpha skill");
+        import_skill(&source, SkillKind::Remote, &managed_root).unwrap();
+        let remote = bare_remote_with_skill_content(
+            "source-binding-mismatch-origin",
+            "beta",
+            "Beta skill",
+            "",
+        );
+        let _rewrite = github_repo_rewrite("acme", "source-binding-mismatch", &remote);
+
+        let preview = preview_remote_source_binding(
+            RemoteSourceBindingRequest {
+                skill_name: "alpha".to_string(),
+                source_url: github_source_url("acme", "source-binding-mismatch", "beta"),
+                actor: "cli".to_string(),
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        assert_eq!(preview.validation, SourceBindingValidation::Mismatch);
+        assert!(preview
+            .message
+            .contains("Remote skill name beta does not match alpha"));
+
+        let error = bind_remote_source(
+            BindRemoteSourceRequest {
+                skill_name: "alpha".to_string(),
+                source_url: github_source_url("acme", "source-binding-mismatch", "beta"),
+                actor: "cli".to_string(),
+            },
+            &managed_root,
+        )
+        .unwrap_err();
+        assert!(error.contains("Remote skill name beta does not match alpha"));
+        let operations = list_operations(OperationFilter::default(), &managed_root).unwrap();
+        assert!(operations
+            .operations
+            .iter()
+            .any(|operation| operation.operation_type == "bind_remote_source"
+                && operation.status == OperationStatus::Failed));
+    }
+
+    #[test]
     fn scan_import_candidates_infers_type_from_path_and_metadata() {
         let root = temp_dir("candidate-type");
         let agents_root = root.join(".agents").join("skills");
@@ -4032,6 +4487,102 @@ description: \"{description}\"
         );
         run_git(&work, &["push", "origin", "main"]);
         remote
+    }
+
+    fn bare_remote_with_skill_content(
+        label: &str,
+        skill_name: &str,
+        description: &str,
+        body: &str,
+    ) -> PathBuf {
+        let remote = bare_remote(label);
+        let work = temp_dir(&format!("{label}-work"));
+        run_git(&work, &["init", "-b", "main"]);
+        let skill_dir = work.join("skills").join(skill_name);
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            format!(
+                "---
+name: {skill_name}
+description: \"{description}\"
+---
+
+# {skill_name}
+{body}
+"
+            ),
+        )
+        .unwrap();
+        run_git(&work, &["add", "."]);
+        run_git(
+            &work,
+            &[
+                "-c",
+                "user.name=SkillBox",
+                "-c",
+                "user.email=skillbox@example.invalid",
+                "commit",
+                "-m",
+                "Add skill",
+            ],
+        );
+        run_git(
+            &work,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
+        run_git(&work, &["push", "-u", "origin", "main"]);
+        remote
+    }
+
+    fn github_source_url(owner: &str, repo: &str, skill_name: &str) -> String {
+        format!("https://github.com/{owner}/{repo}/tree/main/skills/{skill_name}")
+    }
+
+    static GIT_CONFIG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct GitConfigRewriteGuard {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        previous: Vec<(&'static str, Option<std::ffi::OsString>)>,
+    }
+
+    impl Drop for GitConfigRewriteGuard {
+        fn drop(&mut self) {
+            for (key, value) in self.previous.drain(..) {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
+
+    fn github_repo_rewrite(
+        owner: &str,
+        repo: &str,
+        remote: &std::path::Path,
+    ) -> GitConfigRewriteGuard {
+        let lock = GIT_CONFIG_LOCK.lock().unwrap();
+        let keys = ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"];
+        let previous = keys
+            .into_iter()
+            .map(|key| (key, std::env::var_os(key)))
+            .collect::<Vec<_>>();
+
+        std::env::set_var("GIT_CONFIG_COUNT", "1");
+        std::env::set_var(
+            "GIT_CONFIG_KEY_0",
+            format!("url.file://{}.insteadOf", remote.display()),
+        );
+        std::env::set_var(
+            "GIT_CONFIG_VALUE_0",
+            format!("https://github.com/{owner}/{repo}.git"),
+        );
+
+        GitConfigRewriteGuard {
+            _lock: lock,
+            previous,
+        }
     }
 
     fn remote_head(remote: &std::path::Path) -> String {
