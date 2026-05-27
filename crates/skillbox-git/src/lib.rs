@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -14,6 +15,14 @@ pub struct GitStatus {
 pub struct GitChangedFile {
     pub path: String,
     pub status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitDiffFile {
+    pub path: String,
+    pub old_path: Option<String>,
+    pub status: String,
+    pub diff: String,
 }
 
 pub fn status(repo: impl AsRef<Path>) -> Result<GitStatus, String> {
@@ -164,6 +173,224 @@ pub fn ls_remote(repo_url: &str, reference: &str) -> Result<Option<String>, Stri
         .map(str::to_string))
 }
 
+pub fn fetch_ref_path(
+    repo_url: &str,
+    reference: &str,
+    path: &str,
+    checkout_root: impl AsRef<Path>,
+) -> Result<String, String> {
+    let checkout_root = checkout_root.as_ref();
+    fs::create_dir_all(checkout_root).map_err(|error| error.to_string())?;
+    git(checkout_root, &["init", "-b", "main"])?;
+    git(checkout_root, &["remote", "add", "origin", repo_url])?;
+    git(
+        checkout_root,
+        &["fetch", "--depth", "1", "origin", reference],
+    )?;
+    let sha = git(checkout_root, &["rev-parse", "FETCH_HEAD"])?
+        .trim()
+        .to_string();
+    git_owned(
+        checkout_root,
+        &[
+            "checkout".to_string(),
+            "FETCH_HEAD".to_string(),
+            "--".to_string(),
+            path.to_string(),
+        ],
+    )?;
+    Ok(sha)
+}
+
+pub fn diff_no_index_tree(
+    old_root: impl AsRef<Path>,
+    new_root: impl AsRef<Path>,
+) -> Result<Vec<GitDiffFile>, String> {
+    let old_root = old_root.as_ref();
+    let new_root = new_root.as_ref();
+    let old_root_text = old_root.to_str().ok_or("Old path is not valid UTF-8.")?;
+    let new_root_text = new_root.to_str().ok_or("New path is not valid UTF-8.")?;
+
+    let name_status = git_diff_no_index(&[
+        "--no-index",
+        "--name-status",
+        "-M",
+        old_root_text,
+        new_root_text,
+    ])?;
+    let unified = git_diff_no_index(&["--no-index", "-M", "--", old_root_text, new_root_text])?;
+    Ok(parse_no_index_files(
+        &name_status,
+        &unified,
+        old_root,
+        new_root,
+    ))
+}
+
+fn git_diff_no_index(args: &[&str]) -> Result<String, String> {
+    let output = Command::new("git")
+        .arg("diff")
+        .args(args)
+        .output()
+        .map_err(|error| error.to_string())?;
+
+    if output.status.success() || output.status.code() == Some(1) {
+        return Ok(String::from_utf8_lossy(&output.stdout).to_string());
+    }
+
+    Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+}
+
+fn parse_no_index_files(
+    name_status: &str,
+    unified: &str,
+    old_root: &Path,
+    new_root: &Path,
+) -> Vec<GitDiffFile> {
+    let mut sections_by_path = HashMap::new();
+    for section in split_diff_sections(unified) {
+        if let Some((old_path, new_path)) = diff_section_paths(&section, old_root, new_root) {
+            let normalized = normalize_diff_section(&section, &old_path, &new_path);
+            let key = if new_path.is_empty() {
+                old_path.clone()
+            } else {
+                new_path.clone()
+            };
+            sections_by_path.insert(key.clone(), normalized.clone());
+            if !old_path.is_empty() && old_path != key {
+                sections_by_path.insert(old_path, normalized);
+            }
+        }
+    }
+
+    name_status
+        .lines()
+        .filter_map(|line| parse_name_status_line(line, old_root, new_root, &sections_by_path))
+        .collect()
+}
+
+fn parse_name_status_line(
+    line: &str,
+    old_root: &Path,
+    new_root: &Path,
+    sections_by_path: &HashMap<String, String>,
+) -> Option<GitDiffFile> {
+    let parts: Vec<&str> = line.split('\t').collect();
+    if parts.len() < 2 {
+        return None;
+    }
+
+    let status_code = parts[0];
+    let status = status_code.chars().next()?.to_string();
+    let old_path = if matches!(status.as_str(), "R" | "C") && parts.len() >= 3 {
+        Some(normalize_no_index_path(parts[1], old_root, new_root))
+    } else {
+        None
+    };
+    let path_source = if matches!(status.as_str(), "R" | "C") && parts.len() >= 3 {
+        parts[2]
+    } else {
+        parts[1]
+    };
+    let path = normalize_no_index_path(path_source, old_root, new_root);
+    let diff = sections_by_path.get(&path).cloned().unwrap_or_default();
+
+    Some(GitDiffFile {
+        path,
+        old_path,
+        status,
+        diff,
+    })
+}
+
+fn split_diff_sections(unified: &str) -> Vec<String> {
+    let mut sections = Vec::new();
+    let mut current = Vec::new();
+
+    for line in unified.lines() {
+        if line.starts_with("diff --git ") && !current.is_empty() {
+            sections.push(current.join("\n") + "\n");
+            current.clear();
+        }
+        current.push(line.to_string());
+    }
+
+    if !current.is_empty() {
+        sections.push(current.join("\n") + "\n");
+    }
+
+    sections
+}
+
+fn diff_section_paths(section: &str, old_root: &Path, new_root: &Path) -> Option<(String, String)> {
+    let header = section.lines().next()?;
+    let rest = header.strip_prefix("diff --git ")?;
+    let (old_path, new_path) = rest.split_once(" b/")?;
+    Some((
+        normalize_no_index_path(
+            old_path.strip_prefix("a/").unwrap_or(old_path),
+            old_root,
+            new_root,
+        ),
+        normalize_no_index_path(new_path, old_root, new_root),
+    ))
+}
+
+fn normalize_diff_section(section: &str, old_path: &str, new_path: &str) -> String {
+    let mut normalized = String::new();
+    for line in section.lines() {
+        if line.starts_with("diff --git ") {
+            normalized.push_str(&format!("diff --git a/{old_path} b/{new_path}\n"));
+        } else if line.starts_with("--- /dev/null") || line.starts_with("+++ /dev/null") {
+            normalized.push_str(line);
+            normalized.push('\n');
+        } else if line.starts_with("--- ") {
+            normalized.push_str(&format!("--- a/{old_path}\n"));
+        } else if line.starts_with("+++ ") {
+            normalized.push_str(&format!("+++ b/{new_path}\n"));
+        } else {
+            normalized.push_str(line);
+            normalized.push('\n');
+        }
+    }
+    normalized
+}
+
+fn normalize_no_index_path(path: &str, old_root: &Path, new_root: &Path) -> String {
+    let value = path
+        .trim()
+        .trim_matches('"')
+        .strip_prefix("a/")
+        .or_else(|| path.trim().trim_matches('"').strip_prefix("b/"))
+        .unwrap_or_else(|| path.trim().trim_matches('"'));
+    if value == "/dev/null" {
+        return String::new();
+    }
+
+    for root in [old_root, new_root] {
+        let root_text = root.to_string_lossy();
+        if let Some(stripped) = strip_root_prefix(value, &root_text) {
+            return stripped;
+        }
+
+        let without_leading_slash = root_text.trim_start_matches('/');
+        if let Some(stripped) = strip_root_prefix(value, without_leading_slash) {
+            return stripped;
+        }
+    }
+
+    value.trim_start_matches('/').to_string()
+}
+
+fn strip_root_prefix(value: &str, root: &str) -> Option<String> {
+    if value == root {
+        return Some(String::new());
+    }
+    value
+        .strip_prefix(root)
+        .map(|path| path.trim_start_matches('/').to_string())
+}
+
 fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
     let output = Command::new("git")
         .arg("-C")
@@ -253,6 +480,50 @@ mod tests {
         );
     }
 
+    #[test]
+    fn snapshot_fetch_ref_path_checks_out_only_requested_path() {
+        let remote = bare_remote_with_skill("git-snapshot-origin");
+        let temp = temp_dir("git-snapshot-work");
+        let checkout = temp.join("checkout");
+
+        let sha =
+            fetch_ref_path(remote.to_str().unwrap(), "main", "skills/demo", &checkout).unwrap();
+
+        assert!(!sha.is_empty());
+        assert!(checkout.join("skills/demo/SKILL.md").exists());
+        assert!(!checkout.join("README.md").exists());
+    }
+
+    #[test]
+    fn snapshot_diff_no_index_tree_reports_changed_files() {
+        let temp = temp_dir("git-diff-no-index");
+        let old_root = temp.join("old");
+        let new_root = temp.join("new");
+        fs::create_dir_all(&old_root).unwrap();
+        fs::create_dir_all(&new_root).unwrap();
+        fs::write(old_root.join("SKILL.md"), "name: demo\n").unwrap();
+        fs::write(new_root.join("SKILL.md"), "name: demo\nversion: 2\n").unwrap();
+        fs::write(new_root.join("extra.txt"), "extra\n").unwrap();
+
+        let files = diff_no_index_tree(&old_root, &new_root).unwrap();
+
+        assert!(files
+            .iter()
+            .any(|file| file.path == "SKILL.md" && file.status == "M"));
+        assert!(files
+            .iter()
+            .any(|file| file.path == "extra.txt" && file.status == "A"));
+        let skill_diff = files
+            .iter()
+            .find(|file| file.path == "SKILL.md")
+            .map(|file| file.diff.as_str())
+            .unwrap_or("");
+        assert!(skill_diff.starts_with("diff --git a/SKILL.md b/SKILL.md"));
+        assert!(skill_diff.contains("--- a/SKILL.md"));
+        assert!(skill_diff.contains("+++ b/SKILL.md"));
+        assert!(skill_diff.contains("+version: 2"));
+    }
+
     fn temp_dir(prefix: &str) -> PathBuf {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -265,5 +536,36 @@ mod tests {
 
     fn write_file(path: &Path, content: &str) {
         fs::write(path, content).unwrap();
+    }
+
+    fn bare_remote_with_skill(label: &str) -> PathBuf {
+        let remote = temp_dir(label).join("remote.git");
+        Command::new("git")
+            .args(["init", "--bare"])
+            .arg(&remote)
+            .output()
+            .unwrap();
+        let work = temp_dir(&format!("{label}-work"));
+        Command::new("git")
+            .args(["init", "-b", "main"])
+            .arg(&work)
+            .output()
+            .unwrap();
+        fs::create_dir_all(work.join("skills/demo")).unwrap();
+        fs::write(work.join("README.md"), "root\n").unwrap();
+        fs::write(
+            work.join("skills/demo/SKILL.md"),
+            "---\nname: demo\ndescription: Demo\n---\n",
+        )
+        .unwrap();
+        git(&work, &["add", "."]).unwrap();
+        git_with_config(&work, &["commit", "-m", "Initial skill"]).unwrap();
+        git(
+            &work,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        )
+        .unwrap();
+        git(&work, &["push", "-u", "origin", "main"]).unwrap();
+        remote
     }
 }
