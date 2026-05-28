@@ -4,8 +4,10 @@
 
 默认根目录是 `~/.skillbox`，也可以通过 `SKILLBOX_HOME` 指向其它目录。
 managed store 是跨 agent 的真相源，不绑定 Codex、Claude、Cursor、Copilot 或任何单一 runtime。
-历史版本使用过 `~/SkillBox`；已有数据应由用户或迁移命令显式搬到 `~/.skillbox`，
-如果 runtime 中仍存在指向旧路径的 symlink，可以保留 `~/SkillBox -> ~/.skillbox` 兼容链接。
+历史版本使用过 `~/SkillBox`。当 `SKILLBOX_HOME` 未设置、`~/.skillbox` 只是空的启动壳、
+且 `~/SkillBox` 已有 managed data 时，Rust core 会先备份空壳目录，再创建
+`~/.skillbox -> ~/SkillBox` 兼容链接。这样 UI 和 CLI 继续使用隐藏路径，
+同时保留旧 runtime symlink 指向 `~/SkillBox` 时的可用性。
 
 ```text
 ~/.skillbox/

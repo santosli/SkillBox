@@ -30,6 +30,13 @@ pub struct GitDiffFile {
     pub diff: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitLogEntry {
+    pub sha: String,
+    pub timestamp: String,
+    pub subject: String,
+}
+
 pub fn status(repo: impl AsRef<Path>) -> Result<GitStatus, String> {
     let repo = repo.as_ref();
     if !repo.join(".git").exists() {
@@ -158,6 +165,45 @@ pub fn diff_head_path(repo: impl AsRef<Path>, path: &str) -> Result<String, Stri
             path.to_string(),
         ],
     )
+}
+
+pub fn log_path(
+    repo: impl AsRef<Path>,
+    path: &str,
+    limit: usize,
+) -> Result<Vec<GitLogEntry>, String> {
+    let repo = repo.as_ref();
+    if !has_head(repo) {
+        return Ok(Vec::new());
+    }
+
+    let limit = limit.clamp(1, 100).to_string();
+    let output = git_owned(
+        repo,
+        &[
+            "log".to_string(),
+            format!("-n{limit}"),
+            "--format=%H%x1f%ct%x1f%s%x1e".to_string(),
+            "--".to_string(),
+            path.to_string(),
+        ],
+    )?;
+
+    Ok(output.split('\x1e').filter_map(parse_log_entry).collect())
+}
+
+fn parse_log_entry(entry: &str) -> Option<GitLogEntry> {
+    let trimmed = entry.trim_matches(|character| character == '\n' || character == '\r');
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let mut parts = trimmed.splitn(3, '\x1f');
+    Some(GitLogEntry {
+        sha: parts.next()?.to_string(),
+        timestamp: parts.next()?.to_string(),
+        subject: parts.next().unwrap_or("").to_string(),
+    })
 }
 
 pub fn ls_remote(repo_url: &str, reference: &str) -> Result<Option<String>, String> {

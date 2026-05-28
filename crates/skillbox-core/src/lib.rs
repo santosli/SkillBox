@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub type Result<T> = std::result::Result<T, String>;
 
@@ -296,6 +296,24 @@ pub struct UserSkillsGitChanges {
     pub branch: String,
     pub remote_url: Option<String>,
     pub files: Vec<UserSkillsGitChangeFile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UserSkillVersion {
+    pub version: String,
+    pub is_current: bool,
+    pub kind: String,
+    pub short_label: String,
+    pub updated_at: String,
+    pub message: Option<String>,
+    pub path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UserSkillVersionList {
+    pub skill_name: String,
+    pub current_version: String,
+    pub versions: Vec<UserSkillVersion>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -622,7 +640,15 @@ pub struct ImportBatchResult {
 pub fn default_managed_root() -> PathBuf {
     std::env::var_os("SKILLBOX_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| home_dir().join(".skillbox"))
+        .unwrap_or_else(default_hidden_managed_root)
+}
+
+fn default_hidden_managed_root() -> PathBuf {
+    home_dir().join(".skillbox")
+}
+
+fn legacy_managed_root() -> PathBuf {
+    home_dir().join("SkillBox")
 }
 
 pub fn default_runtime_roots() -> Vec<PathBuf> {
@@ -796,11 +822,139 @@ pub fn managed_paths(root: impl Into<PathBuf>) -> ManagedPaths {
 }
 
 pub fn ensure_managed_layout(root: impl Into<PathBuf>) -> Result<ManagedPaths> {
+    let root = expand_home(root.into());
+    maybe_link_legacy_default_managed_root(&root)?;
     let paths = managed_paths(root);
     fs::create_dir_all(&paths.user_skills_root).map_err(|error| error.to_string())?;
     fs::create_dir_all(&paths.remote_skills_root).map_err(|error| error.to_string())?;
     init_database(&paths.database_path)?;
     Ok(paths)
+}
+
+fn maybe_link_legacy_default_managed_root(root: &Path) -> Result<()> {
+    if std::env::var_os("SKILLBOX_HOME").is_some() || root != default_hidden_managed_root() {
+        return Ok(());
+    }
+    link_legacy_managed_root_if_needed(root, &legacy_managed_root()).map(|_| ())
+}
+
+fn link_legacy_managed_root_if_needed(hidden_root: &Path, legacy_root: &Path) -> Result<bool> {
+    if hidden_root == legacy_root || !managed_root_has_content(legacy_root)? {
+        return Ok(false);
+    }
+
+    match fs::symlink_metadata(hidden_root) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() {
+                return Ok(false);
+            }
+            if !is_empty_managed_stub(hidden_root)? {
+                return Ok(false);
+            }
+            let backup_path = next_empty_root_backup_path(hidden_root);
+            fs::rename(hidden_root, &backup_path).map_err(|error| {
+                format!(
+                    "Failed to back up empty managed root {} to {}: {error}",
+                    hidden_root.display(),
+                    backup_path.display()
+                )
+            })?;
+            if let Err(error) = symlink_dir(legacy_root, hidden_root) {
+                let _ = fs::rename(&backup_path, hidden_root);
+                return Err(format!(
+                    "Failed to link {} to legacy SkillBox root {}: {error}",
+                    hidden_root.display(),
+                    legacy_root.display()
+                ));
+            }
+            Ok(true)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if let Some(parent) = hidden_root.parent() {
+                fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            }
+            symlink_dir(legacy_root, hidden_root).map_err(|error| {
+                format!(
+                    "Failed to link {} to legacy SkillBox root {}: {error}",
+                    hidden_root.display(),
+                    legacy_root.display()
+                )
+            })?;
+            Ok(true)
+        }
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn managed_root_has_content(root: &Path) -> Result<bool> {
+    if !root.is_dir() {
+        return Ok(false);
+    }
+    Ok(directory_has_entries(&root.join("user-skills"))?
+        || directory_has_entries(&root.join("remote-skills"))?
+        || directory_has_entries(&root.join("backups"))?)
+}
+
+fn is_empty_managed_stub(root: &Path) -> Result<bool> {
+    if !root.is_dir() {
+        return Ok(false);
+    }
+    for entry in fs::read_dir(root).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        let file_type = entry.file_type().map_err(|error| error.to_string())?;
+        match name.as_str() {
+            "user-skills" | "remote-skills" => {
+                if !file_type.is_dir() || directory_has_entries(&path)? {
+                    return Ok(false);
+                }
+            }
+            "skillbox.sqlite" => {
+                if !file_type.is_file() {
+                    return Ok(false);
+                }
+            }
+            _ => return Ok(false),
+        }
+    }
+    Ok(true)
+}
+
+fn directory_has_entries(path: &Path) -> Result<bool> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    if !path.is_dir() {
+        return Ok(true);
+    }
+    Ok(fs::read_dir(path)
+        .map_err(|error| error.to_string())?
+        .next()
+        .is_some())
+}
+
+fn next_empty_root_backup_path(root: &Path) -> PathBuf {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_millis();
+    let name = root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("skillbox");
+    for attempt in 0..100 {
+        let suffix = if attempt == 0 {
+            format!("{name}.empty-backup-{timestamp}")
+        } else {
+            format!("{name}.empty-backup-{timestamp}-{attempt}")
+        };
+        let candidate = root.with_file_name(suffix);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    root.with_file_name(format!("{name}.empty-backup-{timestamp}-fallback"))
 }
 
 pub fn parse_skill_frontmatter(input: &str) -> SkillMetadata {
@@ -1494,6 +1648,66 @@ pub fn user_skills_git_changes(managed_root: impl AsRef<Path>) -> Result<UserSki
         branch: status.branch,
         remote_url: status.remote_url,
         files,
+    })
+}
+
+pub fn list_user_skill_versions(
+    skill_name: &str,
+    managed_root: impl AsRef<Path>,
+) -> Result<UserSkillVersionList> {
+    validate_skill_name(skill_name)?;
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let repo = paths.user_skills_root;
+    let skill_path = repo.join(skill_name);
+    let skill = read_skill(&skill_path)?;
+    if skill.name != skill_name {
+        return Err(format!(
+            "User skill name does not match requested skill: {}",
+            skill.name
+        ));
+    }
+
+    let log_entries = skillbox_git::log_path(&repo, skill_name, 20)?;
+    let has_uncommitted_skill_changes = user_skill_has_uncommitted_changes(&repo, skill_name)?;
+    let mut versions = Vec::new();
+    let current_version = if !has_uncommitted_skill_changes {
+        log_entries
+            .first()
+            .map(|entry| entry.sha.clone())
+            .unwrap_or_else(|| skill.content_hash.clone())
+    } else {
+        skill.content_hash.clone()
+    };
+
+    if has_uncommitted_skill_changes || log_entries.is_empty() {
+        versions.push(UserSkillVersion {
+            version: skill.content_hash.clone(),
+            is_current: true,
+            kind: "working".to_string(),
+            short_label: short_version_label(&skill.content_hash),
+            updated_at: file_modified_timestamp(&skill.skill_md_path),
+            message: None,
+            path: skill.path.clone(),
+        });
+    }
+
+    for entry in log_entries {
+        let is_current = !has_uncommitted_skill_changes && entry.sha == current_version;
+        versions.push(UserSkillVersion {
+            short_label: short_version_label(&entry.sha),
+            kind: "git".to_string(),
+            is_current,
+            updated_at: entry.timestamp,
+            message: Some(entry.subject),
+            path: skill.path.clone(),
+            version: entry.sha,
+        });
+    }
+
+    Ok(UserSkillVersionList {
+        skill_name: skill_name.to_string(),
+        current_version,
+        versions,
     })
 }
 
@@ -3256,6 +3470,24 @@ fn user_skills_git_state(
     }
 }
 
+fn user_skill_has_uncommitted_changes(repo: &Path, skill_name: &str) -> Result<bool> {
+    if !skillbox_git::status(repo)?.initialized {
+        return Ok(false);
+    }
+
+    Ok(skillbox_git::changed_files(repo)?
+        .into_iter()
+        .any(|file| git_path_belongs_to_skill(&file.path, skill_name)))
+}
+
+fn git_path_belongs_to_skill(path: &str, skill_name: &str) -> bool {
+    path == skill_name
+        || path
+            .strip_prefix(skill_name)
+            .and_then(|rest| rest.strip_prefix('/'))
+            .is_some()
+}
+
 fn normalized_commit_message(message: Option<&str>) -> String {
     message
         .map(str::trim)
@@ -4568,6 +4800,35 @@ description: \"Demo skill\"
     }
 
     #[test]
+    fn legacy_managed_root_is_linked_when_hidden_root_is_empty_stub() {
+        let root = temp_dir("legacy-managed-root-link");
+        let hidden_root = root.join(".skillbox");
+        let legacy_root = root.join("SkillBox");
+        fs::create_dir_all(hidden_root.join("user-skills")).unwrap();
+        fs::create_dir_all(hidden_root.join("remote-skills")).unwrap();
+        fs::write(hidden_root.join("skillbox.sqlite"), "").unwrap();
+        make_skill(
+            &legacy_root.join("user-skills").join("demo"),
+            "demo",
+            "Legacy demo",
+        );
+
+        let migrated = link_legacy_managed_root_if_needed(&hidden_root, &legacy_root).unwrap();
+        let paths = ensure_managed_layout(&hidden_root).unwrap();
+        let state = managed_state(&hidden_root).unwrap();
+
+        assert!(migrated);
+        assert_eq!(paths.root, hidden_root);
+        assert!(fs::symlink_metadata(&hidden_root)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(fs::read_link(&hidden_root).unwrap(), legacy_root);
+        assert_eq!(state.skills.len(), 1);
+        assert_eq!(state.skills[0].name, "demo");
+    }
+
+    #[test]
     fn list_workspaces_initializes_empty_registry() {
         let managed_root = temp_dir("workspace-empty").join("SkillBox");
 
@@ -5495,6 +5756,78 @@ description: \"Demo skill\"
         assert_eq!(result.state, UserSkillsGitState::Dirty);
         assert!(result.raw_status.contains("beta/SKILL.md"));
         assert!(!result.raw_status.contains("alpha/SKILL.md"));
+    }
+
+    #[test]
+    fn user_skill_versions_include_current_worktree_and_git_history() {
+        let root = temp_dir("user-skill-versions");
+        let managed_root = root.join("SkillBox");
+        let paths = ensure_managed_layout(&managed_root).unwrap();
+        make_skill_with_body(
+            &paths.user_skills_root.join("alpha"),
+            "alpha",
+            "Alpha skill",
+            "version one\n",
+        );
+        make_skill_with_body(
+            &paths.user_skills_root.join("beta"),
+            "beta",
+            "Beta skill",
+            "beta version\n",
+        );
+        sync_user_skills_git(
+            UserSkillsSyncRequest {
+                remote_url: None,
+                commit_message: Some("Initial user skills".to_string()),
+                push: false,
+                selected_paths: None,
+            },
+            &managed_root,
+        )
+        .unwrap();
+        make_skill_with_body(
+            &paths.user_skills_root.join("alpha"),
+            "alpha",
+            "Alpha skill",
+            "version two\n",
+        );
+        sync_user_skills_git(
+            UserSkillsSyncRequest {
+                remote_url: None,
+                commit_message: Some("Update alpha skill".to_string()),
+                push: false,
+                selected_paths: Some(vec!["alpha/SKILL.md".to_string()]),
+            },
+            &managed_root,
+        )
+        .unwrap();
+        make_skill_with_body(
+            &paths.user_skills_root.join("alpha"),
+            "alpha",
+            "Alpha skill",
+            "work in progress\n",
+        );
+
+        let versions = list_user_skill_versions("alpha", &managed_root).unwrap();
+
+        assert_eq!(versions.skill_name, "alpha");
+        assert_eq!(versions.versions.len(), 3);
+        assert!(versions.versions[0].is_current);
+        assert_eq!(versions.versions[0].kind, "working");
+        assert_eq!(versions.current_version, versions.versions[0].version);
+        assert_eq!(versions.versions[1].kind, "git");
+        assert_eq!(
+            versions.versions[1].message.as_deref(),
+            Some("Update alpha skill")
+        );
+        assert_eq!(
+            versions.versions[2].message.as_deref(),
+            Some("Initial user skills")
+        );
+        assert!(!versions
+            .versions
+            .iter()
+            .any(|version| version.message.as_deref() == Some("Beta skill")));
     }
 
     #[test]

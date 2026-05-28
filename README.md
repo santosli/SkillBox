@@ -24,9 +24,11 @@ cargo test --offline
 ```
 
 The default managed root is `~/.skillbox`, or `SKILLBOX_HOME` when set.
-Existing data under the legacy `~/SkillBox` root should be migrated explicitly,
-for example by moving it to `~/.skillbox` and keeping `~/SkillBox` as a symlink
-only when older deployed runtime links still point there.
+When `SKILLBOX_HOME` is unset, SkillBox keeps existing legacy data visible: if
+`~/.skillbox` is only an empty bootstrap directory and `~/SkillBox` already has
+managed data, the empty bootstrap is backed up and `~/.skillbox` is created as a
+compatibility symlink to `~/SkillBox`. This avoids an empty first-launch state
+while preserving older deployed runtime links that still point at `~/SkillBox`.
 
 `npm install` runs `npm run hooks:install`, which points Git at the tracked
 `.githooks/` directory. The pre-commit hook checks staged implementation and
