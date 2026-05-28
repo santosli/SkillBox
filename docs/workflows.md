@@ -50,9 +50,9 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 根据路径和内容推断类型：当前 `.agents/skills` 倾向 user，`.codex/skills` 倾向 remote，`.system` 默认不选中，包含 GitHub 来源信息的未知目录倾向 remote。
 - agent adapter 引入后，候选项还应携带 `agent_id`、原生格式和 target scope。
 - 检查 managed target 是否冲突。
-- user skill 复制到 `~/SkillBox/user-skills/<name>`。
-- remote skill 复制到 `~/SkillBox/remote-skills/<name>/versions/manual-<contentHash12>`，并更新 `current` symlink。
-- 如果用户选择 deploy back to source，先把原 runtime 目录移动到 `~/SkillBox/backups/imports/<name>-<contentHash12>`，再在原位置创建指向 managed target 的 symlink。
+- user skill 复制到 `~/.skillbox/user-skills/<name>`。
+- remote skill 复制到 `~/.skillbox/remote-skills/<name>/versions/manual-<contentHash12>`，并更新 `current` symlink。
+- 如果用户选择 deploy back to source，先把原 runtime 目录移动到 `~/.skillbox/backups/imports/<name>-<contentHash12>`，再在原位置创建指向 managed target 的 symlink。
 - 写入 SQLite `skills`，必要时写入 `deployments`。
 
 失败与回滚：
@@ -66,7 +66,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 - `cargo test --offline`
 - `npm test`
-- 使用临时目录运行 Rust CLI：`cargo run -p skillbox-cli --offline -- import <source-dir> --type user --managed-root <temp-SkillBox>`
+- 使用临时目录运行 Rust CLI：`cargo run -p skillbox-cli --offline -- import <source-dir> --type user --managed-root <temp-skillbox-root>`
 - UI 路径变更时，手动验证 import review 中冲突、默认选中和备份提示。
 
 ## 3. GitHub Install
@@ -99,7 +99,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 完成验证：
 
-- 当前 Node：`node packages/skillbox-cli/bin/skillbox.js install <github-url> --managed-root <temp-SkillBox> --json`
+- 当前 Node：`node packages/skillbox-cli/bin/skillbox.js install <github-url> --managed-root <temp-skillbox-root> --json`
 - URL parse：`cargo run -p skillbox-cli --offline -- parse-github-url <github-url>`
 - Rust 迁移完成后必须新增 Rust tests 覆盖 URL parse、版本目录、`source.json` 和 target deploy。
 
@@ -136,8 +136,8 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 - `cargo test --offline`
 - `npm test`
-- `cargo run -p skillbox-cli --offline -- deploy <skill-name> --target <temp-runtime> --managed-root <temp-SkillBox>`
-- `cargo run -p skillbox-cli --offline -- undeploy <skill-name> --target <temp-runtime> --managed-root <temp-SkillBox>`
+- `cargo run -p skillbox-cli --offline -- deploy <skill-name> --target <temp-runtime> --managed-root <temp-skillbox-root>`
+- `cargo run -p skillbox-cli --offline -- undeploy <skill-name> --target <temp-runtime> --managed-root <temp-skillbox-root>`
 - 检查 target path 是 symlink，real path 指向 managed store。
 - 检查 undeploy 后 target symlink 消失，非 symlink target 不会被删除。
 
@@ -145,7 +145,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 触发条件：
 
-- Rust CLI 当前入口：`cargo run -p skillbox-cli --offline -- check-remote-updates [--managed-root <temp-SkillBox>]`。
+- Rust CLI 当前入口：`cargo run -p skillbox-cli --offline -- check-remote-updates [--managed-root <temp-skillbox-root>]`。
 - Tauri command：`check_remote_skill_updates`。
 - 桌面启动只调用 `cached_remote_skill_updates` 读取上一次检查结果，不主动查询远端。
 - Node CLI 兼容入口仍有 `skillbox check-updates [skill-name]`，但桌面 UI 不调用 Node。
@@ -177,7 +177,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 完成验证：
 
 - `cargo test -p skillbox-core --offline check_remote_skill_updates`
-- `cargo run -p skillbox-cli --offline -- check-remote-updates --managed-root <temp-SkillBox>`
+- `cargo run -p skillbox-cli --offline -- check-remote-updates --managed-root <temp-skillbox-root>`
 - `npm test`
 - 桌面 UI 视觉验证 Dashboard `Refresh` 按钮、Checked 时间、状态 badge、Available updates 计数、notice，以及 Settings 中的自动刷新间隔。
 
@@ -218,9 +218,9 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 完成验证：
 
 - `cargo test -p skillbox-core --offline source_binding`
-- `cargo run -p skillbox-cli --offline -- remote-source-candidates <skill-name> --managed-root <temp-SkillBox>`
-- `cargo run -p skillbox-cli --offline -- remote-source-preview <skill-name> <github-url> --managed-root <temp-SkillBox>`
-- `cargo run -p skillbox-cli --offline -- bind-remote-source <skill-name> <github-url> --managed-root <temp-SkillBox>`
+- `cargo run -p skillbox-cli --offline -- remote-source-candidates <skill-name> --managed-root <temp-skillbox-root>`
+- `cargo run -p skillbox-cli --offline -- remote-source-preview <skill-name> <github-url> --managed-root <temp-skillbox-root>`
+- `cargo run -p skillbox-cli --offline -- bind-remote-source <skill-name> <github-url> --managed-root <temp-skillbox-root>`
 - 桌面 UI 手动验证 source binding dialog：`exact_match` 可绑定，`same_skill_changed` 明确提示当前版本不会被替换，`mismatch` 禁用绑定。
 
 ## 7. Update Remote Skill
@@ -259,9 +259,9 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 完成验证：
 
 - `cargo test -p skillbox-core --offline apply_`
-- `cargo run -p skillbox-cli --offline -- remote-versions <skill-name> --managed-root <temp-SkillBox>`
-- `cargo run -p skillbox-cli --offline -- remote-preview-change <skill-name> --action update --managed-root <temp-SkillBox>`
-- `cargo run -p skillbox-cli --offline -- remote-apply-change <skill-name> --action update --to <sha> --managed-root <temp-SkillBox>`
+- `cargo run -p skillbox-cli --offline -- remote-versions <skill-name> --managed-root <temp-skillbox-root>`
+- `cargo run -p skillbox-cli --offline -- remote-preview-change <skill-name> --action update --managed-root <temp-skillbox-root>`
+- `cargo run -p skillbox-cli --offline -- remote-apply-change <skill-name> --action update --to <sha> --managed-root <temp-skillbox-root>`
 - 手动验证：安装一个固定旧 ref 后更新到新 ref，确认 `current` 指向新 SHA。
 - 桌面 UI 手动验证：update review 打开期间显示 loading，完成后展示所有变更文件，文本文件展示 unified diff，二进制或大文件展示 hash/size metadata，no-file-change 更新显示明确说明，确认后刷新版本列表和 operation history。
 - Tauri 验证：`preview_remote_version_change` 这类 Git/diff 预览 command 必须放到 blocking worker，避免点击 `Review update` 时阻塞窗口渲染。
@@ -295,11 +295,11 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 完成验证：
 
-- 当前 Node：`node packages/skillbox-cli/bin/skillbox.js rollback <skill-name> --to <sha> --managed-root <temp-SkillBox> --json`
+- 当前 Node：`node packages/skillbox-cli/bin/skillbox.js rollback <skill-name> --to <sha> --managed-root <temp-skillbox-root> --json`
 - `cargo test -p skillbox-core --offline remote_version`
 - `cargo test -p skillbox-core --offline apply_`
-- `cargo run -p skillbox-cli --offline -- remote-preview-change <skill-name> --action rollback --to <sha-or-prefix> --managed-root <temp-SkillBox>`
-- `cargo run -p skillbox-cli --offline -- remote-apply-change <skill-name> --action rollback --to <sha-or-prefix> --managed-root <temp-SkillBox>`
+- `cargo run -p skillbox-cli --offline -- remote-preview-change <skill-name> --action rollback --to <sha-or-prefix> --managed-root <temp-skillbox-root>`
+- `cargo run -p skillbox-cli --offline -- remote-apply-change <skill-name> --action rollback --to <sha-or-prefix> --managed-root <temp-skillbox-root>`
 - 桌面 UI 手动验证：rollback review 展示回滚后会新增、修改、删除的所有文件，确认后 `current` 和版本列表同步刷新。
 
 ## 9. Operation Log
@@ -329,8 +329,8 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 完成验证：
 
 - `cargo test -p skillbox-core --offline operation`
-- `cargo run -p skillbox-cli --offline -- operations --managed-root <temp-SkillBox>`
-- `cargo run -p skillbox-cli --offline -- operations --entity-type skill --entity-name <skill-name> --managed-root <temp-SkillBox>`
+- `cargo run -p skillbox-cli --offline -- operations --managed-root <temp-skillbox-root>`
+- `cargo run -p skillbox-cli --offline -- operations --entity-type skill --entity-name <skill-name> --managed-root <temp-skillbox-root>`
 - 桌面 UI 手动验证 remote skill detail 中成功和失败 operation 都可见。
 
 ## 10. Sync User-Skills Git
@@ -344,8 +344,8 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 步骤：
 
-- 确保 `~/SkillBox/user-skills` 存在。
-- 默认所有本地 user skills 通过同一个 `~/SkillBox/user-skills` Git 仓库和同一个 `origin` remote 同步。
+- 确保 `~/.skillbox/user-skills` 存在。
+- 默认所有本地 user skills 通过同一个 `~/.skillbox/user-skills` Git 仓库和同一个 `origin` remote 同步。
 - 如果没有 `.git`，初始化 `main` 分支 Git 仓库。
 - Settings 中配置 shared `origin` remote；commit review dialog 只读展示当前 remote，不直接修改 remote。
 - 桌面 UI 的 sync action 必须先打开 commit review dialog：展示 changed files、当前 diff、可编辑 commit message、只读 remote URL、push 选项，并允许用户选择本次提交的文件。
@@ -371,8 +371,8 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 - `cargo test -p skillbox-git --offline`
 - `cargo test -p skillbox-core --offline user_skills`
-- `cargo run -p skillbox-cli --offline -- user-skills-status --managed-root <temp-SkillBox>`
-- `cargo run -p skillbox-cli --offline -- sync-user-skills --managed-root <temp-SkillBox> --remote <bare-repo-path> --message "test sync"`
+- `cargo run -p skillbox-cli --offline -- user-skills-status --managed-root <temp-skillbox-root>`
+- `cargo run -p skillbox-cli --offline -- sync-user-skills --managed-root <temp-skillbox-root> --remote <bare-repo-path> --message "test sync"`
 - UI 路径变更时，手动验证 commit review dialog、diff preview、默认 commit message、文件选择、shared remote 提示和 push failure 状态。
 
 ## 11. Add Agent Adapter
@@ -437,7 +437,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 完成验证：
 
 - `cargo test -p skillbox-core --offline workspace`
-- `cargo run -p skillbox-cli --offline -- workspace-scan --managed-root <temp-SkillBox>`
-- `cargo run -p skillbox-cli --offline -- workspace-add <temp-root> --kind user --managed-root <temp-SkillBox>`
+- `cargo run -p skillbox-cli --offline -- workspace-scan --managed-root <temp-skillbox-root>`
+- `cargo run -p skillbox-cli --offline -- workspace-add <temp-root> --kind user --managed-root <temp-skillbox-root>`
 - `npm test`
 - 桌面 UI 验证 sidebar 只保留 Dashboard、Workspaces、Settings，Workspace 页面可 scan、add、forget manual rows，并且点击 workspace 可查看和导入该 workspace 下的 skills。

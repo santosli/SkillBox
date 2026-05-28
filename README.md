@@ -23,7 +23,10 @@ cargo run -p skillbox-cli --offline -- workspace-scan
 cargo test --offline
 ```
 
-The default managed root is `~/SkillBox`, or `SKILLBOX_HOME` when set.
+The default managed root is `~/.skillbox`, or `SKILLBOX_HOME` when set.
+Existing data under the legacy `~/SkillBox` root should be migrated explicitly,
+for example by moving it to `~/.skillbox` and keeping `~/SkillBox` as a symlink
+only when older deployed runtime links still point there.
 
 `npm install` runs `npm run hooks:install`, which points Git at the tracked
 `.githooks/` directory. The pre-commit hook checks staged implementation and
@@ -33,7 +36,7 @@ or until the author explicitly commits with `SKILLBOX_SKIP_DOCS_CHECK=1`.
 ## Managed Layout
 
 ```text
-~/SkillBox/
+~/.skillbox/
   user-skills/
   remote-skills/
   skillbox.sqlite

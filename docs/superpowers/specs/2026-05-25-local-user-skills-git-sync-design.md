@@ -5,12 +5,12 @@ Date: 2026-05-25
 ## Scope
 
 Implement a one-click Git sync workflow for local user-created skills stored in
-`~/SkillBox/user-skills`.
+`~/.skillbox/user-skills`.
 
 This feature covers only the managed user skills repository. By default, every
-local user skill under `~/SkillBox/user-skills` syncs through one shared Git
+local user skill under `~/.skillbox/user-skills` syncs through one shared Git
 repository and one shared remote. It does not sync remote skills, runtime
-deployment directories, or agent-specific adapter output. `~/SkillBox` remains
+deployment directories, or agent-specific adapter output. `~/.skillbox` remains
 the source of truth, and `~/.codex/skills`, `~/.agents/skills`, and future agent
 runtime directories remain deployment targets.
 
@@ -22,7 +22,7 @@ Subsequent syncs should use that remote automatically.
 
 ## Remote Model
 
-The MVP repository boundary is `~/SkillBox/user-skills`.
+The MVP repository boundary is `~/.skillbox/user-skills`.
 
 - All local user skills are committed and pushed together.
 - The default sync remote is the Git `origin` remote for that repository.
@@ -33,7 +33,7 @@ The MVP repository boundary is `~/SkillBox/user-skills`.
   later without changing the repository model.
 - The UI should leave a clear path for a future `Change remote` action in the
   sync panel or Settings. That action still changes the shared
-  `~/SkillBox/user-skills` remote, not a per-skill remote.
+  `~/.skillbox/user-skills` remote, not a per-skill remote.
 
 Per-skill remotes are out of scope for this design. If they are added later,
 they should be introduced as an explicit repository-routing feature rather than
@@ -53,12 +53,12 @@ The primary entry point is the User Skill detail page.
 - Remote skills keep their existing update-oriented language and do not show
   user-skills sync actions.
 
-The action operates on the whole `~/SkillBox/user-skills` Git repository, not
+The action operates on the whole `~/.skillbox/user-skills` Git repository, not
 only the currently selected skill. The UI copy should make that scope clear.
 
 ## First-Time Setup Flow
 
-When `~/SkillBox/user-skills` is not a Git repository, or it is a Git repository
+When `~/.skillbox/user-skills` is not a Git repository, or it is a Git repository
 without an `origin` remote:
 
 1. The user clicks `Set up sync`.
@@ -67,7 +67,7 @@ without an `origin` remote:
    - Commit message: default `Sync user skills`, editable.
    - Push after commit: enabled by default.
 3. On confirmation, the backend runs the structured workflow:
-   - Ensure `~/SkillBox/user-skills` exists.
+   - Ensure `~/.skillbox/user-skills` exists.
    - Run `git init -b main` if needed.
    - Add or update `origin` with the provided remote URL.
    - Run `git add .`.
@@ -83,7 +83,7 @@ history can be connected to the remote.
 
 ## Subsequent Sync Flow
 
-When `~/SkillBox/user-skills` is a Git repository with `origin`:
+When `~/.skillbox/user-skills` is a Git repository with `origin`:
 
 1. The user clicks `Sync now`.
 2. The UI uses the default commit message `Sync user skills`.

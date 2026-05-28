@@ -2,11 +2,13 @@
 
 ## Managed Store 布局
 
-默认根目录是 `~/SkillBox`，也可以通过 `SKILLBOX_HOME` 指向其它目录。
+默认根目录是 `~/.skillbox`，也可以通过 `SKILLBOX_HOME` 指向其它目录。
 managed store 是跨 agent 的真相源，不绑定 Codex、Claude、Cursor、Copilot 或任何单一 runtime。
+历史版本使用过 `~/SkillBox`；已有数据应由用户或迁移命令显式搬到 `~/.skillbox`，
+如果 runtime 中仍存在指向旧路径的 symlink，可以保留 `~/SkillBox -> ~/.skillbox` 兼容链接。
 
 ```text
-~/SkillBox/
+~/.skillbox/
   user-skills/
     <skill-name>/
       SKILL.md
@@ -89,7 +91,7 @@ Manual remote 使用这些字段：
 
 ## SQLite
 
-数据库文件是 `~/SkillBox/skillbox.sqlite`。
+数据库文件是 `~/.skillbox/skillbox.sqlite`。
 
 Rust 当前表：
 

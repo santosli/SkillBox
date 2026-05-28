@@ -5,12 +5,12 @@ Date: 2026-05-27
 ## Scope
 
 Implement a safe update workflow for remote skills stored in
-`~/SkillBox/remote-skills`.
+`~/.skillbox/remote-skills`.
 
 The MVP supports GitHub as the only network source provider. It covers source
 binding, update checks, update previews, update execution, rollback previews,
 rollback execution, and a generic operation log for auditable side-effecting
-workflows. `~/SkillBox` remains the source of truth. Runtime directories such as
+workflows. `~/.skillbox` remains the source of truth. Runtime directories such as
 `~/.codex/skills`, `~/.agents/skills`, and project-local skills roots remain
 deployment targets.
 

@@ -6,10 +6,10 @@ Skills、规则、提示词和能力包可能存在于 Claude、Codex、OpenClaw
 
 ## 决定
 
-`~/SkillBox` 是 SkillBox 管理状态的真相源：
+`~/.skillbox` 是 SkillBox 管理状态的真相源：
 
-- `~/SkillBox/user-skills` 保存用户创建的 skills。
-- `~/SkillBox/remote-skills` 保存远程或手动远程导入的版本历史。
+- `~/.skillbox/user-skills` 保存用户创建的 skills。
+- `~/.skillbox/remote-skills` 保存远程或手动远程导入的版本历史。
 - Runtime 目录只作为部署目标。
 
 ## 理由

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the approved one-remote Git sync workflow for `~/SkillBox/user-skills`.
+**Goal:** Build the approved one-remote Git sync workflow for `~/.skillbox/user-skills`.
 
 **Architecture:** Add structured Git primitives to `skillbox-git`, orchestrate the managed `user-skills` workflow in `skillbox-core`, expose it through Rust CLI and Tauri commands, then wire the User Skill detail UI to status, setup, sync, and retry states. React remains presentation-only and never shells out.
 

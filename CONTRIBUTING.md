@@ -42,7 +42,7 @@ Node CLI 兼容入口：
 node packages/skillbox-cli/bin/skillbox.js scan --json
 node packages/skillbox-cli/bin/skillbox.js paths --json
 node packages/skillbox-cli/bin/skillbox.js parse-github-url <github-url> --json
-node packages/skillbox-cli/bin/skillbox.js install <github-url> --managed-root <temp-SkillBox> --json
+node packages/skillbox-cli/bin/skillbox.js install <github-url> --managed-root <temp-skillbox-root> --json
 ```
 
 Rust CLI 目标入口：
@@ -51,17 +51,17 @@ Rust CLI 目标入口：
 cargo run -p skillbox-cli --offline -- scan ~/.codex/skills ~/.agents/skills
 cargo run -p skillbox-cli --offline -- paths
 cargo run -p skillbox-cli --offline -- parse-github-url <github-url>
-cargo run -p skillbox-cli --offline -- import <source-dir> --type user --managed-root <temp-SkillBox>
-cargo run -p skillbox-cli --offline -- deploy <skill-name> --target <target-root> --managed-root <temp-SkillBox>
-cargo run -p skillbox-cli --offline -- check-remote-updates --managed-root <temp-SkillBox>
-cargo run -p skillbox-cli --offline -- remote-source-preview <skill-name> <github-url> --managed-root <temp-SkillBox>
-cargo run -p skillbox-cli --offline -- bind-remote-source <skill-name> <github-url> --managed-root <temp-SkillBox>
-cargo run -p skillbox-cli --offline -- remote-versions <skill-name> --managed-root <temp-SkillBox>
-cargo run -p skillbox-cli --offline -- remote-preview-change <skill-name> --action update --managed-root <temp-SkillBox>
-cargo run -p skillbox-cli --offline -- remote-apply-change <skill-name> --action update --to <sha> --managed-root <temp-SkillBox>
-cargo run -p skillbox-cli --offline -- remote-preview-change <skill-name> --action rollback --to <sha-or-prefix> --managed-root <temp-SkillBox>
-cargo run -p skillbox-cli --offline -- remote-apply-change <skill-name> --action rollback --to <sha-or-prefix> --managed-root <temp-SkillBox>
-cargo run -p skillbox-cli --offline -- operations --managed-root <temp-SkillBox>
+cargo run -p skillbox-cli --offline -- import <source-dir> --type user --managed-root <temp-skillbox-root>
+cargo run -p skillbox-cli --offline -- deploy <skill-name> --target <target-root> --managed-root <temp-skillbox-root>
+cargo run -p skillbox-cli --offline -- check-remote-updates --managed-root <temp-skillbox-root>
+cargo run -p skillbox-cli --offline -- remote-source-preview <skill-name> <github-url> --managed-root <temp-skillbox-root>
+cargo run -p skillbox-cli --offline -- bind-remote-source <skill-name> <github-url> --managed-root <temp-skillbox-root>
+cargo run -p skillbox-cli --offline -- remote-versions <skill-name> --managed-root <temp-skillbox-root>
+cargo run -p skillbox-cli --offline -- remote-preview-change <skill-name> --action update --managed-root <temp-skillbox-root>
+cargo run -p skillbox-cli --offline -- remote-apply-change <skill-name> --action update --to <sha> --managed-root <temp-skillbox-root>
+cargo run -p skillbox-cli --offline -- remote-preview-change <skill-name> --action rollback --to <sha-or-prefix> --managed-root <temp-skillbox-root>
+cargo run -p skillbox-cli --offline -- remote-apply-change <skill-name> --action rollback --to <sha-or-prefix> --managed-root <temp-skillbox-root>
+cargo run -p skillbox-cli --offline -- operations --managed-root <temp-skillbox-root>
 ```
 
 ## 代码约定
