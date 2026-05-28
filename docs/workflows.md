@@ -108,6 +108,8 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 触发条件：
 
 - Rust CLI 执行 `deploy <skill-name> --target <path>`。
+- Rust CLI 执行 `undeploy <skill-name> --target <path>`。
+- 桌面详情页打开 Deploy workspace 弹窗，勾选 workspace 执行 deploy，取消已勾选 workspace 执行 undeploy。
 - Node CLI 执行 `deploy`。
 - import workflow 选择 deploy back to source。
 
@@ -119,12 +121,15 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - target 不存在时创建 symlink。
 - target 是 symlink 且已指向同一 managed path 时视为成功。
 - 写入 SQLite `deployments`。
+- undeploy 时只删除 `target_root/<skill-name>` 这个 symlink，并删除 SQLite `deployments` 对应记录。
+- 桌面执行 undeploy 前必须显示明确提醒，用户确认后才应用取消勾选的 workspace。
 
 失败与回滚：
 
 - target 是非 symlink 时拒绝。
 - target 是 symlink 但指向其它位置时拒绝。
 - 创建 symlink 失败时不写 deployment 记录。
+- undeploy 遇到非 symlink 或指向其它位置的 symlink 时拒绝，不能删除磁盘内容。
 - 不删除非 SkillBox 管理的内容。
 
 完成验证：
@@ -132,7 +137,9 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `cargo test --offline`
 - `npm test`
 - `cargo run -p skillbox-cli --offline -- deploy <skill-name> --target <temp-runtime> --managed-root <temp-SkillBox>`
+- `cargo run -p skillbox-cli --offline -- undeploy <skill-name> --target <temp-runtime> --managed-root <temp-SkillBox>`
 - 检查 target path 是 symlink，real path 指向 managed store。
+- 检查 undeploy 后 target symlink 消失，非 symlink target 不会被删除。
 
 ## 5. Check Remote Updates
 

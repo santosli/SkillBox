@@ -989,15 +989,62 @@ pub fn deploy_skill(
     })
 }
 
+pub fn undeploy_skill(
+    skill_name: &str,
+    managed_root: impl AsRef<Path>,
+    target_root: impl AsRef<Path>,
+) -> Result<Deployment> {
+    validate_skill_name(skill_name)?;
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let managed_path = resolve_managed_skill_path(&paths, skill_name)?;
+    let target_root = expand_home(target_root.as_ref().to_path_buf());
+    let target_path = target_root.join(skill_name);
+
+    match fs::symlink_metadata(&target_path) {
+        Ok(metadata) => {
+            if !metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "Refusing to remove existing non-symlink target: {}",
+                    target_path.display()
+                ));
+            }
+
+            let linked = fs::canonicalize(&target_path).map_err(|error| error.to_string())?;
+            let expected = fs::canonicalize(&managed_path).map_err(|error| error.to_string())?;
+            if linked != expected {
+                return Err(format!(
+                    "Refusing to remove symlink pointing elsewhere: {}",
+                    target_path.display()
+                ));
+            }
+
+            fs::remove_file(&target_path).map_err(|error| error.to_string())?;
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.to_string()),
+    }
+
+    remove_deployment(&paths.database_path, skill_name, &target_root)?;
+    Ok(Deployment {
+        skill_name: skill_name.to_string(),
+        managed_path,
+        target_root,
+        target_path,
+        mode: "symlink".to_string(),
+    })
+}
+
 pub fn managed_state(managed_root: impl AsRef<Path>) -> Result<ManagedState> {
     let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
-    let deployments = load_deployments(&paths.database_path)?;
+    let mut deployments = load_deployments(&paths.database_path)?;
     let mut skills = Vec::new();
 
     for skill in scan_skill_roots(std::slice::from_ref(&paths.user_skills_root))?.skills {
         skills.push(managed_skill(skill, SkillKind::User));
     }
     skills.extend(scan_managed_remote_skills(&paths)?);
+    let workspaces = load_workspaces(&paths.database_path)?;
+    merge_workspace_symlink_deployments(&workspaces, &skills, &mut deployments);
 
     for skill in skills.iter_mut() {
         skill.deployments = deployments.get(&skill.name).cloned().unwrap_or_default();
@@ -1035,6 +1082,52 @@ fn scan_managed_remote_skills(paths: &ManagedPaths) -> Result<Vec<ManagedSkill>>
     }
 
     Ok(skills)
+}
+
+fn merge_workspace_symlink_deployments(
+    workspaces: &[Workspace],
+    skills: &[ManagedSkill],
+    deployments: &mut HashMap<String, Vec<ManagedSkillDeployment>>,
+) {
+    for skill in skills {
+        for workspace in workspaces {
+            let target_path = workspace.path.join(&skill.name);
+            if !workspace_target_is_current_symlink(&target_path, &skill.path) {
+                continue;
+            }
+
+            let skill_deployments = deployments.entry(skill.name.clone()).or_default();
+            if skill_deployments
+                .iter()
+                .any(|deployment| deployment.target_root == workspace.path)
+            {
+                continue;
+            }
+
+            skill_deployments.push(ManagedSkillDeployment {
+                target_root: workspace.path.clone(),
+                target_path,
+                mode: "symlink".to_string(),
+            });
+        }
+    }
+}
+
+fn workspace_target_is_current_symlink(target_path: &Path, managed_path: &Path) -> bool {
+    let Ok(metadata) = fs::symlink_metadata(target_path) else {
+        return false;
+    };
+    if !metadata.file_type().is_symlink() {
+        return false;
+    }
+
+    match (
+        fs::canonicalize(target_path),
+        fs::canonicalize(managed_path),
+    ) {
+        (Ok(target), Ok(expected)) => target == expected,
+        _ => false,
+    }
 }
 
 pub fn managed_preferences(managed_root: impl AsRef<Path>) -> Result<ManagedPreferences> {
@@ -3882,6 +3975,17 @@ fn index_deployment(
     Ok(())
 }
 
+fn remove_deployment(database_path: &Path, skill_name: &str, target_root: &Path) -> Result<()> {
+    let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
+    connection
+        .execute(
+            "DELETE FROM deployments WHERE skill_name = ?1 AND target_root = ?2",
+            params![skill_name, target_root.to_string_lossy()],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 fn load_deployments(database_path: &Path) -> Result<HashMap<String, Vec<ManagedSkillDeployment>>> {
     let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
     let mut statement = connection
@@ -4605,6 +4709,82 @@ description: \"Demo skill\"
     }
 
     #[test]
+    fn undeploys_managed_symlink_and_removes_deployment_index() {
+        let root = temp_dir("undeploy-managed-link");
+        let source = root.join("source").join("demo");
+        let managed_root = root.join("SkillBox");
+        let target_root = root.join("runtime");
+        make_skill(&source, "demo", "Demo skill");
+        import_skill(&source, SkillKind::User, &managed_root).unwrap();
+        let deployment = deploy_skill("demo", &managed_root, &target_root).unwrap();
+
+        let undeployment = undeploy_skill("demo", &managed_root, &target_root).unwrap();
+
+        assert_eq!(undeployment.skill_name, "demo");
+        assert_eq!(undeployment.target_root, target_root);
+        assert_eq!(undeployment.target_path, deployment.target_path);
+        assert!(!undeployment.target_path.exists());
+        let state = managed_state(&managed_root).unwrap();
+        assert_eq!(state.skills[0].deployments.len(), 0);
+    }
+
+    #[test]
+    fn undeploy_missing_target_removes_stale_deployment_index() {
+        let root = temp_dir("undeploy-missing-target");
+        let source = root.join("source").join("demo");
+        let managed_root = root.join("SkillBox");
+        let target_root = root.join("runtime");
+        make_skill(&source, "demo", "Demo skill");
+        import_skill(&source, SkillKind::User, &managed_root).unwrap();
+        let deployment = deploy_skill("demo", &managed_root, &target_root).unwrap();
+        fs::remove_file(&deployment.target_path).unwrap();
+
+        let undeployment = undeploy_skill("demo", &managed_root, &target_root).unwrap();
+
+        assert_eq!(undeployment.target_path, deployment.target_path);
+        let state = managed_state(&managed_root).unwrap();
+        assert_eq!(state.skills[0].deployments.len(), 0);
+    }
+
+    #[test]
+    fn undeploy_refuses_non_symlink_target() {
+        let root = temp_dir("undeploy-non-symlink");
+        let source = root.join("source").join("demo");
+        let managed_root = root.join("SkillBox");
+        let target_root = root.join("runtime");
+        make_skill(&source, "demo", "Demo skill");
+        import_skill(&source, SkillKind::User, &managed_root).unwrap();
+        fs::create_dir_all(target_root.join("demo")).unwrap();
+
+        let error = undeploy_skill("demo", &managed_root, &target_root).unwrap_err();
+
+        assert!(error.contains("Refusing to remove existing non-symlink target"));
+        assert!(target_root.join("demo").exists());
+    }
+
+    #[test]
+    fn undeploy_refuses_symlink_pointing_elsewhere() {
+        let root = temp_dir("undeploy-foreign-link");
+        let source = root.join("source").join("demo");
+        let managed_root = root.join("SkillBox");
+        let target_root = root.join("runtime");
+        let other_target = root.join("other").join("demo");
+        make_skill(&source, "demo", "Demo skill");
+        make_skill(&other_target, "demo", "Other demo skill");
+        import_skill(&source, SkillKind::User, &managed_root).unwrap();
+        fs::create_dir_all(&target_root).unwrap();
+        symlink_dir(&other_target, &target_root.join("demo")).unwrap();
+
+        let error = undeploy_skill("demo", &managed_root, &target_root).unwrap_err();
+
+        assert!(error.contains("Refusing to remove symlink pointing elsewhere"));
+        assert!(fs::symlink_metadata(target_root.join("demo"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+
+    #[test]
     fn managed_state_is_first_use_when_managed_store_has_no_skills() {
         let root = temp_dir("managed-state-empty");
         let state = managed_state(&root.join("SkillBox")).unwrap();
@@ -4627,6 +4807,46 @@ description: \"Demo skill\"
         assert_eq!(state.skills[0].name, "find-skills");
         assert_eq!(state.skills[0].kind, SkillKind::Remote);
         assert!(state.skills[0].path.ends_with("current"));
+    }
+
+    #[test]
+    fn managed_state_infers_workspace_symlink_deployments_without_index() {
+        let root = temp_dir("managed-state-inferred-deployment");
+        let source = root.join("source").join("ui-ux-pro-max");
+        let managed_root = root.join("SkillBox");
+        let workspace_root = root
+            .join("audio-dialogue-web")
+            .join(".codex")
+            .join("skills");
+        make_skill(&source, "ui-ux-pro-max", "UI UX skill");
+        import_skill(&source, SkillKind::Remote, &managed_root).unwrap();
+        fs::create_dir_all(&workspace_root).unwrap();
+        add_workspace(
+            WorkspaceAddRequest {
+                path: workspace_root.clone(),
+                kind: WorkspaceKind::User,
+            },
+            &managed_root,
+        )
+        .unwrap();
+        let managed_current = managed_root
+            .join("remote-skills")
+            .join("ui-ux-pro-max")
+            .join("current");
+        symlink_dir(&managed_current, &workspace_root.join("ui-ux-pro-max")).unwrap();
+
+        let state = managed_state(&managed_root).unwrap();
+
+        assert_eq!(state.skills.len(), 1);
+        assert_eq!(state.skills[0].deployments.len(), 1);
+        assert_eq!(state.skills[0].deployments[0].target_root, workspace_root);
+        assert_eq!(
+            state.skills[0].deployments[0].target_path,
+            state.skills[0].deployments[0]
+                .target_root
+                .join("ui-ux-pro-max")
+        );
+        assert_eq!(state.skills[0].deployments[0].mode, "symlink");
     }
 
     #[test]

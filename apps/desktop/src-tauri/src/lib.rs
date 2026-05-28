@@ -111,6 +111,34 @@ fn import_candidates(items: Vec<skillbox_core::ImportRequestItem>) -> Result<Val
 }
 
 #[tauri::command]
+async fn deploy_skill(skill_name: String, target_root: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = skillbox_core::deploy_skill(
+            &skill_name,
+            skillbox_core::default_managed_root(),
+            target_root,
+        )?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Skill deploy task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn undeploy_skill(skill_name: String, target_root: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = skillbox_core::undeploy_skill(
+            &skill_name,
+            skillbox_core::default_managed_root(),
+            target_root,
+        )?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Skill undeploy task failed: {error}"))?
+}
+
+#[tauri::command]
 fn parse_github_url(url: String) -> Result<Value, String> {
     let source = skillbox_github::parse_github_skill_url(&url)?;
     serde_json::to_value(source).map_err(|error| error.to_string())
@@ -309,6 +337,8 @@ pub fn run() {
             scan_import_candidates,
             scan_workspace_import_candidates,
             import_candidates,
+            deploy_skill,
+            undeploy_skill,
             parse_github_url,
             user_skills_git_status,
             user_skills_git_changes,

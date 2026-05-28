@@ -1,6 +1,6 @@
 use skillbox_core::{
     default_managed_root, deploy_skill, global_runtime_roots, import_skill, managed_paths,
-    scan_skill_roots, SkillKind, WorkspaceAddRequest, WorkspaceKind,
+    scan_skill_roots, undeploy_skill, SkillKind, WorkspaceAddRequest, WorkspaceKind,
 };
 use skillbox_github::parse_github_skill_url;
 use std::path::PathBuf;
@@ -56,6 +56,19 @@ fn run(args: Vec<String>) -> Result<(), String> {
             let target = option(command_args, "--target")
                 .ok_or_else(|| "Usage: skillbox deploy <skill-name> --target <path>".to_string())?;
             print_json(&deploy_skill(
+                &skill_name,
+                managed_root(command_args),
+                target,
+            )?)
+        }
+        "undeploy" => {
+            let skill_name = positional(command_args).into_iter().next().ok_or_else(|| {
+                "Usage: skillbox undeploy <skill-name> --target <path>".to_string()
+            })?;
+            let target = option(command_args, "--target").ok_or_else(|| {
+                "Usage: skillbox undeploy <skill-name> --target <path>".to_string()
+            })?;
+            print_json(&undeploy_skill(
                 &skill_name,
                 managed_root(command_args),
                 target,
@@ -290,6 +303,7 @@ Commands:
   skillbox parse-github-url <github-url>
   skillbox import <source-dir> --type user|remote [--managed-root <path>]
   skillbox deploy <skill-name> --target <path> [--managed-root <path>]
+  skillbox undeploy <skill-name> --target <path> [--managed-root <path>]
   skillbox user-skills-status [--managed-root <path>]
   skillbox check-remote-updates [--managed-root <path>]
   skillbox remote-source-candidates <skill-name> [--managed-root <path>]
