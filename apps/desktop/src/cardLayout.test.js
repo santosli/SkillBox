@@ -6,16 +6,18 @@ const css = await readFile(new URL('./styles.css', import.meta.url), 'utf8');
 const appSource = await readFile(new URL('./App.jsx', import.meta.url), 'utf8');
 const tauriSource = await readFile(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8');
 
-test('dashboard and workspace cards share a fixed auto-wrapping grid width', () => {
+test('dashboard and workspace cards fill the available row width while auto-wrapping', () => {
   const sharedGridRule = css.match(/\.skillCardGrid,\s*\.workspaceCardGrid\s*\{(?<body>[^}]*)\}/s)
     ?.groups.body || '';
 
   assert.match(css, /--dashboard-card-width:\s*360px;/);
-  assert.match(css, /--dashboard-card-track:\s*minmax\(var\(--dashboard-card-width\),\s*var\(--dashboard-card-width\)\);/);
+  assert.match(css, /--dashboard-card-track:\s*minmax\(min\(100%,\s*var\(--dashboard-card-width\)\),\s*1fr\);/);
   assert.match(
     sharedGridRule,
     /grid-template-columns:\s*repeat\(auto-fill,\s*var\(--dashboard-card-track\)\);/
   );
+  assert.match(sharedGridRule, /justify-content:\s*stretch;/);
+  assert.doesNotMatch(sharedGridRule, /justify-content:\s*start;/);
   assert.doesNotMatch(sharedGridRule, /repeat\([234],\s*minmax\(0,\s*1fr\)\)/);
   assert.doesNotMatch(css, /\.skillCardGrid,\s*\.workspaceCardGrid\s*\{[^}]*repeat\([234],\s*minmax\(0,\s*1fr\)\)/s);
 });
@@ -253,10 +255,13 @@ test('skill detail modal uses a two-column workbench layout', () => {
   assert.match(css, /\.skillDetailBodyGrid\s*\{[^}]*overflow-x:\s*hidden;/s);
   assert.match(css, /\.skillDetailBodyGrid\s*\{[^}]*overflow-y:\s*auto;/s);
   assert.match(css, /\.skillDetailControlRail\s*\{[^}]*min-width:\s*0;/s);
+  assert.match(css, /\.skillDetailControlRail\s*\{[^}]*align-self:\s*stretch;/s);
   assert.match(css, /\.skillDetailControlRail\s*\{[^}]*border-left:\s*1px solid #e2e8f0;/s);
   assert.match(css, /\.skillDetailControlRail\s*\{[^}]*position:\s*sticky;/s);
   assert.match(css, /\.remoteVersionSummary span\s*\{[^}]*white-space:\s*nowrap;/s);
   assert.match(css, /\.remoteVersionSummary span\s*\{[^}]*text-overflow:\s*ellipsis;/s);
+  assert.match(css, /\.remoteVersionRow small\s*\{[^}]*white-space:\s*nowrap;/s);
+  assert.match(css, /\.remoteVersionRow small\s*\{[^}]*text-overflow:\s*ellipsis;/s);
 });
 
 test('desktop preview defaults to hidden skillbox managed root', () => {
@@ -361,7 +366,8 @@ test('button heights use shared global sizing tokens', () => {
 
 test('remote version list highlights the current version', () => {
   assert.match(appSource, /updatedAt:\s*version\.updatedAt \|\| version\.updated_at \|\| ''/);
-  assert.match(appSource, /const versionMeta = \[\s*version\.isCurrent \? 'Current' : version\.kind,\s*version\.updatedAt \? `Updated \$\{formatOperationTimestamp\(version\.updatedAt\)\}` : ''\s*\]/);
+  assert.match(appSource, /message:\s*version\.message \|\| ''/);
+  assert.match(appSource, /const versionMeta = \[\s*version\.isCurrent \? 'Current' : version\.kind,\s*version\.message,\s*version\.updatedAt \? `Updated \$\{formatOperationTimestamp\(version\.updatedAt\)\}` : ''\s*\]/);
   assert.match(appSource, /<small>\{versionMeta\}<\/small>/);
   assert.match(appSource, /remoteVersionRow\$\{version\.isCurrent \? ' current' : ''\}/);
   assert.match(appSource, /aria-current=\{version\.isCurrent \? 'true' : undefined\}/);
@@ -376,6 +382,15 @@ test('remote version list highlights the current version', () => {
   assert.match(css, /\.remoteVersionRow \.remoteVersionCurrentBadge\s*\{[^}]*justify-content:\s*center;/s);
   assert.match(css, /\.remoteVersionRow \.remoteVersionCurrentBadge\s*\{[^}]*color:\s*#166534;/s);
   assert.match(css, /\.remoteVersionRow \.remoteVersionCurrentBadge\s*\{[^}]*pointer-events:\s*none;/s);
+});
+
+test('version history shows the latest three rows before expanding older versions', () => {
+  assert.match(appSource, /const VERSION_HISTORY_PREVIEW_COUNT = 3;/);
+  assert.match(appSource, /const visibleVersions = expanded \|\| !hasHiddenVersions\s*\?\s*versionRows\s*:\s*versionRows\.slice\(0,\s*VERSION_HISTORY_PREVIEW_COUNT\);/);
+  assert.match(appSource, /hiddenVersionCount = Math\.max\(0,\s*versionRows\.length - VERSION_HISTORY_PREVIEW_COUNT\)/);
+  assert.match(appSource, /setExpanded\(\(current\) => !current\)/);
+  assert.match(appSource, /Show \$\{hiddenVersionCount\} more/);
+  assert.match(css, /\.remoteVersionToggle\s*\{/);
 });
 
 test('skill detail layout keeps deployment metadata before controls on narrow screens', () => {
@@ -394,6 +409,14 @@ test('remote version history stays in the metadata column before the log', () =>
   assert.doesNotMatch(versionHistoryRules, /(^|[;\s])order\s*:/);
 });
 
+test('local skill detail renders version history from the user skills git repo', () => {
+  assert.match(tauriSource, /fn list_user_skill_versions\(skill_name:\s*String\)/);
+  assert.match(appSource, /invoke\('list_user_skill_versions',\s*\{\s*skillName\s*\}\)/);
+  assert.match(appSource, /function UserSkillVersionHistoryPanel/);
+  assert.match(appSource, /skill\.type === 'user' \? \(\s*<UserSkillVersionHistoryPanel/s);
+  assert.match(appSource, /aria-label="User skill version history"/);
+});
+
 test('remote operation history is collapsed by default', () => {
   assert.match(appSource, /<details className="operationHistoryPanel" aria-label="Operation history">/);
   assert.match(appSource, /<summary className="operationHistorySummary">/);
@@ -405,6 +428,19 @@ test('remote operation history rows include timestamps', () => {
   assert.match(appSource, /formatOperationTimestamp\(operation\.finishedAt \|\| operation\.startedAt\)/);
   assert.match(appSource, /<time dateTime=\{operation\.finishedAt \|\| operation\.startedAt\}>/);
   assert.match(css, /\.operationHistoryRow time/);
+});
+
+test('manual remote source submit verifies and binds without a separate preview action', () => {
+  assert.match(appSource, /async function verifyAndBindRemoteSource\(event\)/);
+  assert.match(appSource, /event\?\.preventDefault\?\.\(\)/);
+  assert.match(appSource, /await loadRemoteSourceBindingPreview\(skillName,\s*trimmedSourceUrl\)/);
+  assert.match(appSource, /preview\.validation === 'mismatch'/);
+  assert.match(appSource, /source_url:\s*verifiedSourceUrl/);
+  assert.match(appSource, /onBind=\{verifyAndBindRemoteSource\}/);
+  assert.match(appSource, /<form className="remoteImportForm" onSubmit=\{onBind\}>/);
+  assert.match(appSource, /Verify and Bind Source/);
+  assert.doesNotMatch(appSource, />\s*Preview\s*<\/button>/);
+  assert.doesNotMatch(appSource, /onPreview=\{previewRemoteSourceBinding\}/);
 });
 
 test('remote source candidates use view and bind actions instead of inline preview', () => {

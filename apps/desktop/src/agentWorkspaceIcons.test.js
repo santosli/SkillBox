@@ -26,6 +26,21 @@ test('maps the Codex app runtime to the mac app icon', () => {
   });
 });
 
+test('maps the Claude runtime to the Claude Code icon asset', () => {
+  assert.deepEqual(agentWorkspaceIconForId('claude'), {
+    id: 'claude',
+    label: 'Claude Code',
+    iconClass: 'claude-code',
+    iconAsset: 'claude-code'
+  });
+  assert.deepEqual(agentWorkspaceIconForId('claude-code'), {
+    id: 'claude-code',
+    label: 'Claude Code',
+    iconClass: 'claude-code',
+    iconAsset: 'claude-code'
+  });
+});
+
 test('resolves common global workspace icons from runtime paths', () => {
   assert.deepEqual(agentWorkspaceIconForPath('/Users/santos/.agents/skills'), {
     id: 'agents',
@@ -38,5 +53,11 @@ test('resolves common global workspace icons from runtime paths', () => {
     label: 'Codex',
     iconClass: 'codex-app',
     iconAsset: 'codex-app'
+  });
+  assert.deepEqual(agentWorkspaceIconForPath('/Users/santos/.claude/skills'), {
+    id: 'claude',
+    label: 'Claude Code',
+    iconClass: 'claude-code',
+    iconAsset: 'claude-code'
   });
 });

@@ -1,6 +1,6 @@
 :root {
   --dashboard-card-width: 360px;
-  --dashboard-card-track: minmax(var(--dashboard-card-width), var(--dashboard-card-width));
+  --dashboard-card-track: minmax(min(100%, var(--dashboard-card-width)), 1fr);
   --button-height: 38px;
   --button-radius: 8px;
   color: #111827;
@@ -732,7 +732,7 @@ button {
   grid-template-columns: repeat(auto-fill, var(--dashboard-card-track));
   gap: 16px;
   align-items: stretch;
-  justify-content: start;
+  justify-content: stretch;
 }
 
 .skillCard {
@@ -1027,8 +1027,14 @@ button {
 .skillAgentIcon.claude,
 .skillAgentIcon.claude-code {
   border-color: rgba(217, 119, 6, 0.26);
-  background: #fff7ed;
+  background: #ffffff;
   color: #c2410c;
+}
+
+.skillAgentIcon.claude img,
+.skillAgentIcon.claude-code img {
+  width: 18px;
+  height: 18px;
 }
 
 .skillAgentIcon.cursor {
@@ -2272,6 +2278,7 @@ dd {
   position: sticky;
   top: 0;
   min-width: 0;
+  align-self: stretch;
   align-content: start;
   gap: 12px;
   border-left: 1px solid #e2e8f0;
@@ -3051,6 +3058,7 @@ dd {
 .remoteVersionRow small {
   display: block;
   min-width: 0;
+  overflow: hidden;
 }
 
 .remoteVersionRow strong {
@@ -3071,6 +3079,8 @@ dd {
   color: #64748b;
   font-size: 11px;
   font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .remoteVersionRow.current small {
@@ -3085,6 +3095,26 @@ dd {
   cursor: default;
   color: #166534;
   pointer-events: none;
+}
+
+.remoteVersionToggle {
+  display: inline-flex;
+  width: 100%;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #2563eb;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.remoteVersionToggle:hover {
+  border-color: #93c5fd;
+  background: #eff6ff;
 }
 
 .operationHistoryRow {

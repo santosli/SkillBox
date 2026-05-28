@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import desktopPackage from '../package.json';
 import skillBoxAppIcon from '../src-tauri/icons/icon.png';
+import claudeCodeIcon from './assets/claude-code-icon.svg';
 import codexAppIcon from './assets/codex-app-icon.png';
 import codexCliIcon from './assets/codex-cli-icon.png';
 import { dashboardTabItems, skillMatchesDashboardFilters, sortDashboardSkills } from './dashboardFilters.js';
@@ -318,8 +319,10 @@ export default function App() {
     error: ''
   });
   const [remoteVersions, setRemoteVersions] = useState({});
+  const [userVersions, setUserVersions] = useState({});
   const [operationHistory, setOperationHistory] = useState({});
   const [remoteContextLoading, setRemoteContextLoading] = useState({});
+  const [userContextLoading, setUserContextLoading] = useState({});
   const contentRef = useRef(null);
   const autoRefreshStateRef = useRef({ status: 'idle', isFirstUse: false });
   const refreshSkillStatusesRef = useRef(null);
@@ -1112,6 +1115,8 @@ export default function App() {
     setSelectedName(skill.name);
     if (skill.type === 'remote') {
       void loadRemoteSkillContext(skill.name);
+    } else if (skill.type === 'user') {
+      void loadUserSkillContext(skill.name);
     }
   }
 
@@ -1367,6 +1372,60 @@ export default function App() {
     }
   }
 
+  async function loadUserSkillContext(skillName) {
+    if (!skillName) return;
+
+    setUserContextLoading((current) => ({ ...current, [skillName]: true }));
+
+    if (!window.__TAURI_INTERNALS__) {
+      setUserVersions((current) => ({
+        ...current,
+        [skillName]: normalizeRemoteSkillVersions({
+          skill_name: skillName,
+          current_version: 'preview-working',
+          versions: [
+            {
+              version: 'preview-working',
+              is_current: true,
+              kind: 'working',
+              short_label: 'preview-working',
+              updated_at: Math.floor(Date.now() / 1000).toString()
+            },
+            {
+              version: 'abcdef1234567890',
+              is_current: false,
+              kind: 'git',
+              short_label: 'abcdef123456',
+              updated_at: Math.floor((Date.now() - 86400000) / 1000).toString(),
+              message: 'Preview user skill commit'
+            }
+          ]
+        })
+      }));
+      setUserContextLoading((current) => ({ ...current, [skillName]: false }));
+      return;
+    }
+
+    try {
+      const versions = await invoke('list_user_skill_versions', { skillName });
+      setUserVersions((current) => ({
+        ...current,
+        [skillName]: normalizeRemoteSkillVersions(versions)
+      }));
+    } catch (contextError) {
+      setUserVersions((current) => ({
+        ...current,
+        [skillName]: normalizeRemoteSkillVersions({
+          skill_name: skillName,
+          current_version: '',
+          versions: []
+        })
+      }));
+    } finally {
+      setUserContextLoading((current) => ({ ...current, [skillName]: false }));
+    }
+  }
+
   async function openRemoteSourceDialog(skill) {
     setRemoteSourceDialog({
       open: true,
@@ -1463,11 +1522,6 @@ export default function App() {
     }
   }
 
-  async function previewRemoteSourceBinding(event) {
-    event.preventDefault();
-    await previewRemoteSourceBindingForUrl(remoteSourceDialog.sourceUrl);
-  }
-
   async function loadRemoteSourceBindingPreview(skillName, sourceUrl) {
     const trimmedSourceUrl = sourceUrl.trim();
     if (!trimmedSourceUrl) {
@@ -1496,14 +1550,16 @@ export default function App() {
     return normalizeRemoteSourceBindingPreview(result);
   }
 
-  async function previewRemoteSourceBindingForUrl(sourceUrl) {
-    const trimmedSourceUrl = sourceUrl.trim();
+  async function verifyAndBindRemoteSource(event) {
+    event?.preventDefault?.();
+
+    const trimmedSourceUrl = remoteSourceDialog.sourceUrl.trim();
+    const skillName = remoteSourceDialog.skillName;
+
     if (!trimmedSourceUrl) {
       setRemoteSourceDialog((current) => ({ ...current, error: 'Enter or select a GitHub source URL.' }));
       return;
     }
-
-    const skillName = remoteSourceDialog.skillName;
 
     setRemoteSourceDialog((current) => ({
       ...current,
@@ -1514,19 +1570,70 @@ export default function App() {
       error: ''
     }));
 
+    await waitForNextPaint();
+
+    let preview;
     try {
-      const preview = await loadRemoteSourceBindingPreview(skillName, trimmedSourceUrl);
-      setRemoteSourceDialog((current) => ({
-        ...current,
-        sourceUrl: preview.sourceUrl || trimmedSourceUrl,
-        preview,
-        loading: false
-      }));
+      preview = await loadRemoteSourceBindingPreview(skillName, trimmedSourceUrl);
     } catch (previewError) {
       setRemoteSourceDialog((current) => ({
         ...current,
         loading: false,
+        binding: false,
         error: previewError.message || String(previewError)
+      }));
+      return;
+    }
+
+    const verifiedSourceUrl = preview.sourceUrl || trimmedSourceUrl;
+
+    if (preview.validation === 'mismatch') {
+      setRemoteSourceDialog((current) => ({
+        ...current,
+        sourceUrl: verifiedSourceUrl,
+        preview,
+        loading: false,
+        binding: false,
+        error: preview.message || 'Source validation failed. Choose a GitHub source for this skill.'
+      }));
+      return;
+    }
+
+    setRemoteSourceDialog((current) => ({
+      ...current,
+      sourceUrl: verifiedSourceUrl,
+      preview,
+      loading: false,
+      binding: true,
+      error: ''
+    }));
+
+    await waitForNextPaint();
+
+    if (!window.__TAURI_INTERNALS__) {
+      setNotice(`Bound ${skillName} to GitHub source.`);
+      setRemoteSourceDialog((current) => ({ ...current, open: false, loading: false, binding: false }));
+      return;
+    }
+
+    try {
+      await invoke('bind_remote_source', {
+        request: {
+          skill_name: skillName,
+          source_url: verifiedSourceUrl,
+          actor: 'desktop'
+        }
+      });
+      setRemoteSourceDialog((current) => ({ ...current, open: false, loading: false, binding: false }));
+      await refreshSkillStatuses();
+      await loadRemoteSkillContext(skillName);
+      setNotice(`Bound ${skillName} to GitHub source.`);
+    } catch (bindError) {
+      setRemoteSourceDialog((current) => ({
+        ...current,
+        loading: false,
+        binding: false,
+        error: bindError.message || String(bindError)
       }));
     }
   }
@@ -1712,37 +1819,6 @@ export default function App() {
           binding: false,
           error: bindError.message || String(bindError)
         }
-      }));
-    }
-  }
-
-  async function bindPreviewedRemoteSource() {
-    setRemoteSourceDialog((current) => ({ ...current, loading: true, binding: true, error: '' }));
-
-    if (!window.__TAURI_INTERNALS__) {
-      setNotice(`Bound ${remoteSourceDialog.skillName} to GitHub source.`);
-      setRemoteSourceDialog((current) => ({ ...current, open: false, loading: false, binding: false }));
-      return;
-    }
-
-    try {
-      await invoke('bind_remote_source', {
-        request: {
-          skill_name: remoteSourceDialog.skillName,
-          source_url: remoteSourceDialog.sourceUrl,
-          actor: 'desktop'
-        }
-      });
-      setRemoteSourceDialog((current) => ({ ...current, open: false, loading: false, binding: false }));
-      await refreshSkillStatuses();
-      await loadRemoteSkillContext(remoteSourceDialog.skillName);
-      setNotice(`Bound ${remoteSourceDialog.skillName} to GitHub source.`);
-    } catch (bindError) {
-      setRemoteSourceDialog((current) => ({
-        ...current,
-        loading: false,
-        binding: false,
-        error: bindError.message || String(bindError)
       }));
     }
   }
@@ -2214,8 +2290,10 @@ export default function App() {
           status={status}
           userSkillsGit={userSkillsGit}
           remoteLoading={Boolean(remoteContextLoading[selectedSkill.name])}
+          userLoading={Boolean(userContextLoading[selectedSkill.name])}
           remoteUpdate={selectedRemoteUpdate}
           versions={remoteVersions[selectedSkill.name] || null}
+          userVersions={userVersions[selectedSkill.name] || null}
           operations={operationHistory[selectedSkill.name] || []}
           onBindRemoteSource={() => openRemoteSourceDialog(selectedSkill)}
           onCheckUpdates={() => refreshSkillStatuses({ skillName: selectedSkill.name })}
@@ -2295,10 +2373,9 @@ export default function App() {
       {remoteSourceDialog.open ? (
         <RemoteSourceBindingDialog
           dialog={remoteSourceDialog}
-          onBind={bindPreviewedRemoteSource}
+          onBind={verifyAndBindRemoteSource}
           onBindCandidate={bindRemoteSourceCandidate}
           onClose={closeRemoteSourceDialog}
-          onPreview={previewRemoteSourceBinding}
           onSearch={() => searchRemoteSourceCandidates(remoteSourceDialog.skillName)}
           onUpdate={updateRemoteSourceDialog}
           onViewCandidate={viewRemoteSourceCandidate}
@@ -2712,6 +2789,9 @@ function agentIconSource(agent, iconClass = '') {
   }
   if (agent.iconAsset === 'codex-cli' || iconClass === 'codex-cli' || agent.id === 'agents') {
     return codexCliIcon;
+  }
+  if (agent.iconAsset === 'claude-code' || iconClass === 'claude-code' || agent.id === 'claude-code') {
+    return claudeCodeIcon;
   }
   return null;
 }
@@ -3570,12 +3650,10 @@ function RemoteSourceBindingDialog({
   onBind,
   onBindCandidate,
   onClose,
-  onPreview,
   onSearch,
   onUpdate,
   onViewCandidate
 }) {
-  const canBind = dialog.preview && dialog.preview.validation !== 'mismatch' && !dialog.loading && !dialog.binding;
   const hasCandidates = dialog.candidates.length > 0;
 
   return (
@@ -3594,7 +3672,7 @@ function RemoteSourceBindingDialog({
             <X aria-hidden="true" />
           </button>
         </div>
-        <form className="remoteImportForm" onSubmit={onPreview}>
+        <form className="remoteImportForm" onSubmit={onBind}>
           <label className="remoteImportField">
             <span>GitHub source URL</span>
             <input
@@ -3677,24 +3755,19 @@ function RemoteSourceBindingDialog({
             <button className="button secondary" disabled={dialog.binding} type="button" onClick={onClose}>
               Cancel
             </button>
-            <button className="button secondary" disabled={dialog.loading || dialog.binding || !dialog.sourceUrl.trim()} type="submit">
+            <button className="button primary" disabled={dialog.loading || dialog.binding || !dialog.sourceUrl.trim()} type="submit">
               {dialog.loading ? (
                 <>
                   <span className="buttonSpinner" aria-hidden="true" />
-                  Checking...
+                  Verifying...
                 </>
-              ) : (
-                'Preview'
-              )}
-            </button>
-            <button className="button primary" disabled={!canBind} type="button" onClick={onBind}>
-              {dialog.binding ? (
+              ) : dialog.binding ? (
                 <>
                   <span className="buttonSpinner" aria-hidden="true" />
                   Binding...
                 </>
               ) : (
-                'Bind source'
+                'Verify and Bind Source'
               )}
             </button>
           </div>
@@ -3991,6 +4064,27 @@ function UserSkillControlPanel({ isPreparingSync, isSyncing, syncAction, onOpenS
   );
 }
 
+function UserSkillVersionHistoryPanel({ loading, versions }) {
+  const versionCount = versions?.versions?.length || 0;
+
+  return (
+    <section className="skillDetailVersionHistory" aria-label="User skill version history">
+      <div className="skillDetailSectionHeader">
+        <span>Version history</span>
+        <small>{versionCount ? `${versionCount} versions` : loading ? 'Loading' : 'No versions loaded'}</small>
+      </div>
+      {loading ? <LoadingNotice compact>Loading local details...</LoadingNotice> : null}
+      {versionCount ? (
+        <RemoteVersionsPanel versions={versions} ariaLabel="User skill versions" />
+      ) : !loading ? (
+        <div className="skillDetailEmptyPanel">No version history loaded.</div>
+      ) : null}
+    </section>
+  );
+}
+
+const VERSION_HISTORY_PREVIEW_COUNT = 3;
+
 function RemoteVersionHistoryPanel({ loading, versions, onReviewRollback }) {
   const versionCount = versions?.versions?.length || 0;
 
@@ -4002,7 +4096,11 @@ function RemoteVersionHistoryPanel({ loading, versions, onReviewRollback }) {
       </div>
       {loading ? <LoadingNotice compact>Loading remote details...</LoadingNotice> : null}
       {versionCount ? (
-        <RemoteVersionsPanel versions={versions} onReviewRollback={onReviewRollback} />
+        <RemoteVersionsPanel
+          versions={versions}
+          ariaLabel="Remote skill versions"
+          onReviewRollback={onReviewRollback}
+        />
       ) : !loading ? (
         <div className="skillDetailEmptyPanel">No version history loaded.</div>
       ) : null}
@@ -4010,16 +4108,31 @@ function RemoteVersionHistoryPanel({ loading, versions, onReviewRollback }) {
   );
 }
 
-function RemoteVersionsPanel({ versions, onReviewRollback }) {
-  if (!versions?.versions?.length) {
+function RemoteVersionsPanel({ ariaLabel = 'Skill versions', versions, onReviewRollback }) {
+  const [expanded, setExpanded] = useState(false);
+  const versionRows = versions?.versions || [];
+  const versionResetKey = versionRows.map((version) => version.version).join('|');
+
+  useEffect(() => {
+    setExpanded(false);
+  }, [versions?.skillName, versionResetKey]);
+
+  if (!versionRows.length) {
     return null;
   }
 
+  const hiddenVersionCount = Math.max(0, versionRows.length - VERSION_HISTORY_PREVIEW_COUNT);
+  const hasHiddenVersions = hiddenVersionCount > 0;
+  const visibleVersions = expanded || !hasHiddenVersions
+    ? versionRows
+    : versionRows.slice(0, VERSION_HISTORY_PREVIEW_COUNT);
+
   return (
-    <div className="remoteVersionList" aria-label="Remote skill versions">
-      {versions.versions.map((version) => {
+    <div className="remoteVersionList" aria-label={ariaLabel}>
+      {visibleVersions.map((version) => {
         const versionMeta = [
           version.isCurrent ? 'Current' : version.kind,
+          version.message,
           version.updatedAt ? `Updated ${formatOperationTimestamp(version.updatedAt)}` : ''
         ].filter(Boolean).join(' · ');
 
@@ -4035,7 +4148,7 @@ function RemoteVersionsPanel({ versions, onReviewRollback }) {
             </span>
             {version.isCurrent ? (
               <span className="button secondary remoteVersionCurrentBadge">Active</span>
-            ) : (
+            ) : onReviewRollback ? (
               <button
                 className="button secondary"
                 type="button"
@@ -4043,10 +4156,19 @@ function RemoteVersionsPanel({ versions, onReviewRollback }) {
               >
                 Rollback
               </button>
-            )}
+            ) : null}
           </div>
         );
       })}
+      {hasHiddenVersions ? (
+        <button
+          className="remoteVersionToggle"
+          type="button"
+          onClick={() => setExpanded((current) => !current)}
+        >
+          {expanded ? 'Show fewer' : `Show ${hiddenVersionCount} more`}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -4359,7 +4481,9 @@ function SkillDetailDialog({
   remoteLoading,
   remoteUpdate,
   status,
+  userLoading,
   userSkillsGit,
+  userVersions,
   versions,
   onBindRemoteSource,
   onCheckUpdates,
@@ -4507,6 +4631,11 @@ function SkillDetailDialog({
                 />
                 <OperationHistoryPanel operations={operations} />
               </>
+            ) : skill.type === 'user' ? (
+              <UserSkillVersionHistoryPanel
+                loading={userLoading}
+                versions={userVersions}
+              />
             ) : null}
           </div>
 
@@ -4747,6 +4876,7 @@ function normalizeRemoteSkillVersions(result = {}) {
     kind: version.kind || '',
     shortLabel: version.shortLabel || version.short_label || version.version || '',
     updatedAt: version.updatedAt || version.updated_at || '',
+    message: version.message || '',
     path: version.path || ''
   }));
 

@@ -17,13 +17,17 @@ const agentWorkspaceIconCatalog = {
   },
   claude: {
     id: 'claude',
-    label: 'Claude',
+    label: 'Claude Code',
+    iconClass: 'claude-code',
+    iconAsset: 'claude-code',
     aliases: ['claude', 'anthropic'],
     pathMarkers: ['/.claude/skills', '~/.claude/skills']
   },
   'claude-code': {
     id: 'claude-code',
     label: 'Claude Code',
+    iconClass: 'claude-code',
+    iconAsset: 'claude-code',
     aliases: ['claude-code', 'claude code']
   },
   cursor: {

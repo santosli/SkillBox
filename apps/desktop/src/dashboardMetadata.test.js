@@ -81,7 +81,7 @@ test('derives installed agent icons from explicit agent and deployment fields', 
   );
 
   assert.deepEqual(skill.installedAgents, [
-    { id: 'claude', label: 'Claude' },
+    { id: 'claude', label: 'Claude Code', iconClass: 'claude-code', iconAsset: 'claude-code' },
     { id: 'codex', label: 'Codex', iconClass: 'codex-app', iconAsset: 'codex-app' },
     { id: 'cursor', label: 'Cursor' }
   ]);
