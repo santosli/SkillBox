@@ -245,8 +245,27 @@ test('skill detail metadata starts with deploy workspace', () => {
   assert.match(appSource, /<span>Deploy workspace<\/span>[\s\S]*<small>\{skill\.installedAgents\.length \|\| 0\} workspaces<\/small>/);
   assert.match(appSource, /<strong>Deployed to<\/strong>/);
   assert.match(appSource, /labelPrefix="Deploy workspaces"/);
-  assert.match(appSource, /className="button secondary skillDetailDeployButton" type="button"[\s\S]*Deploy/);
+  assert.match(appSource, /className="button secondary skillDetailDeployButton" type="button"[\s\S]*onClick=\{onOpenDeployDialog\}[\s\S]*Deploy/);
   assert.match(css, /\.skillDetailDeployRow\s*\{[^}]*justify-content:\s*space-between;/s);
+});
+
+test('deploy workspace dialog includes checked rows and unlink confirmation warning', () => {
+  assert.match(appSource, /function DeployWorkspaceDialog/);
+  assert.match(appSource, /workspaceDeployRequiresConfirmation\(changes\)/);
+  assert.match(appSource, /confirmUndeploy/);
+  assert.match(appSource, /Unchecked deployed workspaces will be unlinked/);
+  assert.match(appSource, /aria-label=\{`Deploy \$\{skill\.name\} to workspace/);
+  assert.match(css, /\.deployWorkspaceDialog\s*\{/);
+  assert.match(css, /\.deployWorkspaceWarning\s*\{[^}]*background:\s*#fff7ed;/s);
+});
+
+test('installed workspace icons use immediate custom tooltips instead of native title delay', () => {
+  assert.match(appSource, /data-tooltip=\{agent\.label\}/);
+  assert.match(appSource, /aria-label=\{agent\.label\}/);
+  assert.doesNotMatch(appSource, /className="skillAgentIcons" aria-label=\{label\} title=\{label\}/);
+  assert.match(css, /\.skillAgentIcon\[data-tooltip\]::after\s*\{/);
+  assert.match(css, /\.skillAgentIcon\[data-tooltip\]:hover::after,\s*\.skillAgentIcon\[data-tooltip\]:focus-visible::after\s*\{/);
+  assert.doesNotMatch(css, /\.skillAgentIcon\[data-tooltip\]::after\s*\{[^}]*transition-delay:\s*[1-9]/s);
 });
 
 test('skill detail tags live inside controls rail', () => {

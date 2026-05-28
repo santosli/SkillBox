@@ -1,3 +1,5 @@
+import { agentWorkspaceLabel } from './agentWorkspaceIcons.js';
+
 export const sidebarItems = [
   { id: 'dashboard', label: 'Dashboard', icon: 'gauge' },
   { id: 'workspaces', label: 'Workspaces', icon: 'folder-code' }
@@ -12,12 +14,6 @@ export const sidebarFooterItems = [
 ];
 
 export const workspaceCardMetaLabels = ['Scope', 'Skills', 'Imported'];
-
-const agentLabels = {
-  codex: 'Codex',
-  agents: 'Agents',
-  claude: 'Claude'
-};
 
 export function normalizeWorkspace(workspace = {}) {
   const canonicalPath = workspace.canonicalPath || workspace.canonical_path || '';
@@ -43,7 +39,7 @@ export function normalizeWorkspace(workspace = {}) {
     source,
     sourceLabel: labelize(source),
     agentId,
-    agentLabel: agentLabels[agentId] || labelize(agentId || 'local'),
+    agentLabel: agentWorkspaceLabel(agentId, labelize(agentId || 'local')),
     displayName: workspaceDisplayName(path || canonicalPath, agentId, kind),
     skillCount,
     importedSkillCount,
@@ -107,13 +103,78 @@ export function workspaceSkillReviewMeta(workspace = {}) {
   return { title, subtitle, noticePrefix };
 }
 
+export function workspaceDeployPickerRows(workspaces = [], deployments = []) {
+  const deployedRoots = new Set();
+
+  for (const deployment of deployments) {
+    for (const value of deploymentRootValues(deployment)) {
+      const key = workspacePathKey(value);
+      if (key) {
+        deployedRoots.add(key);
+      }
+    }
+  }
+
+  return normalizeWorkspaces(workspaces).map((workspace) => {
+    const aliases = [workspace.canonicalPath, workspace.path].map(workspacePathKey).filter(Boolean);
+    const isDeployed = aliases.some((alias) => deployedRoots.has(alias));
+
+    return {
+      ...workspace,
+      isDeployed,
+      isSelected: isDeployed
+    };
+  });
+}
+
+export function workspaceDeploymentChanges(rows = []) {
+  return rows.reduce(
+    (changes, row) => {
+      if (row.isSelected && !row.isDeployed) {
+        changes.deploy.push(row);
+      } else if (!row.isSelected && row.isDeployed) {
+        changes.undeploy.push(row);
+      }
+      return changes;
+    },
+    { deploy: [], undeploy: [] }
+  );
+}
+
+export function workspaceDeployRequiresConfirmation(changes = {}) {
+  return Array.isArray(changes.undeploy) && changes.undeploy.length > 0;
+}
+
+export function workspaceDeployChangeCount(changes = {}) {
+  return numberOrZero(changes.deploy?.length) + numberOrZero(changes.undeploy?.length);
+}
+
+function deploymentRootValues(deployment) {
+  if (!deployment) {
+    return [];
+  }
+  if (typeof deployment === 'string') {
+    return [deployment];
+  }
+  return [
+    deployment.targetRoot,
+    deployment.target_root,
+    deployment.targetPath,
+    deployment.target_path
+  ];
+}
+
+function workspacePathKey(value = '') {
+  return String(value || '').replace(/\/+$/g, '');
+}
+
 function compactWorkspacePath(value = '') {
   return String(value || 'Not available').replace('/Users/santos', '~');
 }
 
 function workspaceDisplayName(path = '', agentId = '', kind = 'user') {
   if (kind === 'global') {
-    return agentLabels[agentId] || pathSegment(path) || 'Local';
+    return agentWorkspaceLabel(agentId, pathSegment(path) || 'Local');
   }
 
   const segments = String(path || '').split('/').filter(Boolean);
@@ -121,14 +182,14 @@ function workspaceDisplayName(path = '', agentId = '', kind = 'user') {
   const parentName = segments.at(-2) || '';
 
   if (rootName === 'skills' && ['.codex', '.agents', '.claude'].includes(parentName)) {
-    return segments.at(-3) || agentLabels[agentId] || 'Local';
+    return segments.at(-3) || agentWorkspaceLabel(agentId, 'Local');
   }
 
   if (rootName === 'skills') {
-    return parentName || agentLabels[agentId] || 'Local';
+    return parentName || agentWorkspaceLabel(agentId, 'Local');
   }
 
-  return rootName || agentLabels[agentId] || 'Local';
+  return rootName || agentWorkspaceLabel(agentId, 'Local');
 }
 
 function pathSegment(path = '') {

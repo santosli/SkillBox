@@ -905,12 +905,13 @@ button {
 
 .skillAgentIcon {
   display: inline-flex;
+  position: relative;
   width: 24px;
   height: 24px;
   flex: 0 0 24px;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid #d9e2ee;
   border-radius: 7px;
   background: #ffffff;
@@ -921,6 +922,65 @@ button {
   letter-spacing: 0;
 }
 
+.skillAgentIcon[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 30;
+  width: max-content;
+  max-width: 220px;
+  overflow: hidden;
+  padding: 6px 8px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  border-radius: 7px;
+  background: #111827;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.22);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(3px);
+  transition: opacity 80ms ease, transform 80ms ease;
+}
+
+.skillAgentIcon[data-tooltip]::before {
+  content: '';
+  position: absolute;
+  right: 8px;
+  bottom: calc(100% + 4px);
+  z-index: 31;
+  width: 8px;
+  height: 8px;
+  background: #111827;
+  transform: rotate(45deg) translateY(3px);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 80ms ease, transform 80ms ease;
+}
+
+.skillAgentIcon[data-tooltip]:hover::after,
+.skillAgentIcon[data-tooltip]:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.skillAgentIcon[data-tooltip]:hover::before,
+.skillAgentIcon[data-tooltip]:focus-visible::before {
+  opacity: 1;
+  transform: rotate(45deg) translateY(0);
+}
+
+.skillAgentIcon[data-tooltip]:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.45);
+  outline-offset: 2px;
+}
+
 .skillAgentIcon img {
   display: block;
   width: 100%;
@@ -928,13 +988,28 @@ button {
   object-fit: contain;
 }
 
-.skillAgentIcon.codex {
+.skillAgentIcon.codex,
+.skillAgentIcon.codex-app {
+  border-color: rgba(59, 130, 246, 0.2);
+  background: #ffffff;
+  color: #1d4ed8;
+}
+
+.skillAgentIcon.codex img,
+.skillAgentIcon.codex-app img {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  opacity: 0.96;
+}
+
+.skillAgentIcon.codex-cli {
   border-color: rgba(15, 23, 42, 0.16);
   background: #111827;
   color: #ffffff;
 }
 
-.skillAgentIcon.codex img {
+.skillAgentIcon.codex-cli img {
   width: 16px;
   height: 16px;
   filter: invert(1);
@@ -971,6 +1046,12 @@ button {
   border-color: rgba(100, 116, 139, 0.24);
   background: #f1f5f9;
   color: #475569;
+}
+
+.skillAgentIcon.workspace {
+  border-color: rgba(37, 99, 235, 0.22);
+  background: #eff6ff;
+  color: #1d4ed8;
 }
 
 .skillFavoriteButton {
@@ -2027,6 +2108,18 @@ dd {
   box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
 }
 
+.deployWorkspaceDialog {
+  display: grid;
+  width: min(720px, calc(100vw - 64px));
+  max-height: min(760px, calc(100vh - 64px));
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid #dbe3ee;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
+}
+
 .syncDialog {
   display: grid;
   width: min(620px, calc(100vw - 64px));
@@ -2336,6 +2429,193 @@ dd {
 .skillDetailDeployButton {
   justify-self: start;
   min-width: 108px;
+}
+
+.deployWorkspaceForm {
+  display: grid;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+  gap: 14px;
+  overflow: hidden;
+  padding: 16px 18px 18px;
+}
+
+.deployWorkspaceToolbar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.deployWorkspaceChangeSummary {
+  display: inline-flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.deployWorkspaceChangeSummary span {
+  display: inline-flex;
+  height: 30px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 720;
+  padding: 0 10px;
+}
+
+.deployWorkspaceChangeSummary svg {
+  width: 14px;
+  height: 14px;
+}
+
+.deployWorkspaceList {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  overflow: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 10px;
+}
+
+.deployWorkspaceRow {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  min-width: 0;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #ffffff;
+  cursor: pointer;
+  padding: 12px;
+}
+
+.deployWorkspaceRow.deployed {
+  border-color: #bbf7d0;
+  background: #f7fff9;
+}
+
+.deployWorkspaceRow input {
+  position: absolute;
+  opacity: 0;
+}
+
+.deployWorkspaceCheck {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  background: #ffffff;
+  color: #ffffff;
+}
+
+.deployWorkspaceCheck svg {
+  width: 13px;
+  height: 13px;
+}
+
+.deployWorkspaceRow input:checked + .deployWorkspaceCheck {
+  border-color: #0a84ff;
+  background: #0a84ff;
+}
+
+.deployWorkspaceMain {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.deployWorkspaceTitle {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.deployWorkspaceTitle strong {
+  overflow: hidden;
+  color: #111827;
+  font-size: 14px;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deployWorkspaceMain code {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deployWorkspaceWarning {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 10px;
+  border: 1px solid #fed7aa;
+  border-radius: 10px;
+  background: #fff7ed;
+  color: #9a3412;
+  padding: 12px;
+}
+
+.deployWorkspaceWarning > svg {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+}
+
+.deployWorkspaceWarning div {
+  display: grid;
+  gap: 7px;
+}
+
+.deployWorkspaceWarning strong {
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.deployWorkspaceWarning span,
+.deployWorkspaceWarning label {
+  color: #9a3412;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.deployWorkspaceWarning label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.deployWorkspaceEmpty {
+  display: grid;
+  min-height: 150px;
+  place-content: center;
+  gap: 6px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #64748b;
+  text-align: center;
+}
+
+.deployWorkspaceEmpty strong {
+  color: #334155;
+  font-size: 14px;
 }
 
 .skillDetailAgentRow {

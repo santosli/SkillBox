@@ -11,6 +11,9 @@ const {
   sidebarIconConvention,
   workspaceMatchesTypeFilter,
   workspaceCounts,
+  workspaceDeploymentChanges,
+  workspaceDeployPickerRows,
+  workspaceDeployRequiresConfirmation,
   workspaceSkillReviewMeta,
   workspaceTypeTabs,
 } = workspaceModule;
@@ -33,7 +36,7 @@ test('normalizes workspace snake case fields and compact labels', () => {
   assert.equal(workspace.canonicalPath, '/Users/santos/project/.agents/skills');
   assert.equal(workspace.compactPath, '~/project/.agents/skills');
   assert.equal(workspace.kindLabel, 'User');
-  assert.equal(workspace.agentLabel, 'Agents');
+  assert.equal(workspace.agentLabel, 'Codex CLI');
   assert.equal(workspace.skillCount, 3);
   assert.equal(workspace.importedSkillCount, 2);
   assert.equal(workspace.lastScanErrorCount, 1);
@@ -49,6 +52,15 @@ test('derives workspace display names from agent roots and project directories',
       display_name: 'Codex Global'
     }).displayName,
     'Codex'
+  );
+  assert.equal(
+    normalizeWorkspace({
+      path: '/Users/santos/.agents/skills',
+      kind: 'global',
+      agent_id: 'agents',
+      display_name: 'Agents'
+    }).displayName,
+    'Codex CLI'
   );
   assert.equal(
     normalizeWorkspace({
@@ -121,6 +133,58 @@ test('builds workspace skill review metadata', () => {
     subtitle: '~/zone/audio-dialogue-web/.codex/skills',
     noticePrefix: 'audio-dialogue-web:'
   });
+});
+
+test('builds deploy picker rows with existing deployments checked', () => {
+  const rows = workspaceDeployPickerRows(
+    [
+      normalizeWorkspace({
+        canonical_path: '/Users/santos/project/.agents/skills',
+        path: '/Users/santos/project/.agents/skills',
+        kind: 'user',
+        agent_id: 'agents'
+      }),
+      normalizeWorkspace({
+        canonical_path: '/Users/santos/.codex/skills',
+        path: '/Users/santos/.codex/skills',
+        kind: 'global',
+        agent_id: 'codex'
+      })
+    ],
+    [{ target_root: '/Users/santos/project/.agents/skills' }]
+  );
+
+  assert.equal(rows[0].isDeployed, true);
+  assert.equal(rows[0].isSelected, true);
+  assert.equal(rows[1].isDeployed, false);
+  assert.equal(rows[1].isSelected, false);
+});
+
+test('computes deploy and undeploy changes from picker rows', () => {
+  const rows = workspaceDeployPickerRows(
+    [
+      normalizeWorkspace({
+        canonical_path: '/Users/santos/project/.agents/skills',
+        path: '/Users/santos/project/.agents/skills'
+      }),
+      normalizeWorkspace({
+        canonical_path: '/Users/santos/.codex/skills',
+        path: '/Users/santos/.codex/skills',
+        kind: 'global'
+      })
+    ],
+    [{ target_root: '/Users/santos/project/.agents/skills' }]
+  );
+  rows[0].isSelected = false;
+  rows[1].isSelected = true;
+
+  const changes = workspaceDeploymentChanges(rows);
+
+  assert.deepEqual(changes.deploy.map((workspace) => workspace.path), ['/Users/santos/.codex/skills']);
+  assert.deepEqual(changes.undeploy.map((workspace) => workspace.path), [
+    '/Users/santos/project/.agents/skills'
+  ]);
+  assert.equal(workspaceDeployRequiresConfirmation(changes), true);
 });
 
 test('workspace helpers do not expose a status field formatter', () => {

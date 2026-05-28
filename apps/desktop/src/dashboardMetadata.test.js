@@ -30,7 +30,9 @@ test('derives dashboard tags, agent label, source label, status, and favorite st
 
   assert.equal(skill.agentLabel, 'Codex');
   assert.equal(skill.sourceLabel, '~/.codex/skills');
-  assert.deepEqual(skill.installedAgents, [{ id: 'codex', label: 'Codex' }]);
+  assert.deepEqual(skill.installedAgents, [
+    { id: 'codex', label: 'Codex', iconClass: 'codex-app', iconAsset: 'codex-app' }
+  ]);
   assert.equal(skill.statusLabel, 'Update available');
   assert.equal(skill.statusTone, 'amber');
   assert.equal(skill.isFavorite, true);
@@ -50,8 +52,10 @@ test('derives user skill sync status and default general tag', () => {
     new Set()
   );
 
-  assert.equal(skill.agentLabel, 'Agents');
-  assert.deepEqual(skill.installedAgents, [{ id: 'agents', label: 'Agents' }]);
+  assert.equal(skill.agentLabel, 'Codex CLI');
+  assert.deepEqual(skill.installedAgents, [
+    { id: 'agents', label: 'Codex CLI', iconClass: 'codex-cli', iconAsset: 'codex-cli' }
+  ]);
   assert.equal(skill.statusLabel, 'Synced');
   assert.equal(skill.statusTone, 'green');
   assert.equal(skill.isFavorite, false);
@@ -78,8 +82,81 @@ test('derives installed agent icons from explicit agent and deployment fields', 
 
   assert.deepEqual(skill.installedAgents, [
     { id: 'claude', label: 'Claude' },
-    { id: 'codex', label: 'Codex' },
+    { id: 'codex', label: 'Codex', iconClass: 'codex-app', iconAsset: 'codex-app' },
     { id: 'cursor', label: 'Cursor' }
+  ]);
+});
+
+test('keeps separate workspace deployment icons for the same agent runtime', () => {
+  const skill = deriveDashboardSkill(
+    {
+      name: 'ui-ux-pro-max',
+      description: 'UI/UX design intelligence.',
+      type: 'remote',
+      deployments: [
+        { target_root: '/Users/santos/.codex/skills' },
+        { target_root: '/Users/santos/zone/audio-dialogue-web/.codex/skills' }
+      ]
+    },
+    { state: 'clean' },
+    normalizeRemoteSkillUpdates(null),
+    new Set(),
+    {},
+    [
+      {
+        path: '/Users/santos/.codex/skills',
+        canonical_path: '/Users/santos/.codex/skills',
+        kind: 'global',
+        agent_id: 'codex',
+        display_name: 'Codex'
+      },
+      {
+        path: '/Users/santos/zone/audio-dialogue-web/.codex/skills',
+        canonical_path: '/Users/santos/zone/audio-dialogue-web/.codex/skills',
+        kind: 'user',
+        agent_id: 'codex',
+        display_name: 'audio-dialogue-web'
+      }
+    ]
+  );
+
+  assert.deepEqual(skill.installedAgents, [
+    { id: 'codex', label: 'Codex', iconClass: 'codex-app', iconAsset: 'codex-app' },
+    {
+      id: 'workspace:/Users/santos/zone/audio-dialogue-web/.codex/skills',
+      label: 'audio-dialogue-web',
+      iconClass: 'workspace',
+      iconLabel: 'A',
+      workspace: true
+    }
+  ]);
+});
+
+test('uses the Codex CLI icon for global agents runtime deployments', () => {
+  const skill = deriveDashboardSkill(
+    {
+      name: 'git-merge-to-main',
+      description: 'Merge branches after review.',
+      type: 'user',
+      deployments: [{ target_root: '/Users/santos/.agents/skills' }]
+    },
+    { state: 'clean' },
+    normalizeRemoteSkillUpdates(null),
+    new Set(),
+    {},
+    [
+      {
+        path: '/Users/santos/.agents/skills',
+        canonical_path: '/Users/santos/.agents/skills',
+        kind: 'global',
+        agent_id: 'agents',
+        display_name: 'Agents'
+      }
+    ]
+  );
+
+  assert.deepEqual(skill.installedAgents, [
+    { id: 'agents', label: 'Codex CLI', iconClass: 'codex-cli', iconAsset: 'codex-cli' }
   ]);
 });
 
@@ -133,19 +210,21 @@ test('falls back to the current symlink deployment target for installed agent ic
   );
 
   assert.equal(skill.agentLabel, 'Local');
-  assert.deepEqual(skill.installedAgents, [{ id: 'codex', label: 'Codex' }]);
+  assert.deepEqual(skill.installedAgents, [
+    { id: 'codex', label: 'Codex', iconClass: 'codex-app', iconAsset: 'codex-app' }
+  ]);
 });
 
 test('builds stable dashboard filter options from derived skills', () => {
   const skills = [
     { displayTags: ['sync', 'github'], agentLabel: 'Codex' },
-    { displayTags: ['general'], agentLabel: 'Agents' },
+    { displayTags: ['general'], agentLabel: 'Codex CLI' },
     { displayTags: ['sync'], agentLabel: 'Local' }
   ];
 
   assert.deepEqual(dashboardFilterOptions(skills), {
     tags: ['sync', 'github', 'general'],
-    agents: ['Codex', 'Agents', 'Local']
+    agents: ['Codex', 'Codex CLI', 'Local']
   });
 });
 

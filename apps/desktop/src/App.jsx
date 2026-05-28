@@ -1,10 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
+  AlertTriangle,
+  Check,
   FolderCode,
   Gauge,
   Grid3X3,
   Import as ImportIcon,
+  Link2,
   List,
   MessageCircleQuestionMark,
   PackagePlus,
@@ -14,6 +17,7 @@ import {
   Settings2,
   Star,
   Trash2,
+  Unlink,
   X
 } from 'lucide-react';
 import desktopPackage from '../package.json';
@@ -70,6 +74,10 @@ import {
   sidebarItems,
   workspaceCardMetaLabels,
   workspaceCounts,
+  workspaceDeployChangeCount,
+  workspaceDeploymentChanges,
+  workspaceDeployPickerRows,
+  workspaceDeployRequiresConfirmation,
   workspaceMatchesTypeFilter,
   workspaceSkillReviewMeta,
   workspaceTypeTabs
@@ -92,6 +100,7 @@ const autoRefreshBlockedStatuses = new Set([
   'importing',
   'loading',
   'preparing_sync',
+  'deploying_skill',
   'scanning',
   'scanning_workspace_skills',
   'scanning_workspaces',
@@ -277,6 +286,13 @@ export default function App() {
     kind: 'user',
     error: ''
   });
+  const [deployDialog, setDeployDialog] = useState({
+    open: false,
+    skillName: '',
+    rows: [],
+    confirmUndeploy: false,
+    error: ''
+  });
   const [remoteSourceDialog, setRemoteSourceDialog] = useState({
     open: false,
     skillName: '',
@@ -356,10 +372,11 @@ export default function App() {
           userSkillsGit,
           remoteSkillUpdates,
           favoriteNameSet,
-          dashboardTagOverrides
+          dashboardTagOverrides,
+          workspaces
         )
       ),
-    [skills, userSkillsGit, remoteSkillUpdates, favoriteNameSet, dashboardTagOverrides]
+    [skills, userSkillsGit, remoteSkillUpdates, favoriteNameSet, dashboardTagOverrides, workspaces]
   );
   const dashboardOptions = useMemo(
     () => dashboardFilterOptions(dashboardSkills),
@@ -396,6 +413,9 @@ export default function App() {
 
   const selectedSkill = selectedName
     ? dashboardSkills.find((skill) => skill.name === selectedName)
+    : null;
+  const deployDialogSkill = deployDialog.open
+    ? dashboardSkills.find((skill) => skill.name === deployDialog.skillName)
     : null;
 
   const counts = useMemo(
@@ -1092,6 +1112,153 @@ export default function App() {
 
   function closeSkillDetail() {
     setSelectedName('');
+  }
+
+  function openDeployDialog(skill) {
+    setDeployDialog({
+      open: true,
+      skillName: skill.name,
+      rows: workspaceDeployPickerRows(workspaces, skill.deployments || []),
+      confirmUndeploy: false,
+      error: ''
+    });
+    setError('');
+    setNotice('');
+  }
+
+  function closeDeployDialog() {
+    if (status === 'deploying_skill') {
+      return;
+    }
+    setDeployDialog((current) => ({
+      ...current,
+      open: false,
+      skillName: '',
+      rows: [],
+      confirmUndeploy: false,
+      error: ''
+    }));
+  }
+
+  function toggleDeployWorkspace(canonicalPath) {
+    setDeployDialog((current) => ({
+      ...current,
+      rows: current.rows.map((row) =>
+        row.canonicalPath === canonicalPath ? { ...row, isSelected: !row.isSelected } : row
+      ),
+      confirmUndeploy: false,
+      error: ''
+    }));
+  }
+
+  function updateDeployUndeployConfirmation(confirmed) {
+    setDeployDialog((current) => ({
+      ...current,
+      confirmUndeploy: confirmed,
+      error: ''
+    }));
+  }
+
+  function refreshDeployDialogRows(nextWorkspaces) {
+    setDeployDialog((current) => {
+      if (!current.open) {
+        return current;
+      }
+
+      const selectedByPath = new Map(
+        current.rows.map((row) => [row.canonicalPath || row.path, row.isSelected])
+      );
+      const deployedRows = current.rows
+        .filter((row) => row.isDeployed)
+        .map((row) => ({ target_root: row.path }));
+      const rows = workspaceDeployPickerRows(nextWorkspaces, deployedRows).map((row) => {
+        const key = row.canonicalPath || row.path;
+        return selectedByPath.has(key) ? { ...row, isSelected: selectedByPath.get(key) } : row;
+      });
+
+      return { ...current, rows, confirmUndeploy: false, error: '' };
+    });
+  }
+
+  async function submitDeployDialog(event) {
+    event.preventDefault();
+    const changes = workspaceDeploymentChanges(deployDialog.rows);
+    const changeCount = workspaceDeployChangeCount(changes);
+    const needsUndeployConfirmation = workspaceDeployRequiresConfirmation(changes);
+
+    if (changeCount === 0) {
+      closeDeployDialog();
+      return;
+    }
+    if (needsUndeployConfirmation && !deployDialog.confirmUndeploy) {
+      setDeployDialog((current) => ({
+        ...current,
+        error: 'Confirm unlinking before applying these deployment changes.'
+      }));
+      return;
+    }
+
+    setStatus('deploying_skill');
+    setError('');
+    setNotice('');
+
+    if (!window.__TAURI_INTERNALS__) {
+      const nextDeployments = deployDialog.rows
+        .filter((row) => row.isSelected)
+        .map((row) => ({
+          target_root: row.path,
+          target_path: `${row.path}/${deployDialog.skillName}`,
+          mode: 'symlink'
+        }));
+      setSkills((current) =>
+        current.map((skill) =>
+          skill.name === deployDialog.skillName ? { ...skill, deployments: nextDeployments } : skill
+        )
+      );
+      setDeployDialog({ open: false, skillName: '', rows: [], confirmUndeploy: false, error: '' });
+      setNotice(`Updated deployments: ${changes.deploy.length} linked, ${changes.undeploy.length} unlinked.`);
+      setStatus('prototype');
+      return;
+    }
+
+    try {
+      for (const workspace of changes.deploy) {
+        await invoke('deploy_skill', {
+          skillName: deployDialog.skillName,
+          targetRoot: workspace.path
+        });
+      }
+      for (const workspace of changes.undeploy) {
+        await invoke('undeploy_skill', {
+          skillName: deployDialog.skillName,
+          targetRoot: workspace.path
+        });
+      }
+
+      const [state, workspaceRows] = await Promise.all([
+        invoke('managed_state'),
+        invoke('list_workspaces').catch(() => workspaces)
+      ]);
+      const managedSkills = state.skills?.map(normalizeSkill) || [];
+      const normalizedWorkspaces = normalizeWorkspaces(workspaceRows);
+
+      setSkills(managedSkills);
+      setWorkspaces(normalizedWorkspaces);
+      setPaths(normalizePaths(state.paths));
+      setIsFirstUse(Boolean(state.isFirstUse ?? state.is_first_use));
+      setSelectedName((currentName) =>
+        currentName && managedSkills.some((skill) => skill.name === currentName) ? currentName : ''
+      );
+      setDeployDialog({ open: false, skillName: '', rows: [], confirmUndeploy: false, error: '' });
+      setNotice(`Updated deployments: ${changes.deploy.length} linked, ${changes.undeploy.length} unlinked.`);
+      setStatus('ready');
+    } catch (deployError) {
+      setDeployDialog((current) => ({
+        ...current,
+        error: deployError.message || String(deployError) || 'Unable to update deployments.'
+      }));
+      setStatus('ready');
+    }
   }
 
   async function loadRemoteSkillContext(skillName) {
@@ -1827,6 +1994,10 @@ export default function App() {
         [...current.filter((item) => item.canonicalPath !== workspace.canonicalPath), workspace]
           .sort((left, right) => left.path.localeCompare(right.path))
       );
+      refreshDeployDialogRows(
+        [...workspaces.filter((item) => item.canonicalPath !== workspace.canonicalPath), workspace]
+          .sort((left, right) => left.path.localeCompare(right.path))
+      );
       setWorkspaceDialog({ open: false, path: '', kind: 'user', error: '' });
       setNotice('Workspace added.');
       setStatus('prototype');
@@ -1841,7 +2012,9 @@ export default function App() {
         }
       });
       const rows = await invoke('list_workspaces').catch(() => [workspace]);
-      setWorkspaces(normalizeWorkspaces(rows));
+      const normalizedRows = normalizeWorkspaces(rows);
+      setWorkspaces(normalizedRows);
+      refreshDeployDialogRows(normalizedRows);
       setWorkspaceDialog({ open: false, path: '', kind: 'user', error: '' });
       setNotice(`Workspace added: ${normalizeWorkspace(workspace).compactPath}`);
       setStatus('ready');
@@ -2003,6 +2176,7 @@ export default function App() {
           onBindRemoteSource={() => openRemoteSourceDialog(selectedSkill)}
           onCheckUpdates={() => refreshSkillStatuses({ skillName: selectedSkill.name })}
           onClose={closeSkillDetail}
+          onOpenDeployDialog={() => openDeployDialog(selectedSkill)}
           onOpenSyncSetup={openSyncDialog}
           onReviewRollback={(version) => openRemoteVersionReview(selectedSkill, 'rollback', version.version)}
           onReviewUpdate={() => openRemoteVersionReview(selectedSkill, 'update')}
@@ -2099,6 +2273,19 @@ export default function App() {
           onActivatePath={activateRemoteVersionPath}
           onApply={applyRemoteVersionChange}
           onClose={closeRemoteVersionDialog}
+        />
+      ) : null}
+
+      {deployDialog.open && deployDialogSkill ? (
+        <DeployWorkspaceDialog
+          dialog={deployDialog}
+          skill={deployDialogSkill}
+          status={status}
+          onAddWorkspace={openWorkspaceDialog}
+          onClose={closeDeployDialog}
+          onConfirmUndeployChange={updateDeployUndeployConfirmation}
+          onSubmit={submitDeployDialog}
+          onToggleWorkspace={toggleDeployWorkspace}
         />
       ) : null}
 
@@ -2428,24 +2615,58 @@ function SkillCard({ skill, onOpen, onToggleFavorite }) {
 function AgentIconStack({ agents = [], emptyLabel = 'No installed agent target', labelPrefix = 'Installed agents' }) {
   const visibleAgents = agents.slice(0, 4);
   const overflowCount = Math.max(agents.length - visibleAgents.length, 0);
+  const overflowLabel = overflowCount
+    ? agents
+        .slice(visibleAgents.length)
+        .map((agent) => agent.label)
+        .join(', ')
+    : '';
   const label = agents.length
     ? `${labelPrefix}: ${agents.map((agent) => agent.label).join(', ')}`
     : emptyLabel;
 
   return (
-    <span className="skillAgentIcons" aria-label={label} title={label}>
-      {visibleAgents.map((agent) => (
-        <span className={`skillAgentIcon ${agent.id}`} key={agent.id}>
-          {agent.id === 'codex' ? (
-            <img src={codexCliIcon} alt="" aria-hidden="true" />
-          ) : (
-            <span aria-hidden="true">{agentInitial(agent)}</span>
-          )}
+    <span className="skillAgentIcons" aria-label={label}>
+      {visibleAgents.map((agent) => {
+        const iconClass = agentIconClass(agent);
+        const iconSource = agentIconSource(agent, iconClass);
+
+        return (
+          <span
+            className={`skillAgentIcon ${iconClass}`}
+            key={agent.id}
+            data-tooltip={agent.label}
+            aria-label={agent.label}
+          >
+            {iconSource ? (
+              <img src={iconSource} alt="" aria-hidden="true" />
+            ) : (
+              <span aria-hidden="true">{agent.iconLabel || agentInitial(agent)}</span>
+            )}
+          </span>
+        );
+      })}
+      {overflowCount > 0 ? (
+        <span className="skillAgentIcon overflow" data-tooltip={overflowLabel} aria-label={overflowLabel}>
+          +{overflowCount}
         </span>
-      ))}
-      {overflowCount > 0 ? <span className="skillAgentIcon overflow">+{overflowCount}</span> : null}
+      ) : null}
     </span>
   );
+}
+
+function agentIconClass(agent) {
+  return agent.iconClass || agent.id || 'local';
+}
+
+function agentIconSource(agent, iconClass = '') {
+  if (agent.iconAsset === 'codex-app' || iconClass === 'codex-app' || agent.id === 'codex') {
+    return codexAppIcon;
+  }
+  if (agent.iconAsset === 'codex-cli' || iconClass === 'codex-cli' || agent.id === 'agents') {
+    return codexCliIcon;
+  }
+  return null;
 }
 
 function agentInitial(agent) {
@@ -2705,6 +2926,124 @@ function WorkspaceAddDialog({ dialog, status, onClose, onSubmit, onUpdate }) {
             </button>
             <button className="button primary" disabled={isBusy} type="submit">
               {isBusy ? 'Scanning...' : 'Add workspace'}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function DeployWorkspaceDialog({
+  dialog,
+  skill,
+  status,
+  onAddWorkspace,
+  onClose,
+  onConfirmUndeployChange,
+  onSubmit,
+  onToggleWorkspace
+}) {
+  const isBusy = status === 'deploying_skill';
+  const changes = workspaceDeploymentChanges(dialog.rows);
+  const requiresConfirmation = workspaceDeployRequiresConfirmation(changes);
+  const changeCount = workspaceDeployChangeCount(changes);
+  const canSubmit = changeCount > 0 && (!requiresConfirmation || dialog.confirmUndeploy);
+
+  return (
+    <div
+      className="modalBackdrop"
+      role="presentation"
+      onMouseDown={(event) => closeOnBackdropClick(event, onClose)}
+    >
+      <section className="deployWorkspaceDialog" role="dialog" aria-modal="true" aria-labelledby="deploy-workspace-title">
+        <div className="importSheetHeader">
+          <div>
+            <h2 id="deploy-workspace-title">Deploy to workspaces</h2>
+            <p>{skill.name}</p>
+          </div>
+          <button className="iconButton" disabled={isBusy} type="button" aria-label="Close deploy workspace dialog" onClick={onClose}>
+            <X aria-hidden="true" />
+          </button>
+        </div>
+
+        <form className="deployWorkspaceForm" onSubmit={onSubmit}>
+          <div className="deployWorkspaceToolbar">
+            <div className="deployWorkspaceChangeSummary" aria-label="Pending deployment changes">
+              <span>
+                <Link2 aria-hidden="true" />
+                {changes.deploy.length} link
+              </span>
+              <span>
+                <Unlink aria-hidden="true" />
+                {changes.undeploy.length} unlink
+              </span>
+            </div>
+            <button className="button secondary" disabled={isBusy} type="button" onClick={onAddWorkspace}>
+              <Plus aria-hidden="true" />
+              Add workspace
+            </button>
+          </div>
+
+          {dialog.rows.length > 0 ? (
+            <div className="deployWorkspaceList" aria-label="Workspace deploy targets">
+              {dialog.rows.map((workspace) => (
+                <label className={workspace.isDeployed ? 'deployWorkspaceRow deployed' : 'deployWorkspaceRow'} key={workspace.canonicalPath || workspace.path}>
+                  <input
+                    aria-label={`Deploy ${skill.name} to workspace ${workspace.displayName}`}
+                    checked={workspace.isSelected}
+                    disabled={isBusy}
+                    type="checkbox"
+                    onChange={() => onToggleWorkspace(workspace.canonicalPath)}
+                  />
+                  <span className="deployWorkspaceCheck" aria-hidden="true">
+                    <Check aria-hidden="true" />
+                  </span>
+                  <span className="deployWorkspaceMain">
+                    <span className="deployWorkspaceTitle">
+                      <strong>{workspace.displayName}</strong>
+                      <Badge tone={workspace.kind === 'global' ? 'blue' : 'green'}>{workspace.kindLabel}</Badge>
+                      {workspace.isDeployed ? <Badge tone="green">Linked</Badge> : null}
+                    </span>
+                    <code>{workspace.compactPath}</code>
+                  </span>
+                </label>
+              ))}
+            </div>
+          ) : (
+            <div className="deployWorkspaceEmpty">
+              <strong>No workspaces registered</strong>
+              <span>Add a workspace before deploying this skill.</span>
+            </div>
+          )}
+
+          {requiresConfirmation ? (
+            <div className="deployWorkspaceWarning">
+              <AlertTriangle aria-hidden="true" />
+              <div>
+                <strong>Unchecked deployed workspaces will be unlinked.</strong>
+                <span>SkillBox will remove only managed symlinks for {skill.name}; existing directories or foreign symlinks are refused.</span>
+                <label>
+                  <input
+                    checked={dialog.confirmUndeploy}
+                    disabled={isBusy}
+                    type="checkbox"
+                    onChange={(event) => onConfirmUndeployChange(event.target.checked)}
+                  />
+                  Confirm unlinking {changes.undeploy.length} workspace{changes.undeploy.length === 1 ? '' : 's'}
+                </label>
+              </div>
+            </div>
+          ) : null}
+
+          {dialog.error ? <div className="formError">{dialog.error}</div> : null}
+
+          <div className="remoteImportFooter">
+            <button className="button secondary" disabled={isBusy} type="button" onClick={onClose}>
+              Cancel
+            </button>
+            <button className="button primary" disabled={isBusy || !canSubmit} type="submit">
+              {isBusy ? 'Updating...' : 'Apply deployment'}
             </button>
           </div>
         </form>
@@ -3962,6 +4301,7 @@ function SkillDetailDialog({
   onBindRemoteSource,
   onCheckUpdates,
   onClose,
+  onOpenDeployDialog,
   onOpenSyncSetup,
   onReviewRollback,
   onReviewUpdate,
@@ -4049,7 +4389,8 @@ function SkillDetailDialog({
                   labelPrefix="Deploy workspaces"
                 />
               </div>
-              <button className="button secondary skillDetailDeployButton" type="button">
+              <button className="button secondary skillDetailDeployButton" type="button" onClick={onOpenDeployDialog}>
+                <Link2 aria-hidden="true" />
                 Deploy
               </button>
             </section>

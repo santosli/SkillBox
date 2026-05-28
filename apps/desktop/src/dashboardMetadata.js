@@ -1,5 +1,10 @@
+import {
+  agentWorkspaceIconForId,
+  agentWorkspaceIconForPath
+} from './agentWorkspaceIcons.js';
 import { remoteSkillRowStatus } from './skillStatusRefresh.js';
 import { userSkillRowStatus } from './userSkillsGitSync.js';
+import { normalizeWorkspaces } from './workspaces.js';
 
 const tagRules = [
   ['manage', ['manage', 'manager', 'organize', 'maintain']],
@@ -11,22 +16,13 @@ const tagRules = [
   ['sync', ['sync', 'import', 'update', 'deploy']]
 ];
 
-const agentCatalog = {
-  codex: { id: 'codex', label: 'Codex' },
-  agents: { id: 'agents', label: 'Agents' },
-  claude: { id: 'claude', label: 'Claude' },
-  'claude-code': { id: 'claude-code', label: 'Claude Code' },
-  cursor: { id: 'cursor', label: 'Cursor' },
-  copilot: { id: 'copilot', label: 'Copilot' },
-  openclaw: { id: 'openclaw', label: 'OpenClaw' }
-};
-
 export function deriveDashboardSkill(
   skill,
   userSkillsGit,
   remoteSkillUpdates,
   favoriteNames = new Set(),
-  tagOverrides = {}
+  tagOverrides = {},
+  workspaces = []
 ) {
   const status = dashboardSkillStatus(skill, userSkillsGit, remoteSkillUpdates);
   const sourceRoot = skill.sourceRoot || skill.source_root || '';
@@ -35,7 +31,7 @@ export function deriveDashboardSkill(
     ...skill,
     displayTags: displayTagsForSkill(skill, tagOverrides),
     agentLabel: deriveAgentLabel(sourceRoot),
-    installedAgents: deriveInstalledAgents(skill),
+    installedAgents: deriveInstalledAgents(skill, workspaces),
     sourceLabel: compactSourceLabel(sourceRoot),
     statusLabel: status.label,
     statusTone: status.tone,
@@ -183,15 +179,7 @@ function displayTagsForSkill(skill, tagOverrides) {
 }
 
 function deriveAgentLabel(sourceRoot = '') {
-  const source = String(sourceRoot);
-
-  if (source.includes('/.codex/skills') || source.includes('~/.codex/skills')) {
-    return 'Codex';
-  }
-  if (source.includes('/.agents/skills') || source.includes('~/.agents/skills')) {
-    return 'Agents';
-  }
-  return 'Local';
+  return agentWorkspaceIconForPath(sourceRoot)?.label || 'Local';
 }
 
 function compactSourceLabel(sourceRoot = '') {
@@ -202,7 +190,12 @@ function compactSourceLabel(sourceRoot = '') {
   return source || 'Local';
 }
 
-function deriveInstalledAgents(skill) {
+function deriveInstalledAgents(skill, workspaces = []) {
+  const workspaceAgents = deriveInstalledWorkspaceAgents(skill, workspaces);
+  if (workspaceAgents.length > 0) {
+    return workspaceAgents;
+  }
+
   const agents = [];
 
   addAgentValues(agents, skill.installedAgents);
@@ -219,10 +212,62 @@ function deriveInstalledAgents(skill) {
   addAgentFromPath(agents, skill.target_path);
 
   if (agents.length === 0 && isSkillDeployed(skill)) {
-    pushAgent(agents, agentCatalog.codex);
+    pushAgent(agents, agentWorkspaceIconForId('codex'));
   }
 
   return agents;
+}
+
+function deriveInstalledWorkspaceAgents(skill, workspaces = []) {
+  const normalizedWorkspaces = normalizeWorkspaces(workspaces);
+  const workspaceByPath = new Map();
+  const agents = [];
+
+  for (const workspace of normalizedWorkspaces) {
+    for (const key of [workspace.canonicalPath, workspace.path]) {
+      const normalizedKey = pathKey(key);
+      if (normalizedKey) {
+        workspaceByPath.set(normalizedKey, workspace);
+      }
+    }
+  }
+
+  for (const deployment of deploymentItems(skill)) {
+    const workspace = workspaceByPath.get(pathKey(deploymentRoot(deployment)));
+    if (!workspace) {
+      continue;
+    }
+    pushAgent(agents, workspaceAgentIcon(workspace));
+  }
+
+  return agents;
+}
+
+function workspaceAgentIcon(workspace) {
+  if (workspace.kind !== 'user') {
+    return normalizeAgent(workspace.agentId) || {
+      id: `workspace:${workspace.canonicalPath || workspace.path}`,
+      label: workspace.displayName || workspace.compactPath || workspace.path || 'Workspace',
+      iconClass: 'workspace',
+      iconLabel: workspaceInitial(workspace),
+      workspace: true
+    };
+  }
+
+  return {
+    id: `workspace:${workspace.canonicalPath || workspace.path}`,
+    label: workspace.displayName || workspace.compactPath || workspace.path || 'Workspace',
+    iconClass: 'workspace',
+    iconLabel: workspaceInitial(workspace),
+    workspace: true
+  };
+}
+
+function workspaceInitial(workspace = {}) {
+  return String(workspace.displayName || workspace.path || '?')
+    .trim()
+    .slice(0, 1)
+    .toUpperCase() || '?';
 }
 
 function addDeploymentAgents(agents, deployments) {
@@ -246,6 +291,25 @@ function addDeploymentAgents(agents, deployments) {
       deployment?.target_path
     ]);
   }
+}
+
+function deploymentItems(skill) {
+  return [
+    ...(Array.isArray(skill.deployments) ? skill.deployments : []),
+    ...(Array.isArray(skill.deploymentTargets) ? skill.deploymentTargets : []),
+    ...(Array.isArray(skill.deployment_targets) ? skill.deployment_targets : [])
+  ];
+}
+
+function deploymentRoot(deployment) {
+  if (typeof deployment === 'string') {
+    return deployment;
+  }
+  return deployment?.targetRoot || deployment?.target_root || '';
+}
+
+function pathKey(value = '') {
+  return String(value || '').replace(/\/+$/g, '');
 }
 
 function addAgentValues(agents, values) {
@@ -276,33 +340,8 @@ function normalizeAgent(value = '') {
   if (!normalized) {
     return null;
   }
-  if (normalized.includes('/.codex/skills') || normalized.includes('~/.codex/skills') || normalized === 'codex') {
-    return agentCatalog.codex;
-  }
-  if (
-    normalized.includes('/.agents/skills') ||
-    normalized.includes('~/.agents/skills') ||
-    normalized === 'agents'
-  ) {
-    return agentCatalog.agents;
-  }
-  if (normalized.includes('claude-code') || normalized.includes('claude code') || normalized === 'claude-code') {
-    return agentCatalog['claude-code'];
-  }
-  if (normalized.includes('claude') || normalized === 'anthropic') {
-    return agentCatalog.claude;
-  }
-  if (normalized.includes('cursor')) {
-    return agentCatalog.cursor;
-  }
-  if (normalized.includes('copilot')) {
-    return agentCatalog.copilot;
-  }
-  if (normalized.includes('openclaw')) {
-    return agentCatalog.openclaw;
-  }
 
-  return null;
+  return agentWorkspaceIconForPath(value) || agentWorkspaceIconForId(value);
 }
 
 function pushAgent(agents, agent) {
