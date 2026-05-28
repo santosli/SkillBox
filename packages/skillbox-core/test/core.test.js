@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import {
   deploySkill,
+  defaultManagedRoot,
   importSkill,
   parseGitHubSkillUrl,
   parseSkillMarkdown,
@@ -30,6 +31,19 @@ metadata:
   assert.equal(parsed.frontmatter.version, '1.2.3');
   assert.equal(parsed.frontmatter.description, 'A useful demo');
   assert.match(parsed.body, /# Demo/);
+});
+
+test('defaults managed root to hidden ~/.skillbox directory', () => {
+  const previous = process.env.SKILLBOX_HOME;
+  delete process.env.SKILLBOX_HOME;
+
+  assert.equal(path.basename(defaultManagedRoot()), '.skillbox');
+
+  if (previous === undefined) {
+    delete process.env.SKILLBOX_HOME;
+  } else {
+    process.env.SKILLBOX_HOME = previous;
+  }
 });
 
 test('normalizes GitHub tree, blob, raw, and API URLs', () => {

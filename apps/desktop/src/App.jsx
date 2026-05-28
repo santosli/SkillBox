@@ -3,7 +3,9 @@ import { invoke } from '@tauri-apps/api/core';
 import {
   AlertTriangle,
   Check,
+  ExternalLink,
   FolderCode,
+  FolderOpen,
   Gauge,
   Grid3X3,
   Import as ImportIcon,
@@ -84,10 +86,10 @@ import {
 } from './workspaces.js';
 
 const previewPaths = {
-  root: '~/SkillBox',
-  userSkillsRoot: '~/SkillBox/user-skills',
-  remoteSkillsRoot: '~/SkillBox/remote-skills',
-  databasePath: '~/SkillBox/skillbox.sqlite'
+  root: '~/.skillbox',
+  userSkillsRoot: '~/.skillbox/user-skills',
+  remoteSkillsRoot: '~/.skillbox/remote-skills',
+  databasePath: '~/.skillbox/skillbox.sqlite'
 };
 
 const previewPreferenceStorageKey = 'skillbox.skipLocalImportConfirmation';
@@ -413,6 +415,9 @@ export default function App() {
 
   const selectedSkill = selectedName
     ? dashboardSkills.find((skill) => skill.name === selectedName)
+    : null;
+  const selectedRemoteUpdate = selectedSkill
+    ? remoteSkillUpdates.statuses.find((item) => item.skillName === selectedSkill.name)
     : null;
   const deployDialogSkill = deployDialog.open
     ? dashboardSkills.find((skill) => skill.name === deployDialog.skillName)
@@ -1278,13 +1283,15 @@ export default function App() {
               version: 'manual-preview',
               is_current: true,
               kind: 'manual',
-              short_label: 'manual-preview'
+              short_label: 'manual-preview',
+              updated_at: Math.floor(Date.now() / 1000).toString()
             },
             {
               version: 'manual-previous',
               is_current: false,
               kind: 'manual',
-              short_label: 'manual-previous'
+              short_label: 'manual-previous',
+              updated_at: Math.floor((Date.now() - 86400000) / 1000).toString()
             }
           ]
         })
@@ -1297,6 +1304,7 @@ export default function App() {
               skill_name: skillName,
               source_type: 'github',
               current_version: 'manual-preview',
+              source_url: `https://github.com/santos/skillbox-preview/tree/main/remote-skills/${skillName}`,
               latest_sha: mockLatestSha,
               ref_kind: 'branch',
               tracking: true,
@@ -1540,6 +1548,42 @@ export default function App() {
     }
 
     window.open(sourceUrl, '_blank', 'noopener,noreferrer');
+  }
+
+  async function openRemoteSourceUrl(sourceUrl) {
+    const url = (sourceUrl || '').trim();
+    if (!url) return;
+
+    if (window.__TAURI_INTERNALS__) {
+      try {
+        await invoke('open_external_url', { url });
+        return;
+      } catch (viewError) {
+        setNotice(viewError.message || String(viewError));
+      }
+    }
+
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
+  async function openLocalSkillFolder(skill) {
+    const folderPath = String(skill?.path || '').trim();
+    if (!folderPath) {
+      setNotice('No local skill folder is available for this skill.');
+      return;
+    }
+
+    if (window.__TAURI_INTERNALS__) {
+      try {
+        await invoke('open_local_path', { path: folderPath });
+        return;
+      } catch (viewError) {
+        setNotice(viewError.message || String(viewError));
+        return;
+      }
+    }
+
+    setNotice(`Local folder: ${compactPath(folderPath)}`);
   }
 
   async function bindRemoteSourceCandidate(candidate) {
@@ -2170,16 +2214,19 @@ export default function App() {
           status={status}
           userSkillsGit={userSkillsGit}
           remoteLoading={Boolean(remoteContextLoading[selectedSkill.name])}
-          remoteUpdate={remoteSkillUpdates.statuses.find((item) => item.skillName === selectedSkill.name)}
+          remoteUpdate={selectedRemoteUpdate}
           versions={remoteVersions[selectedSkill.name] || null}
           operations={operationHistory[selectedSkill.name] || []}
           onBindRemoteSource={() => openRemoteSourceDialog(selectedSkill)}
           onCheckUpdates={() => refreshSkillStatuses({ skillName: selectedSkill.name })}
           onClose={closeSkillDetail}
           onOpenDeployDialog={() => openDeployDialog(selectedSkill)}
+          onOpenLocalFolder={openLocalSkillFolder}
+          onOpenSourceUrl={openRemoteSourceUrl}
           onOpenSyncSetup={openSyncDialog}
           onReviewRollback={(version) => openRemoteVersionReview(selectedSkill, 'rollback', version.version)}
-          onReviewUpdate={() => openRemoteVersionReview(selectedSkill, 'update')}
+          onReviewUpdate={() => openRemoteVersionReview(selectedSkill, 'update', selectedRemoteUpdate?.latestSha || '')}
+          sourceUrl={selectedRemoteUpdate?.sourceUrl || ''}
           onTagsChange={updateDashboardSkillTags}
           onToggleFavorite={toggleDashboardFavorite}
         />
@@ -3215,7 +3262,7 @@ function UserSkillsGitSettingsPanel({ status, userSkillsGit, onSave }) {
         </label>
         <PathList
           items={[
-            ['Repository', userSkillsGit.repoPath || '~/SkillBox/user-skills'],
+            ['Repository', userSkillsGit.repoPath || '~/.skillbox/user-skills'],
             ['Branch', userSkillsGit.branch || 'main'],
             ['State', userSyncLabel(userSkillsGit)]
           ]}
@@ -3840,6 +3887,7 @@ function RemoteSkillControlPanel({
   onReviewUpdate
 }) {
   const sourceMissing = remoteUpdate?.state === 'no_source';
+  const sourceLinked = Boolean(remoteUpdate && remoteUpdate.state !== 'no_source');
   const sourceLabel = sourceMissing
     ? 'No source configured'
     : remoteUpdate?.state === 'pinned'
@@ -3850,6 +3898,14 @@ function RemoteSkillControlPanel({
   const updateLabel = remoteUpdate?.stateLabel || 'Update not checked';
   const showUpdateSummary = remoteUpdate?.state !== 'no_source' && shouldShowRemoteUpdateSummary(remoteUpdate);
   const showReviewUpdate = remoteUpdate?.updateAvailable === true;
+  const updateSectionLabel = showReviewUpdate ? 'Ready to review' : updateLabel;
+  const updateSummaryTitle = remoteUpdate?.state === 'pinned'
+    ? 'Pinned source'
+    : showReviewUpdate
+      ? 'Version change'
+      : remoteUpdate?.stateLabel || remoteUpdate?.state;
+  const updateMessage =
+    showReviewUpdate && /update available/i.test(remoteUpdate?.message || '') ? '' : remoteUpdate?.message || '';
 
   return (
     <section className="remoteSkillPanel" aria-label="Remote skill controls">
@@ -3859,30 +3915,30 @@ function RemoteSkillControlPanel({
           <small>{sourceLabel}</small>
         </div>
         <p className="skillDetailControlCopy">
-          {sourceMissing
+          {sourceMissing || !remoteUpdate
             ? 'Bind a source before checking or applying remote updates.'
             : 'Source changes are linked without replacing the current version.'}
         </p>
         <button
-          className={sourceMissing ? 'button primary' : 'button secondary'}
+          className={sourceMissing || !remoteUpdate ? 'button primary' : 'button secondary'}
           type="button"
           onClick={onBindRemoteSource}
         >
-          Bind source
+          {sourceLinked ? 'Rebind source' : 'Bind source'}
         </button>
       </div>
 
       {!sourceMissing ? <div className="skillDetailControlSection">
         <div className="skillDetailSectionHeader">
           <span>Updates</span>
-          <small>{updateLabel}</small>
+          <small>{updateSectionLabel}</small>
         </div>
         {loading ? <LoadingNotice compact>Loading remote details...</LoadingNotice> : null}
         {showUpdateSummary ? (
           <div className="remoteVersionSummary">
-            <strong>{remoteUpdate.state === 'pinned' ? 'Pinned source' : remoteUpdate.stateLabel || remoteUpdate.state}</strong>
+            <strong>{updateSummaryTitle}</strong>
             <span>{remoteSkillUpdateVersionLabel(remoteUpdate)}</span>
-            {remoteUpdate.message ? <small>{remoteUpdate.message}</small> : null}
+            {updateMessage ? <small>{updateMessage}</small> : null}
           </div>
         ) : null}
         <div className="skillDetailControlActions">
@@ -3961,29 +4017,36 @@ function RemoteVersionsPanel({ versions, onReviewRollback }) {
 
   return (
     <div className="remoteVersionList" aria-label="Remote skill versions">
-      {versions.versions.map((version) => (
-        <div
-          className={`remoteVersionRow${version.isCurrent ? ' current' : ''}`}
-          aria-current={version.isCurrent ? 'true' : undefined}
-          key={version.version}
-        >
-          <span>
-            <strong>{version.shortLabel || version.version}</strong>
-            <small>{version.isCurrent ? 'Current' : version.kind}</small>
-          </span>
-          {version.isCurrent ? (
-            <span className="remoteVersionCurrentBadge">Active</span>
-          ) : (
-            <button
-              className="button secondary"
-              type="button"
-              onClick={() => onReviewRollback(version)}
-            >
-              Rollback
-            </button>
-          )}
-        </div>
-      ))}
+      {versions.versions.map((version) => {
+        const versionMeta = [
+          version.isCurrent ? 'Current' : version.kind,
+          version.updatedAt ? `Updated ${formatOperationTimestamp(version.updatedAt)}` : ''
+        ].filter(Boolean).join(' · ');
+
+        return (
+          <div
+            className={`remoteVersionRow${version.isCurrent ? ' current' : ''}`}
+            aria-current={version.isCurrent ? 'true' : undefined}
+            key={version.version}
+          >
+            <span>
+              <strong>{version.shortLabel || version.version}</strong>
+              <small>{versionMeta}</small>
+            </span>
+            {version.isCurrent ? (
+              <span className="button secondary remoteVersionCurrentBadge">Active</span>
+            ) : (
+              <button
+                className="button secondary"
+                type="button"
+                onClick={() => onReviewRollback(version)}
+              >
+                Rollback
+              </button>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -4302,9 +4365,12 @@ function SkillDetailDialog({
   onCheckUpdates,
   onClose,
   onOpenDeployDialog,
+  onOpenLocalFolder,
+  onOpenSourceUrl,
   onOpenSyncSetup,
   onReviewRollback,
   onReviewUpdate,
+  sourceUrl,
   onTagsChange,
   onToggleFavorite
 }) {
@@ -4361,27 +4427,68 @@ function SkillDetailDialog({
               <Badge tone={skill.type === 'user' ? 'green' : 'blue'}>{labelize(skill.type)}</Badge>
               <Badge tone={skill.statusTone}>{skill.statusLabel}</Badge>
             </div>
-            <h2 id="skill-detail-title">{skill.name}</h2>
+            <div className="skillDetailTitleRow">
+              <h2 id="skill-detail-title">{skill.name}</h2>
+              {skill.path ? (
+                <button
+                  aria-label={`Open ${skill.name} local folder`}
+                  className="button secondary skillDetailSourceButton"
+                  type="button"
+                  onClick={() => onOpenLocalFolder(skill)}
+                >
+                  <FolderOpen aria-hidden="true" />
+                  Folder
+                </button>
+              ) : null}
+              {sourceUrl ? (
+                <button
+                  aria-label={`Open ${skill.name} source`}
+                  className="button secondary skillDetailSourceButton"
+                  type="button"
+                  onClick={() => onOpenSourceUrl(sourceUrl)}
+                >
+                  <ExternalLink aria-hidden="true" />
+                  Source
+                </button>
+              ) : null}
+            </div>
             <p className="skillDetailDescription">
               {skill.description || 'No description in SKILL.md frontmatter.'}
             </p>
           </div>
-          <button className="iconButton skillDetailCloseButton" type="button" aria-label="Close skill detail" onClick={onClose}>
-            <X aria-hidden="true" />
-          </button>
+          <div className="skillDetailHeaderActions">
+            <button
+              aria-pressed={skill.isFavorite}
+              className={skill.isFavorite ? 'detailFavoriteButton active' : 'detailFavoriteButton'}
+              type="button"
+              onClick={() => onToggleFavorite(skill.name)}
+            >
+              <Star aria-hidden="true" />
+              {skill.isFavorite ? 'Favorited' : 'Favorite'}
+            </button>
+            <button className="iconButton skillDetailCloseButton" type="button" aria-label="Close skill detail" onClick={onClose}>
+              <X aria-hidden="true" />
+            </button>
+          </div>
         </header>
 
         <div className="skillDetailBodyGrid">
           <div className="skillDetailMetaColumn">
             <section className="skillDetailSection skillDetailDeploySection" aria-label="Deploy workspace">
               <div className="skillDetailSectionHeader">
-                <span>Deploy workspace</span>
-                <small>{skill.installedAgents.length || 0} workspaces</small>
+                <span>Workspace deployment</span>
+                <button className="button secondary compactAction" type="button" onClick={onOpenDeployDialog}>
+                  <Link2 aria-hidden="true" />
+                  Deploy
+                </button>
               </div>
-              <div className="skillDetailDeployRow">
-                <div>
-                  <strong>Deployed to</strong>
-                  <small>{skill.installedAgents.length ? 'Active runtime workspaces' : 'No workspace deployed'}</small>
+              <div className="skillDetailDeploySurface">
+                <div className="skillDetailDeploySummary">
+                  <span className="skillDetailDeployMetric">{skill.installedAgents.length || 0}</span>
+                  <div>
+                    <strong>Active workspaces</strong>
+                    <small>{skill.installedAgents.length ? 'Active runtime workspaces' : 'No workspace deployed'}</small>
+                  </div>
                 </div>
                 <AgentIconStack
                   agents={skill.installedAgents}
@@ -4389,10 +4496,6 @@ function SkillDetailDialog({
                   labelPrefix="Deploy workspaces"
                 />
               </div>
-              <button className="button secondary skillDetailDeployButton" type="button" onClick={onOpenDeployDialog}>
-                <Link2 aria-hidden="true" />
-                Deploy
-              </button>
             </section>
 
             {skill.type === 'remote' ? (
@@ -4435,6 +4538,7 @@ function SkillDetailDialog({
                 <div className="skillDetailTagInput">
                   <input
                     aria-label="Add tag"
+                    name="skill-detail-tag"
                     placeholder="new tag"
                     value={tagInput}
                     onChange={(event) => setTagInput(event.target.value)}
@@ -4465,17 +4569,6 @@ function SkillDetailDialog({
           </aside>
         </div>
 
-        <footer className="skillDetailActions">
-          <button
-            aria-pressed={skill.isFavorite}
-            className={skill.isFavorite ? 'detailFavoriteButton active' : 'detailFavoriteButton'}
-            type="button"
-            onClick={() => onToggleFavorite(skill.name)}
-          >
-            <Star aria-hidden="true" />
-            {skill.isFavorite ? 'Favorited' : 'Favorite'}
-          </button>
-        </footer>
       </section>
     </div>
   );
@@ -4653,6 +4746,7 @@ function normalizeRemoteSkillVersions(result = {}) {
     isCurrent: Boolean(version.isCurrent ?? version.is_current),
     kind: version.kind || '',
     shortLabel: version.shortLabel || version.short_label || version.version || '',
+    updatedAt: version.updatedAt || version.updated_at || '',
     path: version.path || ''
   }));
 

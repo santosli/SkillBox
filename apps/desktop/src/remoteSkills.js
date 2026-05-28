@@ -130,7 +130,15 @@ export function remoteSkillUpdateVersionLabel(remoteUpdate = {}, versions = {}) 
   const latest = remoteUpdate.latestSha || remoteUpdate.latest_sha || '';
 
   if (!current) return 'current unknown';
-  return latest ? `${current} -> ${latest}` : current;
+  const currentLabel = shortRemoteVersionRef(current);
+  const latestLabel = shortRemoteVersionRef(latest);
+  return latestLabel ? `${currentLabel} -> ${latestLabel}` : currentLabel;
+}
+
+export function shortRemoteVersionRef(ref = '') {
+  const value = String(ref || '').trim();
+  if (value.length <= 12 || !/^[0-9a-f]{16,}$/i.test(value)) return value;
+  return value.slice(0, 12);
 }
 
 export function shouldShowRemoteUpdateSummary(remoteUpdate = {}) {

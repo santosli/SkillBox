@@ -81,6 +81,7 @@ export function normalizeRemoteSkillUpdates(result) {
   const statuses = (result?.statuses || []).map((status) => ({
     skillName: status.skillName || status.skill_name || '',
     sourceType: status.sourceType || status.source_type || '',
+    sourceUrl: status.sourceUrl || status.source_url || status.url || '',
     currentVersion: status.currentVersion || status.current_version || '',
     installedSha: status.installedSha || status.installed_sha || '',
     latestSha: status.latestSha || status.latest_sha || '',

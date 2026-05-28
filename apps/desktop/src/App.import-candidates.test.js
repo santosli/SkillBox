@@ -60,7 +60,7 @@ test('user sync action retries failed push and syncs configured remotes', () => 
 
 test('normalizes user skills git status snake case fields', () => {
   const status = normalizeUserSkillsGitStatus({
-    repo_path: '/tmp/SkillBox/user-skills',
+    repo_path: '/tmp/.skillbox/user-skills',
     remote_url: 'git@example.com:santosli/my-skills.git',
     last_error: 'push failed',
     state: 'push_failed',
@@ -68,7 +68,7 @@ test('normalizes user skills git status snake case fields', () => {
   });
 
   assert.deepEqual(status, {
-    repoPath: '/tmp/SkillBox/user-skills',
+    repoPath: '/tmp/.skillbox/user-skills',
     remoteUrl: 'git@example.com:santosli/my-skills.git',
     branch: '',
     dirty: true,
@@ -93,14 +93,14 @@ test('normalizes changed paths from user skills git status', () => {
 
 test('normalizes user skills git changes and selects all files by default', () => {
   const changes = normalizeUserSkillsGitChanges({
-    repo_path: '/tmp/SkillBox/user-skills',
+    repo_path: '/tmp/.skillbox/user-skills',
     files: [
       { path: 'alpha/SKILL.md', status: ' M', diff: 'alpha diff' },
       { path: 'beta/SKILL.md', status: '??', diff: 'beta diff' }
     ]
   });
 
-  assert.equal(changes.repoPath, '/tmp/SkillBox/user-skills');
+  assert.equal(changes.repoPath, '/tmp/.skillbox/user-skills');
   assert.deepEqual(changes.selectedPaths, ['alpha/SKILL.md', 'beta/SKILL.md']);
   assert.equal(changes.activePath, 'alpha/SKILL.md');
   assert.equal(changes.files[1].label, 'Added');
@@ -320,6 +320,7 @@ test('remote skill row status follows refreshed update state', () => {
       },
       {
         skill_name: 'find-skills',
+        source_url: 'https://github.com/acme/skills/tree/main/skills/find-skills',
         state: 'update_available',
         update_available: true,
         latest_sha: 'abc123',
@@ -340,6 +341,10 @@ test('remote skill row status follows refreshed update state', () => {
   });
 
   assert.equal(updates.checkedAt, '1779840000');
+  assert.equal(
+    updates.statuses.find((status) => status.skillName === 'find-skills').sourceUrl,
+    'https://github.com/acme/skills/tree/main/skills/find-skills'
+  );
   assert.deepEqual(remoteSkillRowStatus({ name: 'find-skills', type: 'remote' }, updates), {
     label: 'Update available',
     tone: 'amber'
@@ -479,6 +484,16 @@ test('remote skill update summary falls back to listed current version', () => {
       { currentVersion: 'manual-74147eb6010a' }
     ),
     'abcdef -> 123456'
+  );
+  assert.equal(
+    remoteSkillUpdateVersionLabel(
+      {
+        currentVersion: 'e4243fbf7d9398722024f62850ece90fa0d5c693',
+        latestSha: 'b469d6954dd10be20d3e8d9bb59463584d42efbb'
+      },
+      {}
+    ),
+    'e4243fbf7d93 -> b469d6954dd1'
   );
 });
 

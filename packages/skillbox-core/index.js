@@ -16,7 +16,7 @@ export function expandHome(input) {
 }
 
 export function defaultManagedRoot() {
-  return expandHome(process.env.SKILLBOX_HOME || '~/SkillBox');
+  return expandHome(process.env.SKILLBOX_HOME || '~/.skillbox');
 }
 
 export function defaultRuntimeRoots() {

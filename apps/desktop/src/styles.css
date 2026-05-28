@@ -1,6 +1,8 @@
 :root {
   --dashboard-card-width: 360px;
   --dashboard-card-track: minmax(var(--dashboard-card-width), var(--dashboard-card-width));
+  --button-height: 38px;
+  --button-radius: 8px;
   color: #111827;
   background: #f7f8fa;
   font-family:
@@ -245,11 +247,11 @@ button {
 
 .button {
   display: inline-flex;
-  height: 38px;
+  height: var(--button-height);
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border-radius: 8px;
+  border-radius: var(--button-radius);
   cursor: pointer;
   font-size: 14px;
   font-weight: 620;
@@ -2148,13 +2150,13 @@ dd {
 
 .skillDetailDialog {
   display: grid;
-  width: min(780px, calc(100vw - 48px));
-  max-height: calc(100vh - 64px);
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: min(920px, calc(100vw - 48px));
+  max-height: min(800px, calc(100vh - 56px));
+  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid #dbe3ee;
   border-radius: 16px;
-  background: #f8fafc;
+  background: #ffffff;
   box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
 }
 
@@ -2165,14 +2167,14 @@ dd {
   justify-content: space-between;
   gap: 18px;
   border-bottom: 1px solid #e5e7eb;
-  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
-  padding: 22px 24px 20px;
+  background: #ffffff;
+  padding: 20px 24px 18px;
 }
 
 .skillDetailTitleBlock {
   display: grid;
   min-width: 0;
-  gap: 10px;
+  gap: 9px;
 }
 
 .skillDetailBadges {
@@ -2180,6 +2182,14 @@ dd {
   min-width: 0;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.skillDetailTitleRow {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
 }
 
 .skillDetailTitleBlock h2 {
@@ -2192,8 +2202,28 @@ dd {
   line-height: 1.15;
 }
 
+.skillDetailSourceButton {
+  min-width: 88px;
+  flex: 0 0 auto;
+  gap: 6px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.skillDetailSourceButton svg {
+  width: 14px;
+  height: 14px;
+}
+
 .skillDetailCloseButton {
   flex: 0 0 auto;
+}
+
+.skillDetailHeaderActions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
 }
 
 .skillDetailCloseButton svg {
@@ -2222,11 +2252,13 @@ dd {
 .skillDetailBodyGrid {
   display: grid;
   min-height: 0;
-  grid-template-columns: minmax(0, 1fr) 248px;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
   align-items: start;
-  gap: 16px;
-  overflow: auto;
-  padding: 16px;
+  gap: 18px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: #f8fafc;
+  padding: 18px 20px 20px;
 }
 
 .skillDetailMetaColumn {
@@ -2237,13 +2269,14 @@ dd {
 
 .skillDetailControlRail {
   display: grid;
+  position: sticky;
+  top: 0;
+  min-width: 0;
   align-content: start;
   gap: 12px;
-  border: 1px solid #dbe3ee;
-  border-radius: 14px;
-  background: #ffffff;
-  box-shadow: 0 14px 36px rgba(15, 23, 42, 0.08);
-  padding: 14px;
+  border-left: 1px solid #e2e8f0;
+  background: transparent;
+  padding: 4px 0 4px 18px;
 }
 
 .skillDetailSection,
@@ -2257,16 +2290,16 @@ dd {
 .skillDetailSection,
 .skillDetailVersionHistory {
   border: 1px solid #e2e8f0;
-  border-radius: 14px;
+  border-radius: 12px;
   background: #ffffff;
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.04);
-  padding: 14px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.035);
+  padding: 14px 16px;
 }
 
 .skillDetailSectionHeader {
   display: flex;
   min-width: 0;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
@@ -2389,26 +2422,48 @@ dd {
 }
 
 .skillDetailDeploySection {
-  gap: 14px;
+  gap: 12px;
 }
 
-.skillDetailDeployRow {
-  display: flex;
+.skillDetailDeploySurface {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   min-width: 0;
   align-items: center;
-  justify-content: space-between;
   gap: 16px;
   border-top: 1px solid #eef2f7;
   padding-top: 12px;
 }
 
-.skillDetailDeployRow > div {
+.skillDetailDeploySummary {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+.skillDetailDeploySummary > div {
   display: grid;
   min-width: 0;
   gap: 3px;
 }
 
-.skillDetailDeployRow strong {
+.skillDetailDeployMetric {
+  display: inline-grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  place-items: center;
+  border: 1px solid #ccfbf1;
+  border-radius: 10px;
+  background: #f0fdfa;
+  color: #0f766e;
+  font-size: 18px;
+  font-weight: 780;
+  line-height: 1;
+}
+
+.skillDetailDeploySummary strong {
   overflow: hidden;
   color: #111827;
   font-size: 13px;
@@ -2417,7 +2472,7 @@ dd {
   white-space: nowrap;
 }
 
-.skillDetailDeployRow small {
+.skillDetailDeploySummary small {
   overflow: hidden;
   color: #64748b;
   font-size: 12px;
@@ -2426,9 +2481,9 @@ dd {
   white-space: nowrap;
 }
 
-.skillDetailDeployButton {
-  justify-self: start;
-  min-width: 108px;
+.compactAction {
+  min-width: 96px;
+  padding: 0 12px;
 }
 
 .deployWorkspaceForm {
@@ -2635,21 +2690,10 @@ dd {
   flex: 0 0 auto;
 }
 
-.skillDetailActions {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
-  border-top: 1px solid #e5e7eb;
-  background: #ffffff;
-  padding: 12px 20px;
-}
-
 .remoteSkillPanel,
 .userSkillPanel {
   display: grid;
+  min-width: 0;
   align-content: start;
   gap: 12px;
 }
@@ -2721,6 +2765,7 @@ dd {
 .remoteVersionSummary,
 .operationHistoryPanel {
   display: grid;
+  min-width: 0;
   gap: 6px;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
@@ -2958,10 +3003,19 @@ dd {
 }
 
 .sourceBindingPreview small,
-.remoteVersionSummary span,
 .remoteVersionSummary small {
   color: #64748b;
   line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.remoteVersionSummary span {
+  min-width: 0;
+  overflow: hidden;
+  color: #64748b;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .remoteVersionList {
@@ -2974,11 +3028,16 @@ dd {
   min-width: 0;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
-  align-items: center;
+  align-items: start;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   background: #ffffff;
   padding: 12px 14px;
+}
+
+.remoteVersionRow .button {
+  align-self: center;
+  min-width: 88px;
 }
 
 .remoteVersionRow.current {
@@ -3018,20 +3077,14 @@ dd {
   color: #166534;
 }
 
-.remoteVersionCurrentBadge {
+.remoteVersionRow .remoteVersionCurrentBadge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   align-self: center;
-  min-height: 28px;
-  border: 1px solid #bbf7d0;
-  border-radius: 999px;
-  background: #ecfdf5;
+  cursor: default;
   color: #166534;
-  font-size: 11px;
-  font-weight: 750;
-  line-height: 1;
-  padding: 0 11px;
+  pointer-events: none;
 }
 
 .operationHistoryRow {
@@ -3058,12 +3111,12 @@ dd {
 
 .detailFavoriteButton {
   display: inline-flex;
-  height: 38px;
+  height: var(--button-height);
   align-items: center;
   justify-content: center;
   gap: 8px;
   border: 1px solid #dbe3ee;
-  border-radius: 8px;
+  border-radius: var(--button-radius);
   background: #ffffff;
   color: #475569;
   cursor: pointer;
@@ -3751,11 +3804,11 @@ dd {
 
 .iconButton {
   display: grid;
-  width: 32px;
-  height: 32px;
+  width: var(--button-height);
+  height: var(--button-height);
   place-items: center;
   border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  border-radius: var(--button-radius);
   background: #ffffff;
   color: #64748b;
   cursor: pointer;
@@ -4168,31 +4221,23 @@ dd {
   }
 
   .skillDetailControlRail {
-    order: 1;
+    position: static;
+    order: 2;
     border-left: 0;
-    border-bottom: 1px solid #e5e7eb;
+    border-top: 1px solid #e5e7eb;
+    padding: 16px 0 0;
   }
 
   .skillDetailMetaColumn {
-    order: 2;
+    order: 1;
   }
 
   .skillDetailVersionHistory {
-    order: 3;
     grid-template-columns: 1fr;
   }
 
   .skillDetailBodyGrid > .operationHistoryPanel {
     order: 4;
-  }
-
-  .skillDetailActions {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .skillDetailActions > button {
-    width: 100%;
   }
 
   .headerActions {

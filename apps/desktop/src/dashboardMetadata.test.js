@@ -200,7 +200,7 @@ test('falls back to the current symlink deployment target for installed agent ic
     {
       name: 'managed-skill',
       description: 'Managed SkillBox copy.',
-      sourceRoot: '/Users/santos/SkillBox/user-skills',
+      sourceRoot: '/Users/santos/.skillbox/user-skills',
       type: 'user',
       isSymlink: true
     },

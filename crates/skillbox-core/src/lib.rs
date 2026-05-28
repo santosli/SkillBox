@@ -342,6 +342,7 @@ pub enum RemoteSkillUpdateState {
 pub struct RemoteSkillUpdateStatus {
     pub skill_name: String,
     pub source_type: Option<String>,
+    pub source_url: Option<String>,
     pub current_version: Option<String>,
     pub installed_sha: Option<String>,
     pub latest_sha: Option<String>,
@@ -432,6 +433,7 @@ pub struct RemoteSkillVersion {
     pub is_current: bool,
     pub kind: String,
     pub short_label: String,
+    pub updated_at: String,
     pub path: PathBuf,
 }
 
@@ -539,6 +541,8 @@ struct ClaudeMarketplaceSkill {
 struct RemoteSkillSource {
     #[serde(rename = "type")]
     source_type: String,
+    #[serde(rename = "url", alias = "sourceUrl", alias = "source_url")]
+    source_url: Option<String>,
     path: Option<String>,
     #[serde(rename = "repoUrl", alias = "repo_url")]
     repo_url: Option<String>,
@@ -618,7 +622,7 @@ pub struct ImportBatchResult {
 pub fn default_managed_root() -> PathBuf {
     std::env::var_os("SKILLBOX_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| home_dir().join("SkillBox"))
+        .unwrap_or_else(|| home_dir().join(".skillbox"))
 }
 
 pub fn default_runtime_roots() -> Vec<PathBuf> {
@@ -999,6 +1003,8 @@ pub fn undeploy_skill(
     let managed_path = resolve_managed_skill_path(&paths, skill_name)?;
     let target_root = expand_home(target_root.as_ref().to_path_buf());
     let target_path = target_root.join(skill_name);
+    let alias_target_paths = workspace_symlink_paths_to_managed_skill(&target_root, &managed_path);
+    let mut target_paths_to_remove = Vec::new();
 
     match fs::symlink_metadata(&target_path) {
         Ok(metadata) => {
@@ -1018,10 +1024,27 @@ pub fn undeploy_skill(
                 ));
             }
 
-            fs::remove_file(&target_path).map_err(|error| error.to_string())?;
+            target_paths_to_remove.push(target_path.clone());
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(error.to_string()),
+    }
+
+    for alias_target_path in alias_target_paths {
+        if !target_paths_to_remove
+            .iter()
+            .any(|path| path == &alias_target_path)
+        {
+            target_paths_to_remove.push(alias_target_path);
+        }
+    }
+
+    let removed_target_path = target_paths_to_remove
+        .first()
+        .cloned()
+        .unwrap_or_else(|| target_path.clone());
+    for target_path_to_remove in target_paths_to_remove {
+        fs::remove_file(&target_path_to_remove).map_err(|error| error.to_string())?;
     }
 
     remove_deployment(&paths.database_path, skill_name, &target_root)?;
@@ -1029,7 +1052,7 @@ pub fn undeploy_skill(
         skill_name: skill_name.to_string(),
         managed_path,
         target_root,
-        target_path,
+        target_path: removed_target_path,
         mode: "symlink".to_string(),
     })
 }
@@ -1091,10 +1114,18 @@ fn merge_workspace_symlink_deployments(
 ) {
     for skill in skills {
         for workspace in workspaces {
-            let target_path = workspace.path.join(&skill.name);
-            if !workspace_target_is_current_symlink(&target_path, &skill.path) {
+            let exact_target_path = workspace.path.join(&skill.name);
+            let target_path =
+                if workspace_target_is_current_symlink(&exact_target_path, &skill.path) {
+                    Some(exact_target_path)
+                } else {
+                    workspace_symlink_paths_to_managed_skill(&workspace.path, &skill.path)
+                        .into_iter()
+                        .next()
+                };
+            let Some(target_path) = target_path else {
                 continue;
-            }
+            };
 
             let skill_deployments = deployments.entry(skill.name.clone()).or_default();
             if skill_deployments
@@ -1111,6 +1142,23 @@ fn merge_workspace_symlink_deployments(
             });
         }
     }
+}
+
+fn workspace_symlink_paths_to_managed_skill(
+    workspace_path: &Path,
+    managed_path: &Path,
+) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(workspace_path) else {
+        return Vec::new();
+    };
+
+    let mut target_paths = entries
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| workspace_target_is_current_symlink(path, managed_path))
+        .collect::<Vec<_>>();
+    target_paths.sort();
+    target_paths
 }
 
 fn workspace_target_is_current_symlink(target_path: &Path, managed_path: &Path) -> bool {
@@ -1683,12 +1731,17 @@ pub fn cached_remote_skill_updates(
             continue;
         }
 
+        let source_url = read_remote_source(&remote_root)
+            .ok()
+            .and_then(|source| remote_source_browser_url(&source));
         if let Some(status) = cached
             .statuses
             .iter()
             .find(|status| status.skill_name == skill_name)
         {
-            statuses.push(status.clone());
+            let mut status = status.clone();
+            status.source_url = source_url.or(status.source_url);
+            statuses.push(status);
         }
     }
 
@@ -1884,6 +1937,7 @@ pub fn list_remote_skill_versions(
             continue;
         }
         let version = entry.file_name().to_string_lossy().to_string();
+        let path = entry.path();
         versions.push(RemoteSkillVersion {
             short_label: short_version_label(&version),
             kind: if version.starts_with("manual-") {
@@ -1893,7 +1947,8 @@ pub fn list_remote_skill_versions(
             }
             .to_string(),
             is_current: version == current_version,
-            path: entry.path(),
+            updated_at: file_modified_timestamp(&path),
+            path,
             version,
         });
     }
@@ -2224,6 +2279,7 @@ fn no_source_remote_update_status(skill_name: &str) -> RemoteSkillUpdateStatus {
     RemoteSkillUpdateStatus {
         skill_name: skill_name.to_string(),
         source_type: None,
+        source_url: None,
         current_version: None,
         installed_sha: None,
         latest_sha: None,
@@ -2233,6 +2289,35 @@ fn no_source_remote_update_status(skill_name: &str) -> RemoteSkillUpdateStatus {
         state: RemoteSkillUpdateState::NoSource,
         message: Some("Remote source metadata is missing.".to_string()),
     }
+}
+
+fn remote_source_browser_url(source: &RemoteSkillSource) -> Option<String> {
+    if let Some(url) = source
+        .source_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return Some(url.to_string());
+    }
+
+    let repo_url = source.repo_url.as_deref()?.trim();
+    let repo = repo_url
+        .strip_prefix("https://github.com/")?
+        .trim_end_matches(".git")
+        .trim_end_matches('/');
+    let path = source.path.as_deref()?.trim().trim_matches('/');
+    if repo.is_empty() || path.is_empty() {
+        return None;
+    }
+
+    let reference = source
+        .reference
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("main");
+    Some(format!("https://github.com/{repo}/tree/{reference}/{path}"))
 }
 
 fn validate_remote_update_timeout_seconds(seconds: u32) -> Result<()> {
@@ -2263,6 +2348,7 @@ fn check_remote_skill_update_batch(
             handle.join().unwrap_or_else(|_| RemoteSkillUpdateStatus {
                 skill_name,
                 source_type: None,
+                source_url: None,
                 current_version: None,
                 installed_sha: None,
                 latest_sha: None,
@@ -2301,6 +2387,7 @@ fn preserve_cached_remote_status_on_failure(
     }
 
     let mut preserved = cached_status.clone();
+    preserved.source_url = status.source_url.or(preserved.source_url);
     let message = status
         .message
         .filter(|message| !message.trim().is_empty())
@@ -2328,6 +2415,7 @@ fn check_one_remote_skill_update(
             return RemoteSkillUpdateStatus {
                 skill_name: skill_name.to_string(),
                 source_type: None,
+                source_url: None,
                 current_version: None,
                 installed_sha: None,
                 latest_sha: None,
@@ -2347,11 +2435,13 @@ fn check_one_remote_skill_update(
     let installed_sha = source.installed_sha.clone();
     let latest_sha = source.latest_sha.clone();
     let ref_kind = source.ref_kind.clone();
+    let source_url = remote_source_browser_url(&source);
 
     if source.source_type != "github" {
         return RemoteSkillUpdateStatus {
             skill_name: skill_name.to_string(),
             source_type: Some(source.source_type),
+            source_url,
             current_version,
             installed_sha,
             latest_sha,
@@ -2371,6 +2461,7 @@ fn check_one_remote_skill_update(
         return RemoteSkillUpdateStatus {
             skill_name: skill_name.to_string(),
             source_type: Some(source.source_type),
+            source_url,
             current_version,
             installed_sha,
             latest_sha,
@@ -2404,6 +2495,7 @@ fn check_one_remote_skill_update(
         return RemoteSkillUpdateStatus {
             skill_name: skill_name.to_string(),
             source_type: Some(source.source_type),
+            source_url,
             current_version,
             installed_sha,
             latest_sha,
@@ -2422,6 +2514,7 @@ fn check_one_remote_skill_update(
             RemoteSkillUpdateStatus {
                 skill_name: skill_name.to_string(),
                 source_type: Some(source.source_type),
+                source_url,
                 current_version,
                 installed_sha,
                 latest_sha: Some(latest_sha),
@@ -2439,6 +2532,7 @@ fn check_one_remote_skill_update(
         Ok(None) => RemoteSkillUpdateStatus {
             skill_name: skill_name.to_string(),
             source_type: Some(source.source_type),
+            source_url,
             current_version,
             installed_sha,
             latest_sha,
@@ -2451,6 +2545,7 @@ fn check_one_remote_skill_update(
         Err(error) => RemoteSkillUpdateStatus {
             skill_name: skill_name.to_string(),
             source_type: Some(source.source_type),
+            source_url,
             current_version,
             installed_sha,
             latest_sha,
@@ -2567,6 +2662,14 @@ fn resolve_remote_version_change_target(
             resolve_remote_version_prefix(paths, &request.skill_name, target)
         }
         RemoteVersionChangeAction::Update => {
+            if let Some(target) = request
+                .target_version
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                return Ok(target.to_string());
+            }
             let source = read_remote_source(&paths.remote_skills_root.join(&request.skill_name))?;
             source
                 .latest_sha
@@ -3428,6 +3531,17 @@ fn operation_timestamp() -> String {
         .map(|duration| duration.as_secs())
         .unwrap_or_default();
     seconds.to_string()
+}
+
+fn file_modified_timestamp(path: &Path) -> String {
+    use std::time::UNIX_EPOCH;
+
+    fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs().to_string())
+        .unwrap_or_default()
 }
 
 fn load_operation(connection: &Connection, id: &str) -> Result<OperationRecord> {
@@ -4437,6 +4551,23 @@ description: \"Demo skill\"
     }
 
     #[test]
+    fn default_managed_root_uses_hidden_skillbox_directory() {
+        let previous = std::env::var_os("SKILLBOX_HOME");
+        std::env::remove_var("SKILLBOX_HOME");
+
+        let root = default_managed_root();
+
+        match previous {
+            Some(value) => std::env::set_var("SKILLBOX_HOME", value),
+            None => std::env::remove_var("SKILLBOX_HOME"),
+        }
+        assert_eq!(
+            root.file_name().and_then(|name| name.to_str()),
+            Some(".skillbox")
+        );
+    }
+
+    #[test]
     fn list_workspaces_initializes_empty_registry() {
         let managed_root = temp_dir("workspace-empty").join("SkillBox");
 
@@ -4747,6 +4878,37 @@ description: \"Demo skill\"
     }
 
     #[test]
+    fn undeploy_removes_workspace_alias_symlink() {
+        let root = temp_dir("undeploy-alias-link");
+        let source = root.join("source").join("dida-task-sync");
+        let managed_root = root.join("SkillBox");
+        let target_root = root.join("Pandora").join(".agents").join("skills");
+        make_skill(&source, "dida-task-sync", "Dida sync skill");
+        let imported = import_skill(&source, SkillKind::User, &managed_root).unwrap();
+        fs::create_dir_all(&target_root).unwrap();
+        add_workspace(
+            WorkspaceAddRequest {
+                path: target_root.clone(),
+                kind: WorkspaceKind::User,
+            },
+            &managed_root,
+        )
+        .unwrap();
+        let alias_path = target_root.join("dida-task-sync 2");
+        symlink_dir(&imported.managed_path, &alias_path).unwrap();
+
+        let state = managed_state(&managed_root).unwrap();
+        assert_eq!(state.skills[0].deployments.len(), 1);
+
+        let undeployment = undeploy_skill("dida-task-sync", &managed_root, &target_root).unwrap();
+
+        assert_eq!(undeployment.target_path, alias_path);
+        assert!(!undeployment.target_path.exists());
+        let state = managed_state(&managed_root).unwrap();
+        assert_eq!(state.skills[0].deployments.len(), 0);
+    }
+
+    #[test]
     fn undeploy_refuses_non_symlink_target() {
         let root = temp_dir("undeploy-non-symlink");
         let source = root.join("source").join("demo");
@@ -4846,6 +5008,35 @@ description: \"Demo skill\"
                 .target_root
                 .join("ui-ux-pro-max")
         );
+        assert_eq!(state.skills[0].deployments[0].mode, "symlink");
+    }
+
+    #[test]
+    fn managed_state_detects_workspace_alias_symlink_deployment() {
+        let root = temp_dir("managed-state-alias-deployment");
+        let source = root.join("source").join("dida-task-sync");
+        let managed_root = root.join("SkillBox");
+        let workspace_root = root.join("Pandora").join(".agents").join("skills");
+        make_skill(&source, "dida-task-sync", "Dida sync skill");
+        let imported = import_skill(&source, SkillKind::User, &managed_root).unwrap();
+        fs::create_dir_all(&workspace_root).unwrap();
+        add_workspace(
+            WorkspaceAddRequest {
+                path: workspace_root.clone(),
+                kind: WorkspaceKind::User,
+            },
+            &managed_root,
+        )
+        .unwrap();
+        let alias_path = workspace_root.join("dida-task-sync 2");
+        symlink_dir(&imported.managed_path, &alias_path).unwrap();
+
+        let state = managed_state(&managed_root).unwrap();
+
+        assert_eq!(state.skills.len(), 1);
+        assert_eq!(state.skills[0].deployments.len(), 1);
+        assert_eq!(state.skills[0].deployments[0].target_root, workspace_root);
+        assert_eq!(state.skills[0].deployments[0].target_path, alias_path);
         assert_eq!(state.skills[0].deployments[0].mode, "symlink");
     }
 
@@ -5492,6 +5683,7 @@ description: \"Demo skill\"
             &paths.remote_skills_root.join("tagged"),
             r#"{
               "type":"github",
+              "url":"https://github.com/acme/skills/tree/v1.0.0/skills/tagged",
               "repoUrl":"https://github.com/acme/skills.git",
               "ref":"v1.0.0",
               "refKind":"tag",
@@ -5515,6 +5707,10 @@ description: \"Demo skill\"
         let tagged = remote_status(&result.statuses, "tagged");
         assert_eq!(tagged.state, RemoteSkillUpdateState::Pinned);
         assert!(!tagged.update_available);
+        assert_eq!(
+            tagged.source_url.as_deref(),
+            Some("https://github.com/acme/skills/tree/v1.0.0/skills/tagged")
+        );
         assert_eq!(tagged.message.as_deref(), Some("Pinned GitHub source."));
         assert!(!tagged.tracking);
 
@@ -5760,6 +5956,11 @@ description: \"Demo skill\"
         assert_eq!(versions.versions.len(), 1);
         assert!(versions.versions[0].is_current);
         assert!(versions.versions[0].version.starts_with("manual-"));
+        assert!(!versions.versions[0].updated_at.is_empty());
+        assert!(versions.versions[0]
+            .updated_at
+            .chars()
+            .all(|character| character.is_ascii_digit()));
     }
 
     #[test]
@@ -5891,6 +6092,51 @@ description: \"Demo skill\"
             .join("versions")
             .join(&preview.to_version)
             .exists());
+    }
+
+    #[test]
+    fn remote_version_preview_update_honors_explicit_target_version() {
+        let root = temp_dir("remote-preview-update-explicit-target");
+        let managed_root = root.join("SkillBox");
+        let paths = ensure_managed_layout(&managed_root).unwrap();
+        let source = root.join("local").join("find-skills");
+        make_skill(&source, "find-skills", "Find skills");
+        import_skill(&source, SkillKind::Remote, &managed_root).unwrap();
+        let current_version = current_remote_version(&paths, "find-skills").unwrap();
+        let remote_root = paths.remote_skills_root.join("find-skills");
+        let target_version = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let target_path = remote_root.join("versions").join(target_version);
+        copy_skill_dir(&source, &target_path).unwrap();
+        fs::write(
+            target_path.join("SKILL.md"),
+            "---\nname: find-skills\ndescription: Find skills\n---\nUpdated body\n",
+        )
+        .unwrap();
+        write_remote_source_with_json(
+            &remote_root,
+            &format!(
+                r#"{{
+                  "type":"github",
+                  "currentVersion":"{current_version}",
+                  "latestSha":"{current_version}"
+                }}"#
+            ),
+        );
+
+        let preview = preview_remote_version_change(
+            RemoteVersionChangeRequest {
+                skill_name: "find-skills".to_string(),
+                action: RemoteVersionChangeAction::Update,
+                target_version: Some(target_version.to_string()),
+                actor: "cli".to_string(),
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        assert_eq!(preview.from_version, current_version);
+        assert_eq!(preview.to_version, target_version);
+        assert!(preview.files.iter().any(|file| file.path == "SKILL.md"));
     }
 
     #[test]

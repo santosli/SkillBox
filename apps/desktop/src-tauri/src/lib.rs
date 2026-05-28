@@ -1,4 +1,5 @@
 use serde_json::Value;
+use std::path::PathBuf;
 
 fn validate_external_github_url(url: &str) -> Result<&str, String> {
     let trimmed = url.trim();
@@ -30,6 +31,43 @@ fn open_external_url(url: String) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("Browser open command failed with status {status}."))
+    }
+}
+
+fn validate_local_folder_path(path: &str) -> Result<PathBuf, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed.chars().any(|character| character == '\0') {
+        return Err("Invalid local folder path.".to_string());
+    }
+
+    let path = PathBuf::from(trimmed);
+    if !path.is_absolute() {
+        return Err("Only absolute local folder paths can be opened.".to_string());
+    }
+
+    let metadata = std::fs::metadata(&path)
+        .map_err(|error| format!("Local skill folder does not exist: {error}"))?;
+    if !metadata.is_dir() {
+        return Err("Local skill path is not a folder.".to_string());
+    }
+
+    Ok(path)
+}
+
+#[tauri::command]
+fn open_local_path(path: String) -> Result<(), String> {
+    let path = validate_local_folder_path(&path)?;
+    let status = std::process::Command::new("open")
+        .arg(&path)
+        .status()
+        .map_err(|error| format!("Unable to open local folder: {error}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Local folder open command failed with status {status}."
+        ))
     }
 }
 
@@ -327,6 +365,7 @@ pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             open_external_url,
+            open_local_path,
             managed_paths,
             managed_state,
             managed_preferences,
@@ -365,7 +404,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_external_github_url;
+    use super::{validate_external_github_url, validate_local_folder_path};
 
     #[test]
     fn validates_github_https_urls_for_external_open() {
@@ -381,5 +420,21 @@ mod tests {
         assert!(validate_external_github_url("https://example.com/owner/repo").is_err());
         assert!(validate_external_github_url("http://github.com/owner/repo").is_err());
         assert!(validate_external_github_url("https://github.com/owner repo").is_err());
+    }
+
+    #[test]
+    fn validates_existing_absolute_local_folders() {
+        let cwd = std::env::current_dir().unwrap();
+
+        assert_eq!(
+            validate_local_folder_path(cwd.to_str().unwrap()).unwrap(),
+            cwd
+        );
+    }
+
+    #[test]
+    fn rejects_non_local_folder_paths() {
+        assert!(validate_local_folder_path("https://github.com/owner/repo").is_err());
+        assert!(validate_local_folder_path("relative/path").is_err());
     }
 }
