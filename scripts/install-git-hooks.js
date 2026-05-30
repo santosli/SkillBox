@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
 
-const strictInstall = process.env.npm_lifecycle_event === 'hooks:install' || process.argv.includes('--strict');
-
 function runGit(args) {
   return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 }
@@ -36,5 +34,5 @@ try {
   process.stdout.write('Git hooks path set to .githooks\n');
 } catch {
   process.stderr.write('Unable to set Git hooks path. Run `git config core.hooksPath .githooks` from the repository root.\n');
-  process.exitCode = strictInstall ? 1 : 0;
+  process.exitCode = 1;
 }
