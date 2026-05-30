@@ -236,6 +236,27 @@ test('remote update preview command runs off the command handler', () => {
   assert.match(previewCommand, /tauri::async_runtime::spawn_blocking/);
 });
 
+test('blocking desktop commands run off the command handler', () => {
+  for (const commandName of [
+    'sync_user_skills_git',
+    'import_candidates',
+    'apply_remote_version_change',
+    'scan_workspaces'
+  ]) {
+    const commandStart = tauriSource.indexOf(`async fn ${commandName}`);
+    const nextCommandStart = tauriSource.indexOf('#[tauri::command]', commandStart + 1);
+    const command = tauriSource.slice(commandStart, nextCommandStart);
+
+    assert.ok(commandStart > 0, `${commandName} should be async`);
+    assert.match(command, /tauri::async_runtime::spawn_blocking/, `${commandName} should spawn blocking work`);
+  }
+});
+
+test('desktop startup reports run errors without expect panic', () => {
+  assert.doesNotMatch(tauriSource, /\.expect\("failed to run SkillBox"\)/);
+  assert.match(tauriSource, /eprintln!\("failed to run SkillBox: \{error\}"\)/);
+});
+
 test('remote skill async operations show loading and no-change states', () => {
   assert.match(appSource, /remoteContextLoading/);
   assert.match(appSource, /Loading remote details/);

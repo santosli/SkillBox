@@ -143,9 +143,14 @@ fn scan_workspace_import_candidates(path: String) -> Result<Value, String> {
 }
 
 #[tauri::command]
-fn import_candidates(items: Vec<skillbox_core::ImportRequestItem>) -> Result<Value, String> {
-    let result = skillbox_core::import_candidates(items, skillbox_core::default_managed_root())?;
-    serde_json::to_value(result).map_err(|error| error.to_string())
+async fn import_candidates(items: Vec<skillbox_core::ImportRequestItem>) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result =
+            skillbox_core::import_candidates(items, skillbox_core::default_managed_root())?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Import candidates task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -204,10 +209,16 @@ fn set_user_skills_git_remote(
 }
 
 #[tauri::command]
-fn sync_user_skills_git(request: skillbox_core::UserSkillsSyncRequest) -> Result<Value, String> {
-    let result =
-        skillbox_core::sync_user_skills_git(request, skillbox_core::default_managed_root())?;
-    serde_json::to_value(result).map_err(|error| error.to_string())
+async fn sync_user_skills_git(
+    request: skillbox_core::UserSkillsSyncRequest,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result =
+            skillbox_core::sync_user_skills_git(request, skillbox_core::default_managed_root())?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("User skills sync task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -332,12 +343,18 @@ async fn preview_remote_version_change(
 }
 
 #[tauri::command]
-fn apply_remote_version_change(
+async fn apply_remote_version_change(
     request: skillbox_core::RemoteVersionChangeApplyRequest,
 ) -> Result<Value, String> {
-    let result =
-        skillbox_core::apply_remote_version_change(request, skillbox_core::default_managed_root())?;
-    serde_json::to_value(result).map_err(|error| error.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = skillbox_core::apply_remote_version_change(
+            request,
+            skillbox_core::default_managed_root(),
+        )?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Remote version apply task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -353,9 +370,13 @@ fn list_workspaces() -> Result<Value, String> {
 }
 
 #[tauri::command]
-fn scan_workspaces() -> Result<Value, String> {
-    let result = skillbox_core::scan_workspaces(skillbox_core::default_managed_root())?;
-    serde_json::to_value(result).map_err(|error| error.to_string())
+async fn scan_workspaces() -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = skillbox_core::scan_workspaces(skillbox_core::default_managed_root())?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Workspace scan task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -371,7 +392,7 @@ fn forget_workspace(path: String) -> Result<Value, String> {
 }
 
 pub fn run() {
-    tauri::Builder::default()
+    let result = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             open_external_url,
             open_local_path,
@@ -408,8 +429,12 @@ pub fn run() {
             add_workspace,
             forget_workspace
         ])
-        .run(tauri::generate_context!())
-        .expect("failed to run SkillBox");
+        .run(tauri::generate_context!());
+
+    if let Err(error) = result {
+        eprintln!("failed to run SkillBox: {error}");
+        std::process::exit(1);
+    }
 }
 
 #[cfg(test)]
