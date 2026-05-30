@@ -6,7 +6,6 @@ import {
   deploySkill,
   ensureManagedLayout,
   importSkill,
-  indexSkills,
   installRemoteSkillFromGitHub,
   managedPaths,
   parseGitHubSkillUrl,
@@ -40,11 +39,8 @@ async function run(commandName, commandArgs) {
     case 'init':
       return ensureManagedLayout(getOption(commandArgs, '--managed-root') || defaultManagedRoot());
     case 'scan': {
-      const managedRoot = getOption(commandArgs, '--managed-root') || defaultManagedRoot();
       const roots = positional(commandArgs);
-      const scan = scanSkillRoots(roots.length ? roots : defaultRuntimeRoots());
-      const indexed = indexSkills(scan.skills, managedRoot);
-      return { ...scan, indexed };
+      return scanSkillRoots(roots.length ? roots : defaultRuntimeRoots());
     }
     case 'import': {
       const sourceDir = positional(commandArgs)[0];

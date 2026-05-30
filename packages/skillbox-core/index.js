@@ -20,7 +20,7 @@ export function defaultManagedRoot() {
 }
 
 export function defaultRuntimeRoots() {
-  return [expandHome('~/.codex/skills'), expandHome('~/.agents/skills')];
+  return [expandHome('~/.codex/skills'), expandHome('~/.agents/skills'), expandHome('~/.claude/skills')];
 }
 
 export function managedPaths(managedRoot = defaultManagedRoot()) {
@@ -286,6 +286,7 @@ export function deploySkill({ skillName, managedRoot = defaultManagedRoot(), tar
 }
 
 export function parseGitHubSkillUrl(input) {
+  rejectRawUrlPathTraversal(input);
   const url = new URL(input);
   let owner;
   let repo;
@@ -301,9 +302,9 @@ export function parseGitHubSkillUrl(input) {
 
     if (parts[2] === 'tree' || parts[2] === 'blob') {
       kind = parts[2];
-      ref = parts[3] || ref;
-      skillPath = parts.slice(4).join('/');
-      if (kind === 'blob') skillPath = stripSkillMd(skillPath);
+      const parsed = splitRefAndSkillPath(parts.slice(3));
+      ref = parsed.ref;
+      skillPath = stripSkillMd(parsed.path);
     } else if (parts.length > 2) {
       skillPath = parts.slice(2).join('/');
     }
@@ -313,8 +314,9 @@ export function parseGitHubSkillUrl(input) {
     kind = 'raw';
     owner = parts[0];
     repo = trimGitSuffix(parts[1]);
-    ref = parts[2];
-    skillPath = stripSkillMd(parts.slice(3).join('/'));
+    const parsed = splitRefAndSkillPath(parts.slice(2));
+    ref = parsed.ref;
+    skillPath = stripSkillMd(parsed.path);
   } else if (url.hostname === 'api.github.com') {
     const parts = url.pathname.split('/').filter(Boolean);
     if (parts[0] !== 'repos' || parts[3] !== 'contents') {
@@ -332,6 +334,8 @@ export function parseGitHubSkillUrl(input) {
   if (!owner || !repo || !skillPath) {
     throw new Error('GitHub URL must point to a skill directory or SKILL.md file');
   }
+  validateRepoRelativePath(skillPath);
+  validateGitReference(ref);
 
   return {
     owner,
@@ -363,6 +367,7 @@ export function installRemoteSkillFromGitHub({
       '--sparse',
       '--branch',
       source.ref,
+      '--',
       source.repoUrl,
       repoDir
     ], { stdio: 'pipe' });
@@ -417,9 +422,10 @@ export function checkRemoteUpdates({ managedRoot = defaultManagedRoot(), skillNa
     const sourcePath = path.join(paths.remoteSkillsRoot, entry.name, 'source.json');
     if (!fs.existsSync(sourcePath)) continue;
     const source = readJson(sourcePath);
+    validateRemoteSource(source);
     if (source.type !== 'github') continue;
 
-    const remoteLine = execFileSync('git', ['ls-remote', source.repoUrl, source.ref], {
+    const remoteLine = execFileSync('git', ['ls-remote', '--', source.repoUrl, source.ref], {
       encoding: 'utf8'
     }).trim();
     const latestSha = remoteLine.split(/\s+/)[0] || '';
@@ -440,7 +446,11 @@ export function rollbackRemoteSkill({ skillName, toSha, managedRoot = defaultMan
   const safeName = validateSkillName(skillName);
   const remoteRoot = path.join(paths.remoteSkillsRoot, safeName);
   const versionsRoot = path.join(remoteRoot, 'versions');
-  const match = fs.readdirSync(versionsRoot).find((version) => version === toSha || version.startsWith(toSha));
+  const versions = fs.readdirSync(versionsRoot);
+  const exact = versions.find((version) => version === toSha);
+  const prefixMatches = exact ? [] : versions.filter((version) => version.startsWith(toSha));
+  if (prefixMatches.length > 1) throw new Error(`Version prefix is ambiguous: ${toSha}`);
+  const match = exact || prefixMatches[0];
   if (!match) throw new Error(`No version found for ${safeName}: ${toSha}`);
   const versionPath = path.join(versionsRoot, match);
   updateCurrentSymlink(remoteRoot, versionPath);
@@ -524,18 +534,53 @@ function copySkillDirectory(source, destination) {
   if (fs.existsSync(destination)) {
     throw new Error(`Destination already exists: ${destination}`);
   }
+  const sourceRoot = fs.realpathSync(source);
+  try {
+    copyRecursively(source, destination, sourceRoot);
+  } catch (error) {
+    fs.rmSync(destination, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+function copyRecursively(source, destination, sourceRoot) {
+  const stat = fs.lstatSync(source);
+  if (stat.isDirectory()) {
+    fs.mkdirSync(destination, { recursive: true });
+    for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
+      if (entry.name === '.git') continue;
+      copyRecursively(path.join(source, entry.name), path.join(destination, entry.name), sourceRoot);
+    }
+    return;
+  }
+  if (stat.isSymbolicLink()) {
+    const target = fs.readlinkSync(source);
+    const sourceParent = path.dirname(source);
+    const absoluteTarget = path.isAbsolute(target)
+      ? target
+      : path.resolve(sourceParent, target);
+    const checkedTarget = symlinkTargetForBoundaryCheck(sourceParent, target, absoluteTarget);
+    if (!isPathInside(checkedTarget, sourceRoot)) {
+      throw new Error(`Refusing to copy symlink outside source root: ${source}`);
+    }
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.symlinkSync(target, destination);
+    return;
+  }
   fs.mkdirSync(path.dirname(destination), { recursive: true });
-  fs.cpSync(source, destination, {
-    recursive: true,
-    dereference: false,
-    filter: (filePath) => !filePath.includes(`${path.sep}.git${path.sep}`)
-  });
+  fs.copyFileSync(source, destination);
 }
 
 function updateCurrentSymlink(remoteRoot, versionPath) {
   fs.mkdirSync(remoteRoot, { recursive: true });
   const currentPath = path.join(remoteRoot, 'current');
-  fs.rmSync(currentPath, { force: true, recursive: false });
+  if (fs.existsSync(currentPath) || fs.lstatSync(currentPath, { throwIfNoEntry: false })) {
+    const stat = fs.lstatSync(currentPath);
+    if (!stat.isSymbolicLink()) {
+      throw new Error(`Refusing to replace existing non-symlink current: ${currentPath}`);
+    }
+    fs.rmSync(currentPath, { force: true, recursive: false });
+  }
   fs.symlinkSync(versionPath, currentPath, 'dir');
 }
 
@@ -564,6 +609,113 @@ function unquoteYamlScalar(value) {
 
 function stripSkillMd(input) {
   return input.replace(/\/?SKILL\.md$/i, '');
+}
+
+function rejectRawUrlPathTraversal(input) {
+  const rawPath = String(input)
+    .replace(/^[^:]+:\/\/[^/]+\/?/, '')
+    .split(/[?#]/)[0];
+  for (const segment of rawPath.split('/')) {
+    const normalized = segment.toLowerCase().replaceAll('%2e', '.');
+    if (normalized === '.' || normalized === '..') {
+      throw new Error('GitHub path must stay inside the repository');
+    }
+  }
+}
+
+function splitRefAndSkillPath(parts) {
+  if (!parts.length) return { ref: 'main', path: '' };
+  const skillRootIndex = knownSkillPathStart(parts);
+  if (skillRootIndex !== -1) {
+    return {
+      ref: parts.slice(0, skillRootIndex).join('/'),
+      path: parts.slice(skillRootIndex).join('/')
+    };
+  }
+  return {
+    ref: parts[0],
+    path: parts.slice(1).join('/')
+  };
+}
+
+function knownSkillPathStart(parts) {
+  for (let index = 1; index < parts.length; index += 1) {
+    if (parts[index] === 'skills') return index;
+    const pair = `${parts[index]}/${parts[index + 1] || ''}`;
+    if (['.agents/skills', '.codex/skills', '.claude/skills'].includes(pair)) return index;
+  }
+  return -1;
+}
+
+function validateRepoRelativePath(input) {
+  if (!input || path.isAbsolute(input) || input.includes('\\')) {
+    throw new Error('GitHub path must stay inside the repository');
+  }
+  for (const segment of input.split('/')) {
+    if (!segment || segment === '.' || segment === '..') {
+      throw new Error('GitHub path must stay inside the repository');
+    }
+  }
+}
+
+function validateGitReference(input) {
+  if (!input || input.trim() === '') {
+    throw new Error('Git reference is required');
+  }
+  if (input.trimStart().startsWith('-')) {
+    throw new Error("Git reference must not start with '-'");
+  }
+}
+
+function validateGitHubRepoUrl(input) {
+  if (!input || input.trim() === '') {
+    throw new Error('GitHub source is missing repoUrl');
+  }
+  if (input.trimStart().startsWith('-')) {
+    throw new Error("Git remote URL must not start with '-'");
+  }
+  let url;
+  try {
+    url = new URL(input);
+  } catch {
+    throw new Error('Only https://github.com remote URLs are supported');
+  }
+  if (url.protocol !== 'https:' || url.hostname !== 'github.com') {
+    throw new Error('Only https://github.com remote URLs are supported');
+  }
+  if (url.username || url.password || url.search || url.hash) {
+    throw new Error('GitHub remote URL must not contain credentials, query, or fragment');
+  }
+  const parts = url.pathname.split('/').filter(Boolean);
+  if (parts.length !== 2 || parts.some((part) => part === '.' || part === '..' || part.startsWith('-'))) {
+    throw new Error('GitHub remote URL must include a valid owner and repo');
+  }
+}
+
+function validateRemoteSource(source) {
+  if (source.type !== 'github') return;
+  if (source.repoUrl) validateGitHubRepoUrl(source.repoUrl);
+  if (source.path) validateRepoRelativePath(source.path);
+  if (source.ref) validateGitReference(source.ref);
+}
+
+function isPathInside(child, root) {
+  const relative = path.relative(root, child);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function symlinkTargetForBoundaryCheck(sourceParent, target, absoluteTarget) {
+  try {
+    return fs.realpathSync(absoluteTarget);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      if (!path.isAbsolute(target)) {
+        return path.resolve(fs.realpathSync(sourceParent), target);
+      }
+      return path.resolve(absoluteTarget);
+    }
+    throw error;
+  }
 }
 
 function trimGitSuffix(input) {

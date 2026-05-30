@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 const DEFAULT_LS_REMOTE_TIMEOUT: Duration = Duration::from_secs(30);
 const FETCH_REF_TIMEOUT: Duration = Duration::from_secs(30);
+const PUSH_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitStatus {
@@ -119,7 +120,7 @@ pub fn push_origin_main(repo: impl AsRef<Path>, set_upstream: bool) -> Result<()
     } else {
         &["push", "origin", "main"]
     };
-    git(repo.as_ref(), args)?;
+    git_network(repo.as_ref(), args, PUSH_TIMEOUT, "git push")?;
     Ok(())
 }
 
@@ -215,9 +216,12 @@ pub fn ls_remote_with_timeout(
     reference: &str,
     timeout: Duration,
 ) -> Result<Option<String>, String> {
+    validate_git_remote_arg(repo_url)?;
+    validate_git_reference_arg(reference)?;
     let mut command = Command::new("git");
     command
         .arg("ls-remote")
+        .arg("--")
         .arg(repo_url)
         .arg(reference)
         .env("GIT_TERMINAL_PROMPT", "0")
@@ -284,13 +288,15 @@ pub fn fetch_ref_path(
     path: &str,
     checkout_root: impl AsRef<Path>,
 ) -> Result<String, String> {
+    validate_git_remote_arg(repo_url)?;
+    validate_git_reference_arg(reference)?;
     let checkout_root = checkout_root.as_ref();
     fs::create_dir_all(checkout_root).map_err(|error| error.to_string())?;
     git(checkout_root, &["init", "-b", "main"])?;
     git(checkout_root, &["remote", "add", "origin", repo_url])?;
     git_network(
         checkout_root,
-        &["fetch", "--depth", "1", "origin", reference],
+        &["fetch", "--depth", "1", "origin", "--", reference],
         FETCH_REF_TIMEOUT,
         "git fetch",
     )?;
@@ -307,6 +313,26 @@ pub fn fetch_ref_path(
         ],
     )?;
     Ok(sha)
+}
+
+fn validate_git_remote_arg(repo_url: &str) -> Result<(), String> {
+    if repo_url.trim().is_empty() {
+        return Err("Git remote URL is required.".to_string());
+    }
+    if repo_url.trim_start().starts_with('-') {
+        return Err("Git remote URL must not start with '-'.".to_string());
+    }
+    Ok(())
+}
+
+fn validate_git_reference_arg(reference: &str) -> Result<(), String> {
+    if reference.trim().is_empty() {
+        return Err("Git reference is required.".to_string());
+    }
+    if reference.trim_start().starts_with('-') {
+        return Err("Git reference must not start with '-'.".to_string());
+    }
+    Ok(())
 }
 
 pub fn diff_no_index_tree(
@@ -686,6 +712,40 @@ mod tests {
     }
 
     #[test]
+    fn ls_remote_rejects_option_like_inputs_before_git_runs() {
+        let error = ls_remote_with_timeout(
+            "--upload-pack=sh",
+            "main",
+            std::time::Duration::from_millis(100),
+        )
+        .unwrap_err();
+
+        assert!(error.contains("Git remote URL must not start with '-'"));
+
+        let error = ls_remote_with_timeout(
+            "https://github.com/acme/repo.git",
+            "--upload-pack=sh",
+            std::time::Duration::from_millis(100),
+        )
+        .unwrap_err();
+
+        assert!(error.contains("Git reference must not start with '-'"));
+    }
+
+    #[test]
+    fn network_git_commands_delimit_untrusted_arguments() {
+        let source = include_str!("lib.rs");
+        let ls_remote_start = source.find("pub fn ls_remote(").unwrap();
+        let fetch_ref_path_start = source.find("pub fn fetch_ref_path").unwrap();
+        let diff_no_index_start = source.find("pub fn diff_no_index_tree").unwrap();
+        let ls_remote_source = &source[ls_remote_start..fetch_ref_path_start];
+        let fetch_ref_path_source = &source[fetch_ref_path_start..diff_no_index_start];
+
+        assert!(ls_remote_source.contains(".arg(\"--\")"));
+        assert!(fetch_ref_path_source.contains("\"--\""));
+    }
+
+    #[test]
     fn fetch_ref_path_uses_bounded_noninteractive_fetch() {
         let source = include_str!("lib.rs");
         let fetch_ref_path_start = source.find("pub fn fetch_ref_path").unwrap();
@@ -701,6 +761,18 @@ mod tests {
         assert!(git_network_source.contains("GIT_TERMINAL_PROMPT"));
         assert!(git_network_source.contains("GIT_ASKPASS"));
         assert!(git_network_source.contains("GCM_INTERACTIVE"));
+    }
+
+    #[test]
+    fn push_origin_main_uses_bounded_noninteractive_push() {
+        let source = include_str!("lib.rs");
+        let push_start = source.find("pub fn push_origin_main").unwrap();
+        let changed_files_start = source.find("pub fn changed_files").unwrap();
+        let push_source = &source[push_start..changed_files_start];
+
+        assert!(push_source.contains("git_network"));
+        assert!(push_source.contains("PUSH_TIMEOUT"));
+        assert!(!push_source.contains("git(repo.as_ref(), args)"));
     }
 
     fn temp_dir(prefix: &str) -> PathBuf {

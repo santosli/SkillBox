@@ -1481,7 +1481,7 @@ pub fn forget_workspace(
         return Err("Only manually added workspaces can be forgotten.".to_string());
     }
 
-    let connection = Connection::open(&paths.database_path).map_err(|error| error.to_string())?;
+    let connection = open_database(&paths.database_path).map_err(|error| error.to_string())?;
     connection
         .execute(
             "DELETE FROM workspaces WHERE canonical_path = ?1 AND source = 'manual'",
@@ -1501,7 +1501,7 @@ pub fn start_operation(
     let started_at = operation_timestamp();
     let payload_json =
         serde_json::to_string(&request.payload).map_err(|error| error.to_string())?;
-    let connection = Connection::open(&paths.database_path).map_err(|error| error.to_string())?;
+    let connection = open_database(&paths.database_path).map_err(|error| error.to_string())?;
 
     connection
         .execute(
@@ -1538,7 +1538,7 @@ pub fn finish_operation(
     let finished_at = operation_timestamp();
     let payload_json =
         serde_json::to_string(&request.payload).map_err(|error| error.to_string())?;
-    let connection = Connection::open(&paths.database_path).map_err(|error| error.to_string())?;
+    let connection = open_database(&paths.database_path).map_err(|error| error.to_string())?;
 
     connection
         .execute(
@@ -1570,7 +1570,7 @@ pub fn list_operations(
     managed_root: impl AsRef<Path>,
 ) -> Result<OperationList> {
     let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
-    let connection = Connection::open(&paths.database_path).map_err(|error| error.to_string())?;
+    let connection = open_database(&paths.database_path).map_err(|error| error.to_string())?;
     let limit = i64::from(filter.limit.unwrap_or(50).clamp(1, 500));
     let status = filter.status.map(OperationStatus::as_str);
     let mut statement = connection
@@ -2208,10 +2208,12 @@ pub fn preview_remote_version_change(
             .map(|file| remote_diff_file(&from_path, &to_path, file))
             .collect::<Result<Vec<_>>>()?;
         let affected_deployments = classify_affected_deployments(&paths, &request.skill_name)?;
-        let preview_id = content_hash_text(&format!(
-            "{}:{}:{}",
-            request.skill_name, from_version, to_version
-        ));
+        let preview_id = remote_version_preview_id(
+            &request.skill_name,
+            request.action,
+            &from_version,
+            &to_version,
+        );
 
         Ok(RemoteVersionChangePreview {
             preview_id,
@@ -2623,7 +2625,7 @@ fn check_one_remote_skill_update(
         }
     };
 
-    let source: RemoteSkillSource = match serde_json::from_str(&source_content) {
+    let source = match parse_remote_source_content(&source_content) {
         Ok(source) => source,
         Err(error) => {
             return RemoteSkillUpdateStatus {
@@ -2858,7 +2860,41 @@ fn write_github_source_metadata(path: &Path, preview: &RemoteSourceBindingPrevie
 fn read_remote_source(remote_root: &Path) -> Result<RemoteSkillSource> {
     let source_path = remote_root.join("source.json");
     let content = fs::read_to_string(&source_path).map_err(|error| error.to_string())?;
-    serde_json::from_str(&content).map_err(|error| error.to_string())
+    parse_remote_source_content(&content)
+}
+
+fn parse_remote_source_content(content: &str) -> Result<RemoteSkillSource> {
+    let source: RemoteSkillSource =
+        serde_json::from_str(content).map_err(|error| error.to_string())?;
+    validate_remote_source(&source)?;
+    Ok(source)
+}
+
+fn validate_remote_source(source: &RemoteSkillSource) -> Result<()> {
+    if source.source_type != "github" {
+        return Ok(());
+    }
+
+    if let Some(repo_url) = source.repo_url.as_deref() {
+        validate_remote_source_repo_url(repo_url)?;
+    }
+    if let Some(path) = source.path.as_deref() {
+        skillbox_github::validate_repo_relative_path(path)?;
+    }
+    if let Some(reference) = source.reference.as_deref() {
+        skillbox_github::validate_git_reference(reference)?;
+    }
+    Ok(())
+}
+
+fn validate_remote_source_repo_url(repo_url: &str) -> Result<()> {
+    #[cfg(test)]
+    {
+        if Path::new(repo_url).is_absolute() {
+            return Ok(());
+        }
+    }
+    skillbox_github::validate_github_repo_url(repo_url)
 }
 
 fn resolve_remote_version_change_target(
@@ -3080,6 +3116,7 @@ fn apply_remote_version_change_inner(
     let paths = ensure_managed_layout(managed_root.to_path_buf())?;
     let from_version = current_remote_version(&paths, &request.skill_name)?;
     let to_version = resolve_remote_version_apply_target(&paths, request)?;
+    validate_remote_version_preview_id(request, &from_version, &to_version)?;
     let remote_root = paths.remote_skills_root.join(&request.skill_name);
     let to_path = match request.action {
         RemoteVersionChangeAction::Update => {
@@ -3127,6 +3164,43 @@ fn apply_remote_version_change_inner(
         affected_deployments,
         operation_id,
     })
+}
+
+fn remote_version_preview_id(
+    skill_name: &str,
+    action: RemoteVersionChangeAction,
+    from_version: &str,
+    to_version: &str,
+) -> String {
+    content_hash_text(&format!(
+        "{}:{}:{}:{}",
+        skill_name,
+        remote_version_action_label(action),
+        from_version,
+        to_version
+    ))
+}
+
+fn validate_remote_version_preview_id(
+    request: &RemoteVersionChangeApplyRequest,
+    from_version: &str,
+    to_version: &str,
+) -> Result<()> {
+    let Some(preview_id) = request.preview_id.as_deref() else {
+        return Ok(());
+    };
+    let expected = remote_version_preview_id(
+        &request.skill_name,
+        request.action,
+        from_version,
+        to_version,
+    );
+    if preview_id != expected {
+        return Err(
+            "Remote version preview is stale. Re-open the preview and apply again.".to_string(),
+        );
+    }
+    Ok(())
 }
 
 fn resolve_remote_version_apply_target(
@@ -3642,11 +3716,24 @@ fn import_one_candidate(
     })
 }
 
+fn open_database(database_path: &Path) -> Result<Connection> {
+    let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
+    connection
+        .execute_batch(
+            "
+            PRAGMA busy_timeout = 5000;
+            PRAGMA journal_mode = WAL;
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(connection)
+}
+
 fn init_database(database_path: &Path) -> Result<()> {
     if let Some(parent) = database_path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
-    let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
+    let connection = open_database(database_path)?;
     connection
         .execute_batch(
             "
@@ -3821,7 +3908,7 @@ fn parse_operation_status(value: &str) -> Option<OperationStatus> {
 }
 
 fn read_bool_preference(database_path: &Path, key: &str) -> Result<Option<bool>> {
-    let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
     let value: Option<String> = connection
         .query_row(
             "SELECT value FROM preferences WHERE key = ?1",
@@ -3840,7 +3927,7 @@ fn read_bool_preference(database_path: &Path, key: &str) -> Result<Option<bool>>
 }
 
 fn write_bool_preference(database_path: &Path, key: &str, value: bool) -> Result<()> {
-    let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
     connection
         .execute(
             "
@@ -3857,7 +3944,7 @@ fn write_bool_preference(database_path: &Path, key: &str, value: bool) -> Result
 }
 
 fn read_u32_preference(database_path: &Path, key: &str) -> Result<Option<u32>> {
-    let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
     let value: Option<String> = connection
         .query_row(
             "SELECT value FROM preferences WHERE key = ?1",
@@ -3876,7 +3963,7 @@ fn read_u32_preference(database_path: &Path, key: &str) -> Result<Option<u32>> {
 }
 
 fn write_u32_preference(database_path: &Path, key: &str, value: u32) -> Result<()> {
-    let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
     connection
         .execute(
             "
@@ -3893,7 +3980,7 @@ fn write_u32_preference(database_path: &Path, key: &str, value: u32) -> Result<(
 }
 
 fn read_remote_update_cache(database_path: &Path) -> Result<Option<RemoteSkillUpdateCheck>> {
-    let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
     let value: Option<String> = connection
         .query_row(
             "SELECT value FROM preferences WHERE key = ?1",
@@ -3909,7 +3996,7 @@ fn read_remote_update_cache(database_path: &Path) -> Result<Option<RemoteSkillUp
 }
 
 fn write_remote_update_cache(database_path: &Path, result: &RemoteSkillUpdateCheck) -> Result<()> {
-    let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
     let value = serde_json::to_string(result).map_err(|error| error.to_string())?;
     connection
         .execute(
@@ -3952,7 +4039,7 @@ fn upsert_workspace(
     let stats = scan_workspace_root(&path, paths)?;
     let agent_id = workspace_agent_id(&path);
     let display_name = workspace_display_name(&path, agent_id.as_deref(), kind);
-    let connection = Connection::open(&paths.database_path).map_err(|error| error.to_string())?;
+    let connection = open_database(&paths.database_path).map_err(|error| error.to_string())?;
 
     connection
         .execute(
@@ -4012,7 +4099,7 @@ fn upsert_workspace(
 }
 
 fn load_workspaces(database_path: &Path) -> Result<Vec<Workspace>> {
-    let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
     let mut statement = connection
         .prepare(
             "
@@ -4049,7 +4136,7 @@ fn load_workspace_by_canonical_path(
     database_path: &Path,
     canonical_path: &Path,
 ) -> Result<Option<Workspace>> {
-    let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
     connection
         .query_row(
             "
@@ -4267,7 +4354,7 @@ fn index_skill(
     kind: SkillKind,
     managed_path: &Path,
 ) -> Result<()> {
-    let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
     connection
         .execute(
             "
@@ -4300,7 +4387,7 @@ fn index_deployment(
     target_root: &Path,
     target_path: &Path,
 ) -> Result<()> {
-    let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
     connection
         .execute(
             "
@@ -4322,7 +4409,7 @@ fn index_deployment(
 }
 
 fn remove_deployment(database_path: &Path, skill_name: &str, target_root: &Path) -> Result<()> {
-    let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
     connection
         .execute(
             "DELETE FROM deployments WHERE skill_name = ?1 AND target_root = ?2",
@@ -4333,7 +4420,7 @@ fn remove_deployment(database_path: &Path, skill_name: &str, target_root: &Path)
 }
 
 fn load_deployments(database_path: &Path) -> Result<HashMap<String, Vec<ManagedSkillDeployment>>> {
-    let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
     let mut statement = connection
         .prepare(
             "
@@ -4505,7 +4592,7 @@ fn unique_backup_path(paths: &ManagedPaths, skill_name: &str, content_hash: &str
         return base;
     }
 
-    for index in 2.. {
+    for index in 2..=10_000 {
         let candidate = paths
             .root
             .join("backups")
@@ -4516,7 +4603,15 @@ fn unique_backup_path(paths: &ManagedPaths, skill_name: &str, content_hash: &str
         }
     }
 
-    unreachable!("backup suffix loop is unbounded")
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    paths
+        .root
+        .join("backups")
+        .join("imports")
+        .join(format!("{skill_name}-{hash}-{nanos}"))
 }
 
 fn is_under_path(path: &Path, root: &Path) -> bool {
@@ -4534,6 +4629,10 @@ fn find_skill_dirs(
     if depth > max_depth {
         return Ok(());
     }
+    let current_metadata = fs::symlink_metadata(current).map_err(|error| error.to_string())?;
+    if current_metadata.file_type().is_symlink() {
+        return Ok(());
+    }
     if current.join("SKILL.md").exists() {
         found.push(current.to_path_buf());
         return Ok(());
@@ -4543,12 +4642,7 @@ fn find_skill_dirs(
         let entry = entry.map_err(|error| error.to_string())?;
         let path = entry.path();
         let file_type = entry.file_type().map_err(|error| error.to_string())?;
-        let is_dir = file_type.is_dir()
-            || (file_type.is_symlink()
-                && fs::metadata(&path)
-                    .map(|metadata| metadata.is_dir())
-                    .unwrap_or(false));
-        if !is_dir {
+        if !file_type.is_dir() {
             continue;
         }
         let file_name = entry.file_name();
@@ -4583,30 +4677,59 @@ fn copy_skill_dir(source: &Path, destination: &Path) -> Result<()> {
             destination.display()
         ));
     }
-    fs::create_dir_all(destination).map_err(|error| error.to_string())?;
-
-    for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
-        let entry = entry.map_err(|error| error.to_string())?;
-        let file_name = entry.file_name();
-        if file_name == ".git" {
-            continue;
-        }
-        copy_recursively(&entry.path(), &destination.join(file_name))?;
+    let temp_destination = temporary_sibling_path(destination, "copy")?;
+    if temp_destination.exists() {
+        return Err(format!(
+            "Temporary destination already exists: {}",
+            temp_destination.display()
+        ));
     }
+    let source_root = fs::canonicalize(source).map_err(|error| error.to_string())?;
+    fs::create_dir_all(&temp_destination).map_err(|error| error.to_string())?;
 
-    Ok(())
+    let result = (|| {
+        for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let file_name = entry.file_name();
+            if file_name == ".git" {
+                continue;
+            }
+            copy_recursively(
+                &entry.path(),
+                &temp_destination.join(file_name),
+                &source_root,
+            )?;
+        }
+        fs::rename(&temp_destination, destination).map_err(|error| error.to_string())
+    })();
+
+    if result.is_err() {
+        let _ = fs::remove_dir_all(&temp_destination);
+    }
+    result
 }
 
-fn copy_recursively(source: &Path, destination: &Path) -> Result<()> {
+fn copy_recursively(source: &Path, destination: &Path, source_root: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(source).map_err(|error| error.to_string())?;
     if metadata.is_dir() {
         fs::create_dir_all(destination).map_err(|error| error.to_string())?;
         for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
             let entry = entry.map_err(|error| error.to_string())?;
-            copy_recursively(&entry.path(), &destination.join(entry.file_name()))?;
+            copy_recursively(
+                &entry.path(),
+                &destination.join(entry.file_name()),
+                source_root,
+            )?;
         }
     } else if metadata.file_type().is_symlink() {
         let target = fs::read_link(source).map_err(|error| error.to_string())?;
+        let checked_target = symlink_target_for_boundary_check(source, &target)?;
+        if !checked_target.starts_with(source_root) {
+            return Err(format!(
+                "Refusing to copy symlink outside source root: {}",
+                source.display()
+            ));
+        }
         symlink_any(&target, destination)?;
     } else {
         fs::copy(source, destination).map_err(|error| error.to_string())?;
@@ -4614,10 +4737,84 @@ fn copy_recursively(source: &Path, destination: &Path) -> Result<()> {
     Ok(())
 }
 
+fn symlink_target_for_boundary_check(source: &Path, target: &Path) -> Result<PathBuf> {
+    let absolute_target = if target.is_absolute() {
+        target.to_path_buf()
+    } else {
+        source
+            .parent()
+            .unwrap_or_else(|| Path::new(""))
+            .join(target)
+    };
+
+    match fs::canonicalize(&absolute_target) {
+        Ok(target) => Ok(target),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let lexical_target = if target.is_absolute() {
+                absolute_target
+            } else {
+                let base = source
+                    .parent()
+                    .and_then(|parent| fs::canonicalize(parent).ok())
+                    .unwrap_or_else(|| {
+                        source
+                            .parent()
+                            .unwrap_or_else(|| Path::new(""))
+                            .to_path_buf()
+                    });
+                base.join(target)
+            };
+            Ok(normalize_lexical_path(&lexical_target))
+        }
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn normalize_lexical_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            _ => normalized.push(component.as_os_str()),
+        }
+    }
+    normalized
+}
+
+fn temporary_sibling_path(destination: &Path, label: &str) -> Result<PathBuf> {
+    let parent = destination
+        .parent()
+        .ok_or_else(|| format!("Destination has no parent: {}", destination.display()))?;
+    let name = destination
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("skill");
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_nanos();
+    Ok(parent.join(format!(".{name}.{label}-{nanos}.tmp")))
+}
+
 fn update_current_symlink(remote_root: &Path, version_path: &Path) -> Result<()> {
     fs::create_dir_all(remote_root).map_err(|error| error.to_string())?;
     let current = remote_root.join("current");
-    let _ = fs::remove_file(&current);
+    match fs::symlink_metadata(&current) {
+        Ok(metadata) => {
+            if !metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "Refusing to replace existing non-symlink current: {}",
+                    current.display()
+                ));
+            }
+            fs::remove_file(&current).map_err(|error| error.to_string())?;
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.to_string()),
+    }
     symlink_dir(version_path, &current)
 }
 
@@ -4712,6 +4909,25 @@ description: \"Demo skill\"
     }
 
     #[test]
+    fn database_initialization_configures_busy_timeout_and_wal() {
+        let source = include_str!("lib.rs");
+
+        assert!(source.contains("PRAGMA busy_timeout = 5000"));
+        assert!(source.contains("PRAGMA journal_mode = WAL"));
+    }
+
+    #[test]
+    fn unique_backup_path_uses_bounded_suffix_search() {
+        let source = include_str!("lib.rs");
+        let start = source.find("fn unique_backup_path").unwrap();
+        let end = start + source[start..].find("fn is_under_path").unwrap();
+        let function_source = &source[start..end];
+
+        assert!(!function_source.contains("for index in 2.. {"));
+        assert!(!function_source.contains("unreachable!(\"backup suffix loop is unbounded\")"));
+    }
+
+    #[test]
     fn scans_nested_skill_directories() {
         let root = temp_dir("scan");
         make_skill(&root.join("alpha"), "alpha", "Alpha skill");
@@ -4726,6 +4942,19 @@ description: \"Demo skill\"
             .map(|skill| skill.name.as_str())
             .collect();
         assert_eq!(names, vec!["alpha", "beta"]);
+    }
+
+    #[test]
+    fn scan_skill_roots_does_not_follow_symlinked_directories() {
+        let root = temp_dir("scan-symlink-root");
+        let outside = temp_dir("scan-symlink-outside");
+        make_skill(&outside.join("leaked"), "leaked", "Leaked skill");
+        symlink_dir(&outside, &root.join("linked")).unwrap();
+
+        let scan = scan_skill_roots(&[root]).unwrap();
+
+        assert_eq!(scan.errors.len(), 0);
+        assert!(scan.skills.is_empty());
     }
 
     #[test]
@@ -6340,6 +6569,93 @@ description: \"Demo skill\"
     }
 
     #[test]
+    fn read_remote_source_rejects_untrusted_github_metadata() {
+        let root = temp_dir("remote-source-validation");
+        let remote_root = root.join("remote-skills").join("demo");
+
+        write_remote_source_with_json(
+            &remote_root,
+            r#"{
+              "type":"github",
+              "repoUrl":"file:///tmp/repo.git",
+              "ref":"main",
+              "path":"skills/demo"
+            }"#,
+        );
+
+        let error = read_remote_source(&remote_root).unwrap_err();
+        assert!(error.contains("Only https://github.com remote URLs are supported"));
+
+        write_remote_source_with_json(
+            &remote_root,
+            r#"{
+              "type":"github",
+              "repoUrl":"https://github.com/acme/repo.git",
+              "ref":"main",
+              "path":"skills/../../secret"
+            }"#,
+        );
+
+        let error = read_remote_source(&remote_root).unwrap_err();
+        assert!(error.contains("path must stay inside the repository"));
+    }
+
+    #[test]
+    fn update_current_symlink_refuses_existing_non_symlink() {
+        let root = temp_dir("current-non-symlink");
+        let remote_root = root.join("remote");
+        let version = remote_root.join("versions").join("v1");
+        fs::create_dir_all(&version).unwrap();
+        fs::create_dir_all(&remote_root).unwrap();
+        fs::write(remote_root.join("current"), "not a symlink").unwrap();
+
+        let error = update_current_symlink(&remote_root, &version).unwrap_err();
+
+        assert!(error.contains("Refusing to replace existing non-symlink current"));
+        assert_eq!(
+            fs::read_to_string(remote_root.join("current")).unwrap(),
+            "not a symlink"
+        );
+    }
+
+    #[test]
+    fn copy_skill_dir_rejects_symlinks_that_escape_source_root() {
+        let root = temp_dir("copy-symlink-escape");
+        let source = root.join("source");
+        let outside = root.join("outside");
+        let destination = root.join("destination");
+        make_skill(&source, "demo", "Demo skill");
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("secret.txt"), "secret").unwrap();
+        symlink_any(&outside.join("secret.txt"), &source.join("secret-link")).unwrap();
+
+        let error = copy_skill_dir(&source, &destination).unwrap_err();
+
+        assert!(error.contains("Refusing to copy symlink outside source root"));
+        assert!(!destination.exists());
+    }
+
+    #[test]
+    fn copy_skill_dir_preserves_internal_broken_symlink() {
+        let root = temp_dir("copy-broken-symlink");
+        let source = root.join("source");
+        let destination = root.join("destination");
+        make_skill(&source, "demo", "Demo skill");
+        symlink_any(Path::new("missing.txt"), &source.join("missing-link")).unwrap();
+
+        copy_skill_dir(&source, &destination).unwrap();
+
+        assert!(fs::symlink_metadata(destination.join("missing-link"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            fs::read_link(destination.join("missing-link")).unwrap(),
+            PathBuf::from("missing.txt")
+        );
+    }
+
+    #[test]
     fn remote_version_preview_keeps_binary_file_metadata() {
         let root = temp_dir("remote-preview-binary");
         let managed_root = root.join("SkillBox");
@@ -6518,6 +6834,53 @@ description: \"Demo skill\"
                 |operation| operation.operation_type == "rollback_remote_skill"
                     && operation.status == OperationStatus::Succeeded
             ));
+    }
+
+    #[test]
+    fn apply_remote_version_change_rejects_stale_preview_id() {
+        let root = temp_dir("apply-stale-preview");
+        let managed_root = root.join("SkillBox");
+        let paths = ensure_managed_layout(&managed_root).unwrap();
+        let source_v1 = root.join("local-v1").join("demo");
+        make_skill(&source_v1, "demo", "Demo skill");
+        import_skill(&source_v1, SkillKind::Remote, &managed_root).unwrap();
+        let v1 = current_remote_version(&paths, "demo").unwrap();
+        let remote_root = paths.remote_skills_root.join("demo");
+        let v2 = "0123456789abcdef0123456789abcdef01234567";
+        let v2_path = remote_root.join("versions").join(v2);
+        copy_skill_dir(&source_v1, &v2_path).unwrap();
+        fs::write(
+            v2_path.join("SKILL.md"),
+            "---\nname: demo\ndescription: Demo skill\n---\nupdated\n",
+        )
+        .unwrap();
+        update_current_symlink(&remote_root, &v2_path).unwrap();
+
+        let preview = preview_remote_version_change(
+            RemoteVersionChangeRequest {
+                skill_name: "demo".to_string(),
+                action: RemoteVersionChangeAction::Rollback,
+                target_version: Some(v1.clone()),
+                actor: "cli".to_string(),
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        let error = apply_remote_version_change(
+            RemoteVersionChangeApplyRequest {
+                skill_name: "demo".to_string(),
+                action: RemoteVersionChangeAction::Rollback,
+                target_version: v1,
+                preview_id: Some(format!("{}-stale", preview.preview_id)),
+                actor: "cli".to_string(),
+            },
+            &managed_root,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("Remote version preview is stale"));
+        assert_eq!(current_remote_version(&paths, "demo").unwrap(), v2);
     }
 
     #[test]
@@ -6804,7 +7167,7 @@ description: \"Demo skill\"
     }
 
     #[test]
-    fn scan_import_candidates_marks_symlinked_source_as_imported() {
+    fn scan_import_candidates_skips_symlinked_sources() {
         let root = temp_dir("candidate-imported-symlink");
         let runtime_root = root.join("runtime");
         let source = runtime_root.join("demo");
@@ -6823,11 +7186,7 @@ description: \"Demo skill\"
 
         let candidates = scan_import_candidates(&[runtime_root], &managed_root).unwrap();
 
-        assert_eq!(candidates.candidates.len(), 1);
-        let demo = candidate(&candidates.candidates, "demo");
-        assert_eq!(demo.import_status, ImportCandidateStatus::Imported);
-        assert!(!demo.is_selected);
-        assert_eq!(fs::canonicalize(&demo.source_path).unwrap(), demo.real_path);
+        assert!(candidates.candidates.is_empty());
     }
 
     #[test]
