@@ -5,6 +5,7 @@ export function normalizeImportCandidate(candidate) {
   const importStatus = candidate.importStatus || candidate.import_status || 'importable';
   const isImportable = importStatus === 'importable' && !conflict;
   const backendSelected = candidate.isSelected ?? candidate.is_selected;
+  const usageCountValue = Number(candidate.usageCount ?? candidate.usage_count);
 
   return {
     ...candidate,
@@ -18,6 +19,7 @@ export function normalizeImportCandidate(candidate) {
     importOrigin: candidate.importOrigin || candidate.import_origin || 'local-scan',
     importStatus,
     conflict,
+    usageCount: Number.isFinite(usageCountValue) && usageCountValue > 0 ? usageCountValue : 0,
     isSelected: isImportable && (backendSelected ?? true)
   };
 }

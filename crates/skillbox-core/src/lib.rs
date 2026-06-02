@@ -1,3 +1,4 @@
+use chrono::{DateTime, SecondsFormat, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -17,6 +18,17 @@ const MIN_REMOTE_UPDATE_TIMEOUT_SECONDS: u32 = 5;
 const MAX_REMOTE_UPDATE_TIMEOUT_SECONDS: u32 = 300;
 const REMOTE_UPDATE_CHECK_CONCURRENCY: usize = 3;
 const CLAUDE_MARKETPLACE_SKILLS_API: &str = "https://claudemarketplaces.com/api/skills";
+const MAX_USAGE_METADATA_JSON_BYTES: usize = 16 * 1024;
+const USAGE_METADATA_CONTENT_KEYS: &[&str] = &[
+    "prompt",
+    "content",
+    "messages",
+    "transcript",
+    "input",
+    "output",
+    "diff",
+    "file_contents",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ManagedPaths {
@@ -115,6 +127,8 @@ pub struct ManagedSkill {
     pub kind: SkillKind,
     pub status: String,
     pub deployments: Vec<ManagedSkillDeployment>,
+    pub usage_count: usize,
+    pub last_used_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -173,6 +187,7 @@ pub struct Workspace {
     pub display_name: String,
     pub skill_count: usize,
     pub imported_skill_count: usize,
+    pub usage_count: usize,
     pub last_scan_error_count: usize,
     pub last_scan_error: Option<String>,
     pub last_scanned_at: Option<String>,
@@ -590,6 +605,7 @@ pub struct ImportCandidate {
     pub import_status: ImportCandidateStatus,
     pub is_selected: bool,
     pub conflict: Option<String>,
+    pub usage_count: usize,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -635,6 +651,67 @@ pub struct ImportCandidateError {
 pub struct ImportBatchResult {
     pub imported: Vec<ImportedCandidate>,
     pub errors: Vec<ImportCandidateError>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecordSkillUsageRequest {
+    pub skill_name: String,
+    pub agent_id: String,
+    pub runtime_root: PathBuf,
+    pub event_id: Option<String>,
+    pub used_at: Option<String>,
+    pub metadata: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SkillUsageRecordResult {
+    pub skill_name: String,
+    pub agent_id: String,
+    pub runtime_root: PathBuf,
+    pub event_id: Option<String>,
+    pub used_at: String,
+    pub recorded_at: String,
+    pub usage_count: usize,
+    pub last_used_at: String,
+    pub deduplicated: bool,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UsageHookTarget {
+    CodexApp,
+    CodexCli,
+    ClaudeCodeCli,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UsageHookStatus {
+    pub target: UsageHookTarget,
+    pub label: String,
+    pub config_path: PathBuf,
+    pub command: String,
+    pub installed: bool,
+    pub shared_config_key: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UsageHookInstallResult {
+    pub target: UsageHookTarget,
+    pub installed: bool,
+    pub backup_path: Option<PathBuf>,
+    pub status: UsageHookStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct UsageHookRecordResult {
+    pub recorded: Vec<SkillUsageRecordResult>,
+    pub skipped: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct UsageSummary {
+    usage_count: usize,
+    last_used_at: Option<String>,
 }
 
 pub fn default_managed_root() -> PathBuf {
@@ -1214,6 +1291,7 @@ pub fn undeploy_skill(
 pub fn managed_state(managed_root: impl AsRef<Path>) -> Result<ManagedState> {
     let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
     let mut deployments = load_deployments(&paths.database_path)?;
+    let usage_by_skill = load_usage_by_skill(&paths.database_path)?;
     let mut skills = Vec::new();
 
     for skill in scan_skill_roots(std::slice::from_ref(&paths.user_skills_root))?.skills {
@@ -1225,6 +1303,10 @@ pub fn managed_state(managed_root: impl AsRef<Path>) -> Result<ManagedState> {
 
     for skill in skills.iter_mut() {
         skill.deployments = deployments.get(&skill.name).cloned().unwrap_or_default();
+        if let Some(usage) = usage_by_skill.get(&skill.name) {
+            skill.usage_count = usage.usage_count;
+            skill.last_used_at = usage.last_used_at.clone();
+        }
     }
 
     skills.sort_by(|left, right| left.name.cmp(&right.name));
@@ -1490,6 +1572,248 @@ pub fn forget_workspace(
         .map_err(|error| error.to_string())?;
 
     load_workspaces(&paths.database_path)
+}
+
+pub fn record_skill_usage(
+    request: RecordSkillUsageRequest,
+    managed_root: impl AsRef<Path>,
+) -> Result<SkillUsageRecordResult> {
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let skill_name = request.skill_name.trim().to_string();
+    validate_skill_name(&skill_name)?;
+    let agent_id = normalize_usage_agent_id(&request.agent_id)?;
+    let runtime_root = normalize_usage_runtime_root(request.runtime_root)?;
+    let runtime_root_value = runtime_root.to_string_lossy().to_string();
+    let event_id = normalize_usage_event_id(request.event_id)?;
+    let used_at = normalize_usage_timestamp(request.used_at.as_deref())?;
+    let recorded_at = current_rfc3339_timestamp();
+    let metadata_json = normalize_usage_metadata(request.metadata)?;
+    let connection = open_database(&paths.database_path).map_err(|error| error.to_string())?;
+
+    if let Some(event_id_value) = event_id.as_deref() {
+        let existing = connection
+            .query_row(
+                "
+                SELECT used_at, recorded_at
+                FROM skill_usage_events
+                WHERE agent_id = ?1 AND runtime_root = ?2 AND event_id = ?3
+                ",
+                params![&agent_id, &runtime_root_value, event_id_value],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+
+        if let Some((existing_used_at, existing_recorded_at)) = existing {
+            let usage =
+                load_usage_stat_for_key(&connection, &skill_name, &agent_id, &runtime_root_value)?;
+            return Ok(SkillUsageRecordResult {
+                skill_name,
+                agent_id,
+                runtime_root,
+                event_id,
+                used_at: existing_used_at.clone(),
+                recorded_at: existing_recorded_at,
+                usage_count: usage.usage_count,
+                last_used_at: usage.last_used_at.unwrap_or(existing_used_at),
+                deduplicated: true,
+            });
+        }
+    }
+
+    connection
+        .execute(
+            "
+            INSERT INTO skill_usage_events (
+              id,
+              event_id,
+              skill_name,
+              agent_id,
+              runtime_root,
+              used_at,
+              recorded_at,
+              metadata_json
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            ",
+            params![
+                usage_event_row_id(),
+                event_id.as_deref(),
+                &skill_name,
+                &agent_id,
+                &runtime_root_value,
+                &used_at,
+                &recorded_at,
+                &metadata_json,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    connection
+        .execute(
+            "
+            INSERT INTO skill_usage_stats (
+              skill_name,
+              agent_id,
+              runtime_root,
+              usage_count,
+              last_used_at
+            )
+            VALUES (?1, ?2, ?3, 1, ?4)
+            ON CONFLICT(skill_name, agent_id, runtime_root) DO UPDATE SET
+              usage_count = skill_usage_stats.usage_count + 1,
+              last_used_at = CASE
+                WHEN excluded.last_used_at > skill_usage_stats.last_used_at
+                THEN excluded.last_used_at
+                ELSE skill_usage_stats.last_used_at
+              END,
+              updated_at = CURRENT_TIMESTAMP
+            ",
+            params![&skill_name, &agent_id, &runtime_root_value, &used_at],
+        )
+        .map_err(|error| error.to_string())?;
+
+    let usage = load_usage_stat_for_key(&connection, &skill_name, &agent_id, &runtime_root_value)?;
+    Ok(SkillUsageRecordResult {
+        skill_name,
+        agent_id,
+        runtime_root,
+        event_id,
+        used_at,
+        recorded_at,
+        usage_count: usage.usage_count,
+        last_used_at: usage.last_used_at.unwrap_or_default(),
+        deduplicated: false,
+    })
+}
+
+pub fn usage_hook_statuses() -> Result<Vec<UsageHookStatus>> {
+    usage_hook_statuses_for_home(home_dir())
+}
+
+pub fn usage_hook_statuses_for_home(home: impl AsRef<Path>) -> Result<Vec<UsageHookStatus>> {
+    let home = home.as_ref();
+    [
+        UsageHookTarget::CodexApp,
+        UsageHookTarget::CodexCli,
+        UsageHookTarget::ClaudeCodeCli,
+    ]
+    .into_iter()
+    .map(|target| usage_hook_status_for_home(target, home))
+    .collect()
+}
+
+pub fn install_usage_hook(target: UsageHookTarget) -> Result<UsageHookInstallResult> {
+    install_usage_hook_for_home(target, home_dir())
+}
+
+pub fn install_usage_hook_for_home(
+    target: UsageHookTarget,
+    home: impl AsRef<Path>,
+) -> Result<UsageHookInstallResult> {
+    let home = home.as_ref();
+    let config_path = usage_hook_config_path(target, home);
+    let command = usage_hook_command(target);
+    let mut config = read_hook_config_json(&config_path)?;
+
+    if json_has_hook_command(&config, &command) {
+        return Ok(UsageHookInstallResult {
+            target,
+            installed: false,
+            backup_path: None,
+            status: usage_hook_status_for_home(target, home)?,
+        });
+    }
+
+    inject_stop_hook_command(&mut config, &command)?;
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let backup_path = if config_path.exists() {
+        let backup_path = next_usage_hook_backup_path(&config_path);
+        fs::copy(&config_path, &backup_path).map_err(|error| {
+            format!(
+                "Failed to back up {} to {}: {error}",
+                config_path.display(),
+                backup_path.display()
+            )
+        })?;
+        Some(backup_path)
+    } else {
+        None
+    };
+    let json = serde_json::to_string_pretty(&config).map_err(|error| error.to_string())?;
+    fs::write(&config_path, format!("{json}\n")).map_err(|error| error.to_string())?;
+
+    Ok(UsageHookInstallResult {
+        target,
+        installed: true,
+        backup_path,
+        status: usage_hook_status_for_home(target, home)?,
+    })
+}
+
+pub fn parse_usage_hook_target(value: &str) -> Result<UsageHookTarget> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "codex-app" | "codex_app" => Ok(UsageHookTarget::CodexApp),
+        "codex-cli" | "codex_cli" | "agents" => Ok(UsageHookTarget::CodexCli),
+        "claude-code" | "claude_code" | "claude-code-cli" | "claude_code_cli" | "claude" => {
+            Ok(UsageHookTarget::ClaudeCodeCli)
+        }
+        other => Err(format!("Unknown usage hook target: {other}")),
+    }
+}
+
+pub fn record_skill_usage_from_hook(
+    agent: &str,
+    hook_input: &str,
+    managed_root: impl AsRef<Path>,
+) -> Result<UsageHookRecordResult> {
+    let hook: serde_json::Value =
+        serde_json::from_str(hook_input).map_err(|error| format!("Invalid hook JSON: {error}"))?;
+    let Some(transcript_path) = hook
+        .get("transcript_path")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(UsageHookRecordResult {
+            recorded: Vec::new(),
+            skipped: vec!["missing transcript_path".to_string()],
+        });
+    };
+    let transcript = fs::read_to_string(expand_home(PathBuf::from(transcript_path)))
+        .map_err(|error| format!("Unable to read hook transcript: {error}"))?;
+    let turn_id = hook.get("turn_id").and_then(|value| value.as_str());
+    let session_id = hook
+        .get("session_id")
+        .and_then(|value| value.as_str())
+        .unwrap_or("unknown-session");
+    let hook_event = hook
+        .get("hook_event_name")
+        .and_then(|value| value.as_str())
+        .unwrap_or("unknown");
+    let model = hook
+        .get("model")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let agent = normalize_usage_hook_agent(agent)?;
+    let skill_refs = extract_skill_refs_from_transcript(&transcript, turn_id);
+    let mut recorded = Vec::new();
+    let mut skipped = Vec::new();
+
+    for (index, skill_ref) in skill_refs.into_iter().enumerate() {
+        match usage_request_from_skill_ref(
+            &skill_ref, &agent, session_id, turn_id, index, hook_event, model,
+        ) {
+            Ok(request) => match record_skill_usage(request, managed_root.as_ref()) {
+                Ok(result) => recorded.push(result),
+                Err(error) => skipped.push(format!("{}: {error}", skill_ref.name)),
+            },
+            Err(error) => skipped.push(format!("{}: {error}", skill_ref.name)),
+        }
+    }
+
+    Ok(UsageHookRecordResult { recorded, skipped })
 }
 
 pub fn start_operation(
@@ -2378,6 +2702,7 @@ pub fn scan_import_candidates(
 ) -> Result<ImportCandidateScan> {
     let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
     let imported_hashes = imported_skill_hashes(&paths)?;
+    let usage_by_skill_runtime = load_usage_by_skill_runtime(&paths.database_path)?;
     let scan = scan_skill_roots(roots)?;
     record_scanned_workspaces(&paths, &scan.roots)?;
     let mut candidates = Vec::new();
@@ -2412,6 +2737,15 @@ pub fn scan_import_candidates(
             )
         };
 
+        let usage_count = skill
+            .source_root
+            .as_ref()
+            .and_then(|root| {
+                usage_by_skill_runtime.get(&(skill.name.clone(), usage_runtime_key(root)))
+            })
+            .map(|usage| usage.usage_count)
+            .unwrap_or_default();
+
         candidates.push(ImportCandidate {
             name: skill.name,
             description: skill.description,
@@ -2424,6 +2758,7 @@ pub fn scan_import_candidates(
             import_status,
             is_selected,
             conflict,
+            usage_count,
         });
     }
 
@@ -2472,6 +2807,8 @@ fn managed_skill(skill: Skill, kind: SkillKind) -> ManagedSkill {
         }
         .to_string(),
         deployments: Vec::new(),
+        usage_count: 0,
+        last_used_at: None,
     }
 }
 
@@ -3792,6 +4129,31 @@ fn init_database(database_path: &Path) -> Result<()> {
               error TEXT,
               payload_json TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS skill_usage_events (
+              id TEXT PRIMARY KEY,
+              event_id TEXT,
+              skill_name TEXT NOT NULL,
+              agent_id TEXT NOT NULL,
+              runtime_root TEXT NOT NULL,
+              used_at TEXT NOT NULL,
+              recorded_at TEXT NOT NULL,
+              metadata_json TEXT NOT NULL DEFAULT '{}'
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS skill_usage_events_event_id_unique
+            ON skill_usage_events (agent_id, runtime_root, event_id)
+            WHERE event_id IS NOT NULL;
+
+            CREATE TABLE IF NOT EXISTS skill_usage_stats (
+              skill_name TEXT NOT NULL,
+              agent_id TEXT NOT NULL,
+              runtime_root TEXT NOT NULL,
+              usage_count INTEGER NOT NULL DEFAULT 0,
+              last_used_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (skill_name, agent_id, runtime_root)
+            );
             ",
         )
         .map_err(|error| error.to_string())?;
@@ -3861,6 +4223,542 @@ fn file_modified_timestamp(path: &Path) -> String {
         .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
         .map(|duration| duration.as_secs().to_string())
         .unwrap_or_default()
+}
+
+fn usage_event_row_id() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    format!("usage-{nanos}")
+}
+
+fn current_rfc3339_timestamp() -> String {
+    Utc::now().to_rfc3339_opts(SecondsFormat::Secs, false)
+}
+
+fn normalize_usage_timestamp(value: Option<&str>) -> Result<String> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(current_rfc3339_timestamp());
+    };
+    DateTime::parse_from_rfc3339(value)
+        .map(|timestamp| {
+            timestamp
+                .with_timezone(&Utc)
+                .to_rfc3339_opts(SecondsFormat::Secs, false)
+        })
+        .map_err(|error| format!("Invalid usage timestamp: {error}"))
+}
+
+fn normalize_usage_agent_id(value: &str) -> Result<String> {
+    let normalized = value.trim().to_ascii_lowercase();
+    if normalized.is_empty()
+        || normalized
+            .chars()
+            .any(|character| !matches!(character, 'a'..='z' | '0'..='9' | '-' | '_'))
+    {
+        return Err(format!("Invalid usage agent id: {value}"));
+    }
+    Ok(normalized)
+}
+
+fn normalize_usage_runtime_root(path: PathBuf) -> Result<PathBuf> {
+    let expanded = expand_home(path);
+    if !expanded.is_absolute() {
+        return Err("Usage runtime root must be an absolute path.".to_string());
+    }
+    Ok(fs::canonicalize(&expanded).unwrap_or(expanded))
+}
+
+fn normalize_usage_event_id(value: Option<String>) -> Result<Option<String>> {
+    value
+        .map(|event_id| {
+            let event_id = event_id.trim().to_string();
+            if event_id.is_empty() {
+                Err("Usage event id cannot be empty.".to_string())
+            } else {
+                Ok(event_id)
+            }
+        })
+        .transpose()
+}
+
+fn normalize_usage_metadata(value: Option<serde_json::Value>) -> Result<String> {
+    let metadata = value.unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
+    if !metadata.is_object() {
+        return Err("Usage metadata must be a JSON object.".to_string());
+    }
+    if let Some(key) = usage_metadata_content_key(&metadata) {
+        return Err(format!(
+            "Usage metadata cannot include content field: {key}"
+        ));
+    }
+
+    let metadata_json = serde_json::to_string(&metadata).map_err(|error| error.to_string())?;
+    if metadata_json.len() > MAX_USAGE_METADATA_JSON_BYTES {
+        return Err(format!(
+            "Usage metadata must be at most {MAX_USAGE_METADATA_JSON_BYTES} bytes."
+        ));
+    }
+    Ok(metadata_json)
+}
+
+fn usage_metadata_content_key(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::Object(object) => {
+            for (key, nested) in object {
+                let normalized_key = key.to_ascii_lowercase();
+                if USAGE_METADATA_CONTENT_KEYS
+                    .iter()
+                    .any(|content_key| content_key == &normalized_key)
+                {
+                    return Some(key.clone());
+                }
+                if let Some(content_key) = usage_metadata_content_key(nested) {
+                    return Some(content_key);
+                }
+            }
+            None
+        }
+        serde_json::Value::Array(values) => values.iter().find_map(usage_metadata_content_key),
+        _ => None,
+    }
+}
+
+fn usage_runtime_key(path: &Path) -> String {
+    let expanded = expand_home(path.to_path_buf());
+    fs::canonicalize(&expanded)
+        .unwrap_or(expanded)
+        .to_string_lossy()
+        .to_string()
+}
+
+fn usage_hook_status_for_home(target: UsageHookTarget, home: &Path) -> Result<UsageHookStatus> {
+    let config_path = usage_hook_config_path(target, home);
+    let command = usage_hook_command(target);
+    let installed = read_hook_config_json(&config_path)
+        .map(|config| json_has_hook_command(&config, &command))
+        .unwrap_or(false);
+    Ok(UsageHookStatus {
+        target,
+        label: usage_hook_label(target).to_string(),
+        config_path,
+        command,
+        installed,
+        shared_config_key: usage_hook_shared_config_key(target).to_string(),
+    })
+}
+
+fn usage_hook_label(target: UsageHookTarget) -> &'static str {
+    match target {
+        UsageHookTarget::CodexApp => "Codex App",
+        UsageHookTarget::CodexCli => "Codex CLI",
+        UsageHookTarget::ClaudeCodeCli => "Claude Code CLI",
+    }
+}
+
+fn usage_hook_shared_config_key(target: UsageHookTarget) -> &'static str {
+    match target {
+        UsageHookTarget::CodexApp | UsageHookTarget::CodexCli => "codex",
+        UsageHookTarget::ClaudeCodeCli => "claude-code",
+    }
+}
+
+fn usage_hook_command(target: UsageHookTarget) -> String {
+    match target {
+        UsageHookTarget::CodexApp | UsageHookTarget::CodexCli => {
+            "skillbox usage-hook codex".to_string()
+        }
+        UsageHookTarget::ClaudeCodeCli => "skillbox usage-hook claude-code".to_string(),
+    }
+}
+
+fn usage_hook_config_path(target: UsageHookTarget, home: &Path) -> PathBuf {
+    match target {
+        UsageHookTarget::CodexApp | UsageHookTarget::CodexCli => {
+            home.join(".codex").join("hooks.json")
+        }
+        UsageHookTarget::ClaudeCodeCli => home.join(".claude").join("settings.json"),
+    }
+}
+
+fn read_hook_config_json(path: &Path) -> Result<serde_json::Value> {
+    if !path.exists() {
+        return Ok(serde_json::json!({}));
+    }
+    let input = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    if input.trim().is_empty() {
+        return Ok(serde_json::json!({}));
+    }
+    let value: serde_json::Value = serde_json::from_str(&input)
+        .map_err(|error| format!("Invalid hook config {}: {error}", path.display()))?;
+    if !value.is_object() {
+        return Err(format!(
+            "Hook config must be a JSON object: {}",
+            path.display()
+        ));
+    }
+    Ok(value)
+}
+
+fn inject_stop_hook_command(config: &mut serde_json::Value, command: &str) -> Result<()> {
+    let Some(root) = config.as_object_mut() else {
+        return Err("Hook config must be a JSON object.".to_string());
+    };
+    let hooks = root.entry("hooks").or_insert_with(|| serde_json::json!({}));
+    let Some(hooks) = hooks.as_object_mut() else {
+        return Err("Hook config field `hooks` must be a JSON object.".to_string());
+    };
+    let stop = hooks
+        .entry("Stop")
+        .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+    let Some(stop) = stop.as_array_mut() else {
+        return Err("Hook config field `hooks.Stop` must be an array.".to_string());
+    };
+    stop.push(serde_json::json!({
+        "hooks": [{
+            "type": "command",
+            "command": command,
+            "timeout": 5,
+            "statusMessage": "Recording SkillBox usage"
+        }]
+    }));
+    Ok(())
+}
+
+fn json_has_hook_command(value: &serde_json::Value, command: &str) -> bool {
+    match value {
+        serde_json::Value::Object(object) => {
+            object
+                .get("command")
+                .and_then(|value| value.as_str())
+                .is_some_and(|value| value == command)
+                || object
+                    .values()
+                    .any(|nested| json_has_hook_command(nested, command))
+        }
+        serde_json::Value::Array(values) => values
+            .iter()
+            .any(|nested| json_has_hook_command(nested, command)),
+        _ => false,
+    }
+}
+
+fn next_usage_hook_backup_path(path: &Path) -> PathBuf {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_millis();
+    for attempt in 0..100 {
+        let suffix = if attempt == 0 {
+            format!("skillbox-backup-{timestamp}")
+        } else {
+            format!("skillbox-backup-{timestamp}-{attempt}")
+        };
+        let candidate = PathBuf::from(format!("{}.{}", path.display(), suffix));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    PathBuf::from(format!(
+        "{}.skillbox-backup-{timestamp}-fallback",
+        path.display()
+    ))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HookSkillRef {
+    name: String,
+    path: PathBuf,
+}
+
+fn normalize_usage_hook_agent(value: &str) -> Result<String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "codex" | "codex-app" | "codex-cli" | "agents" => Ok("codex".to_string()),
+        "claude" | "claude-code" | "claude-code-cli" => Ok("claude-code".to_string()),
+        other => Err(format!("Unknown usage hook agent: {other}")),
+    }
+}
+
+fn usage_request_from_skill_ref(
+    skill_ref: &HookSkillRef,
+    hook_agent: &str,
+    session_id: &str,
+    turn_id: Option<&str>,
+    index: usize,
+    hook_event: &str,
+    model: &str,
+) -> Result<RecordSkillUsageRequest> {
+    let (runtime_root, agent_id) =
+        infer_usage_runtime_from_skill_path(&skill_ref.path, hook_agent)?;
+    let path_hash = &sha256(&skill_ref.path.to_string_lossy())[..12];
+    let turn = turn_id.unwrap_or("session");
+    let metadata = serde_json::json!({
+        "source": "agent_hook",
+        "hook_agent": hook_agent,
+        "hook_event": hook_event,
+        "model": model
+    });
+    Ok(RecordSkillUsageRequest {
+        skill_name: skill_ref.name.clone(),
+        agent_id,
+        runtime_root,
+        event_id: Some(format!(
+            "{hook_agent}:{session_id}:{turn}:{index}:{}:{path_hash}",
+            skill_ref.name
+        )),
+        used_at: None,
+        metadata: Some(metadata),
+    })
+}
+
+fn infer_usage_runtime_from_skill_path(
+    skill_path: &Path,
+    hook_agent: &str,
+) -> Result<(PathBuf, String)> {
+    let expanded = expand_home(skill_path.to_path_buf());
+    for ancestor in expanded.ancestors() {
+        if ancestor.file_name().and_then(|name| name.to_str()) != Some("skills") {
+            continue;
+        }
+        let parent = ancestor
+            .parent()
+            .and_then(|path| path.file_name())
+            .and_then(|name| name.to_str());
+        let agent_id = match parent {
+            Some(".codex") => Some("codex"),
+            Some(".agents") => Some("agents"),
+            Some(".claude") => Some("claude"),
+            _ => None,
+        };
+        if let Some(agent_id) = agent_id {
+            return Ok((
+                fs::canonicalize(ancestor).unwrap_or_else(|_| ancestor.to_path_buf()),
+                agent_id.to_string(),
+            ));
+        }
+    }
+
+    let fallback_root = expanded
+        .parent()
+        .and_then(|path| path.parent())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| expanded.parent().unwrap_or(&expanded).to_path_buf());
+    let agent_id = match hook_agent {
+        "claude-code" => "claude",
+        _ => "codex",
+    };
+    Ok((
+        fs::canonicalize(&fallback_root).unwrap_or(fallback_root),
+        agent_id.to_string(),
+    ))
+}
+
+fn extract_skill_refs_from_transcript(
+    transcript: &str,
+    turn_id: Option<&str>,
+) -> Vec<HookSkillRef> {
+    let mut current_turn: Option<String> = None;
+    let mut skills = Vec::new();
+    for line in transcript.lines() {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if value.get("type").and_then(|value| value.as_str()) == Some("turn_context") {
+            current_turn = value
+                .get("payload")
+                .and_then(|payload| payload.get("turn_id"))
+                .and_then(|turn| turn.as_str())
+                .map(ToString::to_string);
+            continue;
+        }
+        if turn_id.is_some() && current_turn.as_deref() != turn_id {
+            continue;
+        }
+        visit_json_strings(&value, &mut |text| {
+            skills.extend(extract_skill_refs_from_text(text));
+        });
+    }
+    dedupe_hook_skill_refs(skills)
+}
+
+fn visit_json_strings(value: &serde_json::Value, visitor: &mut impl FnMut(&str)) {
+    match value {
+        serde_json::Value::String(text) => visitor(text),
+        serde_json::Value::Array(values) => {
+            for nested in values {
+                visit_json_strings(nested, visitor);
+            }
+        }
+        serde_json::Value::Object(object) => {
+            for nested in object.values() {
+                visit_json_strings(nested, visitor);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn extract_skill_refs_from_text(text: &str) -> Vec<HookSkillRef> {
+    let mut remaining = text;
+    let mut skills = Vec::new();
+    while let Some(start) = remaining.find("<skill>") {
+        let after_start = &remaining[start + "<skill>".len()..];
+        let Some(end) = after_start.find("</skill>") else {
+            break;
+        };
+        let block = &after_start[..end];
+        if let (Some(name), Some(path)) = (xml_tag_text(block, "name"), xml_tag_text(block, "path"))
+        {
+            skills.push(HookSkillRef {
+                name: name.trim().to_string(),
+                path: PathBuf::from(path.trim()),
+            });
+        }
+        remaining = &after_start[end + "</skill>".len()..];
+    }
+    skills
+}
+
+fn xml_tag_text(input: &str, tag: &str) -> Option<String> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let after_open = input.split_once(&open)?.1;
+    let value = after_open.split_once(&close)?.0;
+    Some(value.to_string())
+}
+
+fn dedupe_hook_skill_refs(skills: Vec<HookSkillRef>) -> Vec<HookSkillRef> {
+    let mut seen = HashSet::new();
+    let mut deduped = Vec::new();
+    for skill in skills {
+        let key = format!("{}\n{}", skill.name, skill.path.display());
+        if seen.insert(key) {
+            deduped.push(skill);
+        }
+    }
+    deduped
+}
+
+fn load_usage_by_skill(database_path: &Path) -> Result<HashMap<String, UsageSummary>> {
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT skill_name, SUM(usage_count), MAX(last_used_at)
+            FROM skill_usage_stats
+            GROUP BY skill_name
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            let usage_count: i64 = row.get(1)?;
+            Ok((
+                row.get::<_, String>(0)?,
+                UsageSummary {
+                    usage_count: usize::try_from(usage_count.max(0)).unwrap_or_default(),
+                    last_used_at: row.get(2)?,
+                },
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+    let mut usage = HashMap::new();
+    for row in rows {
+        let (skill_name, summary) = row.map_err(|error| error.to_string())?;
+        usage.insert(skill_name, summary);
+    }
+    Ok(usage)
+}
+
+fn load_usage_by_runtime(database_path: &Path) -> Result<HashMap<String, UsageSummary>> {
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT runtime_root, SUM(usage_count), MAX(last_used_at)
+            FROM skill_usage_stats
+            GROUP BY runtime_root
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            let usage_count: i64 = row.get(1)?;
+            Ok((
+                row.get::<_, String>(0)?,
+                UsageSummary {
+                    usage_count: usize::try_from(usage_count.max(0)).unwrap_or_default(),
+                    last_used_at: row.get(2)?,
+                },
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+    let mut usage = HashMap::new();
+    for row in rows {
+        let (runtime_root, summary) = row.map_err(|error| error.to_string())?;
+        usage.insert(runtime_root, summary);
+    }
+    Ok(usage)
+}
+
+fn load_usage_by_skill_runtime(
+    database_path: &Path,
+) -> Result<HashMap<(String, String), UsageSummary>> {
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT skill_name, runtime_root, usage_count, last_used_at
+            FROM skill_usage_stats
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            let usage_count: i64 = row.get(2)?;
+            Ok((
+                (row.get::<_, String>(0)?, row.get::<_, String>(1)?),
+                UsageSummary {
+                    usage_count: usize::try_from(usage_count.max(0)).unwrap_or_default(),
+                    last_used_at: row.get(3)?,
+                },
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+    let mut usage = HashMap::new();
+    for row in rows {
+        let (key, summary) = row.map_err(|error| error.to_string())?;
+        usage.insert(key, summary);
+    }
+    Ok(usage)
+}
+
+fn load_usage_stat_for_key(
+    connection: &Connection,
+    skill_name: &str,
+    agent_id: &str,
+    runtime_root: &str,
+) -> Result<UsageSummary> {
+    connection
+        .query_row(
+            "
+            SELECT usage_count, last_used_at
+            FROM skill_usage_stats
+            WHERE skill_name = ?1 AND agent_id = ?2 AND runtime_root = ?3
+            ",
+            params![skill_name, agent_id, runtime_root],
+            |row| {
+                let usage_count: i64 = row.get(0)?;
+                Ok(UsageSummary {
+                    usage_count: usize::try_from(usage_count.max(0)).unwrap_or_default(),
+                    last_used_at: Some(row.get(1)?),
+                })
+            },
+        )
+        .optional()
+        .map(|usage| usage.unwrap_or_default())
+        .map_err(|error| error.to_string())
 }
 
 fn load_operation(connection: &Connection, id: &str) -> Result<OperationRecord> {
@@ -4099,6 +4997,7 @@ fn upsert_workspace(
 }
 
 fn load_workspaces(database_path: &Path) -> Result<Vec<Workspace>> {
+    let usage_by_runtime = load_usage_by_runtime(database_path)?;
     let connection = open_database(database_path).map_err(|error| error.to_string())?;
     let mut statement = connection
         .prepare(
@@ -4126,7 +5025,11 @@ fn load_workspaces(database_path: &Path) -> Result<Vec<Workspace>> {
     let mut workspaces = Vec::new();
 
     for row in rows {
-        workspaces.push(row.map_err(|error| error.to_string())?);
+        let mut workspace = row.map_err(|error| error.to_string())?;
+        if let Some(usage) = usage_by_runtime.get(&usage_runtime_key(&workspace.canonical_path)) {
+            workspace.usage_count = usage.usage_count;
+        }
+        workspaces.push(workspace);
     }
 
     Ok(workspaces)
@@ -4136,8 +5039,9 @@ fn load_workspace_by_canonical_path(
     database_path: &Path,
     canonical_path: &Path,
 ) -> Result<Option<Workspace>> {
+    let usage_by_runtime = load_usage_by_runtime(database_path)?;
     let connection = open_database(database_path).map_err(|error| error.to_string())?;
-    connection
+    let workspace = connection
         .query_row(
             "
             SELECT
@@ -4159,7 +5063,14 @@ fn load_workspace_by_canonical_path(
             workspace_from_row,
         )
         .optional()
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+
+    Ok(workspace.map(|mut workspace| {
+        if let Some(usage) = usage_by_runtime.get(&usage_runtime_key(&workspace.canonical_path)) {
+            workspace.usage_count = usage.usage_count;
+        }
+        workspace
+    }))
 }
 
 fn workspace_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Workspace> {
@@ -4180,6 +5091,7 @@ fn workspace_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Workspace> {
         display_name: row.get(5)?,
         skill_count: usize::try_from(skill_count.max(0)).unwrap_or_default(),
         imported_skill_count: usize::try_from(imported_skill_count.max(0)).unwrap_or_default(),
+        usage_count: 0,
         last_scan_error_count: usize::try_from(last_scan_error_count.max(0)).unwrap_or_default(),
         last_scan_error: row.get(9)?,
         last_scanned_at: row.get(10)?,
@@ -5139,6 +6051,290 @@ description: \"Demo skill\"
 
         assert_eq!(workspace.skill_count, 2);
         assert_eq!(workspace.imported_skill_count, 1);
+    }
+
+    #[test]
+    fn record_skill_usage_allows_unmanaged_skill_and_dedupes_event_ids() {
+        let root = temp_dir("usage-unmanaged-dedupe");
+        let managed_root = root.join("SkillBox");
+        let runtime_root = root.join("project").join(".codex").join("skills");
+        fs::create_dir_all(&runtime_root).unwrap();
+
+        let first = record_skill_usage(
+            RecordSkillUsageRequest {
+                skill_name: "draft-helper".to_string(),
+                agent_id: "codex".to_string(),
+                runtime_root: runtime_root.clone(),
+                event_id: Some("codex-run-1".to_string()),
+                used_at: Some("2026-06-02T10:15:00Z".to_string()),
+                metadata: Some(serde_json::json!({ "source": "codex-app" })),
+            },
+            &managed_root,
+        )
+        .unwrap();
+        let second = record_skill_usage(
+            RecordSkillUsageRequest {
+                skill_name: "draft-helper".to_string(),
+                agent_id: "codex".to_string(),
+                runtime_root,
+                event_id: Some("codex-run-1".to_string()),
+                used_at: Some("2026-06-02T10:16:00Z".to_string()),
+                metadata: Some(serde_json::json!({ "source": "codex-app" })),
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        assert_eq!(first.usage_count, 1);
+        assert_eq!(first.deduplicated, false);
+        assert_eq!(first.used_at, "2026-06-02T10:15:00+00:00");
+        assert_eq!(second.usage_count, 1);
+        assert_eq!(second.deduplicated, true);
+        assert_eq!(second.last_used_at, "2026-06-02T10:15:00+00:00");
+    }
+
+    #[test]
+    fn managed_state_includes_skill_usage_summary() {
+        let root = temp_dir("usage-managed-state");
+        let managed_root = root.join("SkillBox");
+        let source = root.join("runtime").join("alpha");
+        let codex_runtime = root.join(".codex").join("skills");
+        let agents_runtime = root.join(".agents").join("skills");
+        make_skill(&source, "alpha", "Alpha skill");
+        import_skill(&source, SkillKind::User, &managed_root).unwrap();
+
+        record_skill_usage(
+            RecordSkillUsageRequest {
+                skill_name: "alpha".to_string(),
+                agent_id: "codex".to_string(),
+                runtime_root: codex_runtime,
+                event_id: None,
+                used_at: Some("2026-06-02T09:00:00Z".to_string()),
+                metadata: None,
+            },
+            &managed_root,
+        )
+        .unwrap();
+        record_skill_usage(
+            RecordSkillUsageRequest {
+                skill_name: "alpha".to_string(),
+                agent_id: "agents".to_string(),
+                runtime_root: agents_runtime,
+                event_id: None,
+                used_at: Some("2026-06-02T11:00:00Z".to_string()),
+                metadata: None,
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        let state = managed_state(&managed_root).unwrap();
+
+        assert_eq!(state.skills[0].name, "alpha");
+        assert_eq!(state.skills[0].usage_count, 2);
+        assert_eq!(
+            state.skills[0].last_used_at.as_deref(),
+            Some("2026-06-02T11:00:00+00:00")
+        );
+    }
+
+    #[test]
+    fn workspace_and_import_candidates_include_usage_counts() {
+        let root = temp_dir("usage-workspace-candidates");
+        let managed_root = root.join("SkillBox");
+        let workspace_root = root.join("project").join(".agents").join("skills");
+        make_skill(&workspace_root.join("alpha"), "alpha", "Alpha skill");
+
+        record_skill_usage(
+            RecordSkillUsageRequest {
+                skill_name: "alpha".to_string(),
+                agent_id: "agents".to_string(),
+                runtime_root: workspace_root.clone(),
+                event_id: None,
+                used_at: Some("2026-06-02T12:00:00Z".to_string()),
+                metadata: None,
+            },
+            &managed_root,
+        )
+        .unwrap();
+        record_skill_usage(
+            RecordSkillUsageRequest {
+                skill_name: "alpha".to_string(),
+                agent_id: "agents".to_string(),
+                runtime_root: workspace_root.clone(),
+                event_id: None,
+                used_at: Some("2026-06-02T12:01:00Z".to_string()),
+                metadata: None,
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        let candidates = scan_import_candidates(&[workspace_root.clone()], &managed_root).unwrap();
+        let workspaces = list_workspaces(&managed_root).unwrap();
+
+        assert_eq!(workspace(&workspaces, &workspace_root).usage_count, 2);
+        assert_eq!(candidate(&candidates.candidates, "alpha").usage_count, 2);
+    }
+
+    #[test]
+    fn record_skill_usage_rejects_content_metadata() {
+        let root = temp_dir("usage-metadata-content");
+        let managed_root = root.join("SkillBox");
+        let runtime_root = root.join(".codex").join("skills");
+
+        let error = record_skill_usage(
+            RecordSkillUsageRequest {
+                skill_name: "alpha".to_string(),
+                agent_id: "codex".to_string(),
+                runtime_root,
+                event_id: None,
+                used_at: Some("2026-06-02T12:00:00Z".to_string()),
+                metadata: Some(serde_json::json!({ "prompt": "private request" })),
+            },
+            &managed_root,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("metadata"));
+        assert!(error.contains("prompt"));
+    }
+
+    #[test]
+    fn usage_hook_install_injects_codex_and_claude_stop_hooks() {
+        let root = temp_dir("usage-hook-install");
+        let home = root.join("home");
+        fs::create_dir_all(home.join(".codex")).unwrap();
+        fs::write(
+            home.join(".codex").join("hooks.json"),
+            r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo existing"}]}]}}"#,
+        )
+        .unwrap();
+        fs::create_dir_all(home.join(".claude")).unwrap();
+        fs::write(
+            home.join(".claude").join("settings.json"),
+            r#"{"permissions":{"allow":["Read"]}}"#,
+        )
+        .unwrap();
+
+        let codex = install_usage_hook_for_home(UsageHookTarget::CodexApp, &home).unwrap();
+        let claude = install_usage_hook_for_home(UsageHookTarget::ClaudeCodeCli, &home).unwrap();
+
+        assert!(codex.installed);
+        assert!(claude.installed);
+        assert!(codex.backup_path.is_some());
+        assert!(claude.backup_path.is_some());
+
+        let codex_config: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(home.join(".codex/hooks.json")).unwrap())
+                .unwrap();
+        let claude_config: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(home.join(".claude/settings.json")).unwrap())
+                .unwrap();
+
+        assert_eq!(
+            codex_config["hooks"]["Stop"][0]["hooks"][0]["command"],
+            "echo existing"
+        );
+        assert!(json_has_hook_command(
+            &codex_config,
+            "skillbox usage-hook codex"
+        ));
+        assert!(json_has_hook_command(
+            &claude_config,
+            "skillbox usage-hook claude-code"
+        ));
+        assert_eq!(claude_config["permissions"]["allow"][0], "Read");
+
+        let statuses = usage_hook_statuses_for_home(&home).unwrap();
+        assert!(
+            statuses
+                .iter()
+                .find(|status| status.target == UsageHookTarget::CodexApp)
+                .unwrap()
+                .installed
+        );
+        assert!(
+            statuses
+                .iter()
+                .find(|status| status.target == UsageHookTarget::CodexCli)
+                .unwrap()
+                .installed
+        );
+        assert!(
+            statuses
+                .iter()
+                .find(|status| status.target == UsageHookTarget::ClaudeCodeCli)
+                .unwrap()
+                .installed
+        );
+    }
+
+    #[test]
+    fn usage_hook_records_skill_blocks_from_codex_transcript() {
+        let root = temp_dir("usage-hook-codex-record");
+        let managed_root = root.join("SkillBox");
+        let runtime_root = root.join("project").join(".agents").join("skills");
+        let skill_root = runtime_root.join("probe");
+        fs::create_dir_all(&skill_root).unwrap();
+        fs::write(
+            skill_root.join("SKILL.md"),
+            "---\nname: probe\ndescription: Probe\n---\n",
+        )
+        .unwrap();
+        let transcript = root.join("codex.jsonl");
+        fs::write(
+            &transcript,
+            format!(
+                "{}\n{}\n{}\n",
+                serde_json::json!({
+                    "type": "turn_context",
+                    "payload": { "turn_id": "turn-1" }
+                }),
+                serde_json::json!({
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{
+                            "type": "input_text",
+                            "text": format!(
+                                "<skill>\n<name>probe</name>\n<path>{}</path>\n---\nname: probe\n---\n</skill>",
+                                skill_root.join("SKILL.md").display()
+                            )
+                        }]
+                    }
+                }),
+                serde_json::json!({
+                    "type": "turn_context",
+                    "payload": { "turn_id": "turn-2" }
+                })
+            ),
+        )
+        .unwrap();
+        let hook_input = serde_json::json!({
+            "session_id": "session-1",
+            "turn_id": "turn-1",
+            "transcript_path": transcript,
+            "cwd": root.join("project"),
+            "hook_event_name": "Stop",
+            "model": "gpt-test"
+        })
+        .to_string();
+
+        let first = record_skill_usage_from_hook("codex", &hook_input, &managed_root).unwrap();
+        let second = record_skill_usage_from_hook("codex", &hook_input, &managed_root).unwrap();
+
+        assert_eq!(first.recorded.len(), 1);
+        assert_eq!(first.recorded[0].skill_name, "probe");
+        assert_eq!(first.recorded[0].agent_id, "agents");
+        assert_eq!(
+            first.recorded[0].runtime_root,
+            fs::canonicalize(runtime_root).unwrap()
+        );
+        assert!(!first.recorded[0].deduplicated);
+        assert_eq!(second.recorded.len(), 1);
+        assert!(second.recorded[0].deduplicated);
     }
 
     #[test]

@@ -28,6 +28,7 @@ test('normalizes workspace snake case fields and compact labels', () => {
     display_name: 'Agents User',
     skill_count: 3,
     imported_skill_count: 2,
+    usage_count: 7,
     last_scan_error_count: 1,
     last_scan_error: 'one unreadable skill',
     last_scanned_at: '2026-05-26 08:00:00'
@@ -39,6 +40,7 @@ test('normalizes workspace snake case fields and compact labels', () => {
   assert.equal(workspace.agentLabel, 'Codex CLI');
   assert.equal(workspace.skillCount, 3);
   assert.equal(workspace.importedSkillCount, 2);
+  assert.equal(workspace.usageCount, 7);
   assert.equal(workspace.lastScanErrorCount, 1);
   assert.equal(workspace.lastScanError, 'one unreadable skill');
 });
@@ -213,6 +215,6 @@ test('sidebar footer icons follow the lucide-react convention', () => {
 });
 
 test('workspace card metadata keeps only user-facing fields', () => {
-  assert.deepEqual(workspaceCardMetaLabels, ['Scope', 'Skills', 'Imported']);
+  assert.deepEqual(workspaceCardMetaLabels, ['Scope', 'Skills', 'Imported', 'Calls']);
   assert.equal('workspaceTableColumns' in workspaceModule, false);
 });

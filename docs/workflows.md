@@ -441,3 +441,48 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `cargo run -p skillbox-cli --offline -- workspace-add <temp-root> --kind user --managed-root <temp-skillbox-root>`
 - `npm test`
 - 桌面 UI 验证 sidebar 只保留 Dashboard、Workspaces、Settings，Workspace 页面可 scan、add、forget manual rows，并且点击 workspace 可查看和导入该 workspace 下的 skills。
+
+## 13. Skill Usage Recording
+
+触发条件：
+
+- agent adapter、CLI wrapper 或 runtime hook 观察到真实 agent 调用 skill。
+- Rust CLI 入口：`usage-record`。
+- Rust CLI hook 入口：`usage-hook codex|claude-code`、`usage-hook-status`、`usage-hook-install <target>`。
+- Tauri command：`record_skill_usage`。
+- Tauri hook 配置 command：`usage_hook_statuses`、`install_usage_hook`。
+- 桌面 Settings 的 `Usage hook injection` 一键注入 Codex App、Codex CLI 和 Claude Code CLI 的 Stop hook。
+- 不统计 SkillBox 打开详情、部署、更新、scan、import 或其它管理行为。
+
+步骤：
+
+- 调用方提交 `skill_name`、`agent_id`、`runtime_root`，可选提交 `event_id`、`used_at` 和 `metadata`。
+- hook 注入只修改对应 agent 的配置文件；Codex App 和 Codex CLI 共享 `~/.codex/hooks.json`，Claude Code CLI 使用 `~/.claude/settings.json`。
+- 注入命令挂在 `Stop` 事件上。hook 命令读取 agent 提供的 `transcript_path`，只提取本 turn 中 Skill 块的 `name` 和 `path`，不保存 prompt、聊天正文、文件内容或 transcript。
+- `usage-hook` 命令必须 fail-open：解析或写入失败时不应让 agent hook 返回失败，从而不影响 agent 会话结束。
+- Rust core 写入 `skill_usage_events`，允许 `skill_name` 尚未导入 SkillBox。
+- 如果同一 `agent_id + runtime_root + event_id` 已存在，返回 deduplicated 结果，不递增聚合计数。
+- 写入成功后更新 `skill_usage_stats`，聚合键为 `skill_name + agent_id + runtime_root`。
+- `used_at` 不传时使用当前 UTC RFC3339 时间；`recorded_at` 始终记录 SkillBox 收到上报的时间。
+- `metadata` 必须是 JSON object，大小受限，不能包含 prompt、聊天正文、文件内容、diff 等内容型字段。
+- 桌面 skill 详情页按 `skill_name` 汇总显示 Usage；Workspace card 按 runtime root 显示 Calls；workspace skill/import 行显示该 workspace 下的 Calls。
+- 桌面 skill card 在 skill name 下方直接显示全局 Calls。
+
+失败与回滚：
+
+- 无效 skill name、agent id、runtime root、timestamp 或 metadata 时拒绝写入。
+- hook 注入前如果配置文件存在，先写同目录 `.bak` 备份；无效 JSON 配置拒绝注入，不覆盖原文件。
+- usage event 不写 operation log；operation log 只记录 SkillBox 管理动作。
+- usage 写入失败不应影响 scan/import/deploy 工作流。
+
+完成验证：
+
+- `cargo test -p skillbox-core --offline usage`
+- `cargo test -p skillbox-core --offline usage_hook`
+- `cargo test -p skillbox-cli --offline usage_record`
+- `cargo test -p skillbox-cli --offline usage_hook`
+- `cargo run -p skillbox-cli --offline -- usage-record --skill <skill-name> --agent <agent-id> --runtime-root <runtime-root> --event-id <id> --managed-root <temp-skillbox-root>`
+- `cargo run -p skillbox-cli --offline -- usage-hook-install codex-app`
+- `cargo run -p skillbox-cli --offline -- usage-hook-status`
+- 使用相同 `--event-id` 重复上报，确认第二次返回 deduplicated 且计数不增加。
+- `npm test`

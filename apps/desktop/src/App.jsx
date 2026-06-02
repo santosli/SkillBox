@@ -104,6 +104,7 @@ const autoRefreshBlockedStatuses = new Set([
   'loading',
   'preparing_sync',
   'deploying_skill',
+  'installing_usage_hook',
   'scanning',
   'scanning_workspace_skills',
   'scanning_workspaces',
@@ -191,6 +192,33 @@ const previewWorkspaces = [
   }
 ];
 
+const previewUsageHooks = [
+  {
+    target: 'codex_app',
+    label: 'Codex App',
+    configPath: '~/.codex/hooks.json',
+    command: 'skillbox usage-hook codex',
+    installed: false,
+    sharedConfigKey: 'codex'
+  },
+  {
+    target: 'codex_cli',
+    label: 'Codex CLI',
+    configPath: '~/.codex/hooks.json',
+    command: 'skillbox usage-hook codex',
+    installed: false,
+    sharedConfigKey: 'codex'
+  },
+  {
+    target: 'claude_code_cli',
+    label: 'Claude Code CLI',
+    configPath: '~/.claude/settings.json',
+    command: 'skillbox usage-hook claude-code',
+    installed: false,
+    sharedConfigKey: 'claude-code'
+  }
+];
+
 function previewUserSkillsGitChanges() {
   return {
     repo_path: previewPaths.userSkillsRoot,
@@ -267,6 +295,7 @@ export default function App() {
     error: ''
   });
   const [userSkillsGit, setUserSkillsGit] = useState(normalizeUserSkillsGitStatus(null));
+  const [usageHooks, setUsageHooks] = useState(normalizeUsageHookStatuses(null));
   const [remoteSkillUpdates, setRemoteSkillUpdates] = useState(normalizeRemoteSkillUpdates(null));
   const [lastStatusCheckedAt, setLastStatusCheckedAt] = useState('');
   const [syncDialog, setSyncDialog] = useState({
@@ -460,18 +489,27 @@ export default function App() {
         throw new Error('Browser preview is mocking an empty managed store. Run inside Tauri to use the local skill bridge.');
       }
 
-      const [state, storedPreferences, gitStatus, cachedRemoteUpdatesResult, workspaceRows] = await Promise.all([
+      const [
+        state,
+        storedPreferences,
+        gitStatus,
+        cachedRemoteUpdatesResult,
+        workspaceRows,
+        usageHookRows
+      ] = await Promise.all([
         invoke('managed_state'),
         invoke('managed_preferences').catch(() => null),
         invoke('user_skills_git_status').catch(() => null),
         invoke('cached_remote_skill_updates').catch(() => null),
-        invoke('list_workspaces').catch(() => [])
+        invoke('list_workspaces').catch(() => []),
+        invoke('usage_hook_statuses').catch(() => [])
       ]);
       const managedSkills = state.skills?.map(normalizeSkill) || [];
       const cachedRemoteUpdates = normalizeRemoteSkillUpdates(cachedRemoteUpdatesResult);
 
       setSkills(managedSkills);
       setWorkspaces(normalizeWorkspaces(workspaceRows));
+      setUsageHooks(normalizeUsageHookStatuses(usageHookRows));
       setPaths(normalizePaths(state.paths));
       setPreferences(normalizePreferences(storedPreferences));
       setUserSkillsGit(normalizeUserSkillsGitStatus(gitStatus));
@@ -488,6 +526,7 @@ export default function App() {
       setPaths(previewPaths);
       setPreferences(readPreviewPreferences());
       setUserSkillsGit(normalizeUserSkillsGitStatus(null));
+      setUsageHooks(normalizeUsageHookStatuses(null));
       setRemoteSkillUpdates(normalizeRemoteSkillUpdates(null));
       setLastStatusCheckedAt('');
       setIsFirstUse(true);
@@ -872,6 +911,39 @@ export default function App() {
     const nextPreferences = normalizePreferences(storedPreferences);
     setPreferences(nextPreferences);
     return nextPreferences;
+  }
+
+  async function installUsageHook(target) {
+    setStatus('installing_usage_hook');
+    setError('');
+    setNotice('');
+
+    if (!window.__TAURI_INTERNALS__) {
+      setUsageHooks((current) => {
+        const normalized = normalizeUsageHookStatuses(current);
+        const selected = normalized.find((hook) => hook.target === target);
+        const sharedConfigKey = selected?.sharedConfigKey || target;
+        return normalized.map((hook) =>
+          hook.sharedConfigKey === sharedConfigKey
+            ? { ...hook, installed: true }
+            : hook
+        );
+      });
+      setNotice('Usage hook injection is enabled in preview.');
+      setStatus('ready');
+      return;
+    }
+
+    try {
+      await invoke('install_usage_hook', { target });
+      const hookRows = await invoke('usage_hook_statuses');
+      setUsageHooks(normalizeUsageHookStatuses(hookRows));
+      setNotice('Usage hook injection updated.');
+      setStatus('ready');
+    } catch (hookError) {
+      setError(hookError.message || String(hookError) || 'Unable to install usage hook.');
+      setStatus('ready');
+    }
   }
 
   async function openSyncDialog() {
@@ -2234,7 +2306,9 @@ export default function App() {
             paths={paths}
             preferences={preferences}
             status={status}
+            usageHooks={usageHooks}
             userSkillsGit={userSkillsGit}
+            onInstallUsageHook={installUsageHook}
             onSaveStatusRefreshInterval={saveStatusRefreshIntervalMinutes}
             onSaveRemoteUpdateTimeout={saveRemoteUpdateTimeoutSeconds}
             onSaveUserSkillsRemote={saveUserSkillsGitRemote}
@@ -2705,7 +2779,10 @@ function SkillCard({ skill, onOpen, onToggleFavorite }) {
     <article className={skill.isFavorite ? 'skillCard favorite' : 'skillCard'}>
       <button className="skillCardHitArea" type="button" onClick={() => onOpen(skill)}>
         <span className="skillCardTitleRow">
-          <strong>{skill.name}</strong>
+          <span className="skillCardTitleText">
+            <strong>{skill.name}</strong>
+            <span className="skillCardUsage">{skill.usageCount || 0} calls</span>
+          </span>
           <Badge tone={skill.statusTone}>{skill.statusLabel}</Badge>
         </span>
         <span className="skillCardDescription">
@@ -2952,7 +3029,8 @@ function WorkspaceCard({ isBusy, workspace, onForget, onOpenSkills }) {
   const metaValues = {
     Scope: <Badge tone={workspace.kind === 'global' ? 'blue' : 'green'}>{workspace.kindLabel}</Badge>,
     Skills: <strong>{workspace.skillCount}</strong>,
-    Imported: <strong>{workspace.importedSkillCount}</strong>
+    Imported: <strong>{workspace.importedSkillCount}</strong>,
+    Calls: <strong>{workspace.usageCount}</strong>
   };
 
   return (
@@ -3183,7 +3261,9 @@ function SettingsPage({
   paths,
   preferences,
   status,
+  usageHooks,
   userSkillsGit,
+  onInstallUsageHook,
   onSaveRemoteUpdateTimeout,
   onSaveStatusRefreshInterval,
   onSaveUserSkillsRemote
@@ -3209,8 +3289,53 @@ function SettingsPage({
           onSaveRemoteUpdateTimeout={onSaveRemoteUpdateTimeout}
           onSave={onSaveStatusRefreshInterval}
         />
+        <UsageHookSettingsPanel
+          status={status}
+          usageHooks={usageHooks}
+          onInstall={onInstallUsageHook}
+        />
       </section>
     </>
+  );
+}
+
+function UsageHookSettingsPanel({ status, usageHooks, onInstall }) {
+  const hooks = normalizeUsageHookStatuses(usageHooks);
+  const isInstalling = status === 'installing_usage_hook';
+
+  return (
+    <aside className="panel compactPanel usageHookSettingsPanel">
+      <div className="panelHeader compact">
+        <div>
+          <h2>Usage hook injection</h2>
+          <p>Record real agent skill calls from runtime hooks.</p>
+        </div>
+      </div>
+      <div className="usageHookList">
+        {hooks.map((hook) => (
+          <div className="usageHookRow" key={hook.target}>
+            <div className="usageHookMain">
+              <strong>{hook.label}</strong>
+              <small>{hook.configPath || 'Config path unavailable'}</small>
+              <code>{hook.command || 'skillbox usage-hook'}</code>
+            </div>
+            <div className="usageHookActions">
+              <Badge tone={hook.installed ? 'green' : 'amber'}>
+                {hook.installed ? 'Injected' : 'Not injected'}
+              </Badge>
+              <button
+                className="button secondary"
+                disabled={isInstalling || hook.installed}
+                type="button"
+                onClick={() => onInstall(hook.target)}
+              >
+                {isInstalling ? 'Injecting...' : hook.installed ? 'Ready' : 'Inject'}
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </aside>
   );
 }
 
@@ -4450,6 +4575,7 @@ function CandidateRow({ candidate, onToggleSelected, onTypeChange }) {
         </div>
         <small>{candidate.description || 'No description in SKILL.md'}</small>
         <code>{compactPath(candidate.sourcePath)}</code>
+        <span className="candidateUsage">Calls {candidate.usageCount || 0}</span>
         {candidateStatusNote(candidate) ? <p>{candidateStatusNote(candidate)}</p> : null}
       </div>
 
@@ -4607,11 +4733,20 @@ function SkillDetailDialog({
                 </button>
               </div>
               <div className="skillDetailDeploySurface">
-                <div className="skillDetailDeploySummary">
-                  <span className="skillDetailDeployMetric">{skill.installedAgents.length || 0}</span>
-                  <div>
-                    <strong>Active workspaces</strong>
-                    <small>{skill.installedAgents.length ? 'Active runtime workspaces' : 'No workspace deployed'}</small>
+                <div className="skillDetailDeployMetrics">
+                  <div className="skillDetailDeploySummary">
+                    <span className="skillDetailDeployMetric">{skill.installedAgents.length || 0}</span>
+                    <div>
+                      <strong>Active workspaces</strong>
+                      <small>{skill.installedAgents.length ? 'Active runtime workspaces' : 'No workspace deployed'}</small>
+                    </div>
+                  </div>
+                  <div className="skillDetailUsageSummary">
+                    <span className="skillDetailDeployMetric">{skill.usageCount || 0}</span>
+                    <div>
+                      <strong>Usage</strong>
+                      <small>Agent calls recorded</small>
+                    </div>
                   </div>
                 </div>
                 <AgentIconStack
@@ -4857,6 +4992,7 @@ function normalizeSkill(skill) {
   const sourceRoot = skill.sourceRoot || skill.source_root;
   const isSymlink = skill.isSymlink || skill.is_symlink;
   const type = skill.type || inferType(sourceRoot);
+  const usageCountValue = Number(skill.usageCount ?? skill.usage_count);
 
   return {
     ...skill,
@@ -4865,6 +5001,8 @@ function normalizeSkill(skill) {
     skillMdPath: skill.skillMdPath || skill.skill_md_path,
     isSymlink,
     type,
+    usageCount: Number.isFinite(usageCountValue) && usageCountValue > 0 ? usageCountValue : 0,
+    lastUsedAt: skill.lastUsedAt || skill.last_used_at || '',
     status: skill.status || defaultSkillStatus(type)
   };
 }
@@ -4911,6 +5049,35 @@ function normalizePreferences(preferences) {
       preferences?.remoteUpdateTimeoutSeconds ?? preferences?.remote_update_timeout_seconds
     )
   };
+}
+
+function normalizeUsageHookStatuses(rows) {
+  const incoming = Array.isArray(rows) ? rows : [];
+  const byTarget = new Map();
+
+  for (const row of incoming) {
+    const target = row.target || '';
+    if (!target) {
+      continue;
+    }
+    byTarget.set(target, {
+      target,
+      label: row.label || usageHookTargetLabel(target),
+      configPath: row.configPath || row.config_path || '',
+      command: row.command || '',
+      installed: Boolean(row.installed),
+      sharedConfigKey: row.sharedConfigKey || row.shared_config_key || target
+    });
+  }
+
+  return previewUsageHooks.map((fallback) => ({
+    ...fallback,
+    ...(byTarget.get(fallback.target) || {})
+  }));
+}
+
+function usageHookTargetLabel(target) {
+  return previewUsageHooks.find((hook) => hook.target === target)?.label || 'Agent';
 }
 
 function readPreviewPreferences() {

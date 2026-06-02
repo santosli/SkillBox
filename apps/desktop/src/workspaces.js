@@ -13,7 +13,7 @@ export const sidebarFooterItems = [
   { id: 'help', label: 'Help', icon: 'message-circle-question-mark' }
 ];
 
-export const workspaceCardMetaLabels = ['Scope', 'Skills', 'Imported'];
+export const workspaceCardMetaLabels = ['Scope', 'Skills', 'Imported', 'Calls'];
 
 export function normalizeWorkspace(workspace = {}) {
   const canonicalPath = workspace.canonicalPath || workspace.canonical_path || '';
@@ -25,6 +25,7 @@ export function normalizeWorkspace(workspace = {}) {
   const importedSkillCount = numberOrZero(
     workspace.importedSkillCount ?? workspace.imported_skill_count
   );
+  const usageCount = numberOrZero(workspace.usageCount ?? workspace.usage_count);
   const lastScanErrorCount = numberOrZero(
     workspace.lastScanErrorCount ?? workspace.last_scan_error_count
   );
@@ -43,6 +44,7 @@ export function normalizeWorkspace(workspace = {}) {
     displayName: workspaceDisplayName(path || canonicalPath, agentId, kind),
     skillCount,
     importedSkillCount,
+    usageCount,
     lastScanErrorCount,
     lastScanError: workspace.lastScanError || workspace.last_scan_error || '',
     lastScannedAt: workspace.lastScannedAt || workspace.last_scanned_at || ''

@@ -42,10 +42,12 @@ test('normalizes backend is_selected false without selecting importable candidat
     suggested_type: 'remote',
     import_status: 'importable',
     is_selected: false,
-    conflict: null
+    conflict: null,
+    usage_count: 4
   });
 
   assert.equal(candidate.isSelected, false);
+  assert.equal(candidate.usageCount, 4);
 });
 
 test('user sync action is setup before remote and hidden for remote skills', () => {

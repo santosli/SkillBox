@@ -3,6 +3,7 @@ use skillbox_core::{
     scan_skill_roots, undeploy_skill, SkillKind, WorkspaceAddRequest, WorkspaceKind,
 };
 use skillbox_github::parse_github_skill_url;
+use std::io::Read;
 use std::path::PathBuf;
 
 fn main() {
@@ -165,6 +166,34 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 managed_root(command_args),
             )?)
         }
+        "usage-record" => print_json(&skillbox_core::record_skill_usage(
+            usage_record_request(command_args)?,
+            managed_root(command_args),
+        )?),
+        "usage-hook" => {
+            let agent = positional(command_args)
+                .into_iter()
+                .next()
+                .ok_or_else(|| "Usage: skillbox usage-hook codex|claude-code".to_string())?;
+            let mut hook_input = String::new();
+            let _ = std::io::stdin().read_to_string(&mut hook_input);
+            let _ = skillbox_core::record_skill_usage_from_hook(
+                &agent,
+                &hook_input,
+                managed_root(command_args),
+            );
+            Ok(())
+        }
+        "usage-hook-status" => print_json(&skillbox_core::usage_hook_statuses()?),
+        "usage-hook-install" => {
+            let target = positional(command_args)
+                .into_iter()
+                .next()
+                .ok_or_else(|| "Usage: skillbox usage-hook-install <target>".to_string())?;
+            print_json(&skillbox_core::install_usage_hook(
+                skillbox_core::parse_usage_hook_target(&target)?,
+            )?)
+        }
         "operations" => print_json(&skillbox_core::list_operations(
             skillbox_core::OperationFilter {
                 entity_type: option(command_args, "--entity-type"),
@@ -294,6 +323,33 @@ fn operation_status(value: &str) -> Result<skillbox_core::OperationStatus, Strin
     }
 }
 
+fn usage_record_request(args: &[String]) -> Result<skillbox_core::RecordSkillUsageRequest, String> {
+    let skill_name = option(args, "--skill").ok_or_else(|| {
+        "Usage: skillbox usage-record --skill <name> --agent <id> --runtime-root <path>".to_string()
+    })?;
+    let agent_id = option(args, "--agent").ok_or_else(|| {
+        "Usage: skillbox usage-record --skill <name> --agent <id> --runtime-root <path>".to_string()
+    })?;
+    let runtime_root = option(args, "--runtime-root").ok_or_else(|| {
+        "Usage: skillbox usage-record --skill <name> --agent <id> --runtime-root <path>".to_string()
+    })?;
+    let metadata = option(args, "--metadata-json")
+        .map(|value| {
+            serde_json::from_str(&value)
+                .map_err(|error| format!("Invalid --metadata-json: {error}"))
+        })
+        .transpose()?;
+
+    Ok(skillbox_core::RecordSkillUsageRequest {
+        skill_name,
+        agent_id,
+        runtime_root: PathBuf::from(runtime_root),
+        event_id: option(args, "--event-id"),
+        used_at: option(args, "--used-at"),
+        metadata,
+    })
+}
+
 fn help_text() -> &'static str {
     "SkillBox Rust CLI
 
@@ -312,6 +368,10 @@ Commands:
   skillbox remote-versions <skill-name> [--managed-root <path>]
   skillbox remote-preview-change <skill-name> --action update|rollback [--to <version>] [--managed-root <path>]
   skillbox remote-apply-change <skill-name> --action update|rollback --to <version> [--preview-id <id>] [--managed-root <path>]
+  skillbox usage-record --skill <name> --agent <id> --runtime-root <path> [--event-id <id>] [--used-at <rfc3339>] [--metadata-json <json>] [--managed-root <path>]
+  skillbox usage-hook codex|claude-code [--managed-root <path>]
+  skillbox usage-hook-status
+  skillbox usage-hook-install <target>
   skillbox operations [--entity-type <type>] [--entity-name <name>] [--status started|succeeded|failed|cancelled] [--limit <n>] [--managed-root <path>]
   skillbox workspaces [--managed-root <path>]
   skillbox workspace-scan [--managed-root <path>]
@@ -319,4 +379,74 @@ Commands:
   skillbox workspace-forget <path> [--managed-root <path>]
   skillbox sync-user-skills [--remote <git-url>] [--message <msg>] [--no-push] [--managed-root <path>]
 "
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn usage_record_request_parses_required_and_optional_fields() {
+        let args = vec![
+            "--skill".to_string(),
+            "grill-me".to_string(),
+            "--agent".to_string(),
+            "codex".to_string(),
+            "--runtime-root".to_string(),
+            "/Users/santos/.codex/skills".to_string(),
+            "--event-id".to_string(),
+            "codex-run-1".to_string(),
+            "--used-at".to_string(),
+            "2026-06-02T10:15:00Z".to_string(),
+            "--metadata-json".to_string(),
+            r#"{"source":"codex-app"}"#.to_string(),
+        ];
+
+        let request = usage_record_request(&args).unwrap();
+
+        assert_eq!(request.skill_name, "grill-me");
+        assert_eq!(request.agent_id, "codex");
+        assert_eq!(
+            request.runtime_root,
+            PathBuf::from("/Users/santos/.codex/skills")
+        );
+        assert_eq!(request.event_id.as_deref(), Some("codex-run-1"));
+        assert_eq!(request.used_at.as_deref(), Some("2026-06-02T10:15:00Z"));
+        assert_eq!(
+            request.metadata.as_ref().unwrap()["source"].as_str(),
+            Some("codex-app")
+        );
+    }
+
+    #[test]
+    fn usage_record_request_rejects_invalid_metadata_json() {
+        let args = vec![
+            "--skill".to_string(),
+            "grill-me".to_string(),
+            "--agent".to_string(),
+            "codex".to_string(),
+            "--runtime-root".to_string(),
+            "/Users/santos/.codex/skills".to_string(),
+            "--metadata-json".to_string(),
+            "{broken".to_string(),
+        ];
+
+        let error = usage_record_request(&args).unwrap_err();
+
+        assert!(error.contains("--metadata-json"));
+    }
+
+    #[test]
+    fn usage_hook_targets_are_supported_by_cli_help() {
+        assert!(matches!(
+            skillbox_core::parse_usage_hook_target("codex-cli").unwrap(),
+            skillbox_core::UsageHookTarget::CodexCli
+        ));
+        assert!(matches!(
+            skillbox_core::parse_usage_hook_target("claude-code").unwrap(),
+            skillbox_core::UsageHookTarget::ClaudeCodeCli
+        ));
+        assert!(help_text().contains("skillbox usage-hook codex|claude-code"));
+        assert!(help_text().contains("skillbox usage-hook-install <target>"));
+    }
 }

@@ -799,20 +799,37 @@ button {
   display: flex;
   min-width: 0;
   min-height: 32px;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   padding-right: 46px;
 }
 
-.skillCardTitleRow strong {
-  display: block;
+.skillCardTitleText {
+  display: grid;
   flex: 1 1 auto;
+  min-width: 0;
+  gap: 4px;
+}
+
+.skillCardTitleText strong {
+  display: block;
   min-width: 0;
   overflow: hidden;
   color: #111827;
   font-size: 17px;
   font-weight: 720;
   line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skillCardUsage {
+  min-width: 0;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1133,6 +1150,67 @@ button {
   max-width: 760px;
 }
 
+.usageHookList {
+  display: grid;
+  gap: 10px;
+  padding: 4px 18px 18px;
+}
+
+.usageHookRow {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 12px;
+}
+
+.usageHookMain {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.usageHookMain strong,
+.usageHookMain small,
+.usageHookMain code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usageHookMain strong {
+  color: #111827;
+  font-size: 14px;
+  font-weight: 720;
+}
+
+.usageHookMain small {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.usageHookMain code {
+  color: #475569;
+  font-family:
+    "SF Mono",
+    ui-monospace,
+    Menlo,
+    monospace;
+  font-size: 12px;
+}
+
+.usageHookActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .workspaceFrame {
   max-width: none;
 }
@@ -1258,7 +1336,7 @@ button {
 .workspaceCardMeta {
   display: grid;
   min-width: 0;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   border-top: 1px solid #eef2f7;
   padding-top: 14px;
@@ -2442,14 +2520,22 @@ dd {
   padding-top: 12px;
 }
 
-.skillDetailDeploySummary {
+.skillDetailDeployMetrics {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+}
+
+.skillDetailDeploySummary,
+.skillDetailUsageSummary {
   display: flex;
   min-width: 0;
   align-items: center;
   gap: 12px;
 }
 
-.skillDetailDeploySummary > div {
+.skillDetailDeploySummary > div,
+.skillDetailUsageSummary > div {
   display: grid;
   min-width: 0;
   gap: 3px;
@@ -2470,7 +2556,8 @@ dd {
   line-height: 1;
 }
 
-.skillDetailDeploySummary strong {
+.skillDetailDeploySummary strong,
+.skillDetailUsageSummary strong {
   overflow: hidden;
   color: #111827;
   font-size: 13px;
@@ -2479,7 +2566,8 @@ dd {
   white-space: nowrap;
 }
 
-.skillDetailDeploySummary small {
+.skillDetailDeploySummary small,
+.skillDetailUsageSummary small {
   overflow: hidden;
   color: #64748b;
   font-size: 12px;
@@ -4056,7 +4144,8 @@ dd {
 
 .candidateMain small,
 .candidateMain code,
-.candidateMain p {
+.candidateMain p,
+.candidateUsage {
   display: block;
   min-width: 0;
 }
@@ -4088,6 +4177,14 @@ dd {
   margin: 6px 0 0;
   color: #64748b;
   font-size: 12px;
+}
+
+.candidateUsage {
+  margin-top: 6px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.2;
 }
 
 .candidateRow.conflict .candidateMain p {

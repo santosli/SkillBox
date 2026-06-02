@@ -148,11 +148,39 @@ operations
   summary TEXT NOT NULL
   error TEXT
   payload_json TEXT NOT NULL
+
+skill_usage_events
+  id TEXT PRIMARY KEY
+  event_id TEXT
+  skill_name TEXT NOT NULL
+  agent_id TEXT NOT NULL
+  runtime_root TEXT NOT NULL
+  used_at TEXT NOT NULL
+  recorded_at TEXT NOT NULL
+  metadata_json TEXT NOT NULL DEFAULT '{}'
+
+skill_usage_stats
+  skill_name TEXT NOT NULL
+  agent_id TEXT NOT NULL
+  runtime_root TEXT NOT NULL
+  usage_count INTEGER NOT NULL DEFAULT 0
+  last_used_at TEXT NOT NULL
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  PRIMARY KEY (skill_name, agent_id, runtime_root)
 ```
 
 `workspaces.display_name` 由 path 推导：home-level global roots 使用 agent 名（例如 `Codex`、`Claude`），项目局部 roots 使用项目目录名（例如 `Pandora`）。`global` / `user` 不拼进名称，由 `kind` 字段表达。`imported_skill_count` 使用 import candidate 的同一套 imported 判定：内容 hash 已存在于 SkillBox managed store，或 workspace skill 已 symlink 到 managed root。
 
 `operations` 记录会改变 managed store、runtime、SQLite、Git state 或偏好设置的动作。Rust core 统一写入，UI 只能读取展示或通过结构化命令触发新记录；记录从 UI 视角 append-only，MVP 不做自动清理。`payload_json` 保存操作细节，例如 from/to version、changed paths、backup path、affected deployments、commit SHA 或失败恢复状态。
+
+`skill_usage_events` 记录真实 agent 调用事件，不记录 SkillBox 打开详情、部署、更新等管理行为。显式上报入口允许未导入 skill 写入；`event_id` 是可选幂等键，在同一 `agent_id + runtime_root` 下重复上报不会递增统计。`metadata_json` 只接受小型 JSON object，不保存 prompt、聊天正文、文件内容或 diff。`skill_usage_stats` 按 `skill_name + agent_id + runtime_root` 聚合，详情页和 skill card 按 skill name 汇总，workspace 页面按 runtime root 汇总。
+
+usage hook 注入状态不写入 SQLite。SkillBox 设置页读取并更新各 agent 自己的 hook 配置文件：
+
+- Codex App 和 Codex CLI：`~/.codex/hooks.json`，注入 `skillbox usage-hook codex` 到 `hooks.Stop`。
+- Claude Code CLI：`~/.claude/settings.json`，注入 `skillbox usage-hook claude-code` 到 `hooks.Stop`。
+
+安装 hook 前会备份已有配置文件；后续状态展示直接读取配置文件中是否已经包含对应 command。
 
 跨 agent 目标 schema 需要补充的概念：
 

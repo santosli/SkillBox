@@ -364,6 +364,36 @@ fn list_operations(request: skillbox_core::OperationFilter) -> Result<Value, Str
 }
 
 #[tauri::command]
+async fn record_skill_usage(
+    request: skillbox_core::RecordSkillUsageRequest,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result =
+            skillbox_core::record_skill_usage(request, skillbox_core::default_managed_root())?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Skill usage record task failed: {error}"))?
+}
+
+#[tauri::command]
+fn usage_hook_statuses() -> Result<Value, String> {
+    let result = skillbox_core::usage_hook_statuses()?;
+    serde_json::to_value(result).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn install_usage_hook(target: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let target = skillbox_core::parse_usage_hook_target(&target)?;
+        let result = skillbox_core::install_usage_hook(target)?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Usage hook install task failed: {error}"))?
+}
+
+#[tauri::command]
 fn list_workspaces() -> Result<Value, String> {
     let result = skillbox_core::list_workspaces(skillbox_core::default_managed_root())?;
     serde_json::to_value(result).map_err(|error| error.to_string())
@@ -424,6 +454,9 @@ pub fn run() {
             preview_remote_version_change,
             apply_remote_version_change,
             list_operations,
+            record_skill_usage,
+            usage_hook_statuses,
+            install_usage_hook,
             list_workspaces,
             scan_workspaces,
             add_workspace,

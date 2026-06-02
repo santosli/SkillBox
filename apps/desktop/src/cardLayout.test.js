@@ -241,7 +241,9 @@ test('blocking desktop commands run off the command handler', () => {
     'sync_user_skills_git',
     'import_candidates',
     'apply_remote_version_change',
-    'scan_workspaces'
+    'scan_workspaces',
+    'record_skill_usage',
+    'install_usage_hook'
   ]) {
     const commandStart = tauriSource.indexOf(`async fn ${commandName}`);
     const nextCommandStart = tauriSource.indexOf('#[tauri::command]', commandStart + 1);
@@ -250,6 +252,18 @@ test('blocking desktop commands run off the command handler', () => {
     assert.ok(commandStart > 0, `${commandName} should be async`);
     assert.match(command, /tauri::async_runtime::spawn_blocking/, `${commandName} should spawn blocking work`);
   }
+});
+
+test('settings exposes usage hook injection for supported agents', () => {
+  assert.match(appSource, /invoke\('usage_hook_statuses'\)/);
+  assert.match(appSource, /invoke\('install_usage_hook'/);
+  assert.match(appSource, /function UsageHookSettingsPanel/);
+  assert.match(appSource, /Codex App/);
+  assert.match(appSource, /Codex CLI/);
+  assert.match(appSource, /Claude Code CLI/);
+  assert.match(appSource, /Usage hook injection/);
+  assert.match(tauriSource, /fn usage_hook_statuses/);
+  assert.match(tauriSource, /async fn install_usage_hook/);
 });
 
 test('desktop startup reports run errors without expect panic', () => {
@@ -298,9 +312,26 @@ test('skill detail metadata starts with deploy workspace', () => {
   assert.match(appSource, /<span>Workspace deployment<\/span>[\s\S]*<button className="button secondary compactAction" type="button" onClick=\{onOpenDeployDialog\}/);
   assert.match(appSource, /className="skillDetailDeployMetric"[\s\S]*\{skill\.installedAgents\.length \|\| 0\}/);
   assert.match(appSource, /<strong>Active workspaces<\/strong>/);
+  assert.match(appSource, /className="skillDetailUsageSummary"[\s\S]*\{skill\.usageCount \|\| 0\}[\s\S]*<strong>Usage<\/strong>/);
   assert.match(appSource, /labelPrefix="Deploy workspaces"/);
   assert.match(css, /\.skillDetailDeploySurface\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto;/s);
   assert.match(css, /\.skillDetailDeployMetric\s*\{/);
+});
+
+test('skill cards show usage directly under the skill name', () => {
+  const skillCardStart = appSource.indexOf('function SkillCard');
+  const skillCardEnd = appSource.indexOf('function AgentIconStack', skillCardStart);
+  const skillCardSource = appSource.slice(skillCardStart, skillCardEnd);
+
+  assert.ok(skillCardStart > 0);
+  assert.ok(skillCardEnd > skillCardStart);
+  assert.match(skillCardSource, /className="skillCardTitleText"[\s\S]*<strong>\{skill\.name\}<\/strong>[\s\S]*className="skillCardUsage"[\s\S]*\{skill\.usageCount \|\| 0\} calls/);
+  assert.ok(
+    skillCardSource.indexOf('<strong>{skill.name}</strong>') <
+      skillCardSource.indexOf('className="skillCardUsage"')
+  );
+  assert.match(css, /\.skillCardTitleText\s*\{/);
+  assert.match(css, /\.skillCardUsage\s*\{/);
 });
 
 test('deploy workspace dialog includes checked rows and unlink confirmation warning', () => {
