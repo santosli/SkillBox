@@ -193,12 +193,13 @@ test('workspace helpers do not expose a status field formatter', () => {
   assert.equal('workspaceStatusLabel' in workspaceModule, false);
 });
 
-test('sidebar keeps dashboard and workspaces without user or remote entries', () => {
+test('sidebar keeps primary navigation entries without user or remote entries', () => {
   assert.deepEqual(
     sidebarItems.map((item) => [item.id, item.label, item.icon]),
     [
       ['dashboard', 'Dashboard', 'gauge'],
-      ['workspaces', 'Workspaces', 'folder-code']
+      ['workspaces', 'Workspaces', 'folder-code'],
+      ['history', 'History', 'history']
     ]
   );
 });

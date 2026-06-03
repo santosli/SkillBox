@@ -157,6 +157,7 @@ skill_usage_events
   runtime_root TEXT NOT NULL
   used_at TEXT NOT NULL
   recorded_at TEXT NOT NULL
+  prompt_excerpt TEXT
   metadata_json TEXT NOT NULL DEFAULT '{}'
 
 skill_usage_stats
@@ -173,12 +174,14 @@ skill_usage_stats
 
 `operations` 记录会改变 managed store、runtime、SQLite、Git state 或偏好设置的动作。Rust core 统一写入，UI 只能读取展示或通过结构化命令触发新记录；记录从 UI 视角 append-only，MVP 不做自动清理。`payload_json` 保存操作细节，例如 from/to version、changed paths、backup path、affected deployments、commit SHA 或失败恢复状态。
 
-`skill_usage_events` 记录真实 agent 调用事件，不记录 SkillBox 打开详情、部署、更新等管理行为。显式上报入口允许未导入 skill 写入；`event_id` 是可选幂等键，在同一 `agent_id + runtime_root` 下重复上报不会递增统计。`metadata_json` 只接受小型 JSON object，不保存 prompt、聊天正文、文件内容或 diff。`skill_usage_stats` 按 `skill_name + agent_id + runtime_root` 聚合，详情页和 skill card 按 skill name 汇总，workspace 页面按 runtime root 汇总。
+`skill_usage_events` 记录真实 agent 调用事件，不记录 SkillBox 打开详情、部署、更新等管理行为。显式上报入口允许未导入 skill 写入；`event_id` 是可选幂等键，在同一 `agent_id + runtime_root` 下重复上报不会递增统计。`prompt_excerpt` 保存触发 skill 的用户 prompt 摘要，必须剥离 skill XML 注入块、压缩空白并限制长度，不保存完整聊天正文。`metadata_json` 只接受小型 JSON object，不保存 prompt、聊天正文、文件内容或 diff。`skill_usage_stats` 按 `skill_name + agent_id + runtime_root` 聚合，详情页和 skill card 按 skill name 汇总，workspace 页面按 runtime root 汇总。
 
-usage hook 注入状态不写入 SQLite。SkillBox 设置页读取并更新各 agent 自己的 hook 配置文件：
+History 是只读聚合视图，不新增表。Rust core 从 `operations` 和 `skill_usage_events` 读取最近记录，按事件时间合并为桌面 History 页的时间线；History 只展示摘要字段，不向 React 暴露 operation payload 或 usage metadata。
 
-- Codex App 和 Codex CLI：`~/.codex/hooks.json`，注入 `skillbox usage-hook codex` 到 `hooks.Stop`。
-- Claude Code CLI：`~/.claude/settings.json`，注入 `skillbox usage-hook claude-code` 到 `hooks.Stop`。
+usage hook 注入状态不写入 SQLite。SkillBox 设置页读取并更新各 agent 自己的 hook 配置文件。注入命令由 SkillBox 生成，固定指向 `~/.skillbox/bin/skillbox-usage-hook <agent>`。这个 wrapper 由 SkillBox 写入，并调用同目录的 `skillbox-usage-hook-runner`；安装或重新注入时会刷新 runner，避免 hook 配置依赖开发态 `target/debug` 路径或 legacy Node CLI：
+
+- Codex App 和 Codex CLI：`~/.codex/hooks.json`，注入 Codex usage hook command 到 `hooks.Stop`。
+- Claude Code CLI：`~/.claude/settings.json`，注入 Claude Code usage hook command 到 `hooks.Stop`。
 
 安装 hook 前会备份已有配置文件；后续状态展示直接读取配置文件中是否已经包含对应 command。
 

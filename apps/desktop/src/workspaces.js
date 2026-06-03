@@ -2,7 +2,8 @@ import { agentWorkspaceLabel } from './agentWorkspaceIcons.js';
 
 export const sidebarItems = [
   { id: 'dashboard', label: 'Dashboard', icon: 'gauge' },
-  { id: 'workspaces', label: 'Workspaces', icon: 'folder-code' }
+  { id: 'workspaces', label: 'Workspaces', icon: 'folder-code' },
+  { id: 'history', label: 'History', icon: 'history' }
 ];
 
 // Sidebar and footer icon names resolve to lucide-react components by default.

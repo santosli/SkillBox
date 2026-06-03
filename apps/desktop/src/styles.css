@@ -3,8 +3,8 @@
   --dashboard-card-track: minmax(min(100%, var(--dashboard-card-width)), 1fr);
   --button-height: 38px;
   --button-radius: 8px;
-  color: #111827;
-  background: #f7f8fa;
+  color: var(--skillbox-text);
+  background: var(--skillbox-bg);
   font-family:
     ui-sans-serif,
     -apple-system,
@@ -23,7 +23,7 @@
 body {
   min-width: 1024px;
   margin: 0;
-  background: #f7f8fa;
+  background: var(--skillbox-bg);
 }
 
 button,
@@ -40,15 +40,15 @@ button {
   grid-template-columns: 256px minmax(0, 1fr);
   min-height: 100vh;
   overflow: hidden;
-  background: #f7f8fa;
+  background: var(--skillbox-bg);
 }
 
 .sidebar {
   display: flex;
   min-height: 100vh;
   flex-direction: column;
-  border-right: 1px solid #e5e7eb;
-  background: #ffffff;
+  border-right: 1px solid var(--skillbox-border);
+  background: var(--skillbox-surface);
 }
 
 .brand {
@@ -78,7 +78,7 @@ button {
 
 .brand span {
   margin-top: 2px;
-  color: #64748b;
+  color: var(--skillbox-text-muted);
   font-size: 12px;
 }
 
@@ -97,7 +97,7 @@ button {
   gap: 10px;
   border-radius: 8px;
   background: transparent;
-  color: #334155;
+  color: var(--skillbox-text-nav);
   cursor: pointer;
   font-size: 14px;
   text-align: left;
@@ -113,9 +113,9 @@ button {
   width: 22px;
   height: 22px;
   place-items: center;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--skillbox-border);
   border-radius: 6px;
-  color: #64748b;
+  color: var(--skillbox-text-muted);
 }
 
 .navButton .navIcon svg,
@@ -132,26 +132,26 @@ button {
 
 .navButton:hover,
 .sidebarFooter button:hover {
-  background: #f1f5f9;
+  background: var(--skillbox-surface-hover);
 }
 
 .navButton.active {
-  background: #eef2f7;
-  color: #111827;
+  background: var(--skillbox-surface-selected);
+  color: var(--skillbox-text);
   font-weight: 650;
 }
 
 .sidebarFooter button.active {
-  background: #eef2f7;
-  color: #111827;
+  background: var(--skillbox-surface-selected);
+  color: var(--skillbox-text);
   font-weight: 650;
 }
 
 .navButton.active .navIcon,
 .sidebarFooter button.active .footerIcon {
-  border-color: #cbd5e1;
-  background: #ffffff;
-  color: #0a84ff;
+  border-color: var(--skillbox-border-strong);
+  background: var(--skillbox-surface);
+  color: var(--skillbox-blue);
 }
 
 .sidebarFooter {
@@ -170,7 +170,7 @@ button {
 }
 
 .sidebarFooter button:hover .footerIcon {
-  color: #0a84ff;
+  color: var(--skillbox-blue);
 }
 
 .sidebarVersion {
@@ -180,13 +180,13 @@ button {
   gap: 12px;
   margin: 10px 6px 0;
   padding: 12px 6px 0;
-  border-top: 1px solid #eef2f7;
-  color: #94a3b8;
+  border-top: 1px solid var(--skillbox-border-muted);
+  color: var(--skillbox-text-subtle);
   font-size: 12px;
 }
 
 .sidebarVersion strong {
-  color: #64748b;
+  color: var(--skillbox-text-muted);
   font-size: 12px;
   font-weight: 650;
 }
@@ -212,7 +212,7 @@ button {
 .pageHeader h1,
 .detailHeader h1 {
   margin: 0;
-  color: #111827;
+  color: var(--skillbox-text);
   font-size: 30px;
   font-weight: 670;
   letter-spacing: 0;
@@ -1211,6 +1211,13 @@ button {
   gap: 8px;
 }
 
+.usageHookTrustNote {
+  grid-column: 1 / -1;
+  color: #92400e;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .workspaceFrame {
   max-width: none;
 }
@@ -1229,6 +1236,214 @@ button {
   align-items: center;
   gap: 10px;
   margin-left: auto;
+}
+
+.historyFrame {
+  max-width: 1040px;
+}
+
+.historyControlRow {
+  grid-template-columns: minmax(360px, max-content) max-content;
+  justify-content: space-between;
+}
+
+.historyTypeTabs {
+  width: 440px;
+  flex: 0 0 auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.historyTimeline {
+  display: grid;
+  gap: 14px;
+}
+
+.historyDayBlock {
+  overflow: hidden;
+  border: 1px solid #dfe4ec;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.03);
+}
+
+.historyDayHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #e7edf5;
+  background: #f8fafc;
+  padding: 11px 14px;
+}
+
+.historyDayHeader h2 {
+  margin: 0;
+  color: var(--skillbox-text);
+  font-size: 13px;
+  font-weight: 760;
+  line-height: 1.2;
+}
+
+.historyDayHeader span {
+  display: inline-flex;
+  min-width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--skillbox-border-control);
+  border-radius: 999px;
+  background: var(--skillbox-surface);
+  color: var(--skillbox-text-secondary);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.historyDayRows {
+  display: grid;
+}
+
+.historyRow {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 52px minmax(0, 1fr);
+  column-gap: 14px;
+  row-gap: 7px;
+  align-items: baseline;
+  border: 0;
+  background: transparent;
+  padding: 14px;
+}
+
+.historyRow + .historyRow {
+  border-top: 1px solid var(--skillbox-border-subtle);
+}
+
+.historyRowTimeRail {
+  display: grid;
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  align-self: baseline;
+  justify-items: start;
+}
+
+.historyRowTimestamp {
+  display: grid;
+  min-width: 0;
+  border-left: 3px solid var(--skillbox-blue-strong);
+  padding: 0 0 0 8px;
+}
+
+.historyRowTimestamp strong {
+  color: var(--skillbox-text-strong);
+  font-size: 15px;
+  font-weight: 820;
+  line-height: 1.25;
+}
+
+.historyRowMain {
+  display: grid;
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+  gap: 7px;
+}
+
+.historyRowTitle {
+  display: flex;
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.historyRowTitle strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--skillbox-text);
+  font-size: 14px;
+  font-weight: 720;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.historyRowMeta {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--skillbox-text-muted);
+  font-size: 12px;
+}
+
+.historyRowMeta span {
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.historyRowMeta span::before {
+  color: var(--skillbox-border-strong);
+  content: "/";
+  margin-right: 6px;
+}
+
+.historyRowMain p,
+.historyRowMain small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.historyRowMain p {
+  margin: 0;
+  color: var(--skillbox-text-secondary);
+  font-size: 13px;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.historyRowPrompt {
+  display: grid;
+  max-width: 960px;
+  min-width: 0;
+  gap: 4px;
+  border-left: 3px solid var(--skillbox-prompt-border);
+  border-radius: 0 7px 7px 0;
+  background: var(--skillbox-prompt-bg);
+  padding: 7px 10px;
+}
+
+.historyRowPrompt span {
+  color: var(--skillbox-prompt-label);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.historyRowPrompt p {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--skillbox-prompt-text);
+  font-size: 13px;
+  line-height: 1.35;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.historyRowMain small {
+  color: var(--skillbox-red-text);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .workspaceCard {
@@ -1695,28 +1910,28 @@ button {
 }
 
 .badge.blue {
-  background: #dbeafe;
-  color: #1d4ed8;
+  background: var(--skillbox-blue-bg);
+  color: var(--skillbox-blue-text);
 }
 
 .badge.green {
-  background: #dcfce7;
-  color: #166534;
+  background: var(--skillbox-green-bg);
+  color: var(--skillbox-green-text);
 }
 
 .badge.amber {
-  background: #fef3c7;
-  color: #92400e;
+  background: var(--skillbox-amber-bg);
+  color: var(--skillbox-amber-text);
 }
 
 .badge.red {
-  background: #fee2e2;
-  color: #991b1b;
+  background: var(--skillbox-red-bg);
+  color: var(--skillbox-red-text);
 }
 
 .badge.slate {
-  background: #eef2f7;
-  color: #475569;
+  background: var(--skillbox-slate-bg);
+  color: var(--skillbox-slate-text);
 }
 
 .emptyState {

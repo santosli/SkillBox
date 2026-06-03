@@ -8,6 +8,7 @@ import {
   FolderOpen,
   Gauge,
   Grid3X3,
+  History as HistoryIcon,
   Import as ImportIcon,
   Link2,
   List,
@@ -105,6 +106,7 @@ const autoRefreshBlockedStatuses = new Set([
   'preparing_sync',
   'deploying_skill',
   'installing_usage_hook',
+  'loading_history',
   'scanning',
   'scanning_workspace_skills',
   'scanning_workspaces',
@@ -197,7 +199,7 @@ const previewUsageHooks = [
     target: 'codex_app',
     label: 'Codex App',
     configPath: '~/.codex/hooks.json',
-    command: 'skillbox usage-hook codex',
+    command: '~/.skillbox/bin/skillbox-usage-hook codex',
     installed: false,
     sharedConfigKey: 'codex'
   },
@@ -205,7 +207,7 @@ const previewUsageHooks = [
     target: 'codex_cli',
     label: 'Codex CLI',
     configPath: '~/.codex/hooks.json',
-    command: 'skillbox usage-hook codex',
+    command: '~/.skillbox/bin/skillbox-usage-hook codex',
     installed: false,
     sharedConfigKey: 'codex'
   },
@@ -213,7 +215,7 @@ const previewUsageHooks = [
     target: 'claude_code_cli',
     label: 'Claude Code CLI',
     configPath: '~/.claude/settings.json',
-    command: 'skillbox usage-hook claude-code',
+    command: '~/.skillbox/bin/skillbox-usage-hook claude-code',
     installed: false,
     sharedConfigKey: 'claude-code'
   }
@@ -251,6 +253,50 @@ function previewUserSkillsGitChanges() {
   };
 }
 
+function previewHistory() {
+  const now = Date.now();
+  return {
+    skill_usage_count: 3,
+    operation_count: 2,
+    entries: [
+      {
+        id: 'preview-usage-grill-me',
+        kind: 'skill_usage',
+        timestamp: new Date(now - 12 * 60 * 1000).toISOString(),
+        title: 'Skill call: grill-me',
+        subtitle: 'codex in ~/.skillbox/remote-skills/grill-me/versions',
+        skill_name: 'grill-me',
+        agent_id: 'codex',
+        runtime_root: '~/.skillbox/remote-skills/grill-me/versions',
+        prompt_excerpt: 'Use grill-me to review the skill usage stats plan'
+      },
+      {
+        id: 'preview-operation-install',
+        kind: 'operation',
+        timestamp: Math.floor((now - 42 * 60 * 1000) / 1000).toString(),
+        title: 'Installed find-skills',
+        subtitle: 'install_remote_skill by desktop',
+        status: 'succeeded',
+        operation_type: 'install_remote_skill',
+        actor: 'desktop',
+        entity_type: 'skill',
+        entity_name: 'find-skills'
+      },
+      {
+        id: 'preview-usage-frontend',
+        kind: 'skill_usage',
+        timestamp: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+        title: 'Skill call: frontend-design',
+        subtitle: 'codex in ~/.skillbox/remote-skills/frontend-design/versions',
+        skill_name: 'frontend-design',
+        agent_id: 'codex',
+        runtime_root: '~/.skillbox/remote-skills/frontend-design/versions',
+        prompt_excerpt: 'Make the History timeline easier to scan'
+      }
+    ]
+  };
+}
+
 export default function App() {
   const [skills, setSkills] = useState([]);
   const [workspaces, setWorkspaces] = useState([]);
@@ -261,6 +307,7 @@ export default function App() {
   const [dashboardFavoritesOnly, setDashboardFavoritesOnly] = useState(false);
   const [dashboardViewMode, setDashboardViewMode] = useState('grid');
   const [workspaceTypeFilter, setWorkspaceTypeFilter] = useState('all');
+  const [historyFilter, setHistoryFilter] = useState('all');
   const [favoriteNames, setFavoriteNames] = useState(readDashboardFavorites);
   const [dashboardTagOverrides, setDashboardTagOverrides] = useState(readDashboardTagOverrides);
   const [selectedName, setSelectedName] = useState('');
@@ -350,6 +397,7 @@ export default function App() {
   const [remoteVersions, setRemoteVersions] = useState({});
   const [userVersions, setUserVersions] = useState({});
   const [operationHistory, setOperationHistory] = useState({});
+  const [history, setHistory] = useState(normalizeHistory(null));
   const [remoteContextLoading, setRemoteContextLoading] = useState({});
   const [userContextLoading, setUserContextLoading] = useState({});
   const contentRef = useRef(null);
@@ -946,6 +994,26 @@ export default function App() {
     }
   }
 
+  async function openUsageHookConfig(path) {
+    const configPath = String(path || '').trim();
+    if (!configPath) {
+      setNotice('No usage hook config file is available.');
+      return;
+    }
+
+    if (window.__TAURI_INTERNALS__) {
+      try {
+        await invoke('open_local_file', { path: configPath });
+        return;
+      } catch (viewError) {
+        setNotice(viewError.message || String(viewError));
+        return;
+      }
+    }
+
+    setNotice(`Usage hook config: ${compactPath(configPath)}`);
+  }
+
   async function openSyncDialog() {
     setError('');
     setNotice('');
@@ -1181,6 +1249,34 @@ export default function App() {
     setFilter(nextFilter);
     setSelectedName('');
     setPage('dashboard');
+  }
+
+  function openHistory() {
+    setSelectedName('');
+    setPage('history');
+    if (!history.entries.length) {
+      void loadHistory();
+    }
+  }
+
+  async function loadHistory() {
+    setError('');
+
+    if (!window.__TAURI_INTERNALS__) {
+      setHistory(normalizeHistory(previewHistory()));
+      setStatus('prototype');
+      return;
+    }
+
+    setStatus('loading_history');
+    try {
+      const result = await invoke('list_history', { request: { limit: 200 } });
+      setHistory(normalizeHistory(result));
+      setStatus('ready');
+    } catch (historyError) {
+      setError(historyError.message || String(historyError) || 'Unable to load history.');
+      setStatus('ready');
+    }
   }
 
   function openSkill(skill) {
@@ -2274,6 +2370,8 @@ export default function App() {
               onClick={() => {
                 if (item.id === 'dashboard') {
                   openDashboard('all');
+                } else if (item.id === 'history') {
+                  openHistory();
                 } else {
                   setSelectedName('');
                   setPage(item.id);
@@ -2308,6 +2406,7 @@ export default function App() {
             status={status}
             usageHooks={usageHooks}
             userSkillsGit={userSkillsGit}
+            onOpenUsageHookConfig={openUsageHookConfig}
             onInstallUsageHook={installUsageHook}
             onSaveStatusRefreshInterval={saveStatusRefreshIntervalMinutes}
             onSaveRemoteUpdateTimeout={saveRemoteUpdateTimeoutSeconds}
@@ -2327,6 +2426,15 @@ export default function App() {
             onForget={forgetWorkspaceRow}
             onOpenSkills={scanWorkspaceSkills}
             onScan={scanWorkspaceRegistry}
+          />
+        ) : page === 'history' ? (
+          <HistoryPage
+            error={error}
+            filter={historyFilter}
+            history={history}
+            status={status}
+            onFilter={setHistoryFilter}
+            onRefresh={loadHistory}
           />
         ) : (
           <Dashboard
@@ -3025,6 +3133,136 @@ function WorkspacePage({
   );
 }
 
+function HistoryPage({ error, filter, history, status, onFilter, onRefresh }) {
+  const entries = history.entries || [];
+  const tabs = [
+    {
+      id: 'all',
+      label: 'All',
+      count: numberOrZero(history.skillUsageCount) + numberOrZero(history.operationCount)
+    },
+    { id: 'skill_usage', label: 'Skill calls', count: numberOrZero(history.skillUsageCount) },
+    { id: 'operation', label: 'Operations', count: numberOrZero(history.operationCount) }
+  ];
+  const filteredEntries =
+    filter === 'all' ? entries : entries.filter((entry) => entry.kind === filter);
+  const groupedEntries = groupHistoryEntriesByDay(filteredEntries);
+  const isLoading = status === 'loading_history';
+
+  return (
+    <section className="dashboardFrame historyFrame" aria-label="History">
+      {error ? <div className="notice">{error}</div> : null}
+      <div className="dashboardTitleRow">
+        <div className="dashboardTitleGroup">
+          <h1>History</h1>
+          <span className="dashboardCountPill">{filteredEntries.length}</span>
+        </div>
+      </div>
+
+      <div className="dashboardControlRow historyControlRow">
+        <div className="dashboardTypeTabs historyTypeTabs" role="tablist" aria-label="History type">
+          {tabs.map((tab) => (
+            <button
+              aria-selected={filter === tab.id}
+              className={filter === tab.id ? 'active' : ''}
+              key={tab.id}
+              role="tab"
+              type="button"
+              onClick={() => onFilter(tab.id)}
+            >
+              <span>{tab.label}</span>
+              <small>{tab.count}</small>
+            </button>
+          ))}
+        </div>
+        <button className="button secondary" disabled={isLoading} type="button" onClick={onRefresh}>
+          <RefreshCw aria-hidden="true" />
+          {isLoading ? 'Loading...' : 'Refresh'}
+        </button>
+      </div>
+
+      {filteredEntries.length > 0 ? (
+        <div className="historyTimeline" aria-label="History entries">
+          {groupedEntries.map((group) => (
+            <section className="historyDayBlock" key={group.key} aria-label={`${group.label} history`}>
+              <div className="historyDayHeader">
+                <h2>{group.label}</h2>
+                <span>{group.entries.length}</span>
+              </div>
+              <div className="historyDayRows">
+                {group.entries.map((entry) => (
+                  <HistoryRow entry={entry} key={`${entry.kind}:${entry.id}`} />
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+      ) : (
+        <div className="emptyState dashboardEmptyState historyEmptyState">
+          <strong>No history yet</strong>
+          <span>Skill calls and SkillBox operations will appear here.</span>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function HistoryRow({ entry }) {
+  const timestamp = formatOperationTimestamp(entry.timestamp);
+  const timestampParts = timestamp.split(' ');
+  const timestampTime = timestampParts.length > 1 ? timestampParts.slice(1).join(' ') : timestamp;
+  const isUsage = entry.kind === 'skill_usage';
+  const badgeLabel = isUsage ? 'Call' : entry.status || 'operation';
+  const badgeTone = isUsage ? 'blue' : operationStatusTone(entry.status);
+  const details = isUsage
+    ? [entry.agentId, compactPath(entry.runtimeRoot)].filter(Boolean)
+    : [entry.operationType, entry.actor, entry.entityName].filter(Boolean);
+  const rowSubtitle = historyRowSubtitle(entry, isUsage);
+
+  return (
+    <article className={isUsage ? 'historyRow usage' : 'historyRow operation'}>
+      <div className="historyRowTimeRail">
+        {timestamp ? (
+          <time className="historyRowTimestamp" dateTime={entry.timestamp}>
+            <strong>{timestampTime}</strong>
+          </time>
+        ) : null}
+      </div>
+      <div className="historyRowTitle">
+        <strong>{entry.title || entry.skillName || entry.operationType || 'History event'}</strong>
+        <Badge tone={badgeTone}>{badgeLabel}</Badge>
+      </div>
+      <div className="historyRowMain">
+        <div className="historyRowMeta">
+          {details.map((detail) => (
+            <span key={detail}>{detail}</span>
+          ))}
+        </div>
+        {rowSubtitle ? <p>{rowSubtitle}</p> : null}
+        {isUsage && entry.promptExcerpt ? (
+          <div className="historyRowPrompt">
+            <span>Prompt</span>
+            <p>{entry.promptExcerpt}</p>
+          </div>
+        ) : null}
+        {entry.error ? <small>{entry.error}</small> : null}
+      </div>
+    </article>
+  );
+}
+
+function historyRowSubtitle(entry, isUsage) {
+  if (isUsage) return '';
+
+  const subtitle = String(entry.subtitle || '').trim();
+  if (!subtitle) return '';
+
+  const defaultOperationSubtitle = entry.operationType && entry.actor
+    ? `${entry.operationType} by ${entry.actor}`
+    : '';
+  return subtitle === defaultOperationSubtitle ? '' : subtitle;
+}
+
 function WorkspaceCard({ isBusy, workspace, onForget, onOpenSkills }) {
   const metaValues = {
     Scope: <Badge tone={workspace.kind === 'global' ? 'blue' : 'green'}>{workspace.kindLabel}</Badge>,
@@ -3264,6 +3502,7 @@ function SettingsPage({
   usageHooks,
   userSkillsGit,
   onInstallUsageHook,
+  onOpenUsageHookConfig,
   onSaveRemoteUpdateTimeout,
   onSaveStatusRefreshInterval,
   onSaveUserSkillsRemote
@@ -3293,14 +3532,15 @@ function SettingsPage({
           status={status}
           usageHooks={usageHooks}
           onInstall={onInstallUsageHook}
+          onOpenConfig={onOpenUsageHookConfig}
         />
       </section>
     </>
   );
 }
 
-function UsageHookSettingsPanel({ status, usageHooks, onInstall }) {
-  const hooks = normalizeUsageHookStatuses(usageHooks);
+function UsageHookSettingsPanel({ status, usageHooks, onInstall, onOpenConfig }) {
+  const hookGroups = groupUsageHooksByConfig(normalizeUsageHookStatuses(usageHooks));
   const isInstalling = status === 'installing_usage_hook';
 
   return (
@@ -3312,26 +3552,31 @@ function UsageHookSettingsPanel({ status, usageHooks, onInstall }) {
         </div>
       </div>
       <div className="usageHookList">
-        {hooks.map((hook) => (
-          <div className="usageHookRow" key={hook.target}>
+        {hookGroups.map((group) => (
+          <div className="usageHookRow" key={group.key}>
             <div className="usageHookMain">
-              <strong>{hook.label}</strong>
-              <small>{hook.configPath || 'Config path unavailable'}</small>
-              <code>{hook.command || 'skillbox usage-hook'}</code>
+              <strong>{group.label}</strong>
+              <small>{group.configPath || 'Config path unavailable'}</small>
+              <code>{group.command || '~/.skillbox/bin/skillbox-usage-hook'}</code>
             </div>
             <div className="usageHookActions">
-              <Badge tone={hook.installed ? 'green' : 'amber'}>
-                {hook.installed ? 'Injected' : 'Not injected'}
+              <Badge tone={usageHookBadgeTone(group)}>
+                {usageHookStatusLabel(group)}
               </Badge>
               <button
                 className="button secondary"
-                disabled={isInstalling || hook.installed}
+                disabled={isInstalling || (group.installed && !group.configPath)}
                 type="button"
-                onClick={() => onInstall(hook.target)}
+                onClick={() =>
+                  group.installed ? onOpenConfig(group.configPath) : onInstall(group.target)
+                }
               >
-                {isInstalling ? 'Injecting...' : hook.installed ? 'Ready' : 'Inject'}
+                {isInstalling ? 'Injecting...' : group.installed ? 'Open' : 'Inject'}
               </button>
             </div>
+            {group.activationNote ? (
+              <small className="usageHookTrustNote">{group.activationNote}</small>
+            ) : null}
           </div>
         ))}
       </div>
@@ -4897,6 +5142,10 @@ function Icon({ name }) {
     return <FolderCode aria-hidden="true" />;
   }
 
+  if (name === 'history') {
+    return <HistoryIcon aria-hidden="true" />;
+  }
+
   if (name === 'settings-2' || name === 'settings') {
     return <Settings2 aria-hidden="true" />;
   }
@@ -5037,6 +5286,99 @@ function normalizeOperationRecords(result = {}) {
   }));
 }
 
+function normalizeHistory(result = {}) {
+  const entries = (result?.entries || []).map((entry) => ({
+    id: entry.id || '',
+    kind: entry.kind || '',
+    timestamp: entry.timestamp || '',
+    title: entry.title || '',
+    subtitle: entry.subtitle || '',
+    status: entry.status || '',
+    skillName: entry.skillName || entry.skill_name || '',
+    agentId: entry.agentId || entry.agent_id || '',
+    runtimeRoot: entry.runtimeRoot || entry.runtime_root || '',
+    promptExcerpt: entry.promptExcerpt || entry.prompt_excerpt || '',
+    operationType: entry.operationType || entry.operation_type || '',
+    actor: entry.actor || '',
+    entityType: entry.entityType || entry.entity_type || '',
+    entityName: entry.entityName || entry.entity_name || '',
+    error: entry.error || ''
+  }));
+
+  return {
+    entries,
+    skillUsageCount: numberOrZero(result?.skillUsageCount ?? result?.skill_usage_count),
+    operationCount: numberOrZero(result?.operationCount ?? result?.operation_count)
+  };
+}
+
+function groupHistoryEntriesByDay(entries = []) {
+  const groups = [];
+  const groupByKey = new Map();
+
+  entries.forEach((entry) => {
+    const key = historyDayKey(entry.timestamp);
+    const label = historyDayLabel(entry.timestamp);
+    if (!groupByKey.has(key)) {
+      const group = { key, label, entries: [] };
+      groupByKey.set(key, group);
+      groups.push(group);
+    }
+    groupByKey.get(key).entries.push(entry);
+  });
+
+  return groups;
+}
+
+function historyDayKey(timestamp = '') {
+  const date = historyDate(timestamp);
+  if (!date) return 'unknown';
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function historyDayLabel(timestamp = '') {
+  const date = historyDate(timestamp);
+  if (!date) return 'Unknown date';
+
+  const today = historyDayKey(new Date().toISOString());
+  const yesterdayDate = new Date();
+  yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+  const yesterday = historyDayKey(yesterdayDate.toISOString());
+  const key = historyDayKey(timestamp);
+
+  if (key === today) return 'Today';
+  if (key === yesterday) return 'Yesterday';
+
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function historyDate(timestamp = '') {
+  const value = String(timestamp || '').trim();
+  if (!value) return null;
+
+  const milliseconds = /^\d+$/.test(value) ? Number(value) * 1000 : Date.parse(value);
+  const date = new Date(milliseconds);
+  return Number.isFinite(milliseconds) && !Number.isNaN(date.getTime()) ? date : null;
+}
+
+function operationStatusTone(status = '') {
+  if (status === 'succeeded') return 'green';
+  if (status === 'failed') return 'red';
+  if (status === 'cancelled') return 'amber';
+  return 'slate';
+}
+
+function numberOrZero(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : 0;
+}
+
 function normalizePreferences(preferences) {
   return {
     skipLocalImportConfirmation: Boolean(
@@ -5066,6 +5408,8 @@ function normalizeUsageHookStatuses(rows) {
       configPath: row.configPath || row.config_path || '',
       command: row.command || '',
       installed: Boolean(row.installed),
+      trustRequired: Boolean(row.trustRequired ?? row.trust_required),
+      activationNote: row.activationNote || row.activation_note || '',
       sharedConfigKey: row.sharedConfigKey || row.shared_config_key || target
     });
   }
@@ -5074,6 +5418,56 @@ function normalizeUsageHookStatuses(rows) {
     ...fallback,
     ...(byTarget.get(fallback.target) || {})
   }));
+}
+
+function groupUsageHooksByConfig(hooks) {
+  const groups = [];
+  const byKey = new Map();
+
+  for (const hook of hooks) {
+    const key =
+      hook.configPath && hook.command
+        ? `${hook.configPath}:${hook.command}`
+        : hook.sharedConfigKey || hook.target;
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.labels.push(hook.label);
+      existing.installed = existing.installed || hook.installed;
+      existing.trustRequired = existing.trustRequired || hook.trustRequired;
+      existing.activationNote = existing.activationNote || hook.activationNote;
+      continue;
+    }
+
+    const group = {
+      key,
+      target: hook.target,
+      labels: [hook.label],
+      label: hook.label,
+      configPath: hook.configPath,
+      command: hook.command,
+      installed: hook.installed,
+      trustRequired: hook.trustRequired,
+      activationNote: hook.activationNote
+    };
+    byKey.set(key, group);
+    groups.push(group);
+  }
+
+  return groups.map((group) => ({
+    ...group,
+    label: group.labels.join(' / ')
+  }));
+}
+
+function usageHookBadgeTone(group) {
+  if (!group.installed || group.trustRequired) return 'amber';
+  return 'green';
+}
+
+function usageHookStatusLabel(group) {
+  if (!group.installed) return 'Not injected';
+  if (group.trustRequired) return 'Needs trust';
+  return 'Injected';
 }
 
 function usageHookTargetLabel(target) {

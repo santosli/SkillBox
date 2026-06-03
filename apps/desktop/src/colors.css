@@ -1,0 +1,40 @@
+:root {
+  --skillbox-bg: #f7f8fa;
+  --skillbox-surface: #ffffff;
+  --skillbox-surface-muted: #f8fafc;
+  --skillbox-surface-hover: #f1f5f9;
+  --skillbox-surface-selected: #eef2f7;
+
+  --skillbox-text: #111827;
+  --skillbox-text-strong: #0f172a;
+  --skillbox-text-muted: #64748b;
+  --skillbox-text-subtle: #94a3b8;
+  --skillbox-text-secondary: #475569;
+  --skillbox-text-nav: #334155;
+
+  --skillbox-border: #e5e7eb;
+  --skillbox-border-muted: #eef2f7;
+  --skillbox-border-subtle: #edf2f7;
+  --skillbox-border-strong: #cbd5e1;
+  --skillbox-border-control: #dbe3ee;
+
+  --skillbox-blue: #0a84ff;
+  --skillbox-blue-strong: #2563eb;
+  --skillbox-blue-bg: #dbeafe;
+  --skillbox-blue-text: #1d4ed8;
+  --skillbox-green: #16a34a;
+  --skillbox-green-bg: #dcfce7;
+  --skillbox-green-border: #bbf7d0;
+  --skillbox-green-text: #166534;
+  --skillbox-amber-bg: #fef3c7;
+  --skillbox-amber-text: #92400e;
+  --skillbox-red-bg: #fee2e2;
+  --skillbox-red-text: #991b1b;
+  --skillbox-slate-bg: #eef2f7;
+  --skillbox-slate-text: #475569;
+
+  --skillbox-prompt-bg: #ecfdf5;
+  --skillbox-prompt-border: #22c55e;
+  --skillbox-prompt-label: #15803d;
+  --skillbox-prompt-text: #14532d;
+}

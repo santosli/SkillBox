@@ -346,6 +346,7 @@ fn usage_record_request(args: &[String]) -> Result<skillbox_core::RecordSkillUsa
         runtime_root: PathBuf::from(runtime_root),
         event_id: option(args, "--event-id"),
         used_at: option(args, "--used-at"),
+        prompt_excerpt: option(args, "--prompt-excerpt"),
         metadata,
     })
 }
@@ -368,7 +369,7 @@ Commands:
   skillbox remote-versions <skill-name> [--managed-root <path>]
   skillbox remote-preview-change <skill-name> --action update|rollback [--to <version>] [--managed-root <path>]
   skillbox remote-apply-change <skill-name> --action update|rollback --to <version> [--preview-id <id>] [--managed-root <path>]
-  skillbox usage-record --skill <name> --agent <id> --runtime-root <path> [--event-id <id>] [--used-at <rfc3339>] [--metadata-json <json>] [--managed-root <path>]
+  skillbox usage-record --skill <name> --agent <id> --runtime-root <path> [--event-id <id>] [--used-at <rfc3339>] [--prompt-excerpt <text>] [--metadata-json <json>] [--managed-root <path>]
   skillbox usage-hook codex|claude-code [--managed-root <path>]
   skillbox usage-hook-status
   skillbox usage-hook-install <target>
@@ -398,6 +399,8 @@ mod tests {
             "codex-run-1".to_string(),
             "--used-at".to_string(),
             "2026-06-02T10:15:00Z".to_string(),
+            "--prompt-excerpt".to_string(),
+            "Use grill-me on the plan".to_string(),
             "--metadata-json".to_string(),
             r#"{"source":"codex-app"}"#.to_string(),
         ];
@@ -412,6 +415,10 @@ mod tests {
         );
         assert_eq!(request.event_id.as_deref(), Some("codex-run-1"));
         assert_eq!(request.used_at.as_deref(), Some("2026-06-02T10:15:00Z"));
+        assert_eq!(
+            request.prompt_excerpt.as_deref(),
+            Some("Use grill-me on the plan")
+        );
         assert_eq!(
             request.metadata.as_ref().unwrap()["source"].as_str(),
             Some("codex-app")

@@ -310,7 +310,8 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 当前 remote source bind、remote update apply、remote rollback apply 必须写 operation log；后续其它 side-effect workflow 接入同一能力。
 - Rust CLI 入口：`operations`。
 - Tauri command：`list_operations`。
-- 桌面 UI：remote skill detail 默认折叠最近的 skill operation history，只显示日志入口和事件数；展开后每条记录显示完成时间，未完成时显示开始时间；未来 Settings 或 Operations 页面可展示全局日志。
+- Tauri command：`list_history`。
+- 桌面 UI：remote skill detail 默认折叠最近的 skill operation history，只显示日志入口和事件数；展开后每条记录显示完成时间，未完成时显示开始时间。左侧 History 页展示全局 skill usage events 和 SkillBox operation logs 的合并时间线，并支持按 Skill calls / Operations 过滤。
 
 步骤：
 
@@ -331,7 +332,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `cargo test -p skillbox-core --offline operation`
 - `cargo run -p skillbox-cli --offline -- operations --managed-root <temp-skillbox-root>`
 - `cargo run -p skillbox-cli --offline -- operations --entity-type skill --entity-name <skill-name> --managed-root <temp-skillbox-root>`
-- 桌面 UI 手动验证 remote skill detail 中成功和失败 operation 都可见。
+- 桌面 UI 手动验证 remote skill detail 中成功和失败 operation 都可见，并验证 History 页能同时显示 skill calls 和 operations。
 
 ## 10. Sync User-Skills Git
 
@@ -458,7 +459,9 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 - 调用方提交 `skill_name`、`agent_id`、`runtime_root`，可选提交 `event_id`、`used_at` 和 `metadata`。
 - hook 注入只修改对应 agent 的配置文件；Codex App 和 Codex CLI 共享 `~/.codex/hooks.json`，Claude Code CLI 使用 `~/.claude/settings.json`。
-- 注入命令挂在 `Stop` 事件上。hook 命令读取 agent 提供的 `transcript_path`，只提取本 turn 中 Skill 块的 `name` 和 `path`，不保存 prompt、聊天正文、文件内容或 transcript。
+- Codex App / Codex CLI 的非 managed command hook 写入后仍需用户在 Codex `/hooks` 中 review/trust；Settings 显示 `Needs trust` 时表示文件已注入但自动统计尚不会执行。
+- 注入命令必须指向 `~/.skillbox/bin/skillbox-usage-hook <agent>`；SkillBox 安装或重新注入时写入同目录 `skillbox-usage-hook-runner`，并替换旧的裸 `skillbox usage-hook ...` 或开发态绝对路径配置，避免命中 legacy Node CLI、找不到命令，或依赖 `target/debug`。
+- 注入命令挂在 `Stop` 事件上。hook 命令读取 agent 提供的 `transcript_path`，只提取本 turn 中 Skill 块的 `name`、`path` 和触发用户 prompt 的受限 excerpt；不保存完整 prompt、聊天正文、文件内容或 transcript。
 - `usage-hook` 命令必须 fail-open：解析或写入失败时不应让 agent hook 返回失败，从而不影响 agent 会话结束。
 - Rust core 写入 `skill_usage_events`，允许 `skill_name` 尚未导入 SkillBox。
 - 如果同一 `agent_id + runtime_root + event_id` 已存在，返回 deduplicated 结果，不递增聚合计数。

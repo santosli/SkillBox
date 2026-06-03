@@ -19,6 +19,7 @@ const MAX_REMOTE_UPDATE_TIMEOUT_SECONDS: u32 = 300;
 const REMOTE_UPDATE_CHECK_CONCURRENCY: usize = 3;
 const CLAUDE_MARKETPLACE_SKILLS_API: &str = "https://claudemarketplaces.com/api/skills";
 const MAX_USAGE_METADATA_JSON_BYTES: usize = 16 * 1024;
+const MAX_USAGE_PROMPT_EXCERPT_CHARS: usize = 500;
 const USAGE_METADATA_CONTENT_KEYS: &[&str] = &[
     "prompt",
     "content",
@@ -272,6 +273,45 @@ pub struct OperationRecord {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct OperationList {
     pub operations: Vec<OperationRecord>,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoryEntryKind {
+    SkillUsage,
+    Operation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct HistoryFilter {
+    pub kind: Option<HistoryEntryKind>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct HistoryEntry {
+    pub id: String,
+    pub kind: HistoryEntryKind,
+    pub timestamp: String,
+    pub title: String,
+    pub subtitle: String,
+    pub prompt_excerpt: Option<String>,
+    pub status: Option<OperationStatus>,
+    pub skill_name: Option<String>,
+    pub agent_id: Option<String>,
+    pub runtime_root: Option<PathBuf>,
+    pub operation_type: Option<String>,
+    pub actor: Option<String>,
+    pub entity_type: Option<String>,
+    pub entity_name: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct HistoryList {
+    pub entries: Vec<HistoryEntry>,
+    pub skill_usage_count: usize,
+    pub operation_count: usize,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -660,6 +700,8 @@ pub struct RecordSkillUsageRequest {
     pub runtime_root: PathBuf,
     pub event_id: Option<String>,
     pub used_at: Option<String>,
+    #[serde(default)]
+    pub prompt_excerpt: Option<String>,
     pub metadata: Option<serde_json::Value>,
 }
 
@@ -691,6 +733,8 @@ pub struct UsageHookStatus {
     pub config_path: PathBuf,
     pub command: String,
     pub installed: bool,
+    pub trust_required: bool,
+    pub activation_note: Option<String>,
     pub shared_config_key: String,
 }
 
@@ -1587,6 +1631,7 @@ pub fn record_skill_usage(
     let event_id = normalize_usage_event_id(request.event_id)?;
     let used_at = normalize_usage_timestamp(request.used_at.as_deref())?;
     let recorded_at = current_rfc3339_timestamp();
+    let prompt_excerpt = normalize_usage_prompt_excerpt(request.prompt_excerpt.as_deref());
     let metadata_json = normalize_usage_metadata(request.metadata)?;
     let connection = open_database(&paths.database_path).map_err(|error| error.to_string())?;
 
@@ -1594,17 +1639,45 @@ pub fn record_skill_usage(
         let existing = connection
             .query_row(
                 "
-                SELECT used_at, recorded_at
+                SELECT used_at, recorded_at, prompt_excerpt
                 FROM skill_usage_events
                 WHERE agent_id = ?1 AND runtime_root = ?2 AND event_id = ?3
                 ",
                 params![&agent_id, &runtime_root_value, event_id_value],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                },
             )
             .optional()
             .map_err(|error| error.to_string())?;
 
-        if let Some((existing_used_at, existing_recorded_at)) = existing {
+        if let Some((existing_used_at, existing_recorded_at, existing_prompt_excerpt)) = existing {
+            if existing_prompt_excerpt.is_none() {
+                if let Some(prompt_excerpt_value) = prompt_excerpt.as_deref() {
+                    connection
+                        .execute(
+                            "
+                            UPDATE skill_usage_events
+                            SET prompt_excerpt = ?1
+                            WHERE agent_id = ?2
+                              AND runtime_root = ?3
+                              AND event_id = ?4
+                              AND prompt_excerpt IS NULL
+                            ",
+                            params![
+                                prompt_excerpt_value,
+                                &agent_id,
+                                &runtime_root_value,
+                                event_id_value,
+                            ],
+                        )
+                        .map_err(|error| error.to_string())?;
+                }
+            }
             let usage =
                 load_usage_stat_for_key(&connection, &skill_name, &agent_id, &runtime_root_value)?;
             return Ok(SkillUsageRecordResult {
@@ -1632,9 +1705,10 @@ pub fn record_skill_usage(
               runtime_root,
               used_at,
               recorded_at,
+              prompt_excerpt,
               metadata_json
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
             ",
             params![
                 usage_event_row_id(),
@@ -1644,6 +1718,7 @@ pub fn record_skill_usage(
                 &runtime_root_value,
                 &used_at,
                 &recorded_at,
+                prompt_excerpt.as_deref(),
                 &metadata_json,
             ],
         )
@@ -1711,8 +1786,9 @@ pub fn install_usage_hook_for_home(
     home: impl AsRef<Path>,
 ) -> Result<UsageHookInstallResult> {
     let home = home.as_ref();
+    write_usage_hook_runner(home)?;
     let config_path = usage_hook_config_path(target, home);
-    let command = usage_hook_command(target);
+    let command = usage_hook_command_for_home(target, home);
     let mut config = read_hook_config_json(&config_path)?;
 
     if json_has_hook_command(&config, &command) {
@@ -1724,7 +1800,10 @@ pub fn install_usage_hook_for_home(
         });
     }
 
-    inject_stop_hook_command(&mut config, &command)?;
+    let replaced = replace_usage_hook_command(&mut config, target, &command);
+    if !replaced {
+        inject_stop_hook_command(&mut config, &command)?;
+    }
     if let Some(parent) = config_path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
@@ -1924,6 +2003,35 @@ pub fn list_operations(
     }
 
     Ok(OperationList { operations })
+}
+
+pub fn list_history(filter: HistoryFilter, managed_root: impl AsRef<Path>) -> Result<HistoryList> {
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let connection = open_database(&paths.database_path).map_err(|error| error.to_string())?;
+    let limit = usize::try_from(filter.limit.unwrap_or(100).clamp(1, 500)).unwrap_or(100);
+    let skill_usage_count = history_table_count(&connection, "skill_usage_events")?;
+    let operation_count = history_table_count(&connection, "operations")?;
+    let mut entries = Vec::new();
+
+    if filter.kind.is_none() || filter.kind == Some(HistoryEntryKind::SkillUsage) {
+        entries.extend(load_skill_usage_history_entries(&connection)?);
+    }
+    if filter.kind.is_none() || filter.kind == Some(HistoryEntryKind::Operation) {
+        entries.extend(load_operation_history_entries(&connection)?);
+    }
+
+    entries.sort_by(|left, right| {
+        history_sort_key(&right.timestamp)
+            .cmp(&history_sort_key(&left.timestamp))
+            .then_with(|| right.id.cmp(&left.id))
+    });
+    entries.truncate(limit);
+
+    Ok(HistoryList {
+        entries,
+        skill_usage_count,
+        operation_count,
+    })
 }
 
 pub fn user_skills_git_status(managed_root: impl AsRef<Path>) -> Result<UserSkillsGitStatus> {
@@ -4138,6 +4246,7 @@ fn init_database(database_path: &Path) -> Result<()> {
               runtime_root TEXT NOT NULL,
               used_at TEXT NOT NULL,
               recorded_at TEXT NOT NULL,
+              prompt_excerpt TEXT,
               metadata_json TEXT NOT NULL DEFAULT '{}'
             );
 
@@ -4163,6 +4272,7 @@ fn init_database(database_path: &Path) -> Result<()> {
         "imported_skill_count",
         "INTEGER NOT NULL DEFAULT 0",
     )?;
+    ensure_database_column(&connection, "skill_usage_events", "prompt_excerpt", "TEXT")?;
     Ok(())
 }
 
@@ -4303,6 +4413,64 @@ fn normalize_usage_metadata(value: Option<serde_json::Value>) -> Result<String> 
     Ok(metadata_json)
 }
 
+fn normalize_usage_prompt_excerpt(value: Option<&str>) -> Option<String> {
+    let stripped = strip_skill_blocks(value?);
+    let stripped = strip_skill_markdown_links(&stripped);
+    let compact = stripped.split_whitespace().collect::<Vec<_>>().join(" ");
+    if compact.is_empty() {
+        return None;
+    }
+
+    let mut chars = compact.chars();
+    let mut excerpt = chars
+        .by_ref()
+        .take(MAX_USAGE_PROMPT_EXCERPT_CHARS)
+        .collect::<String>();
+    if chars.next().is_some() {
+        excerpt.push_str("...");
+    }
+    Some(excerpt)
+}
+
+fn strip_skill_blocks(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut remaining = input;
+
+    while let Some(start) = remaining.find("<skill>") {
+        output.push_str(&remaining[..start]);
+        let after_start = &remaining[start + "<skill>".len()..];
+        let Some(end) = after_start.find("</skill>") else {
+            return output;
+        };
+        remaining = &after_start[end + "</skill>".len()..];
+    }
+
+    output.push_str(remaining);
+    output
+}
+
+fn strip_skill_markdown_links(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut remaining = input;
+
+    while let Some(start) = remaining.find("[$") {
+        output.push_str(&remaining[..start]);
+        let after_start = &remaining[start..];
+        let Some(label_end) = after_start.find("](") else {
+            output.push_str(after_start);
+            return output;
+        };
+        let Some(link_end) = after_start[label_end + 2..].find(')') else {
+            output.push_str(after_start);
+            return output;
+        };
+        remaining = &after_start[label_end + 2 + link_end + 1..];
+    }
+
+    output.push_str(remaining);
+    output
+}
+
 fn usage_metadata_content_key(value: &serde_json::Value) -> Option<String> {
     match value {
         serde_json::Value::Object(object) => {
@@ -4335,9 +4503,13 @@ fn usage_runtime_key(path: &Path) -> String {
 
 fn usage_hook_status_for_home(target: UsageHookTarget, home: &Path) -> Result<UsageHookStatus> {
     let config_path = usage_hook_config_path(target, home);
-    let command = usage_hook_command(target);
+    let command = usage_hook_command_for_home(target, home);
     let installed = read_hook_config_json(&config_path)
-        .map(|config| json_has_hook_command(&config, &command))
+        .map(|config| {
+            json_has_hook_command(&config, &command)
+                && usage_hook_wrapper_path(home).is_file()
+                && usage_hook_runner_path(home).is_file()
+        })
         .unwrap_or(false);
     Ok(UsageHookStatus {
         target,
@@ -4345,6 +4517,8 @@ fn usage_hook_status_for_home(target: UsageHookTarget, home: &Path) -> Result<Us
         config_path,
         command,
         installed,
+        trust_required: installed && usage_hook_target_requires_trust(target),
+        activation_note: usage_hook_activation_note(target, installed),
         shared_config_key: usage_hook_shared_config_key(target).to_string(),
     })
 }
@@ -4364,13 +4538,102 @@ fn usage_hook_shared_config_key(target: UsageHookTarget) -> &'static str {
     }
 }
 
-fn usage_hook_command(target: UsageHookTarget) -> String {
-    match target {
-        UsageHookTarget::CodexApp | UsageHookTarget::CodexCli => {
-            "skillbox usage-hook codex".to_string()
-        }
-        UsageHookTarget::ClaudeCodeCli => "skillbox usage-hook claude-code".to_string(),
+fn usage_hook_target_requires_trust(target: UsageHookTarget) -> bool {
+    matches!(
+        target,
+        UsageHookTarget::CodexApp | UsageHookTarget::CodexCli
+    )
+}
+
+fn usage_hook_activation_note(target: UsageHookTarget, installed: bool) -> Option<String> {
+    if installed && usage_hook_target_requires_trust(target) {
+        return Some(
+            "Review and trust this hook in Codex /hooks before automatic counting can run."
+                .to_string(),
+        );
     }
+    None
+}
+
+fn usage_hook_command_for_home(target: UsageHookTarget, home: &Path) -> String {
+    let agent = usage_hook_agent_arg(target);
+    format!(
+        "{} {agent}",
+        shell_quote_path(&usage_hook_wrapper_path(home))
+    )
+}
+
+fn usage_hook_agent_arg(target: UsageHookTarget) -> &'static str {
+    match target {
+        UsageHookTarget::CodexApp | UsageHookTarget::CodexCli => "codex",
+        UsageHookTarget::ClaudeCodeCli => "claude-code",
+    }
+}
+
+fn usage_hook_runner_dir(home: &Path) -> PathBuf {
+    home.join(".skillbox").join("bin")
+}
+
+fn usage_hook_runner_path(home: &Path) -> PathBuf {
+    usage_hook_runner_dir(home).join("skillbox-usage-hook-runner")
+}
+
+fn usage_hook_wrapper_path(home: &Path) -> PathBuf {
+    usage_hook_runner_dir(home).join("skillbox-usage-hook")
+}
+
+fn write_usage_hook_runner(home: &Path) -> Result<()> {
+    let runner_dir = usage_hook_runner_dir(home);
+    fs::create_dir_all(&runner_dir).map_err(|error| error.to_string())?;
+    let runner_path = usage_hook_runner_path(home);
+    let wrapper_path = usage_hook_wrapper_path(home);
+    let current_exe = std::env::current_exe()
+        .map_err(|error| format!("Unable to locate current executable: {error}"))?;
+    let temporary_runner = runner_path.with_extension("tmp");
+
+    fs::copy(&current_exe, &temporary_runner).map_err(|error| {
+        format!(
+            "Failed to copy usage hook runner from {} to {}: {error}",
+            current_exe.display(),
+            temporary_runner.display()
+        )
+    })?;
+    fs::rename(&temporary_runner, &runner_path).map_err(|error| error.to_string())?;
+    set_executable_permission(&runner_path)?;
+
+    let wrapper = format!(
+        "#!/bin/sh\nexec {} usage-hook \"$@\"\n",
+        shell_quote_path(&runner_path)
+    );
+    fs::write(&wrapper_path, wrapper).map_err(|error| error.to_string())?;
+    set_executable_permission(&wrapper_path)?;
+    Ok(())
+}
+
+fn set_executable_permission(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(path)
+            .map_err(|error| error.to_string())?
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn shell_quote_path(path: &Path) -> String {
+    let value = path.to_string_lossy();
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn legacy_usage_hook_commands(target: UsageHookTarget) -> Vec<String> {
+    let agent = usage_hook_agent_arg(target);
+    vec![
+        format!("skillbox usage-hook {agent}"),
+        format!("skillbox-cli usage-hook {agent}"),
+    ]
 }
 
 fn usage_hook_config_path(target: UsageHookTarget, home: &Path) -> PathBuf {
@@ -4426,6 +4689,60 @@ fn inject_stop_hook_command(config: &mut serde_json::Value, command: &str) -> Re
     Ok(())
 }
 
+fn replace_usage_hook_command(
+    config: &mut serde_json::Value,
+    target: UsageHookTarget,
+    command: &str,
+) -> bool {
+    let legacy_commands = legacy_usage_hook_commands(target);
+    replace_json_command(config, &legacy_commands, command)
+}
+
+fn replace_json_command(
+    value: &mut serde_json::Value,
+    old_commands: &[String],
+    new_command: &str,
+) -> bool {
+    match value {
+        serde_json::Value::Object(object) => {
+            let mut replaced = false;
+            if object
+                .get("command")
+                .and_then(|value| value.as_str())
+                .is_some_and(|value| should_replace_usage_hook_command(value, old_commands))
+            {
+                object.insert(
+                    "command".to_string(),
+                    serde_json::Value::String(new_command.to_string()),
+                );
+                replaced = true;
+            }
+            object.values_mut().fold(replaced, |changed, nested| {
+                replace_json_command(nested, old_commands, new_command) || changed
+            })
+        }
+        serde_json::Value::Array(values) => values.iter_mut().fold(false, |changed, nested| {
+            replace_json_command(nested, old_commands, new_command) || changed
+        }),
+        _ => false,
+    }
+}
+
+fn should_replace_usage_hook_command(command: &str, old_commands: &[String]) -> bool {
+    if old_commands.iter().any(|old| old == command) {
+        return true;
+    }
+    old_commands.iter().any(|old| {
+        let Some(agent) = old.strip_prefix("skillbox usage-hook ") else {
+            return false;
+        };
+        command.ends_with(&format!(" usage-hook {agent}"))
+            && (command.contains("skillbox-cli")
+                || command.contains("skillbox-desktop")
+                || command.contains("skillbox-usage-hook"))
+    })
+}
+
 fn json_has_hook_command(value: &serde_json::Value, command: &str) -> bool {
     match value {
         serde_json::Value::Object(object) => {
@@ -4470,6 +4787,7 @@ fn next_usage_hook_backup_path(path: &Path) -> PathBuf {
 struct HookSkillRef {
     name: String,
     path: PathBuf,
+    prompt_excerpt: Option<String>,
 }
 
 fn normalize_usage_hook_agent(value: &str) -> Result<String> {
@@ -4508,6 +4826,7 @@ fn usage_request_from_skill_ref(
             skill_ref.name
         )),
         used_at: None,
+        prompt_excerpt: skill_ref.prompt_excerpt.clone(),
         metadata: Some(metadata),
     })
 }
@@ -4558,12 +4877,39 @@ fn extract_skill_refs_from_transcript(
     transcript: &str,
     turn_id: Option<&str>,
 ) -> Vec<HookSkillRef> {
-    let mut current_turn: Option<String> = None;
+    let values: Vec<serde_json::Value> = transcript
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .collect();
+    let selected = if values
+        .iter()
+        .any(|value| value.get("type").and_then(|value| value.as_str()) == Some("turn_context"))
+    {
+        select_turn_context_transcript_values(&values, turn_id)
+    } else {
+        select_task_complete_turn_values(&values, turn_id)
+    };
+    let prompt_excerpt = extract_prompt_excerpt_from_values(&selected);
     let mut skills = Vec::new();
-    for line in transcript.lines() {
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
-            continue;
-        };
+    for value in selected {
+        visit_json_strings(value, &mut |text| {
+            skills.extend(extract_skill_refs_from_text(text));
+        });
+    }
+    let mut skills = dedupe_hook_skill_refs(skills);
+    for skill in &mut skills {
+        skill.prompt_excerpt = prompt_excerpt.clone();
+    }
+    skills
+}
+
+fn select_turn_context_transcript_values<'a>(
+    values: &'a [serde_json::Value],
+    turn_id: Option<&str>,
+) -> Vec<&'a serde_json::Value> {
+    let mut current_turn: Option<String> = None;
+    let mut selected = Vec::new();
+    for value in values {
         if value.get("type").and_then(|value| value.as_str()) == Some("turn_context") {
             current_turn = value
                 .get("payload")
@@ -4575,11 +4921,95 @@ fn extract_skill_refs_from_transcript(
         if turn_id.is_some() && current_turn.as_deref() != turn_id {
             continue;
         }
-        visit_json_strings(&value, &mut |text| {
-            skills.extend(extract_skill_refs_from_text(text));
-        });
+        selected.push(value);
     }
-    dedupe_hook_skill_refs(skills)
+    selected
+}
+
+fn select_task_complete_turn_values<'a>(
+    values: &'a [serde_json::Value],
+    turn_id: Option<&str>,
+) -> Vec<&'a serde_json::Value> {
+    let Some(turn_id) = turn_id else {
+        return values.iter().collect();
+    };
+    let Some(end) = values
+        .iter()
+        .position(|value| task_complete_turn_id(value) == Some(turn_id))
+    else {
+        return values.iter().collect();
+    };
+    let start = values[..end]
+        .iter()
+        .rposition(|value| task_complete_turn_id(value).is_some())
+        .map(|index| index + 1)
+        .unwrap_or(0);
+
+    values[start..=end].iter().collect()
+}
+
+fn task_complete_turn_id(value: &serde_json::Value) -> Option<&str> {
+    if value.get("type").and_then(|value| value.as_str()) != Some("event_msg") {
+        return None;
+    }
+    let payload = value.get("payload")?;
+    if payload.get("type").and_then(|value| value.as_str()) != Some("task_complete") {
+        return None;
+    }
+    payload.get("turn_id").and_then(|value| value.as_str())
+}
+
+fn extract_prompt_excerpt_from_values(values: &[&serde_json::Value]) -> Option<String> {
+    let mut prompts = Vec::new();
+    for value in values {
+        collect_user_message_text(value, &mut prompts);
+    }
+    prompts
+        .iter()
+        .rev()
+        .find_map(|prompt| normalize_usage_prompt_excerpt(Some(prompt)))
+}
+
+fn collect_user_message_text(value: &serde_json::Value, prompts: &mut Vec<String>) {
+    let Some(payload) = value.get("payload") else {
+        return;
+    };
+    if payload.get("type").and_then(|value| value.as_str()) == Some("user_message") {
+        if let Some(message) = payload.get("message").and_then(|value| value.as_str()) {
+            prompts.push(message.to_string());
+        }
+        return;
+    }
+    if payload.get("type").and_then(|value| value.as_str()) != Some("message") {
+        return;
+    }
+    if payload.get("role").and_then(|value| value.as_str()) != Some("user") {
+        return;
+    }
+
+    if let Some(content) = payload.get("content") {
+        collect_message_content_text(content, prompts);
+    }
+    if let Some(text) = payload.get("text").and_then(|value| value.as_str()) {
+        prompts.push(text.to_string());
+    }
+}
+
+fn collect_message_content_text(value: &serde_json::Value, prompts: &mut Vec<String>) {
+    match value {
+        serde_json::Value::String(text) => prompts.push(text.to_string()),
+        serde_json::Value::Array(values) => {
+            for nested in values {
+                collect_message_content_text(nested, prompts);
+            }
+        }
+        serde_json::Value::Object(object) => {
+            if let Some(text) = object.get("text").and_then(|value| value.as_str()) {
+                prompts.push(text.to_string());
+            }
+        }
+        _ => {}
+    }
 }
 
 fn visit_json_strings(value: &serde_json::Value, visitor: &mut impl FnMut(&str)) {
@@ -4613,6 +5043,7 @@ fn extract_skill_refs_from_text(text: &str) -> Vec<HookSkillRef> {
             skills.push(HookSkillRef {
                 name: name.trim().to_string(),
                 path: PathBuf::from(path.trim()),
+                prompt_excerpt: None,
             });
         }
         remaining = &after_start[end + "</skill>".len()..];
@@ -4793,6 +5224,164 @@ fn operation_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<OperationReco
         error: row.get(9)?,
         payload: serde_json::from_str(&payload_json).unwrap_or_else(|_| serde_json::json!({})),
     })
+}
+
+fn history_table_count(connection: &Connection, table: &str) -> Result<usize> {
+    let table = match table {
+        "skill_usage_events" => "skill_usage_events",
+        "operations" => "operations",
+        _ => return Err(format!("Unknown history table: {table}")),
+    };
+    let count: i64 = connection
+        .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+            row.get(0)
+        })
+        .map_err(|error| error.to_string())?;
+    Ok(usize::try_from(count.max(0)).unwrap_or_default())
+}
+
+fn load_skill_usage_history_entries(connection: &Connection) -> Result<Vec<HistoryEntry>> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT id, skill_name, agent_id, runtime_root, used_at, prompt_excerpt
+            FROM skill_usage_events
+            ORDER BY used_at DESC, id DESC
+            LIMIT 500
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            let skill_name: String = row.get(1)?;
+            let agent_id: String = row.get(2)?;
+            let runtime_root: String = row.get(3)?;
+            Ok(HistoryEntry {
+                id: row.get(0)?,
+                kind: HistoryEntryKind::SkillUsage,
+                timestamp: row.get(4)?,
+                title: format!("Skill call: {skill_name}"),
+                subtitle: format!(
+                    "{agent_id} in {}",
+                    compact_home_path(&PathBuf::from(&runtime_root))
+                ),
+                prompt_excerpt: row.get(5)?,
+                status: None,
+                skill_name: Some(skill_name),
+                agent_id: Some(agent_id),
+                runtime_root: Some(PathBuf::from(runtime_root)),
+                operation_type: None,
+                actor: None,
+                entity_type: None,
+                entity_name: None,
+                error: None,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    let mut entries = Vec::new();
+
+    for row in rows {
+        entries.push(row.map_err(|error| error.to_string())?);
+    }
+
+    Ok(entries)
+}
+
+fn load_operation_history_entries(connection: &Connection) -> Result<Vec<HistoryEntry>> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT id, type, status, actor, entity_type, entity_name,
+                   started_at, finished_at, summary, error
+            FROM operations
+            ORDER BY COALESCE(finished_at, started_at) DESC, id DESC
+            LIMIT 500
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            let status_raw: String = row.get(2)?;
+            let status = parse_operation_status(&status_raw).unwrap_or(OperationStatus::Failed);
+            let operation_type: String = row.get(1)?;
+            let actor: String = row.get(3)?;
+            let entity_type: String = row.get(4)?;
+            let entity_name: String = row.get(5)?;
+            let started_at: String = row.get(6)?;
+            let finished_at: Option<String> = row.get(7)?;
+            let summary: String = row.get(8)?;
+            let error: Option<String> = row.get(9)?;
+
+            Ok(HistoryEntry {
+                id: row.get(0)?,
+                kind: HistoryEntryKind::Operation,
+                timestamp: finished_at.unwrap_or(started_at),
+                title: abbreviate_history_sha_values(&summary),
+                subtitle: format!("{operation_type} by {actor}"),
+                prompt_excerpt: None,
+                status: Some(status),
+                skill_name: (entity_type == "skill").then_some(entity_name.clone()),
+                agent_id: None,
+                runtime_root: None,
+                operation_type: Some(operation_type),
+                actor: Some(actor),
+                entity_type: Some(entity_type),
+                entity_name: Some(entity_name),
+                error,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    let mut entries = Vec::new();
+
+    for row in rows {
+        entries.push(row.map_err(|error| error.to_string())?);
+    }
+
+    Ok(entries)
+}
+
+fn history_sort_key(timestamp: &str) -> i128 {
+    let value = timestamp.trim();
+    if let Ok(seconds) = value.parse::<i128>() {
+        return seconds;
+    }
+    DateTime::parse_from_rfc3339(value)
+        .map(|date| i128::from(date.timestamp()))
+        .unwrap_or_default()
+}
+
+fn compact_home_path(path: &Path) -> String {
+    let home = home_dir();
+    path.strip_prefix(&home)
+        .map(|relative| format!("~/{}", relative.to_string_lossy()))
+        .unwrap_or_else(|_| path.to_string_lossy().to_string())
+}
+
+fn abbreviate_history_sha_values(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut buffer = String::new();
+
+    for character in input.chars() {
+        if character.is_ascii_hexdigit() {
+            buffer.push(character);
+            continue;
+        }
+
+        push_abbreviated_sha_buffer(&mut output, &buffer);
+        buffer.clear();
+        output.push(character);
+    }
+
+    push_abbreviated_sha_buffer(&mut output, &buffer);
+    output
+}
+
+fn push_abbreviated_sha_buffer(output: &mut String, buffer: &str) {
+    if buffer.len() >= 16 {
+        output.push_str(&buffer[..12]);
+    } else {
+        output.push_str(buffer);
+    }
 }
 
 fn parse_operation_status(value: &str) -> Option<OperationStatus> {
@@ -6067,6 +6656,7 @@ description: \"Demo skill\"
                 runtime_root: runtime_root.clone(),
                 event_id: Some("codex-run-1".to_string()),
                 used_at: Some("2026-06-02T10:15:00Z".to_string()),
+                prompt_excerpt: None,
                 metadata: Some(serde_json::json!({ "source": "codex-app" })),
             },
             &managed_root,
@@ -6076,9 +6666,12 @@ description: \"Demo skill\"
             RecordSkillUsageRequest {
                 skill_name: "draft-helper".to_string(),
                 agent_id: "codex".to_string(),
-                runtime_root,
+                runtime_root: runtime_root.clone(),
                 event_id: Some("codex-run-1".to_string()),
                 used_at: Some("2026-06-02T10:16:00Z".to_string()),
+                prompt_excerpt: Some(
+                    "Second prompt should backfill the existing event".to_string(),
+                ),
                 metadata: Some(serde_json::json!({ "source": "codex-app" })),
             },
             &managed_root,
@@ -6091,6 +6684,12 @@ description: \"Demo skill\"
         assert_eq!(second.usage_count, 1);
         assert_eq!(second.deduplicated, true);
         assert_eq!(second.last_used_at, "2026-06-02T10:15:00+00:00");
+
+        let history = list_history(HistoryFilter::default(), &managed_root).unwrap();
+        assert_eq!(
+            history.entries[0].prompt_excerpt.as_deref(),
+            Some("Second prompt should backfill the existing event")
+        );
     }
 
     #[test]
@@ -6110,6 +6709,7 @@ description: \"Demo skill\"
                 runtime_root: codex_runtime,
                 event_id: None,
                 used_at: Some("2026-06-02T09:00:00Z".to_string()),
+                prompt_excerpt: None,
                 metadata: None,
             },
             &managed_root,
@@ -6122,6 +6722,7 @@ description: \"Demo skill\"
                 runtime_root: agents_runtime,
                 event_id: None,
                 used_at: Some("2026-06-02T11:00:00Z".to_string()),
+                prompt_excerpt: None,
                 metadata: None,
             },
             &managed_root,
@@ -6152,6 +6753,7 @@ description: \"Demo skill\"
                 runtime_root: workspace_root.clone(),
                 event_id: None,
                 used_at: Some("2026-06-02T12:00:00Z".to_string()),
+                prompt_excerpt: None,
                 metadata: None,
             },
             &managed_root,
@@ -6164,6 +6766,7 @@ description: \"Demo skill\"
                 runtime_root: workspace_root.clone(),
                 event_id: None,
                 used_at: Some("2026-06-02T12:01:00Z".to_string()),
+                prompt_excerpt: None,
                 metadata: None,
             },
             &managed_root,
@@ -6190,6 +6793,7 @@ description: \"Demo skill\"
                 runtime_root,
                 event_id: None,
                 used_at: Some("2026-06-02T12:00:00Z".to_string()),
+                prompt_excerpt: None,
                 metadata: Some(serde_json::json!({ "prompt": "private request" })),
             },
             &managed_root,
@@ -6236,38 +6840,124 @@ description: \"Demo skill\"
             codex_config["hooks"]["Stop"][0]["hooks"][0]["command"],
             "echo existing"
         );
-        assert!(json_has_hook_command(
-            &codex_config,
-            "skillbox usage-hook codex"
-        ));
+        assert!(json_has_hook_command(&codex_config, &codex.status.command));
         assert!(json_has_hook_command(
             &claude_config,
-            "skillbox usage-hook claude-code"
+            &claude.status.command
         ));
         assert_eq!(claude_config["permissions"]["allow"][0], "Read");
 
         let statuses = usage_hook_statuses_for_home(&home).unwrap();
-        assert!(
-            statuses
-                .iter()
-                .find(|status| status.target == UsageHookTarget::CodexApp)
-                .unwrap()
-                .installed
+        let codex_app_status = statuses
+            .iter()
+            .find(|status| status.target == UsageHookTarget::CodexApp)
+            .unwrap();
+        let codex_cli_status = statuses
+            .iter()
+            .find(|status| status.target == UsageHookTarget::CodexCli)
+            .unwrap();
+        let claude_status = statuses
+            .iter()
+            .find(|status| status.target == UsageHookTarget::ClaudeCodeCli)
+            .unwrap();
+
+        assert!(codex_app_status.installed);
+        assert!(codex_app_status.trust_required);
+        assert!(codex_app_status
+            .activation_note
+            .as_ref()
+            .unwrap()
+            .contains("/hooks"));
+        assert!(codex_cli_status.installed);
+        assert!(codex_cli_status.trust_required);
+        assert!(codex_cli_status
+            .activation_note
+            .as_ref()
+            .unwrap()
+            .contains("/hooks"));
+        assert!(claude_status.installed);
+        assert!(!claude_status.trust_required);
+        assert!(claude_status.activation_note.is_none());
+    }
+
+    #[test]
+    fn usage_hook_command_uses_stable_wrapper_path() {
+        let root = temp_dir("usage-hook-command-wrapper-path");
+        let home = root.join("home");
+
+        assert_eq!(
+            usage_hook_command_for_home(UsageHookTarget::CodexApp, &home),
+            format!(
+                "{} codex",
+                shell_quote_path(&home.join(".skillbox/bin/skillbox-usage-hook"))
+            )
         );
-        assert!(
-            statuses
-                .iter()
-                .find(|status| status.target == UsageHookTarget::CodexCli)
-                .unwrap()
-                .installed
-        );
-        assert!(
-            statuses
-                .iter()
-                .find(|status| status.target == UsageHookTarget::ClaudeCodeCli)
-                .unwrap()
-                .installed
-        );
+    }
+
+    #[test]
+    fn usage_hook_install_replaces_legacy_bare_command() {
+        let root = temp_dir("usage-hook-replace-legacy");
+        let home = root.join("home");
+        fs::create_dir_all(home.join(".codex")).unwrap();
+        fs::write(
+            home.join(".codex").join("hooks.json"),
+            r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"skillbox usage-hook codex"}]}]}}"#,
+        )
+        .unwrap();
+
+        let result = install_usage_hook_for_home(UsageHookTarget::CodexApp, &home).unwrap();
+        let codex_config: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(home.join(".codex/hooks.json")).unwrap())
+                .unwrap();
+
+        assert!(result.installed);
+        assert!(result.backup_path.is_some());
+        assert!(home.join(".skillbox/bin/skillbox-usage-hook").is_file());
+        assert!(home
+            .join(".skillbox/bin/skillbox-usage-hook-runner")
+            .is_file());
+        assert!(!result.status.command.contains("target/debug"));
+        assert!(!json_has_hook_command(
+            &codex_config,
+            "skillbox usage-hook codex"
+        ));
+        assert!(json_has_hook_command(&codex_config, &result.status.command));
+    }
+
+    #[test]
+    fn usage_hook_install_replaces_development_absolute_command() {
+        let root = temp_dir("usage-hook-replace-dev-command");
+        let home = root.join("home");
+        let old_command =
+            "'/Users/santos/zone/skill-box/target/debug/skillbox-cli' usage-hook codex";
+        fs::create_dir_all(home.join(".codex")).unwrap();
+        fs::write(
+            home.join(".codex").join("hooks.json"),
+            serde_json::json!({
+                "hooks": {
+                    "Stop": [{
+                        "hooks": [{
+                            "type": "command",
+                            "command": old_command
+                        }]
+                    }]
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let result = install_usage_hook_for_home(UsageHookTarget::CodexApp, &home).unwrap();
+        let wrapper = fs::read_to_string(home.join(".skillbox/bin/skillbox-usage-hook")).unwrap();
+        let codex_config: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(home.join(".codex/hooks.json")).unwrap())
+                .unwrap();
+
+        assert!(result.installed);
+        assert!(!result.status.command.contains("target/debug"));
+        assert!(!wrapper.contains("target/debug"));
+        assert!(!json_has_hook_command(&codex_config, old_command));
+        assert!(json_has_hook_command(&codex_config, &result.status.command));
     }
 
     #[test]
@@ -6299,7 +6989,7 @@ description: \"Demo skill\"
                         "content": [{
                             "type": "input_text",
                             "text": format!(
-                                "<skill>\n<name>probe</name>\n<path>{}</path>\n---\nname: probe\n---\n</skill>",
+                                "Please use probe to review the draft plan.\n<skill>\n<name>probe</name>\n<path>{}</path>\n---\nname: probe\n---\n</skill>",
                                 skill_root.join("SKILL.md").display()
                             )
                         }]
@@ -6335,6 +7025,110 @@ description: \"Demo skill\"
         assert!(!first.recorded[0].deduplicated);
         assert_eq!(second.recorded.len(), 1);
         assert!(second.recorded[0].deduplicated);
+    }
+
+    #[test]
+    fn usage_hook_records_codex_desktop_task_complete_turns() {
+        let root = temp_dir("usage-hook-codex-desktop-record");
+        let managed_root = root.join("SkillBox");
+        let runtime_root = root.join("project").join(".codex").join("skills");
+        let skill_root = runtime_root.join("probe");
+        fs::create_dir_all(&skill_root).unwrap();
+        fs::write(
+            skill_root.join("SKILL.md"),
+            "---\nname: probe\ndescription: Probe\n---\n",
+        )
+        .unwrap();
+        let transcript = root.join("codex-desktop.jsonl");
+        fs::write(
+            &transcript,
+            format!(
+                "{}\n{}\n{}\n{}\n{}\n{}\n{}\n",
+                serde_json::json!({
+                    "type": "session_meta",
+                    "payload": { "id": "session-1" }
+                }),
+                serde_json::json!({
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{ "type": "input_text", "text": "first turn" }]
+                    }
+                }),
+                serde_json::json!({
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "task_complete",
+                        "turn_id": "turn-1"
+                    }
+                }),
+                serde_json::json!({
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "user_message",
+                        "message": format!(
+                            "[$probe]({}) Review this plan",
+                            skill_root.join("SKILL.md").display()
+                        )
+                    }
+                }),
+                serde_json::json!({
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{
+                            "type": "input_text",
+                            "text": format!(
+                                "<skill>\n<name>probe</name>\n<path>{}</path>\n---\nname: probe\n---\n</skill>",
+                                skill_root.join("SKILL.md").display()
+                            )
+                        }]
+                    }
+                }),
+                serde_json::json!({
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{ "type": "output_text", "text": "used probe" }]
+                    }
+                }),
+                serde_json::json!({
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "task_complete",
+                        "turn_id": "turn-2"
+                    }
+                })
+            ),
+        )
+        .unwrap();
+        let hook_input = serde_json::json!({
+            "session_id": "session-1",
+            "turn_id": "turn-2",
+            "transcript_path": transcript,
+            "hook_event_name": "Stop",
+            "model": "gpt-test"
+        })
+        .to_string();
+
+        let result = record_skill_usage_from_hook("codex", &hook_input, &managed_root).unwrap();
+
+        assert_eq!(result.recorded.len(), 1);
+        assert_eq!(result.recorded[0].skill_name, "probe");
+        assert_eq!(result.recorded[0].agent_id, "codex");
+        assert_eq!(
+            result.recorded[0].runtime_root,
+            fs::canonicalize(runtime_root).unwrap()
+        );
+
+        let history = list_history(HistoryFilter::default(), &managed_root).unwrap();
+        assert_eq!(
+            history.entries[0].prompt_excerpt.as_deref(),
+            Some("Review this plan")
+        );
     }
 
     #[test]
@@ -6963,6 +7757,119 @@ description: \"Demo skill\"
         assert_eq!(filtered.operations.len(), 1);
         assert_eq!(filtered.operations[0].entity_name, "beta");
         assert_eq!(filtered.operations[0].status, OperationStatus::Failed);
+    }
+
+    #[test]
+    fn history_lists_skill_usage_and_operations_together() {
+        let managed_root = temp_dir("history-combined").join("SkillBox");
+        let runtime_root = temp_dir("history-runtime").join(".codex").join("skills");
+        fs::create_dir_all(&runtime_root).unwrap();
+        record_skill_usage(
+            RecordSkillUsageRequest {
+                skill_name: "grill-me".to_string(),
+                agent_id: "codex".to_string(),
+                runtime_root: runtime_root.clone(),
+                event_id: Some("event-1".to_string()),
+                used_at: Some("2026-06-03T10:00:00Z".to_string()),
+                prompt_excerpt: None,
+                metadata: Some(serde_json::json!({"source": "test"})),
+            },
+            &managed_root,
+        )
+        .unwrap();
+        let operation = start_operation(
+            OperationStart {
+                operation_type: "deploy_skill".to_string(),
+                actor: "desktop".to_string(),
+                entity_type: "skill".to_string(),
+                entity_name: "grill-me".to_string(),
+                summary: "Deploy grill-me".to_string(),
+                payload: serde_json::json!({}),
+            },
+            &managed_root,
+        )
+        .unwrap();
+        finish_operation(
+            OperationFinish {
+                id: operation.id,
+                status: OperationStatus::Succeeded,
+                summary: "Deployed grill-me".to_string(),
+                error: None,
+                payload: serde_json::json!({}),
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        let history = list_history(HistoryFilter::default(), &managed_root).unwrap();
+        let usage_only = list_history(
+            HistoryFilter {
+                kind: Some(HistoryEntryKind::SkillUsage),
+                limit: Some(20),
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        assert_eq!(history.skill_usage_count, 1);
+        assert_eq!(history.operation_count, 1);
+        assert_eq!(history.entries.len(), 2);
+        assert!(history
+            .entries
+            .iter()
+            .any(|entry| entry.kind == HistoryEntryKind::SkillUsage
+                && entry.skill_name.as_deref() == Some("grill-me")
+                && entry.agent_id.as_deref() == Some("codex")));
+        assert!(history
+            .entries
+            .iter()
+            .any(|entry| entry.kind == HistoryEntryKind::Operation
+                && entry.status == Some(OperationStatus::Succeeded)));
+        assert_eq!(usage_only.entries.len(), 1);
+        assert_eq!(usage_only.entries[0].kind, HistoryEntryKind::SkillUsage);
+    }
+
+    #[test]
+    fn history_abbreviates_full_sha_values_in_operation_titles() {
+        let managed_root = temp_dir("history-short-sha").join("SkillBox");
+        let from_sha = "690f15cac7b4c055c5ab109c79ed9259934081";
+        let to_sha = "da20c92503b2e8ff1cf28ca81a0df4673debdbf7";
+        let full_summary = format!("Changed frontend-design from {from_sha} to {to_sha}");
+        let operation = start_operation(
+            OperationStart {
+                operation_type: "update_remote_skill".to_string(),
+                actor: "desktop".to_string(),
+                entity_type: "skill".to_string(),
+                entity_name: "frontend-design".to_string(),
+                summary: "Apply update for frontend-design".to_string(),
+                payload: serde_json::json!({}),
+            },
+            &managed_root,
+        )
+        .unwrap();
+        finish_operation(
+            OperationFinish {
+                id: operation.id,
+                status: OperationStatus::Succeeded,
+                summary: full_summary.clone(),
+                error: None,
+                payload: serde_json::json!({}),
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        let history = list_history(HistoryFilter::default(), &managed_root).unwrap();
+        let operations = list_operations(OperationFilter::default(), &managed_root).unwrap();
+        let title = &history.entries[0].title;
+
+        assert_eq!(
+            title,
+            "Changed frontend-design from 690f15cac7b4 to da20c92503b2"
+        );
+        assert!(!title.contains(from_sha));
+        assert!(!title.contains(to_sha));
+        assert_eq!(operations.operations[0].summary, full_summary);
     }
 
     #[test]

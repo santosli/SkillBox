@@ -55,6 +55,7 @@ React UI
 - `preview_remote_version_change` -> `skillbox_core::preview_remote_version_change`
 - `apply_remote_version_change` -> `skillbox_core::apply_remote_version_change`
 - `list_operations` -> `skillbox_core::list_operations`
+- `list_history` -> `skillbox_core::list_history`
 - `record_skill_usage` -> `skillbox_core::record_skill_usage`
 - `usage_hook_statuses` -> `skillbox_core::usage_hook_statuses`
 - `install_usage_hook` -> `skillbox_core::install_usage_hook`

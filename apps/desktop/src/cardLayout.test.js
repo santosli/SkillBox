@@ -3,8 +3,11 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const css = await readFile(new URL('./styles.css', import.meta.url), 'utf8');
+const colorsCss = await readFile(new URL('./colors.css', import.meta.url), 'utf8');
 const appSource = await readFile(new URL('./App.jsx', import.meta.url), 'utf8');
+const mainSource = await readFile(new URL('./main.jsx', import.meta.url), 'utf8');
 const tauriSource = await readFile(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8');
+const tauriMainSource = await readFile(new URL('../src-tauri/src/main.rs', import.meta.url), 'utf8');
 
 test('dashboard and workspace cards fill the available row width while auto-wrapping', () => {
   const sharedGridRule = css.match(/\.skillCardGrid,\s*\.workspaceCardGrid\s*\{(?<body>[^}]*)\}/s)
@@ -32,7 +35,7 @@ test('sidebar footer icons use the same shell as primary nav icons', () => {
 
   assert.match(sharedIconRule, /width:\s*22px;/);
   assert.match(sharedIconRule, /height:\s*22px;/);
-  assert.match(sharedIconRule, /border:\s*1px solid #e5e7eb;/);
+  assert.match(sharedIconRule, /border:\s*1px solid var\(--skillbox-border\);/);
   assert.match(sharedSvgRule, /width:\s*15px;/);
   assert.match(sharedSvgRule, /height:\s*15px;/);
   assert.doesNotMatch(css, /\.sidebarFooter button svg\s*\{[^}]*width:\s*22px;/s);
@@ -243,7 +246,8 @@ test('blocking desktop commands run off the command handler', () => {
     'apply_remote_version_change',
     'scan_workspaces',
     'record_skill_usage',
-    'install_usage_hook'
+    'install_usage_hook',
+    'list_history'
   ]) {
     const commandStart = tauriSource.indexOf(`async fn ${commandName}`);
     const nextCommandStart = tauriSource.indexOf('#[tauri::command]', commandStart + 1);
@@ -257,13 +261,76 @@ test('blocking desktop commands run off the command handler', () => {
 test('settings exposes usage hook injection for supported agents', () => {
   assert.match(appSource, /invoke\('usage_hook_statuses'\)/);
   assert.match(appSource, /invoke\('install_usage_hook'/);
+  assert.match(appSource, /async function openUsageHookConfig\(path\)/);
+  assert.match(appSource, /invoke\('open_local_file',\s*\{ path: configPath \}\)/);
+  assert.match(appSource, /onOpenUsageHookConfig=\{openUsageHookConfig\}/);
   assert.match(appSource, /function UsageHookSettingsPanel/);
+  assert.match(appSource, /function groupUsageHooksByConfig/);
+  assert.match(appSource, /const hookGroups = groupUsageHooksByConfig\(normalizeUsageHookStatuses\(usageHooks\)\)/);
+  assert.match(appSource, /hookGroups\.map/);
+  assert.match(appSource, /group\.labels\.join\(' \/ '\)/);
+  assert.match(appSource, /group\.installed \? onOpenConfig\(group\.configPath\) : onInstall\(group\.target\)/);
+  assert.match(appSource, /group\.installed \? 'Open' : 'Inject'/);
+  assert.match(appSource, /function usageHookStatusLabel/);
+  assert.match(appSource, /Needs trust/);
+  assert.match(appSource, /usageHookTrustNote/);
+  assert.match(appSource, /trustRequired:\s*Boolean\(row\.trustRequired \?\? row\.trust_required\)/);
+  assert.match(appSource, /activationNote:\s*row\.activationNote \|\| row\.activation_note \|\| ''/);
   assert.match(appSource, /Codex App/);
   assert.match(appSource, /Codex CLI/);
   assert.match(appSource, /Claude Code CLI/);
   assert.match(appSource, /Usage hook injection/);
   assert.match(tauriSource, /fn usage_hook_statuses/);
   assert.match(tauriSource, /async fn install_usage_hook/);
+  assert.match(tauriSource, /fn open_local_file/);
+  assert.match(tauriSource, /validate_local_file_path/);
+  assert.match(tauriMainSource, /Some\("usage-hook"\)/);
+  assert.match(tauriMainSource, /record_skill_usage_from_hook/);
+});
+
+test('history page combines skill usage and operation logs', () => {
+  assert.match(appSource, /function HistoryPage/);
+  assert.match(appSource, /invoke\('list_history',\s*\{ request: \{ limit: 200 \} \}\)/);
+  assert.match(appSource, /page === 'history'/);
+  assert.match(appSource, /function normalizeHistory/);
+  assert.match(appSource, /skillUsageCount/);
+  assert.match(appSource, /operationCount/);
+  assert.match(appSource, /entry\.kind === 'skill_usage'/);
+  assert.match(appSource, /const rowSubtitle = historyRowSubtitle\(entry, isUsage\);/);
+  assert.match(appSource, /function historyRowSubtitle\(entry, isUsage\)/);
+  assert.match(appSource, /const defaultOperationSubtitle = entry\.operationType && entry\.actor/);
+  assert.match(appSource, /const groupedEntries = groupHistoryEntriesByDay\(filteredEntries\)/);
+  assert.match(appSource, /function groupHistoryEntriesByDay/);
+  assert.match(appSource, /className="historyDayBlock"/);
+  assert.match(appSource, /function HistoryRow/);
+  assert.match(appSource, /className="historyRowTimestamp"/);
+  assert.match(appSource, /className="historyRowTimeRail"/);
+  assert.match(
+    appSource,
+    /<div className="historyRowTimeRail">[\s\S]*?<\/div>\s*<div className="historyRowTitle">/
+  );
+  assert.doesNotMatch(appSource, /timestampDate/);
+  assert.doesNotMatch(appSource, /className="historyRowMarker"/);
+  assert.match(appSource, /className="historyRowPrompt"/);
+  assert.match(appSource, /rowSubtitle \? <p>\{rowSubtitle\}<\/p> : null/);
+  assert.match(appSource, /entry\.promptExcerpt/);
+  assert.match(tauriSource, /async fn list_history/);
+  assert.match(tauriSource, /skillbox_core::list_history/);
+  assert.match(css, /\.historyTimeline\s*\{/);
+  assert.match(css, /\.historyDayBlock\s*\{/);
+  assert.match(css, /\.historyRow\s*\{/);
+  assert.match(css, /\.historyRow\s*\{[^}]*row-gap:\s*7px;/s);
+  assert.match(css, /\.historyRowPrompt\s*\{/);
+  assert.match(mainSource, /import '\.\/colors\.css';\s*import '\.\/styles\.css';/);
+  assert.match(colorsCss, /--skillbox-prompt-bg:\s*#ecfdf5;/);
+  assert.match(css, /\.historyRowPrompt\s*\{[^}]*background:\s*var\(--skillbox-prompt-bg\);/s);
+  assert.match(css, /\.historyRowTimeRail\s*\{[^}]*grid-row:\s*1;/s);
+  assert.match(css, /\.historyRowTitle\s*\{[^}]*grid-row:\s*1;/s);
+  assert.match(css, /\.historyRowMain\s*\{[^}]*grid-column:\s*2;/s);
+  assert.match(css, /\.historyRowTimestamp\s*\{[^}]*padding:\s*0 0 0 8px;/s);
+  assert.match(css, /\.historyRowTimestamp strong\s*\{[^}]*line-height:\s*1\.25;/s);
+  assert.doesNotMatch(css, /\.historyRowTimestamp span\s*\{/);
+  assert.doesNotMatch(css, /\.historyRowMarker\s*\{/);
 });
 
 test('desktop startup reports run errors without expect panic', () => {

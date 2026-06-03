@@ -54,6 +54,26 @@ fn validate_local_folder_path(path: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+fn validate_local_file_path(path: &str) -> Result<PathBuf, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed.chars().any(|character| character == '\0') {
+        return Err("Invalid local file path.".to_string());
+    }
+
+    let path = PathBuf::from(trimmed);
+    if !path.is_absolute() {
+        return Err("Only absolute local file paths can be opened.".to_string());
+    }
+
+    let metadata =
+        std::fs::metadata(&path).map_err(|error| format!("Local file does not exist: {error}"))?;
+    if !metadata.is_file() {
+        return Err("Local path is not a file.".to_string());
+    }
+
+    Ok(path)
+}
+
 #[tauri::command]
 fn open_local_path(path: String) -> Result<(), String> {
     let path = validate_local_folder_path(&path)?;
@@ -67,6 +87,23 @@ fn open_local_path(path: String) -> Result<(), String> {
     } else {
         Err(format!(
             "Local folder open command failed with status {status}."
+        ))
+    }
+}
+
+#[tauri::command]
+fn open_local_file(path: String) -> Result<(), String> {
+    let path = validate_local_file_path(&path)?;
+    let status = std::process::Command::new("open")
+        .arg(&path)
+        .status()
+        .map_err(|error| format!("Unable to open local file: {error}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Local file open command failed with status {status}."
         ))
     }
 }
@@ -364,6 +401,16 @@ fn list_operations(request: skillbox_core::OperationFilter) -> Result<Value, Str
 }
 
 #[tauri::command]
+async fn list_history(request: skillbox_core::HistoryFilter) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = skillbox_core::list_history(request, skillbox_core::default_managed_root())?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("History list task failed: {error}"))?
+}
+
+#[tauri::command]
 async fn record_skill_usage(
     request: skillbox_core::RecordSkillUsageRequest,
 ) -> Result<Value, String> {
@@ -426,6 +473,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_external_url,
             open_local_path,
+            open_local_file,
             managed_paths,
             managed_state,
             managed_preferences,
@@ -454,6 +502,7 @@ pub fn run() {
             preview_remote_version_change,
             apply_remote_version_change,
             list_operations,
+            list_history,
             record_skill_usage,
             usage_hook_statuses,
             install_usage_hook,
@@ -472,7 +521,9 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{validate_external_github_url, validate_local_folder_path};
+    use super::{
+        validate_external_github_url, validate_local_file_path, validate_local_folder_path,
+    };
 
     #[test]
     fn validates_github_https_urls_for_external_open() {
@@ -504,5 +555,31 @@ mod tests {
     fn rejects_non_local_folder_paths() {
         assert!(validate_local_folder_path("https://github.com/owner/repo").is_err());
         assert!(validate_local_folder_path("relative/path").is_err());
+    }
+
+    #[test]
+    fn validates_existing_absolute_local_files() {
+        let cwd = std::env::current_dir().unwrap();
+        let file_path = [
+            cwd.join("tauri.conf.json"),
+            cwd.join("apps/desktop/src-tauri/tauri.conf.json"),
+        ]
+        .into_iter()
+        .find(|path| path.is_file())
+        .unwrap();
+
+        assert_eq!(
+            validate_local_file_path(file_path.to_str().unwrap()).unwrap(),
+            file_path
+        );
+    }
+
+    #[test]
+    fn rejects_non_local_file_paths() {
+        let cwd = std::env::current_dir().unwrap();
+
+        assert!(validate_local_file_path("https://github.com/owner/repo").is_err());
+        assert!(validate_local_file_path("relative/path").is_err());
+        assert!(validate_local_file_path(cwd.to_str().unwrap()).is_err());
     }
 }
