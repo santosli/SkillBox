@@ -1762,23 +1762,32 @@ pub fn record_skill_usage(
 }
 
 pub fn usage_hook_statuses() -> Result<Vec<UsageHookStatus>> {
-    usage_hook_statuses_for_home(home_dir())
+    usage_hook_statuses_for_home_and_managed_root(home_dir(), default_managed_root())
 }
 
 pub fn usage_hook_statuses_for_home(home: impl AsRef<Path>) -> Result<Vec<UsageHookStatus>> {
     let home = home.as_ref();
+    usage_hook_statuses_for_home_and_managed_root(home, home.join(".skillbox"))
+}
+
+fn usage_hook_statuses_for_home_and_managed_root(
+    home: impl AsRef<Path>,
+    managed_root: impl AsRef<Path>,
+) -> Result<Vec<UsageHookStatus>> {
+    let home = home.as_ref();
+    let database_path = managed_paths(managed_root.as_ref().to_path_buf()).database_path;
     [
         UsageHookTarget::CodexApp,
         UsageHookTarget::CodexCli,
         UsageHookTarget::ClaudeCodeCli,
     ]
     .into_iter()
-    .map(|target| usage_hook_status_for_home(target, home))
+    .map(|target| usage_hook_status_for_home(target, home, &database_path))
     .collect()
 }
 
 pub fn install_usage_hook(target: UsageHookTarget) -> Result<UsageHookInstallResult> {
-    install_usage_hook_for_home(target, home_dir())
+    install_usage_hook_for_home_and_managed_root(target, home_dir(), default_managed_root())
 }
 
 pub fn install_usage_hook_for_home(
@@ -1786,6 +1795,16 @@ pub fn install_usage_hook_for_home(
     home: impl AsRef<Path>,
 ) -> Result<UsageHookInstallResult> {
     let home = home.as_ref();
+    install_usage_hook_for_home_and_managed_root(target, home, home.join(".skillbox"))
+}
+
+fn install_usage_hook_for_home_and_managed_root(
+    target: UsageHookTarget,
+    home: impl AsRef<Path>,
+    managed_root: impl AsRef<Path>,
+) -> Result<UsageHookInstallResult> {
+    let home = home.as_ref();
+    let database_path = managed_paths(managed_root.as_ref().to_path_buf()).database_path;
     write_usage_hook_runner(home)?;
     let config_path = usage_hook_config_path(target, home);
     let command = usage_hook_command_for_home(target, home);
@@ -1796,7 +1815,7 @@ pub fn install_usage_hook_for_home(
             target,
             installed: false,
             backup_path: None,
-            status: usage_hook_status_for_home(target, home)?,
+            status: usage_hook_status_for_home(target, home, &database_path)?,
         });
     }
 
@@ -1827,7 +1846,7 @@ pub fn install_usage_hook_for_home(
         target,
         installed: true,
         backup_path,
-        status: usage_hook_status_for_home(target, home)?,
+        status: usage_hook_status_for_home(target, home, &database_path)?,
     })
 }
 
@@ -4556,7 +4575,11 @@ fn usage_runtime_key(path: &Path) -> String {
         .to_string()
 }
 
-fn usage_hook_status_for_home(target: UsageHookTarget, home: &Path) -> Result<UsageHookStatus> {
+fn usage_hook_status_for_home(
+    target: UsageHookTarget,
+    home: &Path,
+    database_path: &Path,
+) -> Result<UsageHookStatus> {
     let config_path = usage_hook_config_path(target, home);
     let command = usage_hook_command_for_home(target, home);
     let installed = read_hook_config_json(&config_path)
@@ -4566,16 +4589,46 @@ fn usage_hook_status_for_home(target: UsageHookTarget, home: &Path) -> Result<Us
                 && usage_hook_runner_path(home).is_file()
         })
         .unwrap_or(false);
+    let trust_required = installed
+        && usage_hook_target_requires_trust(target)
+        && !usage_hook_has_recorded_agent_hook(database_path, usage_hook_agent_arg(target));
     Ok(UsageHookStatus {
         target,
         label: usage_hook_label(target).to_string(),
         config_path,
         command,
         installed,
-        trust_required: installed && usage_hook_target_requires_trust(target),
-        activation_note: usage_hook_activation_note(target, installed),
+        trust_required,
+        activation_note: usage_hook_activation_note(trust_required),
         shared_config_key: usage_hook_shared_config_key(target).to_string(),
     })
+}
+
+fn usage_hook_has_recorded_agent_hook(database_path: &Path, agent: &str) -> bool {
+    if !database_path.is_file() {
+        return false;
+    }
+    let Ok(connection) = open_database(database_path) else {
+        return false;
+    };
+    let Ok(mut statement) =
+        connection.prepare("SELECT metadata_json FROM skill_usage_events WHERE agent_id = ?1")
+    else {
+        return false;
+    };
+    let Ok(rows) = statement.query_map(params![agent], |row| row.get::<_, String>(0)) else {
+        return false;
+    };
+
+    let has_recorded_hook = rows.filter_map(|row| row.ok()).any(|metadata_json| {
+        serde_json::from_str::<serde_json::Value>(&metadata_json)
+            .ok()
+            .is_some_and(|metadata| {
+                metadata.get("source").and_then(|value| value.as_str()) == Some("agent_hook")
+                    && metadata.get("hook_agent").and_then(|value| value.as_str()) == Some(agent)
+            })
+    });
+    has_recorded_hook
 }
 
 fn usage_hook_label(target: UsageHookTarget) -> &'static str {
@@ -4600,8 +4653,8 @@ fn usage_hook_target_requires_trust(target: UsageHookTarget) -> bool {
     )
 }
 
-fn usage_hook_activation_note(target: UsageHookTarget, installed: bool) -> Option<String> {
-    if installed && usage_hook_target_requires_trust(target) {
+fn usage_hook_activation_note(trust_required: bool) -> Option<String> {
+    if trust_required {
         return Some(
             "Review and trust this hook in Codex /hooks before automatic counting can run."
                 .to_string(),
@@ -7052,6 +7105,48 @@ description: \"Demo skill\"
         assert!(claude_status.installed);
         assert!(!claude_status.trust_required);
         assert!(claude_status.activation_note.is_none());
+    }
+
+    #[test]
+    fn usage_hook_status_marks_codex_trusted_after_hook_records_usage() {
+        let root = temp_dir("usage-hook-trusted-after-record");
+        let home = root.join("home");
+        fs::create_dir_all(home.join(".codex")).unwrap();
+        fs::write(home.join(".codex").join("hooks.json"), r#"{"hooks":{}}"#).unwrap();
+
+        install_usage_hook_for_home(UsageHookTarget::CodexApp, &home).unwrap();
+        let statuses = usage_hook_statuses_for_home(&home).unwrap();
+        let codex_status = statuses
+            .iter()
+            .find(|status| status.target == UsageHookTarget::CodexApp)
+            .unwrap();
+        assert!(codex_status.trust_required);
+
+        record_skill_usage(
+            RecordSkillUsageRequest {
+                skill_name: "frontend-design".to_string(),
+                agent_id: "codex".to_string(),
+                runtime_root: home.join(".codex/skills"),
+                event_id: Some("hook-event-1".to_string()),
+                used_at: Some("2026-06-04T00:00:00Z".to_string()),
+                prompt_excerpt: None,
+                metadata: Some(serde_json::json!({
+                    "source": "agent_hook",
+                    "hook_agent": "codex"
+                })),
+            },
+            home.join(".skillbox"),
+        )
+        .unwrap();
+
+        let statuses = usage_hook_statuses_for_home(&home).unwrap();
+        let codex_status = statuses
+            .iter()
+            .find(|status| status.target == UsageHookTarget::CodexApp)
+            .unwrap();
+        assert!(codex_status.installed);
+        assert!(!codex_status.trust_required);
+        assert!(codex_status.activation_note.is_none());
     }
 
     #[test]

@@ -45,6 +45,9 @@ test('dashboard actions stay in one equal segmented row', () => {
   const contentRule = css.match(/\.content\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const controlRowRule = css.match(/\.dashboardControlRow\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const typeTabsRule = css.match(/\.dashboardTypeTabs\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const activeTypeTabsRule = css.match(
+    /\.dashboardTypeTabs button\.active,\s*\.viewSwitch button\.active\s*\{(?<body>[^}]*)\}/s
+  )?.groups.body || '';
   const actionGroupRule = css.match(/\.dashboardActionGroup\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const indicatorRule = css.match(/\.dashboardActionIndicator\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
 
@@ -57,6 +60,8 @@ test('dashboard actions stay in one equal segmented row', () => {
   );
   assert.match(typeTabsRule, /width:\s*380px;/);
   assert.match(typeTabsRule, /grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\);/);
+  assert.match(activeTypeTabsRule, /background:\s*var\(--skillbox-blue-bg\);/);
+  assert.match(activeTypeTabsRule, /color:\s*var\(--skillbox-blue-text\);/);
   assert.match(actionGroupRule, /width:\s*330px;/);
   assert.match(actionGroupRule, /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);/);
   assert.match(css, /\.dashboardActionGroup\.previewing \.dashboardActionIndicator\s*\{[^}]*opacity:\s*1;/s);
@@ -69,6 +74,14 @@ test('dashboard actions stay in one equal segmented row', () => {
   assert.match(appSource, /onMouseEnter=\{\(\) => setPreviewAction\(action\.id\)\}/);
   assert.match(appSource, /onBlur=\{\(event\) =>/);
   assert.match(appSource, /setPreviewAction\(null\);/);
+});
+
+test('workspace type tabs use three columns without an empty slot', () => {
+  const workspaceTypeTabsRule = css.match(/\.workspaceTypeTabs\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(workspaceTypeTabsRule, /width:\s*max-content;/);
+  assert.match(workspaceTypeTabsRule, /grid-template-columns:\s*repeat\(3,\s*minmax\(112px,\s*max-content\)\);/);
+  assert.doesNotMatch(workspaceTypeTabsRule, /repeat\(4,/);
 });
 
 test('remote source binding dialog keeps long candidate lists inside the viewport', () => {
@@ -289,10 +302,14 @@ test('blocking desktop commands run off the command handler', () => {
 test('settings exposes usage hook injection for supported agents', () => {
   assert.match(appSource, /invoke\('usage_hook_statuses'\)/);
   assert.match(appSource, /invoke\('install_usage_hook'/);
+  assert.match(appSource, /async function refreshUsageHookStatuses/);
   assert.match(appSource, /async function openUsageHookConfig\(path\)/);
   assert.match(appSource, /invoke\('open_local_file',\s*\{ path: configPath \}\)/);
   assert.match(appSource, /onOpenUsageHookConfig=\{openUsageHookConfig\}/);
+  assert.match(appSource, /onRefreshUsageHooks=\{refreshUsageHookStatuses\}/);
   assert.match(appSource, /function UsageHookSettingsPanel/);
+  assert.match(appSource, /onRefresh=\{onRefreshUsageHooks\}/);
+  assert.match(appSource, /aria-label="Refresh usage hook status"/);
   assert.match(appSource, /function groupUsageHooksByConfig/);
   assert.match(appSource, /const hookGroups = groupUsageHooksByConfig\(normalizeUsageHookStatuses\(usageHooks\)\)/);
   assert.match(appSource, /hookGroups\.map/);

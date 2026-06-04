@@ -445,6 +445,12 @@ export default function App() {
     }
   }, [page, filter, workspaceTypeFilter]);
 
+  useEffect(() => {
+    if (page === 'settings') {
+      refreshUsageHookStatuses({ silent: true });
+    }
+  }, [page]);
+
   const favoriteNameSet = useMemo(() => new Set(favoriteNames), [favoriteNames]);
   const dashboardSkills = useMemo(
     () =>
@@ -984,13 +990,36 @@ export default function App() {
 
     try {
       await invoke('install_usage_hook', { target });
-      const hookRows = await invoke('usage_hook_statuses');
-      setUsageHooks(normalizeUsageHookStatuses(hookRows));
+      await refreshUsageHookStatuses({ silent: true });
       setNotice('Usage hook injection updated.');
       setStatus('ready');
     } catch (hookError) {
       setError(hookError.message || String(hookError) || 'Unable to install usage hook.');
       setStatus('ready');
+    }
+  }
+
+  async function refreshUsageHookStatuses(options = {}) {
+    const silent = Boolean(options.silent);
+
+    if (!window.__TAURI_INTERNALS__) {
+      setUsageHooks(normalizeUsageHookStatuses(null));
+      if (!silent) {
+        setNotice('Usage hook status refreshed.');
+      }
+      return;
+    }
+
+    try {
+      const hookRows = await invoke('usage_hook_statuses');
+      setUsageHooks(normalizeUsageHookStatuses(hookRows));
+      if (!silent) {
+        setNotice('Usage hook status refreshed.');
+      }
+    } catch (hookError) {
+      if (!silent) {
+        setError(hookError.message || String(hookError) || 'Unable to refresh usage hook status.');
+      }
     }
   }
 
@@ -2408,6 +2437,7 @@ export default function App() {
             userSkillsGit={userSkillsGit}
             onOpenUsageHookConfig={openUsageHookConfig}
             onInstallUsageHook={installUsageHook}
+            onRefreshUsageHooks={refreshUsageHookStatuses}
             onSaveStatusRefreshInterval={saveStatusRefreshIntervalMinutes}
             onSaveRemoteUpdateTimeout={saveRemoteUpdateTimeoutSeconds}
             onSaveUserSkillsRemote={saveUserSkillsGitRemote}
@@ -3509,6 +3539,7 @@ function SettingsPage({
   userSkillsGit,
   onInstallUsageHook,
   onOpenUsageHookConfig,
+  onRefreshUsageHooks,
   onSaveRemoteUpdateTimeout,
   onSaveStatusRefreshInterval,
   onSaveUserSkillsRemote
@@ -3539,13 +3570,14 @@ function SettingsPage({
           usageHooks={usageHooks}
           onInstall={onInstallUsageHook}
           onOpenConfig={onOpenUsageHookConfig}
+          onRefresh={onRefreshUsageHooks}
         />
       </section>
     </>
   );
 }
 
-function UsageHookSettingsPanel({ status, usageHooks, onInstall, onOpenConfig }) {
+function UsageHookSettingsPanel({ status, usageHooks, onInstall, onOpenConfig, onRefresh }) {
   const hookGroups = groupUsageHooksByConfig(normalizeUsageHookStatuses(usageHooks));
   const isInstalling = status === 'installing_usage_hook';
 
@@ -3555,6 +3587,18 @@ function UsageHookSettingsPanel({ status, usageHooks, onInstall, onOpenConfig })
         <div>
           <h2>Usage hook injection</h2>
           <p>Record real agent skill calls from runtime hooks.</p>
+        </div>
+        <div className="panelActions">
+          <button
+            aria-label="Refresh usage hook status"
+            className="iconButton"
+            disabled={isInstalling}
+            title="Refresh usage hook status"
+            type="button"
+            onClick={onRefresh}
+          >
+            <RefreshCw aria-hidden="true" />
+          </button>
         </div>
       </div>
       <div className="usageHookList">

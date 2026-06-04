@@ -521,13 +521,13 @@ button {
 
 .dashboardTypeTabs button.active,
 .viewSwitch button.active {
-  background: #e5e7eb;
-  color: #111827;
+  background: var(--skillbox-blue-bg);
+  color: var(--skillbox-blue-text);
 }
 
 .dashboardTypeTabs button.active small {
   background: #ffffff;
-  color: #111827;
+  color: var(--skillbox-blue-text);
 }
 
 .viewSwitch {
@@ -1239,6 +1239,8 @@ button {
 
 .workspaceTypeTabs {
   flex: 0 0 auto;
+  width: max-content;
+  grid-template-columns: repeat(3, minmax(112px, max-content));
 }
 
 .workspaceHeaderActions {
