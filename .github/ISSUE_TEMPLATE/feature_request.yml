@@ -1,0 +1,37 @@
+name: Feature request
+description: Suggest a focused improvement for SkillBox.
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user workflow is blocked or painful?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Keep the first version small and concrete.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Desktop app
+        - CLI
+        - Import
+        - Deploy
+        - Remote skills
+        - Usage hooks
+        - Homebrew or release
+        - Other

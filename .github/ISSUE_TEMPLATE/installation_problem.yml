@@ -1,0 +1,45 @@
+name: Installation problem
+description: Report a DMG, Gatekeeper, notarization, or Homebrew install issue.
+title: "install: "
+labels:
+  - installation
+body:
+  - type: input
+    id: install_method
+    attributes:
+      label: Install method
+      placeholder: "GitHub Release DMG or Homebrew cask"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: SkillBox version
+      placeholder: "0.1.0-alpha.1"
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "14.5"
+    validations:
+      required: true
+  - type: textarea
+    id: command_output
+    attributes:
+      label: Command output
+      description: Paste relevant output from Homebrew, `spctl`, or the installer.
+      render: shell
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true

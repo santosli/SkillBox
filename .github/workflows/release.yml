@@ -1,0 +1,101 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*-alpha.*"
+
+permissions:
+  contents: write
+
+jobs:
+  macos-dmg:
+    name: Signed macOS DMG
+    runs-on: macos-latest
+
+    env:
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Fetch Rust dependencies
+        run: cargo fetch --locked
+
+      - name: Set release version
+        id: release_version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Import Apple Developer certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          security find-identity -v -p codesigning build.keychain
+
+      - name: Build, sign, notarize, and upload DMG
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          projectPath: apps/desktop
+          tauriScript: npm run tauri
+          tagName: ${{ github.ref_name }}
+          releaseName: SkillBox ${{ github.ref_name }}
+          releaseBody: Public alpha release. See README.md for installation and uninstall instructions.
+          releaseDraft: false
+          prerelease: true
+          uploadUpdaterJson: false
+          args: --target universal-apple-darwin --bundles dmg
+          releaseAssetNamePattern: SkillBox_${{ steps.release_version.outputs.version }}_universal[ext]
+
+      - name: Upload SHA256SUMS
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ steps.release_version.outputs.version }}
+        run: |
+          mkdir -p release-assets
+          gh release download "$GITHUB_REF_NAME" \
+            --pattern "SkillBox_${RELEASE_VERSION}_universal.dmg" \
+            --dir release-assets \
+            --clobber
+          shasum -a 256 "release-assets/SkillBox_${RELEASE_VERSION}_universal.dmg" > SHA256SUMS
+          gh release upload "$GITHUB_REF_NAME" SHA256SUMS --clobber
+
+      - name: Delete temporary keychain
+        if: always()
+        run: security delete-keychain build.keychain || true
