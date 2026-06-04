@@ -7,5 +7,4 @@ edition = "2021"
 serde = "1"
 serde_json = "1"
 skillbox-core = { path = "../skillbox-core" }
-skillbox-git = { path = "../skillbox-git" }
 skillbox-github = { path = "../skillbox-github" }

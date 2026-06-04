@@ -2043,14 +2043,15 @@ pub fn user_skills_git_changes(managed_root: impl AsRef<Path>) -> Result<UserSki
     let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
     let repo = paths.user_skills_root;
     let status = user_skills_git_status_for_repo(repo.clone())?;
+    let git = skillbox_git::GitService::new();
     let files = if status.initialized {
-        skillbox_git::changed_files(&repo)?
+        git.changed_files(&repo)?
             .into_iter()
             .map(|file| {
-                let diff = if file.status == "??" || !skillbox_git::has_head(&repo) {
+                let diff = if file.status == "??" || !git.has_head(&repo) {
                     new_file_diff(&repo, &file.path)
                 } else {
-                    skillbox_git::diff_head_path(&repo, &file.path)
+                    git.diff_head_path(&repo, &file.path)
                 }?;
 
                 Ok(UserSkillsGitChangeFile {
@@ -2099,7 +2100,8 @@ pub fn list_user_skill_versions(
         ));
     }
 
-    let log_entries = skillbox_git::log_path(&repo, skill_name, 20)?;
+    let git = skillbox_git::GitService::new();
+    let log_entries = git.log_path(&repo, skill_name, 20)?;
     let has_uncommitted_skill_changes = user_skill_has_uncommitted_changes(&repo, skill_name)?;
     let mut versions = Vec::new();
     let current_version = if !has_uncommitted_skill_changes {
@@ -2157,10 +2159,11 @@ pub fn set_user_skills_git_remote(
 
     let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
     let repo = paths.user_skills_root;
-    if !skillbox_git::status(&repo)?.initialized {
-        skillbox_git::init_main(&repo)?;
+    let git = skillbox_git::GitService::new();
+    if !git.status(&repo)?.initialized {
+        git.init_main(&repo)?;
     }
-    skillbox_git::set_origin_url(&repo, remote_url)?;
+    git.set_origin_url(&repo, remote_url)?;
     user_skills_git_status_for_repo(repo)
 }
 
@@ -2170,16 +2173,17 @@ pub fn sync_user_skills_git(
 ) -> Result<UserSkillsSyncResult> {
     let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
     let repo = paths.user_skills_root;
-    let before = skillbox_git::status(&repo)?;
+    let git = skillbox_git::GitService::new();
+    let before = git.status(&repo)?;
     let initialized = !before.initialized;
 
     if initialized {
-        skillbox_git::init_main(&repo)?;
+        git.init_main(&repo)?;
     }
 
     let mut remote_updated = false;
     let current_remote = if repo.join(".git").exists() {
-        skillbox_git::origin_url(&repo)?
+        git.origin_url(&repo)?
     } else {
         None
     };
@@ -2191,7 +2195,7 @@ pub fn sync_user_skills_git(
 
     if let Some(remote_url) = requested_remote {
         if current_remote.as_deref() != Some(remote_url) {
-            skillbox_git::set_origin_url(&repo, remote_url)?;
+            git.set_origin_url(&repo, remote_url)?;
             remote_updated = true;
         }
     } else if request
@@ -2202,20 +2206,20 @@ pub fn sync_user_skills_git(
         return Err("Git remote URL cannot be empty.".to_string());
     }
 
-    if request.push && skillbox_git::origin_url(&repo)?.is_none() {
+    if request.push && git.origin_url(&repo)?.is_none() {
         return Err("Git remote URL is required before syncing user skills.".to_string());
     }
 
     if let Some(paths) = &request.selected_paths {
         let selected_paths = validate_git_relative_paths(paths)?;
-        skillbox_git::add_paths(&repo, &selected_paths)?;
+        git.add_paths(&repo, &selected_paths)?;
     } else {
-        skillbox_git::add_all(&repo)?;
+        git.add_all(&repo)?;
     }
-    let has_staged_changes = skillbox_git::staged_changes(&repo)?;
+    let has_staged_changes = git.staged_changes(&repo)?;
     let commit_message = normalized_commit_message(request.commit_message.as_deref());
     let commit_sha = if has_staged_changes {
-        Some(skillbox_git::commit(&repo, &commit_message)?)
+        Some(git.commit(&repo, &commit_message)?)
     } else {
         None
     };
@@ -2229,7 +2233,7 @@ pub fn sync_user_skills_git(
     };
 
     if request.push {
-        match skillbox_git::push_origin_main(&repo, true) {
+        match git.push_origin_main(&repo, true) {
             Ok(()) => {
                 pushed = true;
                 message = if committed {
@@ -2634,7 +2638,8 @@ pub fn preview_remote_version_change(
             ));
         }
 
-        let git_files = skillbox_git::diff_no_index_tree(&from_path, &to_path)?;
+        let git = skillbox_git::GitService::new();
+        let git_files = git.diff_no_index_tree(&from_path, &to_path)?;
         let files = git_files
             .into_iter()
             .map(|file| remote_diff_file(&from_path, &to_path, file))
@@ -2810,8 +2815,9 @@ pub fn scan_import_candidates(
 ) -> Result<ImportCandidateScan> {
     let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
     let imported_hashes = imported_skill_hashes(&paths)?;
+    let usage_by_skill = load_usage_by_skill(&paths.database_path)?;
     let usage_by_skill_runtime = load_usage_by_skill_runtime(&paths.database_path)?;
-    let scan = scan_skill_roots(roots)?;
+    let scan = scan_skill_roots_for_import(roots, &paths)?;
     record_scanned_workspaces(&paths, &scan.roots)?;
     let mut candidates = Vec::new();
 
@@ -2845,14 +2851,12 @@ pub fn scan_import_candidates(
             )
         };
 
-        let usage_count = skill
-            .source_root
-            .as_ref()
-            .and_then(|root| {
-                usage_by_skill_runtime.get(&(skill.name.clone(), usage_runtime_key(root)))
-            })
-            .map(|usage| usage.usage_count)
-            .unwrap_or_default();
+        let usage_count = import_candidate_usage_count(
+            &skill,
+            import_status,
+            &usage_by_skill,
+            &usage_by_skill_runtime,
+        );
 
         candidates.push(ImportCandidate {
             name: skill.name,
@@ -2870,12 +2874,49 @@ pub fn scan_import_candidates(
         });
     }
 
-    candidates.sort_by(|left, right| left.name.cmp(&right.name));
+    candidates.sort_by(|left, right| {
+        left.name
+            .cmp(&right.name)
+            .then_with(|| left.source_path.cmp(&right.source_path))
+    });
+    dedupe_imported_candidates(&mut candidates);
     Ok(ImportCandidateScan {
         roots: scan.roots,
         candidates,
         errors: scan.errors,
     })
+}
+
+fn dedupe_imported_candidates(candidates: &mut Vec<ImportCandidate>) {
+    let mut imported_keys = HashSet::new();
+    candidates.retain(|candidate| {
+        if candidate.import_status != ImportCandidateStatus::Imported {
+            return true;
+        }
+
+        imported_keys.insert((candidate.name.clone(), candidate.content_hash.clone()))
+    });
+}
+
+fn import_candidate_usage_count(
+    skill: &Skill,
+    import_status: ImportCandidateStatus,
+    usage_by_skill: &HashMap<String, UsageSummary>,
+    usage_by_skill_runtime: &HashMap<(String, String), UsageSummary>,
+) -> usize {
+    if import_status == ImportCandidateStatus::Imported {
+        return usage_by_skill
+            .get(&skill.name)
+            .map(|usage| usage.usage_count)
+            .unwrap_or_default();
+    }
+
+    skill
+        .source_root
+        .as_ref()
+        .and_then(|root| usage_by_skill_runtime.get(&(skill.name.clone(), usage_runtime_key(root))))
+        .map(|usage| usage.usage_count)
+        .unwrap_or_default()
 }
 
 pub fn import_candidates(
@@ -3168,7 +3209,8 @@ fn check_one_remote_skill_update(
         };
     }
 
-    match skillbox_git::ls_remote_with_timeout(repo_url, reference, timeout) {
+    let git = skillbox_git::GitService::new();
+    match git.ls_remote_with_timeout(repo_url, reference, timeout) {
         Ok(Some(latest_sha)) => {
             let active_version = current_version.as_deref().or(installed_sha.as_deref());
             let update_available = active_version != Some(latest_sha.as_str());
@@ -3243,10 +3285,17 @@ fn resolve_ref_kind(repo_url: &str, reference: &str) -> Result<String> {
     if skillbox_github::classify_ref_text(reference) == skillbox_github::GitHubRefKind::Commit {
         return Ok("commit".to_string());
     }
-    if skillbox_git::ls_remote(repo_url, &format!("refs/heads/{reference}"))?.is_some() {
+    let git = skillbox_git::GitService::new();
+    if git
+        .ls_remote(repo_url, &format!("refs/heads/{reference}"))?
+        .is_some()
+    {
         return Ok("branch".to_string());
     }
-    if skillbox_git::ls_remote(repo_url, &format!("refs/tags/{reference}"))?.is_some() {
+    if git
+        .ls_remote(repo_url, &format!("refs/tags/{reference}"))?
+        .is_some()
+    {
         return Ok("tag".to_string());
     }
     Ok("branch".to_string())
@@ -3425,7 +3474,8 @@ fn remote_version_preview_target(
         .path
         .ok_or_else(|| "GitHub source is missing path.".to_string())?;
     let checkout = temp.join("checkout");
-    skillbox_git::fetch_ref_path(&repo_url, to_version, &source_path, &checkout)?;
+    let git = skillbox_git::GitService::new();
+    git.fetch_ref_path(&repo_url, to_version, &source_path, &checkout)?;
     Ok(checkout.join(source_path))
 }
 
@@ -3688,7 +3738,8 @@ fn ensure_github_version_snapshot(
 
     let result = (|| {
         let checkout = temp.join("checkout");
-        skillbox_git::fetch_ref_path(&repo_url, target_sha, &source_path, &checkout)?;
+        let git = skillbox_git::GitService::new();
+        git.fetch_ref_path(&repo_url, target_sha, &source_path, &checkout)?;
         copy_skill_dir(&checkout.join(source_path), &version_path)?;
         read_skill(&version_path)?;
         Ok(version_path.clone())
@@ -3773,13 +3824,14 @@ fn fetch_remote_source_skill_path(
 ) -> Result<(String, String)> {
     let candidates = remote_source_path_candidates(skill_name, requested_path);
     let mut first_error = None;
+    let git = skillbox_git::GitService::new();
 
     for candidate in &candidates {
         if checkout.exists() {
             fs::remove_dir_all(checkout).map_err(|error| error.to_string())?;
         }
 
-        match skillbox_git::fetch_ref_path(repo_url, reference, candidate, checkout) {
+        match git.fetch_ref_path(repo_url, reference, candidate, checkout) {
             Ok(sha) => return Ok((sha, candidate.clone())),
             Err(error) => {
                 if first_error.is_none() {
@@ -3946,14 +3998,15 @@ fn claude_marketplace_popularity_score(item: &ClaudeMarketplaceSkill) -> i32 {
 }
 
 fn user_skills_git_status_for_repo(repo_path: PathBuf) -> Result<UserSkillsGitStatus> {
-    let git_status = skillbox_git::status(&repo_path)?;
+    let git = skillbox_git::GitService::new();
+    let git_status = git.status(&repo_path)?;
     let remote_url = if git_status.initialized {
-        skillbox_git::origin_url(&repo_path)?
+        git.origin_url(&repo_path)?
     } else {
         None
     };
     let changed_paths = if git_status.initialized {
-        skillbox_git::changed_files(&repo_path)?
+        git.changed_files(&repo_path)?
             .into_iter()
             .map(|file| file.path)
             .collect()
@@ -3990,11 +4043,13 @@ fn user_skills_git_state(
 }
 
 fn user_skill_has_uncommitted_changes(repo: &Path, skill_name: &str) -> Result<bool> {
-    if !skillbox_git::status(repo)?.initialized {
+    let git = skillbox_git::GitService::new();
+    if !git.status(repo)?.initialized {
         return Ok(false);
     }
 
-    Ok(skillbox_git::changed_files(repo)?
+    Ok(git
+        .changed_files(repo)?
         .into_iter()
         .any(|file| git_path_belongs_to_skill(&file.path, skill_name)))
 }
@@ -5715,7 +5770,7 @@ struct WorkspaceScanStats {
 }
 
 fn scan_workspace_root(root: &Path, paths: &ManagedPaths) -> Result<WorkspaceScanStats> {
-    let scan = scan_skill_roots(&[root.to_path_buf()])?;
+    let scan = scan_skill_roots_for_import(&[root.to_path_buf()], paths)?;
     let imported_hashes = imported_skill_hashes(paths)?;
     let imported_skill_count = scan
         .skills
@@ -5749,6 +5804,94 @@ fn skill_is_imported(
     paths: &ManagedPaths,
 ) -> bool {
     imported_hashes.contains(&skill.content_hash) || is_under_path(&skill.real_path, &paths.root)
+}
+
+fn scan_skill_roots_for_import(roots: &[PathBuf], paths: &ManagedPaths) -> Result<ScanResult> {
+    let mut scan = scan_skill_roots(roots)?;
+    let mut seen_paths: HashSet<PathBuf> =
+        scan.skills.iter().map(|skill| skill.path.clone()).collect();
+
+    for root in scan.roots.clone() {
+        if !root.exists() {
+            continue;
+        }
+
+        let mut symlink_dirs = Vec::new();
+        if let Err(error) =
+            find_managed_skill_symlink_dirs(&root, 0, 3, &paths.root, &mut symlink_dirs)
+        {
+            scan.errors.push(ScanError {
+                root,
+                path: None,
+                error,
+            });
+            continue;
+        }
+
+        for skill_dir in symlink_dirs {
+            if !seen_paths.insert(skill_dir.clone()) {
+                continue;
+            }
+
+            match read_skill(&skill_dir) {
+                Ok(mut skill) => {
+                    skill.source_root = Some(root.clone());
+                    skill.is_symlink = true;
+                    scan.skills.push(skill);
+                }
+                Err(error) => scan.errors.push(ScanError {
+                    root: root.clone(),
+                    path: Some(skill_dir),
+                    error,
+                }),
+            }
+        }
+    }
+
+    scan.skills
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(scan)
+}
+
+fn find_managed_skill_symlink_dirs(
+    current: &Path,
+    depth: usize,
+    max_depth: usize,
+    managed_root: &Path,
+    found: &mut Vec<PathBuf>,
+) -> Result<()> {
+    if depth > max_depth {
+        return Ok(());
+    }
+
+    let current_metadata = fs::symlink_metadata(current).map_err(|error| error.to_string())?;
+    if current_metadata.file_type().is_symlink() {
+        if current.join("SKILL.md").exists() && is_under_path(current, managed_root) {
+            found.push(current.to_path_buf());
+        }
+        return Ok(());
+    }
+
+    if current.join("SKILL.md").exists() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(current).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        let file_name = entry.file_name();
+        let file_name = file_name.to_string_lossy();
+        if file_name.starts_with('.') && file_name != ".system" {
+            continue;
+        }
+
+        let file_type = entry.file_type().map_err(|error| error.to_string())?;
+        if file_type.is_dir() || file_type.is_symlink() {
+            find_managed_skill_symlink_dirs(&path, depth + 1, max_depth, managed_root, found)?;
+        }
+    }
+
+    Ok(())
 }
 
 fn format_scan_error(error: &ScanError) -> String {
@@ -6639,6 +6782,37 @@ description: \"Demo skill\"
         .unwrap();
 
         assert_eq!(workspace.skill_count, 2);
+        assert_eq!(workspace.imported_skill_count, 1);
+    }
+
+    #[test]
+    fn add_workspace_counts_deployed_symlinked_skills() {
+        let root = temp_dir("workspace-deployed-count");
+        let managed_root = root.join("SkillBox");
+        let workspace_root = root.join("project").join(".agents").join("skills");
+        let source = workspace_root.join("alpha");
+        make_skill(&source, "alpha", "Alpha skill");
+
+        import_candidates(
+            vec![ImportRequestItem {
+                source_path: source.clone(),
+                skill_type: SkillKind::User,
+                deploy_back_to_source: true,
+            }],
+            &managed_root,
+        )
+        .unwrap();
+
+        let workspace = add_workspace(
+            WorkspaceAddRequest {
+                path: workspace_root,
+                kind: WorkspaceKind::User,
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        assert_eq!(workspace.skill_count, 1);
         assert_eq!(workspace.imported_skill_count, 1);
     }
 
@@ -9270,7 +9444,7 @@ description: \"Demo skill\"
     }
 
     #[test]
-    fn scan_import_candidates_skips_symlinked_sources() {
+    fn scan_import_candidates_shows_managed_symlinked_sources_as_imported() {
         let root = temp_dir("candidate-imported-symlink");
         let runtime_root = root.join("runtime");
         let source = runtime_root.join("demo");
@@ -9286,6 +9460,117 @@ description: \"Demo skill\"
             &managed_root,
         )
         .unwrap();
+
+        let candidates = scan_import_candidates(&[runtime_root], &managed_root).unwrap();
+
+        assert_eq!(candidates.candidates.len(), 1);
+        let demo = candidate(&candidates.candidates, "demo");
+        assert_eq!(demo.import_status, ImportCandidateStatus::Imported);
+        assert!(!demo.is_selected);
+        assert!(demo.source_path.ends_with("runtime/demo"));
+        assert!(is_under_path(&demo.real_path, &managed_root));
+    }
+
+    #[test]
+    fn scan_import_candidates_dedupes_imported_skill_across_runtime_roots() {
+        let root = temp_dir("candidate-imported-dedupe");
+        let first_root = root.join("global").join(".codex").join("skills");
+        let second_root = root.join("project").join(".codex").join("skills");
+        let first_source = first_root.join("demo");
+        let second_source = second_root.join("demo");
+        let managed_root = root.join("SkillBox");
+        make_skill(&first_source, "demo", "Demo skill");
+
+        let result = import_candidates(
+            vec![ImportRequestItem {
+                source_path: first_source.clone(),
+                skill_type: SkillKind::User,
+                deploy_back_to_source: true,
+            }],
+            &managed_root,
+        )
+        .unwrap();
+        fs::create_dir_all(&second_root).unwrap();
+        symlink_dir(&result.imported[0].managed_path, &second_source).unwrap();
+
+        let candidates =
+            scan_import_candidates(&[first_root.clone(), second_root.clone()], &managed_root)
+                .unwrap();
+
+        assert_eq!(candidates.candidates.len(), 1);
+        let demo = candidate(&candidates.candidates, "demo");
+        assert_eq!(demo.import_status, ImportCandidateStatus::Imported);
+        assert_eq!(demo.content_hash, result.imported[0].content_hash);
+    }
+
+    #[test]
+    fn scan_import_candidates_uses_total_usage_for_imported_skills() {
+        let root = temp_dir("candidate-imported-usage");
+        let first_root = root.join("global").join(".codex").join("skills");
+        let second_root = root.join("project").join(".codex").join("skills");
+        let first_source = first_root.join("demo");
+        let second_source = second_root.join("demo");
+        let managed_root = root.join("SkillBox");
+        make_skill(&first_source, "demo", "Demo skill");
+
+        let result = import_candidates(
+            vec![ImportRequestItem {
+                source_path: first_source.clone(),
+                skill_type: SkillKind::User,
+                deploy_back_to_source: true,
+            }],
+            &managed_root,
+        )
+        .unwrap();
+        fs::create_dir_all(&second_root).unwrap();
+        symlink_dir(&result.imported[0].managed_path, &second_source).unwrap();
+
+        record_skill_usage(
+            RecordSkillUsageRequest {
+                skill_name: "demo".to_string(),
+                agent_id: "codex".to_string(),
+                runtime_root: second_root.clone(),
+                event_id: None,
+                used_at: Some("2026-06-02T12:00:00Z".to_string()),
+                prompt_excerpt: None,
+                metadata: None,
+            },
+            &managed_root,
+        )
+        .unwrap();
+        record_skill_usage(
+            RecordSkillUsageRequest {
+                skill_name: "demo".to_string(),
+                agent_id: "codex".to_string(),
+                runtime_root: second_root.clone(),
+                event_id: None,
+                used_at: Some("2026-06-02T12:01:00Z".to_string()),
+                prompt_excerpt: None,
+                metadata: None,
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        let candidates =
+            scan_import_candidates(&[first_root.clone(), second_root.clone()], &managed_root)
+                .unwrap();
+
+        assert_eq!(candidates.candidates.len(), 1);
+        let demo = candidate(&candidates.candidates, "demo");
+        assert_eq!(demo.import_status, ImportCandidateStatus::Imported);
+        assert_eq!(demo.usage_count, 2);
+    }
+
+    #[test]
+    fn scan_import_candidates_skips_unmanaged_symlinked_sources() {
+        let root = temp_dir("candidate-unmanaged-symlink");
+        let runtime_root = root.join("runtime");
+        let outside = temp_dir("candidate-unmanaged-symlink-outside");
+        let managed_root = root.join("SkillBox");
+        make_skill(&outside.join("demo"), "demo", "Demo skill");
+        fs::create_dir_all(&runtime_root).unwrap();
+        symlink_dir(&outside.join("demo"), &runtime_root.join("demo")).unwrap();
 
         let candidates = scan_import_candidates(&[runtime_root], &managed_root).unwrap();
 

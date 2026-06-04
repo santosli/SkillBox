@@ -38,134 +38,439 @@ pub struct GitLogEntry {
     pub subject: String,
 }
 
-pub fn status(repo: impl AsRef<Path>) -> Result<GitStatus, String> {
-    let repo = repo.as_ref();
-    if !repo.join(".git").exists() {
-        return Ok(GitStatus {
-            initialized: false,
-            branch: String::new(),
-            dirty: false,
-            raw_status: String::new(),
-        });
+#[derive(Debug, Clone, Copy, Default)]
+pub struct GitService;
+
+impl GitService {
+    pub fn new() -> Self {
+        Self
     }
 
-    let branch = git(repo, &["branch", "--show-current"])?;
-    let raw_status = git(repo, &["status", "--short", "--branch"])?;
-    let dirty = raw_status.lines().any(|line| !line.starts_with("##"));
+    pub fn status(&self, repo: impl AsRef<Path>) -> Result<GitStatus, String> {
+        let repo = repo.as_ref();
+        if !repo.join(".git").exists() {
+            return Ok(GitStatus {
+                initialized: false,
+                branch: String::new(),
+                dirty: false,
+                raw_status: String::new(),
+            });
+        }
 
-    Ok(GitStatus {
-        initialized: true,
-        branch: branch.trim().to_string(),
-        dirty,
-        raw_status,
-    })
+        let branch = self.run(repo, &["branch", "--show-current"])?;
+        let raw_status = self.run(repo, &["status", "--short", "--branch"])?;
+        let dirty = raw_status.lines().any(|line| !line.starts_with("##"));
+
+        Ok(GitStatus {
+            initialized: true,
+            branch: branch.trim().to_string(),
+            dirty,
+            raw_status,
+        })
+    }
+
+    pub fn init_main(&self, repo: impl AsRef<Path>) -> Result<(), String> {
+        let repo = repo.as_ref();
+        fs::create_dir_all(repo).map_err(|error| error.to_string())?;
+        self.run(repo, &["init", "-b", "main"])?;
+        Ok(())
+    }
+
+    pub fn origin_url(&self, repo: impl AsRef<Path>) -> Result<Option<String>, String> {
+        let repo = repo.as_ref();
+        match self.run(repo, &["remote", "get-url", "origin"]) {
+            Ok(url) => Ok(Some(url.trim().to_string()).filter(|value| !value.is_empty())),
+            Err(error) if error.contains("No such remote") => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    pub fn set_origin_url(&self, repo: impl AsRef<Path>, remote_url: &str) -> Result<(), String> {
+        let repo = repo.as_ref();
+        if self.origin_url(repo)?.is_some() {
+            self.run(repo, &["remote", "set-url", "origin", remote_url])?;
+        } else {
+            self.run(repo, &["remote", "add", "origin", remote_url])?;
+        }
+        Ok(())
+    }
+
+    pub fn add_all(&self, repo: impl AsRef<Path>) -> Result<(), String> {
+        self.run(repo.as_ref(), &["add", "."])?;
+        Ok(())
+    }
+
+    pub fn add_paths(&self, repo: impl AsRef<Path>, paths: &[String]) -> Result<(), String> {
+        if paths.is_empty() {
+            return Err("Select at least one file to commit.".to_string());
+        }
+
+        let mut args = vec!["add".to_string(), "--".to_string()];
+        args.extend(paths.iter().cloned());
+        self.run_owned(repo.as_ref(), &args)?;
+        Ok(())
+    }
+
+    pub fn staged_changes(&self, repo: impl AsRef<Path>) -> Result<bool, String> {
+        let status = self.run(repo.as_ref(), &["diff", "--cached", "--name-only"])?;
+        Ok(!status.trim().is_empty())
+    }
+
+    pub fn commit(&self, repo: impl AsRef<Path>, message: &str) -> Result<String, String> {
+        let repo = repo.as_ref();
+        self.run_with_config(repo, &["commit", "-m", message])?;
+        Ok(self.run(repo, &["rev-parse", "HEAD"])?.trim().to_string())
+    }
+
+    pub fn push_origin_main(
+        &self,
+        repo: impl AsRef<Path>,
+        set_upstream: bool,
+    ) -> Result<(), String> {
+        let args: &[&str] = if set_upstream {
+            &["push", "-u", "origin", "main"]
+        } else {
+            &["push", "origin", "main"]
+        };
+        self.run_network(repo.as_ref(), args, PUSH_TIMEOUT, "git push")?;
+        Ok(())
+    }
+
+    pub fn changed_files(&self, repo: impl AsRef<Path>) -> Result<Vec<GitChangedFile>, String> {
+        let output = self.run(
+            repo.as_ref(),
+            &["status", "--porcelain=v1", "--untracked-files=all", "-z"],
+        )?;
+        let mut entries = output.split('\0').filter(|entry| !entry.is_empty());
+        let mut files = Vec::new();
+
+        while let Some(entry) = entries.next() {
+            if entry.len() < 4 {
+                continue;
+            }
+
+            let status = entry[0..2].to_string();
+            let mut path = entry[3..].to_string();
+            if status.starts_with('R') || status.starts_with('C') {
+                if let Some(new_path) = entries.next() {
+                    path = new_path.to_string();
+                }
+            }
+
+            files.push(GitChangedFile { path, status });
+        }
+
+        Ok(files)
+    }
+
+    pub fn has_head(&self, repo: impl AsRef<Path>) -> bool {
+        self.run(repo.as_ref(), &["rev-parse", "--verify", "HEAD"])
+            .is_ok()
+    }
+
+    pub fn diff_head_path(&self, repo: impl AsRef<Path>, path: &str) -> Result<String, String> {
+        self.run_owned(
+            repo.as_ref(),
+            &[
+                "diff".to_string(),
+                "--no-ext-diff".to_string(),
+                "HEAD".to_string(),
+                "--".to_string(),
+                path.to_string(),
+            ],
+        )
+    }
+
+    pub fn log_path(
+        &self,
+        repo: impl AsRef<Path>,
+        path: &str,
+        limit: usize,
+    ) -> Result<Vec<GitLogEntry>, String> {
+        let repo = repo.as_ref();
+        if !self.has_head(repo) {
+            return Ok(Vec::new());
+        }
+
+        let limit = limit.clamp(1, 100).to_string();
+        let output = self.run_owned(
+            repo,
+            &[
+                "log".to_string(),
+                format!("-n{limit}"),
+                "--format=%H%x1f%ct%x1f%s%x1e".to_string(),
+                "--".to_string(),
+                path.to_string(),
+            ],
+        )?;
+
+        Ok(output.split('\x1e').filter_map(parse_log_entry).collect())
+    }
+
+    pub fn ls_remote(&self, repo_url: &str, reference: &str) -> Result<Option<String>, String> {
+        self.ls_remote_with_timeout(repo_url, reference, DEFAULT_LS_REMOTE_TIMEOUT)
+    }
+
+    pub fn ls_remote_with_timeout(
+        &self,
+        repo_url: &str,
+        reference: &str,
+        timeout: Duration,
+    ) -> Result<Option<String>, String> {
+        validate_git_remote_arg(repo_url)?;
+        validate_git_reference_arg(reference)?;
+        let mut command = Command::new("git");
+        command
+            .arg("ls-remote")
+            .arg("--")
+            .arg(repo_url)
+            .arg(reference)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GIT_ASKPASS", "true")
+            .env("GCM_INTERACTIVE", "never");
+        let output = self.command_output_with_timeout(command, timeout, "git ls-remote")?;
+
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout)
+            .split_whitespace()
+            .next()
+            .map(str::to_string))
+    }
+
+    pub fn fetch_ref_path(
+        &self,
+        repo_url: &str,
+        reference: &str,
+        path: &str,
+        checkout_root: impl AsRef<Path>,
+    ) -> Result<String, String> {
+        validate_git_remote_arg(repo_url)?;
+        validate_git_reference_arg(reference)?;
+        let checkout_root = checkout_root.as_ref();
+        fs::create_dir_all(checkout_root).map_err(|error| error.to_string())?;
+        self.run(checkout_root, &["init", "-b", "main"])?;
+        self.run(checkout_root, &["remote", "add", "origin", repo_url])?;
+        self.run_network(
+            checkout_root,
+            &["fetch", "--depth", "1", "origin", "--", reference],
+            FETCH_REF_TIMEOUT,
+            "git fetch",
+        )?;
+        let sha = self
+            .run(checkout_root, &["rev-parse", "FETCH_HEAD"])?
+            .trim()
+            .to_string();
+        self.run_owned(
+            checkout_root,
+            &[
+                "checkout".to_string(),
+                "FETCH_HEAD".to_string(),
+                "--".to_string(),
+                path.to_string(),
+            ],
+        )?;
+        Ok(sha)
+    }
+
+    pub fn diff_no_index_tree(
+        &self,
+        old_root: impl AsRef<Path>,
+        new_root: impl AsRef<Path>,
+    ) -> Result<Vec<GitDiffFile>, String> {
+        let old_root = old_root.as_ref();
+        let new_root = new_root.as_ref();
+        let old_root_text = old_root.to_str().ok_or("Old path is not valid UTF-8.")?;
+        let new_root_text = new_root.to_str().ok_or("New path is not valid UTF-8.")?;
+
+        let name_status = self.run_diff_no_index(&[
+            "--no-index",
+            "--name-status",
+            "-M",
+            old_root_text,
+            new_root_text,
+        ])?;
+        let unified =
+            self.run_diff_no_index(&["--no-index", "-M", "--", old_root_text, new_root_text])?;
+        Ok(parse_no_index_files(
+            &name_status,
+            &unified,
+            old_root,
+            new_root,
+        ))
+    }
+
+    fn run(&self, repo: &Path, args: &[&str]) -> Result<String, String> {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .output()
+            .map_err(|error| error.to_string())?;
+
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    fn run_owned(&self, repo: &Path, args: &[String]) -> Result<String, String> {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .output()
+            .map_err(|error| error.to_string())?;
+
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    fn run_network(
+        &self,
+        repo: &Path,
+        args: &[&str],
+        timeout: Duration,
+        label: &str,
+    ) -> Result<String, String> {
+        let mut command = Command::new("git");
+        command
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GIT_ASKPASS", "true")
+            .env("GCM_INTERACTIVE", "never");
+        let output = self.command_output_with_timeout(command, timeout, label)?;
+
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    fn run_with_config(&self, repo: &Path, args: &[&str]) -> Result<String, String> {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .arg("-c")
+            .arg("user.name=SkillBox")
+            .arg("-c")
+            .arg("user.email=skillbox@example.invalid")
+            .args(args)
+            .output()
+            .map_err(|error| error.to_string())?;
+
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    fn run_diff_no_index(&self, args: &[&str]) -> Result<String, String> {
+        let output = Command::new("git")
+            .arg("diff")
+            .args(args)
+            .output()
+            .map_err(|error| error.to_string())?;
+
+        if output.status.success() || output.status.code() == Some(1) {
+            return Ok(String::from_utf8_lossy(&output.stdout).to_string());
+        }
+
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+
+    fn command_output_with_timeout(
+        &self,
+        mut command: Command,
+        timeout: Duration,
+        label: &str,
+    ) -> Result<Output, String> {
+        let mut child = command
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| error.to_string())?;
+        let started_at = Instant::now();
+
+        loop {
+            if child
+                .try_wait()
+                .map_err(|error| error.to_string())?
+                .is_some()
+            {
+                return child.wait_with_output().map_err(|error| error.to_string());
+            }
+
+            if started_at.elapsed() >= timeout {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!(
+                    "{label} timed out after {}",
+                    format_duration(timeout)
+                ));
+            }
+
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+}
+
+pub fn status(repo: impl AsRef<Path>) -> Result<GitStatus, String> {
+    GitService::new().status(repo)
 }
 
 pub fn init_main(repo: impl AsRef<Path>) -> Result<(), String> {
-    let repo = repo.as_ref();
-    fs::create_dir_all(repo).map_err(|error| error.to_string())?;
-    git(repo, &["init", "-b", "main"])?;
-    Ok(())
+    GitService::new().init_main(repo)
 }
 
 pub fn origin_url(repo: impl AsRef<Path>) -> Result<Option<String>, String> {
-    let repo = repo.as_ref();
-    match git(repo, &["remote", "get-url", "origin"]) {
-        Ok(url) => Ok(Some(url.trim().to_string()).filter(|value| !value.is_empty())),
-        Err(error) if error.contains("No such remote") => Ok(None),
-        Err(error) => Err(error),
-    }
+    GitService::new().origin_url(repo)
 }
 
 pub fn set_origin_url(repo: impl AsRef<Path>, remote_url: &str) -> Result<(), String> {
-    let repo = repo.as_ref();
-    if origin_url(repo)?.is_some() {
-        git(repo, &["remote", "set-url", "origin", remote_url])?;
-    } else {
-        git(repo, &["remote", "add", "origin", remote_url])?;
-    }
-    Ok(())
+    GitService::new().set_origin_url(repo, remote_url)
 }
 
 pub fn add_all(repo: impl AsRef<Path>) -> Result<(), String> {
-    git(repo.as_ref(), &["add", "."])?;
-    Ok(())
+    GitService::new().add_all(repo)
 }
 
 pub fn add_paths(repo: impl AsRef<Path>, paths: &[String]) -> Result<(), String> {
-    if paths.is_empty() {
-        return Err("Select at least one file to commit.".to_string());
-    }
-
-    let mut args = vec!["add".to_string(), "--".to_string()];
-    args.extend(paths.iter().cloned());
-    git_owned(repo.as_ref(), &args)?;
-    Ok(())
+    GitService::new().add_paths(repo, paths)
 }
 
 pub fn staged_changes(repo: impl AsRef<Path>) -> Result<bool, String> {
-    let status = git(repo.as_ref(), &["diff", "--cached", "--name-only"])?;
-    Ok(!status.trim().is_empty())
+    GitService::new().staged_changes(repo)
 }
 
 pub fn commit(repo: impl AsRef<Path>, message: &str) -> Result<String, String> {
-    let repo = repo.as_ref();
-    git_with_config(repo, &["commit", "-m", message])?;
-    Ok(git(repo, &["rev-parse", "HEAD"])?.trim().to_string())
+    GitService::new().commit(repo, message)
 }
 
 pub fn push_origin_main(repo: impl AsRef<Path>, set_upstream: bool) -> Result<(), String> {
-    let args: &[&str] = if set_upstream {
-        &["push", "-u", "origin", "main"]
-    } else {
-        &["push", "origin", "main"]
-    };
-    git_network(repo.as_ref(), args, PUSH_TIMEOUT, "git push")?;
-    Ok(())
+    GitService::new().push_origin_main(repo, set_upstream)
 }
 
 pub fn changed_files(repo: impl AsRef<Path>) -> Result<Vec<GitChangedFile>, String> {
-    let output = git(
-        repo.as_ref(),
-        &["status", "--porcelain=v1", "--untracked-files=all", "-z"],
-    )?;
-    let mut entries = output.split('\0').filter(|entry| !entry.is_empty());
-    let mut files = Vec::new();
-
-    while let Some(entry) = entries.next() {
-        if entry.len() < 4 {
-            continue;
-        }
-
-        let status = entry[0..2].to_string();
-        let mut path = entry[3..].to_string();
-        if status.starts_with('R') || status.starts_with('C') {
-            if let Some(new_path) = entries.next() {
-                path = new_path.to_string();
-            }
-        }
-
-        files.push(GitChangedFile { path, status });
-    }
-
-    Ok(files)
+    GitService::new().changed_files(repo)
 }
 
 pub fn has_head(repo: impl AsRef<Path>) -> bool {
-    git(repo.as_ref(), &["rev-parse", "--verify", "HEAD"]).is_ok()
+    GitService::new().has_head(repo)
 }
 
 pub fn diff_head_path(repo: impl AsRef<Path>, path: &str) -> Result<String, String> {
-    git_owned(
-        repo.as_ref(),
-        &[
-            "diff".to_string(),
-            "--no-ext-diff".to_string(),
-            "HEAD".to_string(),
-            "--".to_string(),
-            path.to_string(),
-        ],
-    )
+    GitService::new().diff_head_path(repo, path)
 }
 
 pub fn log_path(
@@ -173,24 +478,7 @@ pub fn log_path(
     path: &str,
     limit: usize,
 ) -> Result<Vec<GitLogEntry>, String> {
-    let repo = repo.as_ref();
-    if !has_head(repo) {
-        return Ok(Vec::new());
-    }
-
-    let limit = limit.clamp(1, 100).to_string();
-    let output = git_owned(
-        repo,
-        &[
-            "log".to_string(),
-            format!("-n{limit}"),
-            "--format=%H%x1f%ct%x1f%s%x1e".to_string(),
-            "--".to_string(),
-            path.to_string(),
-        ],
-    )?;
-
-    Ok(output.split('\x1e').filter_map(parse_log_entry).collect())
+    GitService::new().log_path(repo, path, limit)
 }
 
 fn parse_log_entry(entry: &str) -> Option<GitLogEntry> {
@@ -208,7 +496,7 @@ fn parse_log_entry(entry: &str) -> Option<GitLogEntry> {
 }
 
 pub fn ls_remote(repo_url: &str, reference: &str) -> Result<Option<String>, String> {
-    ls_remote_with_timeout(repo_url, reference, DEFAULT_LS_REMOTE_TIMEOUT)
+    GitService::new().ls_remote(repo_url, reference)
 }
 
 pub fn ls_remote_with_timeout(
@@ -216,61 +504,7 @@ pub fn ls_remote_with_timeout(
     reference: &str,
     timeout: Duration,
 ) -> Result<Option<String>, String> {
-    validate_git_remote_arg(repo_url)?;
-    validate_git_reference_arg(reference)?;
-    let mut command = Command::new("git");
-    command
-        .arg("ls-remote")
-        .arg("--")
-        .arg(repo_url)
-        .arg(reference)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_ASKPASS", "true")
-        .env("GCM_INTERACTIVE", "never");
-    let output = command_output_with_timeout(command, timeout, "git ls-remote")?;
-
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .split_whitespace()
-        .next()
-        .map(str::to_string))
-}
-
-fn command_output_with_timeout(
-    mut command: Command,
-    timeout: Duration,
-    label: &str,
-) -> Result<Output, String> {
-    let mut child = command
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| error.to_string())?;
-    let started_at = Instant::now();
-
-    loop {
-        if child
-            .try_wait()
-            .map_err(|error| error.to_string())?
-            .is_some()
-        {
-            return child.wait_with_output().map_err(|error| error.to_string());
-        }
-
-        if started_at.elapsed() >= timeout {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(format!(
-                "{label} timed out after {}",
-                format_duration(timeout)
-            ));
-        }
-
-        thread::sleep(Duration::from_millis(20));
-    }
+    GitService::new().ls_remote_with_timeout(repo_url, reference, timeout)
 }
 
 fn format_duration(duration: Duration) -> String {
@@ -288,31 +522,7 @@ pub fn fetch_ref_path(
     path: &str,
     checkout_root: impl AsRef<Path>,
 ) -> Result<String, String> {
-    validate_git_remote_arg(repo_url)?;
-    validate_git_reference_arg(reference)?;
-    let checkout_root = checkout_root.as_ref();
-    fs::create_dir_all(checkout_root).map_err(|error| error.to_string())?;
-    git(checkout_root, &["init", "-b", "main"])?;
-    git(checkout_root, &["remote", "add", "origin", repo_url])?;
-    git_network(
-        checkout_root,
-        &["fetch", "--depth", "1", "origin", "--", reference],
-        FETCH_REF_TIMEOUT,
-        "git fetch",
-    )?;
-    let sha = git(checkout_root, &["rev-parse", "FETCH_HEAD"])?
-        .trim()
-        .to_string();
-    git_owned(
-        checkout_root,
-        &[
-            "checkout".to_string(),
-            "FETCH_HEAD".to_string(),
-            "--".to_string(),
-            path.to_string(),
-        ],
-    )?;
-    Ok(sha)
+    GitService::new().fetch_ref_path(repo_url, reference, path, checkout_root)
 }
 
 fn validate_git_remote_arg(repo_url: &str) -> Result<(), String> {
@@ -339,39 +549,7 @@ pub fn diff_no_index_tree(
     old_root: impl AsRef<Path>,
     new_root: impl AsRef<Path>,
 ) -> Result<Vec<GitDiffFile>, String> {
-    let old_root = old_root.as_ref();
-    let new_root = new_root.as_ref();
-    let old_root_text = old_root.to_str().ok_or("Old path is not valid UTF-8.")?;
-    let new_root_text = new_root.to_str().ok_or("New path is not valid UTF-8.")?;
-
-    let name_status = git_diff_no_index(&[
-        "--no-index",
-        "--name-status",
-        "-M",
-        old_root_text,
-        new_root_text,
-    ])?;
-    let unified = git_diff_no_index(&["--no-index", "-M", "--", old_root_text, new_root_text])?;
-    Ok(parse_no_index_files(
-        &name_status,
-        &unified,
-        old_root,
-        new_root,
-    ))
-}
-
-fn git_diff_no_index(args: &[&str]) -> Result<String, String> {
-    let output = Command::new("git")
-        .arg("diff")
-        .args(args)
-        .output()
-        .map_err(|error| error.to_string())?;
-
-    if output.status.success() || output.status.code() == Some(1) {
-        return Ok(String::from_utf8_lossy(&output.stdout).to_string());
-    }
-
-    Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    GitService::new().diff_no_index_tree(old_root, new_root)
 }
 
 fn parse_no_index_files(
@@ -524,78 +702,6 @@ fn strip_root_prefix(value: &str, root: &str) -> Option<String> {
         .map(|path| path.trim_start_matches('/').to_string())
 }
 
-fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(args)
-        .output()
-        .map_err(|error| error.to_string())?;
-
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
-}
-
-fn git_owned(repo: &Path, args: &[String]) -> Result<String, String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(args)
-        .output()
-        .map_err(|error| error.to_string())?;
-
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
-}
-
-fn git_network(
-    repo: &Path,
-    args: &[&str],
-    timeout: Duration,
-    label: &str,
-) -> Result<String, String> {
-    let mut command = Command::new("git");
-    command
-        .arg("-C")
-        .arg(repo)
-        .args(args)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_ASKPASS", "true")
-        .env("GCM_INTERACTIVE", "never");
-    let output = command_output_with_timeout(command, timeout, label)?;
-
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
-}
-
-fn git_with_config(repo: &Path, args: &[&str]) -> Result<String, String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .arg("-c")
-        .arg("user.name=SkillBox")
-        .arg("-c")
-        .arg("user.email=skillbox@example.invalid")
-        .args(args)
-        .output()
-        .map_err(|error| error.to_string())?;
-
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -611,6 +717,23 @@ mod tests {
         add_all(&temp).unwrap();
         let sha = commit(&temp, "Initial sync").unwrap();
         let status = status(&temp).unwrap();
+
+        assert!(!sha.is_empty());
+        assert!(status.initialized);
+        assert_eq!(status.branch, "main");
+        assert!(!status.dirty);
+    }
+
+    #[test]
+    fn git_service_runs_structured_local_commands() {
+        let git = GitService::new();
+        let temp = temp_dir("skillbox-git-service");
+        write_file(&temp.join("demo.txt"), "demo");
+
+        git.init_main(&temp).unwrap();
+        git.add_all(&temp).unwrap();
+        let sha = git.commit(&temp, "Initial sync").unwrap();
+        let status = git.status(&temp).unwrap();
 
         assert!(!sha.is_empty());
         assert!(status.initialized);
@@ -685,12 +808,13 @@ mod tests {
         let mut command = Command::new("sleep");
         command.arg("5");
 
-        let error = command_output_with_timeout(
-            command,
-            std::time::Duration::from_millis(100),
-            "slow command",
-        )
-        .unwrap_err();
+        let error = GitService::new()
+            .command_output_with_timeout(
+                command,
+                std::time::Duration::from_millis(100),
+                "slow command",
+            )
+            .unwrap_err();
 
         assert!(error.contains("timed out"));
     }
@@ -751,16 +875,16 @@ mod tests {
         let fetch_ref_path_start = source.find("pub fn fetch_ref_path").unwrap();
         let diff_no_index_start = source.find("pub fn diff_no_index_tree").unwrap();
         let fetch_ref_path_source = &source[fetch_ref_path_start..diff_no_index_start];
-        let git_network_start = source.find("fn git_network").unwrap();
-        let git_with_config_start = source.find("fn git_with_config").unwrap();
-        let git_network_source = &source[git_network_start..git_with_config_start];
+        let run_network_start = source.find("fn run_network").unwrap();
+        let run_with_config_start = source.find("fn run_with_config").unwrap();
+        let run_network_source = &source[run_network_start..run_with_config_start];
 
-        assert!(fetch_ref_path_source.contains("git_network"));
+        assert!(fetch_ref_path_source.contains("run_network"));
         assert!(fetch_ref_path_source.contains("FETCH_REF_TIMEOUT"));
-        assert!(git_network_source.contains("command_output_with_timeout"));
-        assert!(git_network_source.contains("GIT_TERMINAL_PROMPT"));
-        assert!(git_network_source.contains("GIT_ASKPASS"));
-        assert!(git_network_source.contains("GCM_INTERACTIVE"));
+        assert!(run_network_source.contains("command_output_with_timeout"));
+        assert!(run_network_source.contains("GIT_TERMINAL_PROMPT"));
+        assert!(run_network_source.contains("GIT_ASKPASS"));
+        assert!(run_network_source.contains("GCM_INTERACTIVE"));
     }
 
     #[test]
@@ -770,9 +894,9 @@ mod tests {
         let changed_files_start = source.find("pub fn changed_files").unwrap();
         let push_source = &source[push_start..changed_files_start];
 
-        assert!(push_source.contains("git_network"));
+        assert!(push_source.contains("run_network"));
         assert!(push_source.contains("PUSH_TIMEOUT"));
-        assert!(!push_source.contains("git(repo.as_ref(), args)"));
+        assert!(!push_source.contains("run(repo.as_ref(), args)"));
     }
 
     fn temp_dir(prefix: &str) -> PathBuf {
@@ -790,6 +914,7 @@ mod tests {
     }
 
     fn bare_remote_with_skill(label: &str) -> PathBuf {
+        let git = GitService::new();
         let remote = temp_dir(label).join("remote.git");
         Command::new("git")
             .args(["init", "--bare"])
@@ -797,11 +922,7 @@ mod tests {
             .output()
             .unwrap();
         let work = temp_dir(&format!("{label}-work"));
-        Command::new("git")
-            .args(["init", "-b", "main"])
-            .arg(&work)
-            .output()
-            .unwrap();
+        git.init_main(&work).unwrap();
         fs::create_dir_all(work.join("skills/demo")).unwrap();
         fs::write(work.join("README.md"), "root\n").unwrap();
         fs::write(
@@ -809,14 +930,10 @@ mod tests {
             "---\nname: demo\ndescription: Demo\n---\n",
         )
         .unwrap();
-        git(&work, &["add", "."]).unwrap();
-        git_with_config(&work, &["commit", "-m", "Initial skill"]).unwrap();
-        git(
-            &work,
-            &["remote", "add", "origin", remote.to_str().unwrap()],
-        )
-        .unwrap();
-        git(&work, &["push", "-u", "origin", "main"]).unwrap();
+        git.add_all(&work).unwrap();
+        git.commit(&work, "Initial skill").unwrap();
+        git.set_origin_url(&work, remote.to_str().unwrap()).unwrap();
+        git.push_origin_main(&work, true).unwrap();
         remote
     }
 }
