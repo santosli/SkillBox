@@ -394,7 +394,7 @@ mod tests {
             "--agent".to_string(),
             "codex".to_string(),
             "--runtime-root".to_string(),
-            "/Users/santos/.codex/skills".to_string(),
+            "/Users/example/.codex/skills".to_string(),
             "--event-id".to_string(),
             "codex-run-1".to_string(),
             "--used-at".to_string(),
@@ -411,7 +411,7 @@ mod tests {
         assert_eq!(request.agent_id, "codex");
         assert_eq!(
             request.runtime_root,
-            PathBuf::from("/Users/santos/.codex/skills")
+            PathBuf::from("/Users/example/.codex/skills")
         );
         assert_eq!(request.event_id.as_deref(), Some("codex-run-1"));
         assert_eq!(request.used_at.as_deref(), Some("2026-06-02T10:15:00Z"));
@@ -433,7 +433,7 @@ mod tests {
             "--agent".to_string(),
             "codex".to_string(),
             "--runtime-root".to_string(),
-            "/Users/santos/.codex/skills".to_string(),
+            "/Users/example/.codex/skills".to_string(),
             "--metadata-json".to_string(),
             "{broken".to_string(),
         ];

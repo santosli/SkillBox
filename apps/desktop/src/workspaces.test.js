@@ -20,8 +20,8 @@ const {
 
 test('normalizes workspace snake case fields and compact labels', () => {
   const workspace = normalizeWorkspace({
-    canonical_path: '/Users/santos/project/.agents/skills',
-    path: '/Users/santos/project/.agents/skills',
+    canonical_path: '/Users/example/project/.agents/skills',
+    path: '/Users/example/project/.agents/skills',
     kind: 'user',
     source: 'manual',
     agent_id: 'agents',
@@ -34,12 +34,12 @@ test('normalizes workspace snake case fields and compact labels', () => {
     last_scanned_at: '2026-05-26 08:00:00'
   });
 
-  assert.equal(workspace.canonicalPath, '/Users/santos/project/.agents/skills');
+  assert.equal(workspace.canonicalPath, '/Users/example/project/.agents/skills');
   assert.equal(workspace.compactPath, '~/project/.agents/skills');
   assert.equal(workspace.kindLabel, 'User');
   assert.equal(workspace.agentLabel, 'Codex CLI');
   assert.deepEqual(workspace.agentIcon, {
-    id: 'workspace:/Users/santos/project/.agents/skills',
+    id: 'workspace:/Users/example/project/.agents/skills',
     label: 'project',
     iconClass: 'workspace',
     iconLabel: 'P',
@@ -52,10 +52,20 @@ test('normalizes workspace snake case fields and compact labels', () => {
   assert.equal(workspace.lastScanError, 'one unreadable skill');
 });
 
+test('compacts arbitrary macOS home paths without hardcoded usernames', () => {
+  const workspace = normalizeWorkspace({
+    path: '/Users/alex/project/.codex/skills',
+    kind: 'user',
+    agent_id: 'codex'
+  });
+
+  assert.equal(workspace.compactPath, '~/project/.codex/skills');
+});
+
 test('derives workspace display names from agent roots and project directories', () => {
   assert.equal(
     normalizeWorkspace({
-      path: '/Users/santos/.codex/skills',
+      path: '/Users/example/.codex/skills',
       kind: 'global',
       agent_id: 'codex',
       display_name: 'Codex Global'
@@ -64,7 +74,7 @@ test('derives workspace display names from agent roots and project directories',
   );
   assert.equal(
     normalizeWorkspace({
-      path: '/Users/santos/.agents/skills',
+      path: '/Users/example/.agents/skills',
       kind: 'global',
       agent_id: 'agents',
       display_name: 'Agents'
@@ -73,34 +83,34 @@ test('derives workspace display names from agent roots and project directories',
   );
   assert.equal(
     normalizeWorkspace({
-      path: '/Users/santos/Library/Mobile Documents/iCloud~md~obsidian/Documents/Pandora/.agents/skills',
+      path: '/Users/example/Library/Mobile Documents/iCloud~md~obsidian/Documents/demo-vault/.agents/skills',
       kind: 'user',
       agent_id: 'agents',
       display_name: 'Agents User'
     }).displayName,
-    'Pandora'
+    'demo-vault'
   );
   assert.equal(
     normalizeWorkspace({
-      path: '/Users/santos/zone/audio-dialogue-web/.codex/skills',
+      path: '/Users/example/zone/demo-app/.codex/skills',
       kind: 'user',
       agent_id: 'codex'
     }).displayName,
-    'audio-dialogue-web'
+    'demo-app'
   );
 });
 
 test('derives user workspace icons from display names instead of runtime paths', () => {
   assert.deepEqual(
     normalizeWorkspace({
-      path: '/Users/santos/zone/audio-dialogue-web/.codex/skills',
+      path: '/Users/example/zone/demo-app/.codex/skills',
       kind: 'user'
     }).agentIcon,
     {
-      id: 'workspace:/Users/santos/zone/audio-dialogue-web/.codex/skills',
-      label: 'audio-dialogue-web',
+      id: 'workspace:/Users/example/zone/demo-app/.codex/skills',
+      label: 'demo-app',
       iconClass: 'workspace',
-      iconLabel: 'A',
+      iconLabel: 'D',
       workspace: true
     }
   );
@@ -147,15 +157,15 @@ test('filters workspaces by type', () => {
 
 test('builds workspace skill review metadata', () => {
   const workspace = normalizeWorkspace({
-    path: '/Users/santos/zone/audio-dialogue-web/.codex/skills',
+    path: '/Users/example/zone/demo-app/.codex/skills',
     kind: 'user',
     agent_id: 'codex'
   });
 
   assert.deepEqual(workspaceSkillReviewMeta(workspace), {
-    title: 'audio-dialogue-web skills',
-    subtitle: '~/zone/audio-dialogue-web/.codex/skills',
-    noticePrefix: 'audio-dialogue-web:'
+    title: 'demo-app skills',
+    subtitle: '~/zone/demo-app/.codex/skills',
+    noticePrefix: 'demo-app:'
   });
 });
 
@@ -163,19 +173,19 @@ test('builds deploy picker rows with existing deployments checked', () => {
   const rows = workspaceDeployPickerRows(
     [
       normalizeWorkspace({
-        canonical_path: '/Users/santos/project/.agents/skills',
-        path: '/Users/santos/project/.agents/skills',
+        canonical_path: '/Users/example/project/.agents/skills',
+        path: '/Users/example/project/.agents/skills',
         kind: 'user',
         agent_id: 'agents'
       }),
       normalizeWorkspace({
-        canonical_path: '/Users/santos/.codex/skills',
-        path: '/Users/santos/.codex/skills',
+        canonical_path: '/Users/example/.codex/skills',
+        path: '/Users/example/.codex/skills',
         kind: 'global',
         agent_id: 'codex'
       })
     ],
-    [{ target_root: '/Users/santos/project/.agents/skills' }]
+    [{ target_root: '/Users/example/project/.agents/skills' }]
   );
 
   assert.equal(rows[0].isDeployed, true);
@@ -188,25 +198,25 @@ test('computes deploy and undeploy changes from picker rows', () => {
   const rows = workspaceDeployPickerRows(
     [
       normalizeWorkspace({
-        canonical_path: '/Users/santos/project/.agents/skills',
-        path: '/Users/santos/project/.agents/skills'
+        canonical_path: '/Users/example/project/.agents/skills',
+        path: '/Users/example/project/.agents/skills'
       }),
       normalizeWorkspace({
-        canonical_path: '/Users/santos/.codex/skills',
-        path: '/Users/santos/.codex/skills',
+        canonical_path: '/Users/example/.codex/skills',
+        path: '/Users/example/.codex/skills',
         kind: 'global'
       })
     ],
-    [{ target_root: '/Users/santos/project/.agents/skills' }]
+    [{ target_root: '/Users/example/project/.agents/skills' }]
   );
   rows[0].isSelected = false;
   rows[1].isSelected = true;
 
   const changes = workspaceDeploymentChanges(rows);
 
-  assert.deepEqual(changes.deploy.map((workspace) => workspace.path), ['/Users/santos/.codex/skills']);
+  assert.deepEqual(changes.deploy.map((workspace) => workspace.path), ['/Users/example/.codex/skills']);
   assert.deepEqual(changes.undeploy.map((workspace) => workspace.path), [
-    '/Users/santos/project/.agents/skills'
+    '/Users/example/project/.agents/skills'
   ]);
   assert.equal(workspaceDeployRequiresConfirmation(changes), true);
 });

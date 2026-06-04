@@ -184,7 +184,7 @@ function deriveAgentLabel(sourceRoot = '') {
 }
 
 function compactSourceLabel(sourceRoot = '') {
-  const source = String(sourceRoot || 'Local').replace('/Users/santos', '~');
+  const source = String(sourceRoot || 'Local').replace(/^\/Users\/[^/]+(?=\/|$)/, '~');
 
   if (source.includes('~/.codex/skills')) return '~/.codex/skills';
   if (source.includes('~/.agents/skills')) return '~/.agents/skills';

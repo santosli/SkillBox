@@ -186,7 +186,7 @@ function workspacePathKey(value = '') {
 }
 
 function compactWorkspacePath(value = '') {
-  return String(value || 'Not available').replace('/Users/santos', '~');
+  return String(value || 'Not available').replace(/^\/Users\/[^/]+(?=\/|$)/, '~');
 }
 
 function workspaceDisplayName(path = '', agentId = '', kind = 'user') {

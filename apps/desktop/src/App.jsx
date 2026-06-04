@@ -167,8 +167,8 @@ const previewImportCandidates = [
 
 const previewWorkspaces = [
   {
-    canonical_path: '/Users/santos/.codex/skills',
-    path: '/Users/santos/.codex/skills',
+    canonical_path: '/Users/example/.codex/skills',
+    path: '/Users/example/.codex/skills',
     kind: 'global',
     source: 'auto',
     agent_id: 'codex',
@@ -180,13 +180,13 @@ const previewWorkspaces = [
   },
   {
     canonical_path:
-      '/Users/santos/Library/Mobile Documents/iCloud~md~obsidian/Documents/Pandora/.agents/skills',
+      '/Users/example/Library/Mobile Documents/iCloud~md~obsidian/Documents/demo-vault/.agents/skills',
     path:
-      '/Users/santos/Library/Mobile Documents/iCloud~md~obsidian/Documents/Pandora/.agents/skills',
+      '/Users/example/Library/Mobile Documents/iCloud~md~obsidian/Documents/demo-vault/.agents/skills',
     kind: 'user',
     source: 'manual',
     agent_id: 'agents',
-    display_name: 'Pandora',
+    display_name: 'demo-vault',
     skill_count: 2,
     imported_skill_count: 1,
     last_scan_error_count: 0,
@@ -226,7 +226,7 @@ function previewUserSkillsGitChanges() {
     repo_path: previewPaths.userSkillsRoot,
     initialized: true,
     branch: 'main',
-    remote_url: 'git@example.com:santosli/my-skills.git',
+    remote_url: 'git@example.com:skillbox-dev/user-skills.git',
     files: [
       {
         path: 'codex-chat-sync/SKILL.md',
@@ -236,7 +236,7 @@ function previewUserSkillsGitChanges() {
           '--- a/codex-chat-sync/SKILL.md\n' +
           '+++ b/codex-chat-sync/SKILL.md\n' +
           '@@\n' +
-          '+description: Import Codex App history into Pandora.\n'
+          '+description: Import Codex App history into demo-vault.\n'
       },
       {
         path: 'dida-task-sync/SKILL.md',
@@ -1198,7 +1198,7 @@ export default function App() {
     if (!window.__TAURI_INTERNALS__) {
       const normalized = normalizeUserSkillsGitStatus({
         repo_path: previewPaths.userSkillsRoot,
-        remote_url: remoteUrl || userSkillsGit.remoteUrl || 'git@example.com:santosli/my-skills.git',
+        remote_url: remoteUrl || userSkillsGit.remoteUrl || 'git@example.com:skillbox-dev/user-skills.git',
         branch: 'main',
         state: 'clean',
         dirty: false,
@@ -1477,7 +1477,7 @@ export default function App() {
               skill_name: skillName,
               source_type: 'github',
               current_version: 'manual-preview',
-              source_url: `https://github.com/santos/skillbox-preview/tree/main/remote-skills/${skillName}`,
+              source_url: `https://github.com/skillbox-dev/skillbox-preview/tree/main/remote-skills/${skillName}`,
               latest_sha: mockLatestSha,
               ref_kind: 'branch',
               tracking: true,
@@ -1642,12 +1642,12 @@ export default function App() {
         skill_name: skillName,
         candidates: [
           {
-            owner: 'santos',
+            owner: 'skillbox-dev',
             repo: 'skillbox-preview',
             path: `remote-skills/${skillName}`,
             reference: 'main',
-            source_url: `https://github.com/santos/skillbox-preview/tree/main/remote-skills/${skillName}`,
-            repo_url: 'https://github.com/santos/skillbox-preview.git',
+            source_url: `https://github.com/skillbox-dev/skillbox-preview/tree/main/remote-skills/${skillName}`,
+            repo_url: 'https://github.com/skillbox-dev/skillbox-preview.git',
             name: skillName,
             description: 'Mock GitHub source candidate for browser preview.',
             stars: 12,
@@ -3711,7 +3711,7 @@ function UserSkillsGitSettingsPanel({ status, userSkillsGit, onSave }) {
         <label className="remoteImportField">
           <span>Remote URL</span>
           <input
-            placeholder="git@github.com:santosli/my-skills.git"
+            placeholder="git@github.com:skillbox-dev/user-skills.git"
             value={remoteUrl}
             onChange={(event) => setRemoteUrl(event.target.value)}
           />
@@ -3908,7 +3908,7 @@ function UserSkillsSyncDialog({
               </span>
               <input
                 name="remote-url"
-                placeholder="git@github.com:santosli/my-skills.git"
+                placeholder="git@github.com:skillbox-dev/user-skills.git"
                 readOnly
                 value={dialog.remoteUrl || 'Not configured'}
               />
@@ -5566,7 +5566,7 @@ function previewCandidatesForWorkspace(workspace) {
   const roots = [
     workspace.path,
     workspace.compactPath,
-    workspace.path?.replace('/Users/santos', '~')
+    compactPath(workspace.path)
   ].filter(Boolean);
 
   return previewImportCandidates.filter((candidate) => {
@@ -5767,7 +5767,7 @@ function labelize(value = '') {
 }
 
 function compactPath(value = '') {
-  return String(value || 'Not available').replace('/Users/santos', '~');
+  return String(value || 'Not available').replace(/^\/Users\/[^/]+(?=\/|$)/, '~');
 }
 
 function joinPath(root, child) {

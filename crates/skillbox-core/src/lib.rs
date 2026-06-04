@@ -6609,7 +6609,7 @@ description: \"Demo skill\"
             .join("Mobile Documents")
             .join("iCloud~md~obsidian")
             .join("Documents")
-            .join("Pandora")
+            .join("demo-vault")
             .join(".agents")
             .join("skills");
         let project_codex_root = root
@@ -6625,9 +6625,9 @@ description: \"Demo skill\"
             .join("skills");
 
         make_skill(
-            &project_agents_root.join("pandora-local"),
-            "pandora-local",
-            "Pandora local skill",
+            &project_agents_root.join("demo-local"),
+            "demo-local",
+            "demo-vault local skill",
         );
         make_skill(
             &project_codex_root.join("project-remote"),
@@ -7103,7 +7103,7 @@ description: \"Demo skill\"
         let root = temp_dir("usage-hook-replace-dev-command");
         let home = root.join("home");
         let old_command =
-            "'/Users/santos/zone/skill-box/target/debug/skillbox-cli' usage-hook codex";
+            "'/Users/example/zone/skill-box/target/debug/skillbox-cli' usage-hook codex";
         fs::create_dir_all(home.join(".codex")).unwrap();
         fs::write(
             home.join(".codex").join("hooks.json"),
@@ -7316,7 +7316,7 @@ description: \"Demo skill\"
             .join("Mobile Documents")
             .join("iCloud~md~obsidian")
             .join("Documents")
-            .join("Pandora")
+            .join("demo-vault")
             .join(".agents")
             .join("skills");
         make_skill(
@@ -7330,9 +7330,9 @@ description: \"Demo skill\"
             "Claude helper",
         );
         make_skill(
-            &project_agents_root.join("pandora-local"),
-            "pandora-local",
-            "Pandora local skill",
+            &project_agents_root.join("demo-local"),
+            "demo-local",
+            "demo-vault local skill",
         );
 
         let result = scan_workspaces_under(&root, &managed_root).unwrap();
@@ -7350,7 +7350,7 @@ description: \"Demo skill\"
         assert_eq!(global_claude.display_name, "Claude");
         assert_eq!(project_agents.kind, WorkspaceKind::User);
         assert_eq!(project_agents.agent_id.as_deref(), Some("agents"));
-        assert_eq!(project_agents.display_name, "Pandora");
+        assert_eq!(project_agents.display_name, "demo-vault");
     }
 
     #[test]
@@ -7359,9 +7359,9 @@ description: \"Demo skill\"
         let managed_root = root.join("SkillBox");
         let workspace_root = root.join("project").join(".agents").join("skills");
         make_skill(
-            &workspace_root.join("pandora-local"),
-            "pandora-local",
-            "Pandora local skill",
+            &workspace_root.join("demo-local"),
+            "demo-local",
+            "demo-vault local skill",
         );
 
         let candidates = scan_import_candidates(&[workspace_root.clone()], &managed_root).unwrap();
@@ -7383,20 +7383,20 @@ description: \"Demo skill\"
             .join("Mobile Documents")
             .join("iCloud~md~obsidian")
             .join("Documents")
-            .join("Pandora")
+            .join("demo-vault")
             .join(".agents")
             .join("skills");
         let managed_root = root.join("SkillBox");
 
         make_skill(
-            &project_agents_root.join("pandora-local"),
-            "pandora-local",
-            "Pandora local skill",
+            &project_agents_root.join("demo-local"),
+            "demo-local",
+            "demo-vault local skill",
         );
 
         let roots = runtime_roots_under(&root);
         let candidates = scan_import_candidates(&roots, &managed_root).unwrap();
-        let candidate = candidate(&candidates.candidates, "pandora-local");
+        let candidate = candidate(&candidates.candidates, "demo-local");
 
         assert_eq!(candidate.suggested_type, SkillKind::User);
         assert_eq!(candidate.source_root, Some(project_agents_root));
@@ -7536,7 +7536,7 @@ description: \"Demo skill\"
         let root = temp_dir("undeploy-alias-link");
         let source = root.join("source").join("dida-task-sync");
         let managed_root = root.join("SkillBox");
-        let target_root = root.join("Pandora").join(".agents").join("skills");
+        let target_root = root.join("demo-vault").join(".agents").join("skills");
         make_skill(&source, "dida-task-sync", "Dida sync skill");
         let imported = import_skill(&source, SkillKind::User, &managed_root).unwrap();
         fs::create_dir_all(&target_root).unwrap();
@@ -7630,10 +7630,7 @@ description: \"Demo skill\"
         let root = temp_dir("managed-state-inferred-deployment");
         let source = root.join("source").join("ui-ux-pro-max");
         let managed_root = root.join("SkillBox");
-        let workspace_root = root
-            .join("audio-dialogue-web")
-            .join(".codex")
-            .join("skills");
+        let workspace_root = root.join("demo-app").join(".codex").join("skills");
         make_skill(&source, "ui-ux-pro-max", "UI UX skill");
         import_skill(&source, SkillKind::Remote, &managed_root).unwrap();
         fs::create_dir_all(&workspace_root).unwrap();
@@ -7670,7 +7667,7 @@ description: \"Demo skill\"
         let root = temp_dir("managed-state-alias-deployment");
         let source = root.join("source").join("dida-task-sync");
         let managed_root = root.join("SkillBox");
-        let workspace_root = root.join("Pandora").join(".agents").join("skills");
+        let workspace_root = root.join("demo-vault").join(".agents").join("skills");
         make_skill(&source, "dida-task-sync", "Dida sync skill");
         let imported = import_skill(&source, SkillKind::User, &managed_root).unwrap();
         fs::create_dir_all(&workspace_root).unwrap();

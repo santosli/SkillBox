@@ -42,19 +42,19 @@ test('maps the Claude runtime to the Claude Code icon asset', () => {
 });
 
 test('resolves common global workspace icons from runtime paths', () => {
-  assert.deepEqual(agentWorkspaceIconForPath('/Users/santos/.agents/skills'), {
+  assert.deepEqual(agentWorkspaceIconForPath('/Users/example/.agents/skills'), {
     id: 'agents',
     label: 'Codex CLI',
     iconClass: 'codex-cli',
     iconAsset: 'codex-cli'
   });
-  assert.deepEqual(agentWorkspaceIconForPath('/Users/santos/.codex/skills'), {
+  assert.deepEqual(agentWorkspaceIconForPath('/Users/example/.codex/skills'), {
     id: 'codex',
     label: 'Codex',
     iconClass: 'codex-app',
     iconAsset: 'codex-app'
   });
-  assert.deepEqual(agentWorkspaceIconForPath('/Users/santos/.claude/skills'), {
+  assert.deepEqual(agentWorkspaceIconForPath('/Users/example/.claude/skills'), {
     id: 'claude',
     label: 'Claude Code',
     iconClass: 'claude-code',

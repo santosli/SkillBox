@@ -19,7 +19,7 @@ test('derives dashboard tags, agent label, source label, status, and favorite st
     {
       name: 'note-manager',
       description: 'Manage Obsidian docs and sync notes from GitHub.',
-      sourceRoot: '/Users/santos/.codex/skills',
+      sourceRoot: '/Users/example/.codex/skills',
       type: 'remote',
       status: 'update not checked'
     },
@@ -44,7 +44,7 @@ test('derives user skill sync status and default general tag', () => {
     {
       name: 'alpha',
       description: 'Small helper.',
-      sourceRoot: '/Users/santos/.agents/skills',
+      sourceRoot: '/Users/example/.agents/skills',
       type: 'user'
     },
     { state: 'dirty', changedPaths: ['beta/SKILL.md'] },
@@ -71,7 +71,7 @@ test('derives installed agent icons from explicit agent and deployment fields', 
       installedAgents: ['claude'],
       deployments: [
         { agent_id: 'codex' },
-        { target_root: '/Users/santos/.cursor/skills' },
+        { target_root: '/Users/example/.cursor/skills' },
         { agentId: 'claude' }
       ]
     },
@@ -94,8 +94,8 @@ test('keeps separate workspace deployment icons for the same agent runtime', () 
       description: 'UI/UX design intelligence.',
       type: 'remote',
       deployments: [
-        { target_root: '/Users/santos/.codex/skills' },
-        { target_root: '/Users/santos/zone/audio-dialogue-web/.codex/skills' }
+        { target_root: '/Users/example/.codex/skills' },
+        { target_root: '/Users/example/zone/demo-app/.codex/skills' }
       ]
     },
     { state: 'clean' },
@@ -104,18 +104,18 @@ test('keeps separate workspace deployment icons for the same agent runtime', () 
     {},
     [
       {
-        path: '/Users/santos/.codex/skills',
-        canonical_path: '/Users/santos/.codex/skills',
+        path: '/Users/example/.codex/skills',
+        canonical_path: '/Users/example/.codex/skills',
         kind: 'global',
         agent_id: 'codex',
         display_name: 'Codex'
       },
       {
-        path: '/Users/santos/zone/audio-dialogue-web/.codex/skills',
-        canonical_path: '/Users/santos/zone/audio-dialogue-web/.codex/skills',
+        path: '/Users/example/zone/demo-app/.codex/skills',
+        canonical_path: '/Users/example/zone/demo-app/.codex/skills',
         kind: 'user',
         agent_id: 'codex',
-        display_name: 'audio-dialogue-web'
+        display_name: 'demo-app'
       }
     ]
   );
@@ -123,10 +123,10 @@ test('keeps separate workspace deployment icons for the same agent runtime', () 
   assert.deepEqual(skill.installedAgents, [
     { id: 'codex', label: 'Codex', iconClass: 'codex-app', iconAsset: 'codex-app' },
     {
-      id: 'workspace:/Users/santos/zone/audio-dialogue-web/.codex/skills',
-      label: 'audio-dialogue-web',
+      id: 'workspace:/Users/example/zone/demo-app/.codex/skills',
+      label: 'demo-app',
       iconClass: 'workspace',
-      iconLabel: 'A',
+      iconLabel: 'D',
       workspace: true
     }
   ]);
@@ -138,7 +138,7 @@ test('uses the Codex CLI icon for global agents runtime deployments', () => {
       name: 'git-merge-to-main',
       description: 'Merge branches after review.',
       type: 'user',
-      deployments: [{ target_root: '/Users/santos/.agents/skills' }]
+      deployments: [{ target_root: '/Users/example/.agents/skills' }]
     },
     { state: 'clean' },
     normalizeRemoteSkillUpdates(null),
@@ -146,8 +146,8 @@ test('uses the Codex CLI icon for global agents runtime deployments', () => {
     {},
     [
       {
-        path: '/Users/santos/.agents/skills',
-        canonical_path: '/Users/santos/.agents/skills',
+        path: '/Users/example/.agents/skills',
+        canonical_path: '/Users/example/.agents/skills',
         kind: 'global',
         agent_id: 'agents',
         display_name: 'Agents'
@@ -165,7 +165,7 @@ test('uses editable dashboard tag overrides when present', () => {
     {
       name: 'note-manager',
       description: 'Manage Obsidian docs and sync notes from GitHub.',
-      sourceRoot: '/Users/santos/.codex/skills',
+      sourceRoot: '/Users/example/.codex/skills',
       type: 'remote'
     },
     { state: 'clean' },
@@ -200,7 +200,7 @@ test('falls back to the current symlink deployment target for installed agent ic
     {
       name: 'managed-skill',
       description: 'Managed SkillBox copy.',
-      sourceRoot: '/Users/santos/.skillbox/user-skills',
+      sourceRoot: '/Users/example/.skillbox/user-skills',
       type: 'user',
       isSymlink: true
     },

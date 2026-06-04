@@ -170,7 +170,7 @@ skill_usage_stats
   PRIMARY KEY (skill_name, agent_id, runtime_root)
 ```
 
-`workspaces.display_name` 由 path 推导：home-level global roots 使用 agent 名（例如 `Codex`、`Claude`），项目局部 roots 使用项目目录名（例如 `Pandora`）。`global` / `user` 不拼进名称，由 `kind` 字段表达。`imported_skill_count` 使用 import candidate 的同一套 imported 判定：内容 hash 已存在于 SkillBox managed store，或 workspace skill 已 symlink 到 managed root。
+`workspaces.display_name` 由 path 推导：home-level global roots 使用 agent 名（例如 `Codex`、`Claude`），项目局部 roots 使用项目目录名（例如 `demo-vault`）。`global` / `user` 不拼进名称，由 `kind` 字段表达。`imported_skill_count` 使用 import candidate 的同一套 imported 判定：内容 hash 已存在于 SkillBox managed store，或 workspace skill 已 symlink 到 managed root。
 
 `operations` 记录会改变 managed store、runtime、SQLite、Git state 或偏好设置的动作。Rust core 统一写入，UI 只能读取展示或通过结构化命令触发新记录；记录从 UI 视角 append-only，MVP 不做自动清理。`payload_json` 保存操作细节，例如 from/to version、changed paths、backup path、affected deployments、commit SHA 或失败恢复状态。
 
