@@ -84,6 +84,34 @@ test('remote source binding dialog keeps long candidate lists inside the viewpor
   assert.match(candidateListRule, /overflow-y:\s*auto;/);
 });
 
+test('import review shows imported candidates by default', () => {
+  assert.match(
+    appSource,
+    /const \[isImportedExpanded,\s*setIsImportedExpanded\]\s*=\s*useState\(true\);/
+  );
+});
+
+test('workspace cards show the shared workspace icon beside the workspace name', () => {
+  const workspaceCard = appSource.match(
+    /function WorkspaceCard\(\{ isBusy, workspace, onForget, onOpenSkills \}\)\s*\{(?<body>[\s\S]*?)\n\}/
+  )?.groups.body || '';
+
+  assert.match(workspaceCard, /<strong>\{workspace\.displayName\}<\/strong>/);
+  assert.match(workspaceCard, /<AgentIconBadge agent=\{workspace\.agentIcon\}/);
+  assert.match(css, /\.workspaceCardTitleRow > \.skillAgentIcon\s*\{[^}]*flex:\s*0 0 24px;/s);
+});
+
+test('workspace card icon tooltips can overflow card bounds', () => {
+  const workspaceCardRule = css.match(/\.workspaceCard\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const workspaceHoverRule = css.match(
+    /\.workspaceCard:hover,\s*\.workspaceCard:focus-within\s*\{(?<body>[^}]*)\}/s
+  )?.groups.body || '';
+
+  assert.match(workspaceCardRule, /overflow:\s*visible;/);
+  assert.doesNotMatch(workspaceCardRule, /overflow:\s*hidden;/);
+  assert.match(workspaceHoverRule, /z-index:\s*2;/);
+});
+
 test('remote source search starts after the binding dialog has painted', () => {
   const openSourceDialog = appSource.match(
     /async function openRemoteSourceDialog\(skill\)\s*\{(?<body>[\s\S]*?)\n  \}/
@@ -399,6 +427,24 @@ test('skill cards show usage directly under the skill name', () => {
   );
   assert.match(css, /\.skillCardTitleText\s*\{/);
   assert.match(css, /\.skillCardUsage\s*\{/);
+});
+
+test('skill card status and favorite action share one aligned header row', () => {
+  const skillCardStart = appSource.indexOf('function SkillCard');
+  const skillCardEnd = appSource.indexOf('function AgentIconStack', skillCardStart);
+  const skillCardSource = appSource.slice(skillCardStart, skillCardEnd);
+  const actionsRule = css.match(/\.skillCardHeaderActions\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const actionsBadgeRule = css.match(/\.skillCardHeaderActions \.badge\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const favoriteRule = css.match(/\.skillFavoriteButton\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(skillCardSource, /className="skillCardHeaderActions"[\s\S]*<Badge tone=\{skill\.statusTone\}>\{skill\.statusLabel\}<\/Badge>[\s\S]*className=\{skill\.isFavorite \? 'skillFavoriteButton active' : 'skillFavoriteButton'\}/);
+  assert.match(actionsRule, /display:\s*inline-flex;/);
+  assert.match(actionsRule, /align-items:\s*center;/);
+  assert.match(actionsRule, /top:\s*20px;/);
+  assert.match(actionsBadgeRule, /height:\s*32px;/);
+  assert.match(favoriteRule, /width:\s*32px;/);
+  assert.match(favoriteRule, /height:\s*32px;/);
+  assert.doesNotMatch(favoriteRule, /position:\s*absolute;/);
 });
 
 test('deploy workspace dialog includes checked rows and unlink confirmation warning', () => {

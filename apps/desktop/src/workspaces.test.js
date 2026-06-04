@@ -38,6 +38,13 @@ test('normalizes workspace snake case fields and compact labels', () => {
   assert.equal(workspace.compactPath, '~/project/.agents/skills');
   assert.equal(workspace.kindLabel, 'User');
   assert.equal(workspace.agentLabel, 'Codex CLI');
+  assert.deepEqual(workspace.agentIcon, {
+    id: 'workspace:/Users/santos/project/.agents/skills',
+    label: 'project',
+    iconClass: 'workspace',
+    iconLabel: 'P',
+    workspace: true
+  });
   assert.equal(workspace.skillCount, 3);
   assert.equal(workspace.importedSkillCount, 2);
   assert.equal(workspace.usageCount, 7);
@@ -83,6 +90,21 @@ test('derives workspace display names from agent roots and project directories',
   );
 });
 
+test('derives user workspace icons from display names instead of runtime paths', () => {
+  assert.deepEqual(
+    normalizeWorkspace({
+      path: '/Users/santos/zone/audio-dialogue-web/.codex/skills',
+      kind: 'user'
+    }).agentIcon,
+    {
+      id: 'workspace:/Users/santos/zone/audio-dialogue-web/.codex/skills',
+      label: 'audio-dialogue-web',
+      iconClass: 'workspace',
+      iconLabel: 'A',
+      workspace: true
+    }
+  );
+});
 
 test('counts workspaces by kind, source, and scan errors', () => {
   const counts = workspaceCounts([

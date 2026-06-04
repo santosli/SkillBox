@@ -1,6 +1,7 @@
 import {
   agentWorkspaceIconForId,
-  agentWorkspaceIconForPath
+  agentWorkspaceIconForPath,
+  workspaceAgentIcon
 } from './agentWorkspaceIcons.js';
 import { remoteSkillRowStatus } from './skillStatusRefresh.js';
 import { userSkillRowStatus } from './userSkillsGitSync.js';
@@ -241,33 +242,6 @@ function deriveInstalledWorkspaceAgents(skill, workspaces = []) {
   }
 
   return agents;
-}
-
-function workspaceAgentIcon(workspace) {
-  if (workspace.kind !== 'user') {
-    return normalizeAgent(workspace.agentId) || {
-      id: `workspace:${workspace.canonicalPath || workspace.path}`,
-      label: workspace.displayName || workspace.compactPath || workspace.path || 'Workspace',
-      iconClass: 'workspace',
-      iconLabel: workspaceInitial(workspace),
-      workspace: true
-    };
-  }
-
-  return {
-    id: `workspace:${workspace.canonicalPath || workspace.path}`,
-    label: workspace.displayName || workspace.compactPath || workspace.path || 'Workspace',
-    iconClass: 'workspace',
-    iconLabel: workspaceInitial(workspace),
-    workspace: true
-  };
-}
-
-function workspaceInitial(workspace = {}) {
-  return String(workspace.displayName || workspace.path || '?')
-    .trim()
-    .slice(0, 1)
-    .toUpperCase() || '?';
 }
 
 function addDeploymentAgents(agents, deployments) {

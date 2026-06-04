@@ -80,6 +80,32 @@ export function agentWorkspaceLabel(agentId = '', fallback = '') {
   return agentWorkspaceIconForId(agentId)?.label || fallback;
 }
 
+export function workspaceAgentIcon(workspace = {}) {
+  const kind = String(workspace.kind || '').toLowerCase();
+  if (kind !== 'user') {
+    return agentWorkspaceIconForId(workspace.agentId || workspace.agent_id) || workspaceFallbackIcon(workspace);
+  }
+
+  return workspaceFallbackIcon(workspace);
+}
+
+function workspaceFallbackIcon(workspace = {}) {
+  return {
+    id: `workspace:${workspace.canonicalPath || workspace.canonical_path || workspace.path}`,
+    label: workspace.displayName || workspace.display_name || workspace.compactPath || workspace.path || 'Workspace',
+    iconClass: 'workspace',
+    iconLabel: workspaceInitial(workspace),
+    workspace: true
+  };
+}
+
+function workspaceInitial(workspace = {}) {
+  return String(workspace.displayName || workspace.display_name || workspace.path || '?')
+    .trim()
+    .slice(0, 1)
+    .toUpperCase() || '?';
+}
+
 function publicIcon(icon) {
   if (!icon) {
     return null;

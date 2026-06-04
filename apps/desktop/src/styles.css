@@ -801,7 +801,7 @@ button {
   min-height: 32px;
   align-items: flex-start;
   gap: 10px;
-  padding-right: 46px;
+  padding-right: 176px;
 }
 
 .skillCardTitleText {
@@ -832,10 +832,6 @@ button {
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.skillCardTitleRow .badge {
-  flex: 0 0 auto;
 }
 
 .skillCardDescription {
@@ -1079,13 +1075,28 @@ button {
   color: #1d4ed8;
 }
 
-.skillFavoriteButton {
+.skillCardHeaderActions {
   position: absolute;
   top: 20px;
   right: 18px;
+  z-index: 2;
+  display: inline-flex;
+  height: 32px;
+  align-items: center;
+  gap: 8px;
+}
+
+.skillCardHeaderActions .badge {
+  height: 32px;
+  min-height: 32px;
+  padding: 0 12px;
+}
+
+.skillFavoriteButton {
   display: inline-grid;
   width: 32px;
   height: 32px;
+  flex: 0 0 32px;
   place-items: center;
   border: 1px solid #dfe4ec;
   border-radius: 8px;
@@ -1451,7 +1462,7 @@ button {
   display: grid;
   min-width: 0;
   min-height: 188px;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid #dfe4ec;
   border-radius: 8px;
   background: #ffffff;
@@ -1464,6 +1475,8 @@ button {
   bottom: 0;
   left: 0;
   width: 3px;
+  border-bottom-left-radius: 8px;
+  border-top-left-radius: 8px;
   background: #38a169;
   content: "";
 }
@@ -1472,7 +1485,9 @@ button {
   background: #0a84ff;
 }
 
-.workspaceCard:hover {
+.workspaceCard:hover,
+.workspaceCard:focus-within {
+  z-index: 2;
   border-color: #b9c4d3;
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
 }
@@ -1520,6 +1535,10 @@ button {
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.workspaceCardTitleRow > .skillAgentIcon {
+  flex: 0 0 24px;
 }
 
 .workspaceCardPath {

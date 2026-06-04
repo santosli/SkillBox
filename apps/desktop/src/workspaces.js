@@ -1,4 +1,7 @@
-import { agentWorkspaceLabel } from './agentWorkspaceIcons.js';
+import {
+  agentWorkspaceLabel,
+  workspaceAgentIcon
+} from './agentWorkspaceIcons.js';
 
 export const sidebarItems = [
   { id: 'dashboard', label: 'Dashboard', icon: 'gauge' },
@@ -22,6 +25,16 @@ export function normalizeWorkspace(workspace = {}) {
   const kind = String(workspace.kind || 'user').toLowerCase();
   const source = String(workspace.source || 'auto').toLowerCase();
   const agentId = workspace.agentId || workspace.agent_id || '';
+  const compactPath = compactWorkspacePath(path || canonicalPath);
+  const displayName = workspaceDisplayName(path || canonicalPath, agentId, kind);
+  const agentIcon = workspaceAgentIcon({
+    canonicalPath,
+    path,
+    kind,
+    agentId,
+    compactPath,
+    displayName
+  });
   const skillCount = numberOrZero(workspace.skillCount ?? workspace.skill_count);
   const importedSkillCount = numberOrZero(
     workspace.importedSkillCount ?? workspace.imported_skill_count
@@ -35,14 +48,15 @@ export function normalizeWorkspace(workspace = {}) {
     ...workspace,
     canonicalPath,
     path,
-    compactPath: compactWorkspacePath(path || canonicalPath),
+    compactPath,
     kind,
     kindLabel: labelize(kind),
     source,
     sourceLabel: labelize(source),
     agentId,
+    agentIcon,
     agentLabel: agentWorkspaceLabel(agentId, labelize(agentId || 'local')),
-    displayName: workspaceDisplayName(path || canonicalPath, agentId, kind),
+    displayName,
     skillCount,
     importedSkillCount,
     usageCount,

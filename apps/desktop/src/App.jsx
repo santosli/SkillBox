@@ -2891,7 +2891,6 @@ function SkillCard({ skill, onOpen, onToggleFavorite }) {
             <strong>{skill.name}</strong>
             <span className="skillCardUsage">{skill.usageCount || 0} calls</span>
           </span>
-          <Badge tone={skill.statusTone}>{skill.statusLabel}</Badge>
         </span>
         <span className="skillCardDescription">
           {skill.description || 'No description in SKILL.md'}
@@ -2908,15 +2907,18 @@ function SkillCard({ skill, onOpen, onToggleFavorite }) {
           <AgentIconStack agents={skill.installedAgents} />
         </span>
       </button>
-      <button
-        aria-label={skill.isFavorite ? `Remove ${skill.name} from favorites` : `Add ${skill.name} to favorites`}
-        aria-pressed={skill.isFavorite}
-        className={skill.isFavorite ? 'skillFavoriteButton active' : 'skillFavoriteButton'}
-        type="button"
-        onClick={() => onToggleFavorite(skill.name)}
-      >
-        <Star aria-hidden="true" />
-      </button>
+      <span className="skillCardHeaderActions">
+        <Badge tone={skill.statusTone}>{skill.statusLabel}</Badge>
+        <button
+          aria-label={skill.isFavorite ? `Remove ${skill.name} from favorites` : `Add ${skill.name} to favorites`}
+          aria-pressed={skill.isFavorite}
+          className={skill.isFavorite ? 'skillFavoriteButton active' : 'skillFavoriteButton'}
+          type="button"
+          onClick={() => onToggleFavorite(skill.name)}
+        >
+          <Star aria-hidden="true" />
+        </button>
+      </span>
     </article>
   );
 }
@@ -2936,30 +2938,33 @@ function AgentIconStack({ agents = [], emptyLabel = 'No installed agent target',
 
   return (
     <span className="skillAgentIcons" aria-label={label}>
-      {visibleAgents.map((agent) => {
-        const iconClass = agentIconClass(agent);
-        const iconSource = agentIconSource(agent, iconClass);
-
-        return (
-          <span
-            className={`skillAgentIcon ${iconClass}`}
-            key={agent.id}
-            data-tooltip={agent.label}
-            aria-label={agent.label}
-          >
-            {iconSource ? (
-              <img src={iconSource} alt="" aria-hidden="true" />
-            ) : (
-              <span aria-hidden="true">{agent.iconLabel || agentInitial(agent)}</span>
-            )}
-          </span>
-        );
-      })}
+      {visibleAgents.map((agent) => (
+        <AgentIconBadge agent={agent} key={agent.id} />
+      ))}
       {overflowCount > 0 ? (
         <span className="skillAgentIcon overflow" data-tooltip={overflowLabel} aria-label={overflowLabel}>
           +{overflowCount}
         </span>
       ) : null}
+    </span>
+  );
+}
+
+function AgentIconBadge({ agent }) {
+  if (!agent) {
+    return null;
+  }
+
+  const iconClass = agentIconClass(agent);
+  const iconSource = agentIconSource(agent, iconClass);
+
+  return (
+    <span className={`skillAgentIcon ${iconClass}`} data-tooltip={agent.label} aria-label={agent.label}>
+      {iconSource ? (
+        <img src={iconSource} alt="" aria-hidden="true" />
+      ) : (
+        <span aria-hidden="true">{agent.iconLabel || agentInitial(agent)}</span>
+      )}
     </span>
   );
 }
@@ -3282,6 +3287,7 @@ function WorkspaceCard({ isBusy, workspace, onForget, onOpenSkills }) {
         <div className="workspaceCardBody">
           <div className="workspaceCardTitleRow">
             <strong>{workspace.displayName}</strong>
+            <AgentIconBadge agent={workspace.agentIcon} />
           </div>
           <code className="workspaceCardPath">{workspace.compactPath}</code>
           {workspace.lastScanError ? <small>{workspace.lastScanError}</small> : null}
@@ -4655,7 +4661,7 @@ function ImportReview({
   subtitle = 'Confirm each skill type before SkillBox copies it into the managed store.',
   title = 'Import Review'
 }) {
-  const [isImportedExpanded, setIsImportedExpanded] = useState(false);
+  const [isImportedExpanded, setIsImportedExpanded] = useState(true);
   const [isSystemExpanded, setIsSystemExpanded] = useState(false);
   const importedCandidates = candidates.filter((candidate) => candidate.importStatus === 'imported');
   const systemCandidates = candidates.filter((candidate) => candidate.importStatus === 'system');
