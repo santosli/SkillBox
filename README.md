@@ -1,41 +1,17 @@
 # SkillBox
 
-SkillBox is a local macOS app and CLI for managing skills, rules, prompts, and capability packs across mainstream agent runtimes.
-SkillBox should grow toward Claude, Codex, OpenClaw, Cursor, Claude Code, Copilot, and similar agent ecosystems.
+SkillBox is a local-first macOS app for discovering, importing, and deploying
+agent skills across Codex-style runtimes.
 
-The project is currently bootstrapped with:
+Public alpha status: SkillBox is useful today for local skill management, but it
+is still early software. Expect sharp edges, keep backups of important skills,
+and review each filesystem change before applying it.
 
-- A dependency-free Node CLI MVP that can scan, index, import, deploy, and parse GitHub skill URLs.
-- A Tauri + React desktop shell wired directly to Rust commands.
-- Rust crates for core scanning/import/deploy behavior, GitHub URL parsing, Git status, and CLI access.
+![SkillBox dashboard screenshot](docs/assets/skillbox-dashboard.png)
 
-## Current Commands
+## What SkillBox Manages
 
-```sh
-npm test
-npm run hooks:install
-npm run docs:check-staged
-node packages/skillbox-cli/bin/skillbox.js scan --json
-node packages/skillbox-cli/bin/skillbox.js paths --json
-node packages/skillbox-cli/bin/skillbox.js parse-github-url <github-url> --json
-cargo run -p skillbox-cli --offline -- scan ~/.codex/skills ~/.agents/skills
-cargo run -p skillbox-cli --offline -- workspace-scan
-cargo test --offline
-```
-
-The default managed root is `~/.skillbox`, or `SKILLBOX_HOME` when set.
-When `SKILLBOX_HOME` is unset, SkillBox keeps existing legacy data visible: if
-`~/.skillbox` is only an empty bootstrap directory and `~/SkillBox` already has
-managed data, the empty bootstrap is backed up and `~/.skillbox` is created as a
-compatibility symlink to `~/SkillBox`. This avoids an empty first-launch state
-while preserving older deployed runtime links that still point at `~/SkillBox`.
-
-`npm install` runs `npm run hooks:install`, which points Git at the tracked
-`.githooks/` directory. The pre-commit hook checks staged implementation and
-workflow changes and blocks the commit until the matching docs update is staged,
-or until the author explicitly commits with `SKILLBOX_SKIP_DOCS_CHECK=1`.
-
-## Managed Layout
+SkillBox keeps its managed store under `~/.skillbox` by default:
 
 ```text
 ~/.skillbox/
@@ -44,10 +20,108 @@ or until the author explicitly commits with `SKILLBOX_SKIP_DOCS_CHECK=1`.
   skillbox.sqlite
 ```
 
-Runtime directories such as `~/.codex/skills`, `~/.agents/skills`, `~/.claude/skills`, and future Cursor/Copilot-style targets are deployment targets.
-SkillBox deploys managed skills through symlinks by default.
+Agent runtime directories are deployment targets, not the source of truth. Today
+SkillBox focuses on `SKILL.md`-based runtimes such as:
 
-## Toolchain Status
+- `~/.codex/skills`
+- `~/.agents/skills`
+- project-local `.codex/skills` and `.agents/skills` directories
 
-Rust is installed through rustup on this machine. In fresh shells, use `source ~/.cargo/env`
-or call `/Users/santos/.cargo/bin/cargo` directly if `cargo` is not yet on `PATH`.
+The app can scan runtime directories, import local or remote skills into the
+managed store, deploy skills as symlinks, track remote skill versions, and
+record usage counts through optional runtime hooks.
+
+## Requirements
+
+- macOS 14 Sonoma or newer
+- Git, for user-skill sync and remote skill workflows
+- An agent runtime that uses `SKILL.md` directories
+
+Windows, Linux, and a Homebrew CLI formula are not part of the first public
+alpha.
+
+## Install
+
+### GitHub Releases
+
+Download the signed and notarized DMG from:
+
+https://github.com/skillbox-dev/skill-box/releases
+
+For the first alpha, use the asset named:
+
+```text
+SkillBox_0.1.0-alpha.1_universal.dmg
+```
+
+Open the DMG and drag `SkillBox.app` into `/Applications`.
+
+### Homebrew
+
+The public alpha uses the project tap instead of the official Homebrew Cask
+repository:
+
+```sh
+brew tap skillbox-dev/tap
+brew install --cask skillbox
+```
+
+Upgrade with:
+
+```sh
+brew upgrade --cask skillbox
+```
+
+Uninstall with:
+
+```sh
+brew uninstall --cask skillbox
+```
+
+Homebrew uninstall does not delete `~/.skillbox`.
+
+## First Run
+
+1. Open SkillBox.
+2. Run `Scan` to discover known global and project-local skill workspaces.
+3. Use `Import` to review candidates before SkillBox copies them into
+   `~/.skillbox`.
+4. Deploy imported skills to selected runtime workspaces.
+5. Optional: enable usage hook injection in Settings to record real skill calls.
+
+## Permissions And Local Changes
+
+SkillBox is local-first and does not require a hosted account. The app may:
+
+- scan known runtime directories for `SKILL.md` folders;
+- write managed copies and metadata under `~/.skillbox`;
+- create symlinks from runtime directories back to managed skills;
+- initialize and update Git metadata for `~/.skillbox/user-skills`;
+- modify supported runtime hook config files when you explicitly inject hooks.
+
+SkillBox treats runtime folders, GitHub URLs, downloaded archives, and existing
+skills as untrusted input. It should not silently overwrite a non-symlink
+runtime target.
+
+## Uninstall And Reset
+
+See [docs/uninstall-reset.md](docs/uninstall-reset.md) for removing the app,
+reverting hook injection, deleting runtime symlinks, and optionally removing the
+managed store.
+
+## Development
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, test commands, release
+invariants, and contribution guidelines.
+
+Useful commands:
+
+```sh
+npm test
+cargo test --offline
+npm --workspace apps/desktop run tauri dev
+```
+
+## License
+
+SkillBox is available under the [MIT License](LICENSE).
