@@ -32,6 +32,10 @@ The project currently ships a Tauri + React desktop shell, Rust crates for the c
 
 Skill cards make usage and maintenance state visible at a glance, including call counts, update status, tags, favorites, and deployed runtime targets.
 
+![SkillBox skill detail](docs/screenshots/skillbox-skill-detail.png)
+
+The skill detail view collects workspace deployment, usage, version history, source binding, update review, rollback, tags, and operation history in one place.
+
 ![SkillBox workspaces](docs/screenshots/skillbox-workspaces.png)
 
 The Workspaces view tracks global and project-local skill roots across Codex CLI, Claude Code, Codex App, and project-specific runtimes.
