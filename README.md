@@ -110,13 +110,13 @@ https://github.com/santosli/skill-box/releases
 For this alpha, use the asset named:
 
 ```text
-SkillBox_0.1.0-alpha.2_universal.dmg
+SkillBox_0.1.0-alpha.3_universal.dmg
 ```
 
 The matching checksum is published as:
 
 ```text
-SkillBox_0.1.0-alpha.2_universal.dmg.sha256
+SkillBox_0.1.0-alpha.3_universal.dmg.sha256
 ```
 
 Open the DMG and drag `SkillBox.app` into `/Applications`.

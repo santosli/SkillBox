@@ -7,8 +7,14 @@ tags such as `v0.1.0-alpha.1`.
 
 ## Unreleased
 
+- No unreleased changes.
+
+## 0.1.0-alpha.3
+
 - Prepare public alpha documentation, CI, release workflow, and Homebrew cask
   template.
+- Add mounted DMG signature, Gatekeeper, version, and bundle identifier checks
+  before publishing release assets.
 
 ## 0.1.0-alpha.1
 

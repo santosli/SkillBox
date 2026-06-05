@@ -9,9 +9,9 @@ notarized, universal DMG through GitHub Releases.
 - Main repository: `santosli/skill-box`
 - Homebrew tap: `santosli/homebrew-tap`
 - Bundle identifier: `io.github.santosli.skillbox`
-- Current tag: `v0.1.0-alpha.2`
-- Current DMG asset: `SkillBox_0.1.0-alpha.2_universal.dmg`
-- Current checksum asset: `SkillBox_0.1.0-alpha.2_universal.dmg.sha256`
+- Current tag: `v0.1.0-alpha.3`
+- Current DMG asset: `SkillBox_0.1.0-alpha.3_universal.dmg`
+- Current checksum asset: `SkillBox_0.1.0-alpha.3_universal.dmg.sha256`
 
 ## GitHub Actions Secrets
 
@@ -38,8 +38,8 @@ Application certificate. `APPLE_PASSWORD` should be an app-specific password.
 4. Tag the release:
 
    ```sh
-   git tag v0.1.0-alpha.2
-   git push origin v0.1.0-alpha.2
+   git tag v0.1.0-alpha.3
+   git push origin v0.1.0-alpha.3
    ```
 
 5. Wait for `.github/workflows/release.yml` to build, notarize, mount, and

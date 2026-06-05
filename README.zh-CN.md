@@ -110,13 +110,13 @@ https://github.com/santosli/skill-box/releases
 本次 alpha 使用这个 asset：
 
 ```text
-SkillBox_0.1.0-alpha.2_universal.dmg
+SkillBox_0.1.0-alpha.3_universal.dmg
 ```
 
 对应 checksum：
 
 ```text
-SkillBox_0.1.0-alpha.2_universal.dmg.sha256
+SkillBox_0.1.0-alpha.3_universal.dmg.sha256
 ```
 
 打开 DMG，把 `SkillBox.app` 拖到 `/Applications`。
