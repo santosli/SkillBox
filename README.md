@@ -28,7 +28,7 @@ The project currently ships a Tauri + React desktop shell, Rust crates for the c
 
 ## Screenshots
 
-![SkillBox skill card detail](docs/screenshots/skillbox-dashboard-card.png)
+<img src="docs/screenshots/skillbox-dashboard-card.png" alt="SkillBox skill card detail" width="680">
 
 Skill cards make usage and maintenance state visible at a glance, including call counts, update status, tags, favorites, and deployed runtime targets.
 
