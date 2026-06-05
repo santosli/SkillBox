@@ -8,7 +8,7 @@
 ![Rust](https://img.shields.io/badge/Rust-core-B7410E)
 ![Node.js](https://img.shields.io/badge/Node.js-legacy%20CLI-43853D)
 
-![SkillBox dashboard card](docs/screenshots/skillbox-dashboard-card.png)
+![SkillBox dashboard](docs/screenshots/skillbox-dashboard.png)
 
 SkillBox is a local tool for managing `SKILL.md`-based skills, rules, prompts, and capability packs without treating any one agent runtime as the source of truth. User-created skills live in `~/.skillbox/user-skills`, remote skills live in versioned snapshots under `~/.skillbox/remote-skills`, and agent runtime folders such as `~/.codex/skills`, `~/.agents/skills`, and `~/.claude/skills` are deployment targets.
 
@@ -23,6 +23,10 @@ The project currently ships a Tauri + React desktop shell, Rust crates for the c
 - **Safety over silent mutation.** Existing non-symlink runtime content is not overwritten silently; imports use managed copies and backup-aware replacement paths.
 
 ## Screenshots
+
+![SkillBox skill card detail](docs/screenshots/skillbox-dashboard-card.png)
+
+Skill cards make usage and maintenance state visible at a glance, including call counts, update status, tags, favorites, and deployed runtime targets.
 
 ![SkillBox workspaces](docs/screenshots/skillbox-workspaces.png)
 
