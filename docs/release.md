@@ -5,10 +5,10 @@ notarized, universal DMG through GitHub Releases.
 
 ## Release Identity
 
-- Organization: `skillbox-dev`
-- Main repository: `skillbox-dev/skill-box`
-- Homebrew tap: `skillbox-dev/homebrew-tap`
-- Bundle identifier: `io.github.skillbox-dev.skillbox`
+- Publishing account: `santosli`
+- Main repository: `santosli/skill-box`
+- Homebrew tap: `santosli/homebrew-tap`
+- Bundle identifier: `io.github.santosli.skillbox`
 - First tag: `v0.1.0-alpha.1`
 - First DMG asset: `SkillBox_0.1.0-alpha.1_universal.dmg`
 
@@ -41,14 +41,14 @@ Application certificate. `APPLE_PASSWORD` should be an app-specific password.
 4. Wait for `.github/workflows/release.yml` to publish the prerelease.
 5. Download and smoke-test the DMG.
 6. Copy `packaging/homebrew/Casks/skillbox.rb` into
-   `skillbox-dev/homebrew-tap/Casks/skillbox.rb`.
+   `santosli/homebrew-tap/Casks/skillbox.rb`.
 7. Replace the placeholder SHA with the value from the release `SHA256SUMS`.
 8. Run:
 
    ```sh
-   brew audit --cask skillbox-dev/tap/skillbox
-   brew install --cask skillbox-dev/tap/skillbox
-   brew uninstall --cask skillbox-dev/tap/skillbox
+   brew audit --cask santosli/tap/skillbox
+   brew install --cask santosli/tap/skillbox
+   brew uninstall --cask santosli/tap/skillbox
    ```
 
 9. Commit and push the tap update.

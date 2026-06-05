@@ -226,7 +226,7 @@ function previewUserSkillsGitChanges() {
     repo_path: previewPaths.userSkillsRoot,
     initialized: true,
     branch: 'main',
-    remote_url: 'git@example.com:skillbox-dev/user-skills.git',
+    remote_url: 'git@example.com:santosli/user-skills.git',
     files: [
       {
         path: 'codex-chat-sync/SKILL.md',
@@ -1227,7 +1227,7 @@ export default function App() {
     if (!window.__TAURI_INTERNALS__) {
       const normalized = normalizeUserSkillsGitStatus({
         repo_path: previewPaths.userSkillsRoot,
-        remote_url: remoteUrl || userSkillsGit.remoteUrl || 'git@example.com:skillbox-dev/user-skills.git',
+        remote_url: remoteUrl || userSkillsGit.remoteUrl || 'git@example.com:santosli/user-skills.git',
         branch: 'main',
         state: 'clean',
         dirty: false,
@@ -1506,7 +1506,7 @@ export default function App() {
               skill_name: skillName,
               source_type: 'github',
               current_version: 'manual-preview',
-              source_url: `https://github.com/skillbox-dev/skillbox-preview/tree/main/remote-skills/${skillName}`,
+              source_url: `https://github.com/santosli/skillbox-preview/tree/main/remote-skills/${skillName}`,
               latest_sha: mockLatestSha,
               ref_kind: 'branch',
               tracking: true,
@@ -1671,12 +1671,12 @@ export default function App() {
         skill_name: skillName,
         candidates: [
           {
-            owner: 'skillbox-dev',
+            owner: 'santosli',
             repo: 'skillbox-preview',
             path: `remote-skills/${skillName}`,
             reference: 'main',
-            source_url: `https://github.com/skillbox-dev/skillbox-preview/tree/main/remote-skills/${skillName}`,
-            repo_url: 'https://github.com/skillbox-dev/skillbox-preview.git',
+            source_url: `https://github.com/santosli/skillbox-preview/tree/main/remote-skills/${skillName}`,
+            repo_url: 'https://github.com/santosli/skillbox-preview.git',
             name: skillName,
             description: 'Mock GitHub source candidate for browser preview.',
             stars: 12,
@@ -3755,7 +3755,7 @@ function UserSkillsGitSettingsPanel({ status, userSkillsGit, onSave }) {
         <label className="remoteImportField">
           <span>Remote URL</span>
           <input
-            placeholder="git@github.com:skillbox-dev/user-skills.git"
+            placeholder="git@github.com:santosli/user-skills.git"
             value={remoteUrl}
             onChange={(event) => setRemoteUrl(event.target.value)}
           />
@@ -3952,7 +3952,7 @@ function UserSkillsSyncDialog({
               </span>
               <input
                 name="remote-url"
-                placeholder="git@github.com:skillbox-dev/user-skills.git"
+                placeholder="git@github.com:santosli/user-skills.git"
                 readOnly
                 value={dialog.remoteUrl || 'Not configured'}
               />

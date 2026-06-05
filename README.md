@@ -46,7 +46,7 @@ alpha.
 
 Download the signed and notarized DMG from:
 
-https://github.com/skillbox-dev/skill-box/releases
+https://github.com/santosli/skill-box/releases
 
 For the first alpha, use the asset named:
 
@@ -62,7 +62,7 @@ The public alpha uses the project tap instead of the official Homebrew Cask
 repository:
 
 ```sh
-brew tap skillbox-dev/tap
+brew tap santosli/tap
 brew install --cask skillbox
 ```
 

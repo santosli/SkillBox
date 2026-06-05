@@ -63,7 +63,7 @@ test('user sync action retries failed push and syncs configured remotes', () => 
 test('normalizes user skills git status snake case fields', () => {
   const status = normalizeUserSkillsGitStatus({
     repo_path: '/tmp/.skillbox/user-skills',
-    remote_url: 'git@example.com:skillbox-dev/user-skills.git',
+    remote_url: 'git@example.com:santosli/user-skills.git',
     last_error: 'push failed',
     state: 'push_failed',
     dirty: true
@@ -71,7 +71,7 @@ test('normalizes user skills git status snake case fields', () => {
 
   assert.deepEqual(status, {
     repoPath: '/tmp/.skillbox/user-skills',
-    remoteUrl: 'git@example.com:skillbox-dev/user-skills.git',
+    remoteUrl: 'git@example.com:santosli/user-skills.git',
     branch: '',
     dirty: true,
     rawStatus: '',
@@ -448,12 +448,12 @@ test('normalizes remote source candidates for desktop binding review', () => {
     skill_name: 'grill-me',
     candidates: [
       {
-        owner: 'skillbox-dev',
+        owner: 'santosli',
         repo: 'skills',
         path: 'remote-skills/grill-me',
         reference: 'main',
-        source_url: 'https://github.com/skillbox-dev/skills/tree/main/remote-skills/grill-me',
-        repo_url: 'https://github.com/skillbox-dev/skills.git',
+        source_url: 'https://github.com/santosli/skills/tree/main/remote-skills/grill-me',
+        repo_url: 'https://github.com/santosli/skills.git',
         name: 'grill-me',
         description: 'Interview helper',
         stars: 42,
@@ -467,8 +467,8 @@ test('normalizes remote source candidates for desktop binding review', () => {
   });
 
   assert.equal(search.skillName, 'grill-me');
-  assert.equal(search.candidates[0].sourceUrl, 'https://github.com/skillbox-dev/skills/tree/main/remote-skills/grill-me');
-  assert.equal(search.candidates[0].repoLabel, 'skillbox-dev/skills');
+  assert.equal(search.candidates[0].sourceUrl, 'https://github.com/santosli/skills/tree/main/remote-skills/grill-me');
+  assert.equal(search.candidates[0].repoLabel, 'santosli/skills');
   assert.deepEqual(search.candidates[0].matchReasons, ['Exact skill name match']);
 });
 
