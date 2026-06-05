@@ -18,11 +18,13 @@ The project currently ships a Tauri + React desktop shell, Rust crates for the c
 
 ## Why
 
-- **One managed store for every runtime.** SkillBox keeps durable state in `~/.skillbox` and deploys into agent folders instead of letting runtime directories become the only copy.
-- **Review before import.** Local scans produce import candidates first, including suggested user/remote classification, system-skill handling, conflicts, and usage counts.
-- **Symlink deployment by default.** Runtime targets point back to the managed store, so user skill edits and remote rollbacks can take effect without copy churn.
-- **Rust-backed workflows.** Desktop commands call Rust crates for scan, import, deploy, GitHub URL parsing, user-skill Git sync, remote source binding, update checks, update/rollback previews, workspace registry, usage hooks, and operation history.
-- **Safety over silent mutation.** Existing non-symlink runtime content is not overwritten silently; imports use managed copies and backup-aware replacement paths.
+- **One managed store for every runtime.** Keep durable skill state in `~/.skillbox`, then deploy into each agent runtime as needed.
+- **One-click local sync.** Commit and push user skill changes from the managed store without leaving the desktop app.
+- **Scheduled remote checks.** Refresh remote skill status automatically and review available updates before applying them.
+- **Usage stats for real skill calls.** Record skill calls from supported agent hooks, then surface call counts in cards and history.
+- **Versioned remote skills.** Preview diffs, apply updates, and roll back to immutable remote skill versions.
+- **Review before import.** Classify local scan candidates as user, remote, or system before SkillBox copies anything.
+- **Safe deployment defaults.** Use symlinks by default and refuse to silently overwrite existing runtime content.
 
 ## Screenshots
 
