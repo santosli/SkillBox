@@ -20,6 +20,42 @@ const REMOTE_UPDATE_CHECK_CONCURRENCY: usize = 3;
 const CLAUDE_MARKETPLACE_SKILLS_API: &str = "https://claudemarketplaces.com/api/skills";
 const MAX_USAGE_METADATA_JSON_BYTES: usize = 16 * 1024;
 const MAX_USAGE_PROMPT_EXCERPT_CHARS: usize = 500;
+const DEFAULT_USER_SKILLS_GITIGNORE: &str = "\
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# JavaScript
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local config and logs
+.env
+.env.*
+!.env.example
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+.tmp/
+tmp/
+";
 const USAGE_METADATA_CONTENT_KEYS: &[&str] = &[
     "prompt",
     "content",
@@ -947,9 +983,18 @@ pub fn ensure_managed_layout(root: impl Into<PathBuf>) -> Result<ManagedPaths> {
     maybe_link_legacy_default_managed_root(&root)?;
     let paths = managed_paths(root);
     fs::create_dir_all(&paths.user_skills_root).map_err(|error| error.to_string())?;
+    ensure_default_user_skills_gitignore(&paths.user_skills_root)?;
     fs::create_dir_all(&paths.remote_skills_root).map_err(|error| error.to_string())?;
     init_database(&paths.database_path)?;
     Ok(paths)
+}
+
+fn ensure_default_user_skills_gitignore(user_skills_root: &Path) -> Result<()> {
+    let gitignore_path = user_skills_root.join(".gitignore");
+    if gitignore_path.exists() {
+        return Ok(());
+    }
+    fs::write(gitignore_path, DEFAULT_USER_SKILLS_GITIGNORE).map_err(|error| error.to_string())
 }
 
 fn maybe_link_legacy_default_managed_root(root: &Path) -> Result<()> {
@@ -1084,12 +1129,12 @@ pub fn parse_skill_frontmatter(input: &str) -> SkillMetadata {
         description: String::new(),
         version: String::new(),
     };
-    let mut lines = input.lines();
+    let mut lines = input.lines().peekable();
     if lines.next() != Some("---") {
         return metadata;
     }
 
-    for line in lines {
+    while let Some(line) = lines.next() {
         if line == "---" {
             break;
         }
@@ -1097,7 +1142,7 @@ pub fn parse_skill_frontmatter(input: &str) -> SkillMetadata {
             continue;
         }
         if let Some((key, value)) = line.split_once(':') {
-            let value = unquote(value.trim());
+            let value = parse_frontmatter_value(value.trim(), &mut lines);
             match key.trim() {
                 "name" => metadata.name = value,
                 "description" => metadata.description = value,
@@ -1108,6 +1153,48 @@ pub fn parse_skill_frontmatter(input: &str) -> SkillMetadata {
     }
 
     metadata
+}
+
+fn parse_frontmatter_value<'a, I>(value: &str, lines: &mut std::iter::Peekable<I>) -> String
+where
+    I: Iterator<Item = &'a str>,
+{
+    if value.starts_with('>') {
+        return frontmatter_block_lines(lines)
+            .into_iter()
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+    }
+    if value.starts_with('|') {
+        return frontmatter_block_lines(lines).join("\n");
+    }
+
+    unquote(value)
+}
+
+fn frontmatter_block_lines<'a, I>(lines: &mut std::iter::Peekable<I>) -> Vec<String>
+where
+    I: Iterator<Item = &'a str>,
+{
+    let mut block_lines = Vec::new();
+
+    while let Some(line) = lines.peek().copied() {
+        if line == "---" {
+            break;
+        }
+        if !line.is_empty() && !line.starts_with(' ') && !line.starts_with('\t') {
+            break;
+        }
+        block_lines.push(line.trim().to_string());
+        lines.next();
+    }
+
+    while block_lines.last().is_some_and(|line| line.is_empty()) {
+        block_lines.pop();
+    }
+
+    block_lines
 }
 
 pub fn read_skill(path: impl AsRef<Path>) -> Result<Skill> {
@@ -1543,15 +1630,18 @@ fn scan_workspaces_under(
         .into_iter()
         .filter(|root| workspace_root_is_readable(root))
         .collect::<Vec<_>>();
+    let mut active_auto_workspace_paths = HashSet::new();
     let mut scanned_count = 0;
     let mut error_count = 0;
 
     for root in roots {
         let kind = infer_workspace_kind(&root, home);
         let workspace = upsert_workspace(&paths, &root, kind, WorkspaceSource::Auto)?;
+        active_auto_workspace_paths.insert(workspace.canonical_path);
         scanned_count += 1;
         error_count += workspace.last_scan_error_count;
     }
+    prune_stale_auto_workspaces(&paths.database_path, &active_auto_workspace_paths)?;
 
     Ok(WorkspaceScanResult {
         workspaces: load_workspaces(&paths.database_path)?,
@@ -3157,6 +3247,7 @@ fn check_one_remote_skill_update(
     let latest_sha = source.latest_sha.clone();
     let ref_kind = source.ref_kind.clone();
     let source_url = remote_source_browser_url(&source);
+    let source_repo_path = source.path.clone();
 
     if source.source_type != "github" {
         return RemoteSkillUpdateStatus {
@@ -3232,7 +3323,38 @@ fn check_one_remote_skill_update(
     match git.ls_remote_with_timeout(repo_url, reference, timeout) {
         Ok(Some(latest_sha)) => {
             let active_version = current_version.as_deref().or(installed_sha.as_deref());
-            let update_available = active_version != Some(latest_sha.as_str());
+            let update_available = if active_version == Some(latest_sha.as_str()) {
+                false
+            } else if let Some(source_repo_path) = source_repo_path.as_deref() {
+                match remote_skill_path_changed(
+                    &git,
+                    remote_root,
+                    repo_url,
+                    &latest_sha,
+                    source_repo_path,
+                    timeout,
+                ) {
+                    Ok(Some(changed)) => changed,
+                    Ok(None) => true,
+                    Err(error) => {
+                        return RemoteSkillUpdateStatus {
+                            skill_name: skill_name.to_string(),
+                            source_type: Some(source.source_type),
+                            source_url,
+                            current_version,
+                            installed_sha,
+                            latest_sha: Some(latest_sha),
+                            ref_kind: status_ref_kind,
+                            tracking,
+                            update_available: false,
+                            state: RemoteSkillUpdateState::CheckFailed,
+                            message: Some(format!("Git path update check failed: {error}")),
+                        };
+                    }
+                }
+            } else {
+                true
+            };
             RemoteSkillUpdateStatus {
                 skill_name: skill_name.to_string(),
                 source_type: Some(source.source_type),
@@ -3277,6 +3399,65 @@ fn check_one_remote_skill_update(
             state: RemoteSkillUpdateState::CheckFailed,
             message: Some(format!("Git update check failed: {error}")),
         },
+    }
+}
+
+fn remote_skill_path_changed(
+    git: &skillbox_git::GitService,
+    remote_root: &Path,
+    repo_url: &str,
+    latest_sha: &str,
+    source_repo_path: &str,
+    timeout: Duration,
+) -> Result<Option<bool>> {
+    if !is_full_git_sha(latest_sha) {
+        return Ok(None);
+    }
+
+    let temp = temporary_work_dir("remote-update-check");
+    let result = (|| {
+        let Some(current_path) = current_remote_skill_path(remote_root)? else {
+            return Ok(None);
+        };
+        let checkout = temp.join("checkout");
+        git.fetch_ref_path_with_timeout(
+            repo_url,
+            latest_sha,
+            source_repo_path,
+            &checkout,
+            timeout,
+        )?;
+        let latest_path = checkout.join(source_repo_path);
+        let files = git.diff_no_index_tree(current_path, latest_path)?;
+        Ok(Some(!files.is_empty()))
+    })();
+    let _ = fs::remove_dir_all(&temp);
+    result
+}
+
+fn is_full_git_sha(value: &str) -> bool {
+    value.len() == 40 && value.chars().all(|ch| ch.is_ascii_hexdigit())
+}
+
+fn current_remote_skill_path(remote_root: &Path) -> Result<Option<PathBuf>> {
+    let current = remote_root.join("current");
+    let target = match fs::read_link(&current) {
+        Ok(target) => target,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.to_string()),
+    };
+    let current_path = if target.is_absolute() {
+        target
+    } else {
+        current
+            .parent()
+            .unwrap_or_else(|| Path::new(""))
+            .join(target)
+    };
+    if current_path.exists() {
+        Ok(Some(current_path))
+    } else {
+        Ok(None)
     }
 }
 
@@ -5693,6 +5874,38 @@ fn upsert_workspace(
         .ok_or_else(|| format!("Workspace was not saved: {}", path.display()))
 }
 
+fn prune_stale_auto_workspaces(
+    database_path: &Path,
+    active_canonical_paths: &HashSet<PathBuf>,
+) -> Result<()> {
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
+    let mut statement = connection
+        .prepare("SELECT canonical_path FROM workspaces WHERE source = 'auto'")
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|error| error.to_string())?;
+    let mut stale_paths = Vec::new();
+
+    for row in rows {
+        let canonical_path = row.map_err(|error| error.to_string())?;
+        if !active_canonical_paths.contains(&PathBuf::from(&canonical_path)) {
+            stale_paths.push(canonical_path);
+        }
+    }
+
+    for canonical_path in stale_paths {
+        connection
+            .execute(
+                "DELETE FROM workspaces WHERE canonical_path = ?1 AND source = 'auto'",
+                params![canonical_path],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+
+    Ok(())
+}
+
 fn load_workspaces(database_path: &Path) -> Result<Vec<Workspace>> {
     let usage_by_runtime = load_usage_by_runtime(database_path)?;
     let connection = open_database(database_path).map_err(|error| error.to_string())?;
@@ -6606,6 +6819,29 @@ description: \"Demo skill\"
     }
 
     #[test]
+    fn parses_folded_skill_description_frontmatter() {
+        let metadata = parse_skill_frontmatter(
+            "---
+name: interview-evaluation
+description: >
+  Interview evaluation workflow for reviewing
+  candidate answers and generating feedback.
+version: 0.1.0
+---
+
+# Interview evaluation
+",
+        );
+
+        assert_eq!(metadata.name, "interview-evaluation");
+        assert_eq!(
+            metadata.description,
+            "Interview evaluation workflow for reviewing candidate answers and generating feedback."
+        );
+        assert_eq!(metadata.version, "0.1.0");
+    }
+
+    #[test]
     fn database_initialization_configures_busy_timeout_and_wal() {
         let source = include_str!("lib.rs");
 
@@ -6723,6 +6959,34 @@ description: \"Demo skill\"
             root.file_name().and_then(|name| name.to_str()),
             Some(".skillbox")
         );
+    }
+
+    #[test]
+    fn ensure_managed_layout_writes_default_user_skills_gitignore() {
+        let managed_root = temp_dir("managed-layout-gitignore").join("SkillBox");
+
+        let paths = ensure_managed_layout(&managed_root).unwrap();
+        let gitignore = fs::read_to_string(paths.user_skills_root.join(".gitignore")).unwrap();
+
+        assert!(gitignore.contains(".DS_Store"));
+        assert!(gitignore.contains("__pycache__/"));
+        assert!(gitignore.contains("*.py[cod]"));
+        assert!(gitignore.contains("node_modules/"));
+        assert!(gitignore.contains(".env"));
+        assert!(gitignore.contains("!.env.example"));
+    }
+
+    #[test]
+    fn ensure_managed_layout_preserves_existing_user_skills_gitignore() {
+        let managed_root = temp_dir("managed-layout-preserve-gitignore").join("SkillBox");
+        let user_skills_root = managed_root.join("user-skills");
+        fs::create_dir_all(&user_skills_root).unwrap();
+        fs::write(user_skills_root.join(".gitignore"), "custom-ignore\n").unwrap();
+
+        let paths = ensure_managed_layout(&managed_root).unwrap();
+        let gitignore = fs::read_to_string(paths.user_skills_root.join(".gitignore")).unwrap();
+
+        assert_eq!(gitignore, "custom-ignore\n");
     }
 
     #[test]
@@ -7449,6 +7713,73 @@ description: \"Demo skill\"
     }
 
     #[test]
+    fn scan_workspaces_prunes_auto_roots_missing_from_latest_scan() {
+        let root = temp_dir("workspace-scan-prune");
+        let managed_root = root.join("SkillBox");
+        let old_project_root = root.join("zone").join("audio-dialogue-web");
+        let old_workspace_root = old_project_root.join(".codex").join("skills");
+        let new_workspace_root = root
+            .join("zone")
+            .join("play")
+            .join("audio-dialogue-web")
+            .join(".codex")
+            .join("skills");
+        make_skill(&old_workspace_root.join("local"), "local", "Local skill");
+
+        scan_workspaces_under(&root, &managed_root).unwrap();
+        let old_canonical_path = fs::canonicalize(&old_workspace_root).unwrap();
+        fs::remove_dir_all(&old_project_root).unwrap();
+        make_skill(&new_workspace_root.join("local"), "local", "Local skill");
+
+        let result = scan_workspaces_under(&root, &managed_root).unwrap();
+        let workspaces = list_workspaces(&managed_root).unwrap();
+
+        assert_eq!(result.scanned_count, 1);
+        assert_eq!(workspace(&workspaces, &new_workspace_root).skill_count, 1);
+        assert!(!workspaces
+            .iter()
+            .any(|workspace| workspace.canonical_path == old_canonical_path));
+    }
+
+    #[test]
+    fn scan_workspaces_keeps_manual_roots_missing_from_latest_scan() {
+        let root = temp_dir("workspace-scan-keeps-manual");
+        let managed_root = root.join("SkillBox");
+        let manual_workspace_root = root.join(".external").join(".codex").join("skills");
+        let auto_workspace_root = root
+            .join("zone")
+            .join("project")
+            .join(".codex")
+            .join("skills");
+        make_skill(
+            &manual_workspace_root.join("manual"),
+            "manual",
+            "Manual skill",
+        );
+        make_skill(&auto_workspace_root.join("auto"), "auto", "Auto skill");
+
+        add_workspace(
+            WorkspaceAddRequest {
+                path: manual_workspace_root.clone(),
+                kind: WorkspaceKind::User,
+            },
+            &managed_root,
+        )
+        .unwrap();
+        let result = scan_workspaces_under(&root, &managed_root).unwrap();
+        let workspaces = list_workspaces(&managed_root).unwrap();
+        let manual_workspace = workspace(&workspaces, &manual_workspace_root);
+
+        assert_eq!(result.scanned_count, 1);
+        assert_eq!(manual_workspace.source, WorkspaceSource::Manual);
+        assert_eq!(manual_workspace.skill_count, 1);
+        assert_eq!(
+            workspace(&workspaces, &auto_workspace_root).source,
+            WorkspaceSource::Auto
+        );
+    }
+
+    #[test]
     fn scan_import_candidates_records_scanned_workspaces() {
         let root = temp_dir("workspace-import-candidates");
         let managed_root = root.join("SkillBox");
@@ -8166,7 +8497,8 @@ description: \"Demo skill\"
         .unwrap();
 
         assert!(status.initialized);
-        assert_eq!(status.state, UserSkillsGitState::Clean);
+        assert_eq!(status.state, UserSkillsGitState::Dirty);
+        assert_eq!(status.changed_paths, vec![".gitignore".to_string()]);
         assert_eq!(status.remote_url.as_deref(), Some(remote_url.as_str()));
     }
 
@@ -8460,6 +8792,131 @@ description: \"Demo skill\"
         assert_eq!(stale.state, RemoteSkillUpdateState::UpdateAvailable);
         assert!(stale.update_available);
         assert_eq!(stale.latest_sha.as_deref(), Some(latest_sha.as_str()));
+    }
+
+    #[test]
+    fn check_remote_skill_updates_ignores_commits_outside_skill_path() {
+        let root = temp_dir("remote-update-same-skill-path");
+        let managed_root = root.join("SkillBox");
+        let paths = ensure_managed_layout(&managed_root).unwrap();
+        let remote = bare_remote("remote-update-same-skill-path-origin");
+        let work = temp_dir("remote-update-same-skill-path-work");
+        run_git(&work, &["init", "-b", "main"]);
+        make_skill(
+            &work.join("skills").join("find-skills"),
+            "find-skills",
+            "Find skills",
+        );
+        make_skill(&work.join("skills").join("other"), "other", "Other skill");
+        run_git(&work, &["add", "."]);
+        run_git(
+            &work,
+            &[
+                "-c",
+                "user.name=SkillBox",
+                "-c",
+                "user.email=skillbox@example.invalid",
+                "commit",
+                "-m",
+                "Add skills",
+            ],
+        );
+        run_git(
+            &work,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
+        run_git(&work, &["push", "-u", "origin", "main"]);
+        let installed_sha = remote_head(&remote);
+        let find_skills_version = paths
+            .remote_skills_root
+            .join("find-skills")
+            .join("versions")
+            .join(&installed_sha);
+        copy_skill_dir(
+            &work.join("skills").join("find-skills"),
+            &find_skills_version,
+        )
+        .unwrap();
+        update_current_symlink(
+            &paths.remote_skills_root.join("find-skills"),
+            &find_skills_version,
+        )
+        .unwrap();
+        let other_version = paths
+            .remote_skills_root
+            .join("other")
+            .join("versions")
+            .join(&installed_sha);
+        copy_skill_dir(&work.join("skills").join("other"), &other_version).unwrap();
+        update_current_symlink(&paths.remote_skills_root.join("other"), &other_version).unwrap();
+        fs::write(
+            work.join("skills").join("other").join("notes.md"),
+            "other skill docs\n",
+        )
+        .unwrap();
+        run_git(&work, &["add", "."]);
+        run_git(
+            &work,
+            &[
+                "-c",
+                "user.name=SkillBox",
+                "-c",
+                "user.email=skillbox@example.invalid",
+                "commit",
+                "-m",
+                "Update other skill",
+            ],
+        );
+        run_git(&work, &["push", "origin", "main"]);
+        let latest_sha = remote_head(&remote);
+
+        write_remote_source_with_json(
+            &paths.remote_skills_root.join("find-skills"),
+            &format!(
+                r#"{{
+                  "type":"github",
+                  "repoUrl":"{}",
+                  "path":"skills/find-skills",
+                  "ref":"main",
+                  "refKind":"branch",
+                  "tracking":true,
+                  "currentVersion":"{}",
+                  "installedSha":"{}"
+                }}"#,
+                remote.to_string_lossy(),
+                installed_sha,
+                installed_sha
+            ),
+        );
+        write_remote_source_with_json(
+            &paths.remote_skills_root.join("other"),
+            &format!(
+                r#"{{
+                  "type":"github",
+                  "repoUrl":"{}",
+                  "path":"skills/other",
+                  "ref":"main",
+                  "refKind":"branch",
+                  "tracking":true,
+                  "currentVersion":"{}",
+                  "installedSha":"{}"
+                }}"#,
+                remote.to_string_lossy(),
+                installed_sha,
+                installed_sha
+            ),
+        );
+
+        let result = check_remote_skill_updates(&managed_root).unwrap();
+        let find_skills = remote_status(&result.statuses, "find-skills");
+        let other = remote_status(&result.statuses, "other");
+
+        assert_eq!(find_skills.state, RemoteSkillUpdateState::UpToDate);
+        assert!(!find_skills.update_available);
+        assert_eq!(find_skills.latest_sha.as_deref(), Some(latest_sha.as_str()));
+        assert_eq!(other.state, RemoteSkillUpdateState::UpdateAvailable);
+        assert!(other.update_available);
+        assert_eq!(other.latest_sha.as_deref(), Some(latest_sha.as_str()));
     }
 
     #[test]

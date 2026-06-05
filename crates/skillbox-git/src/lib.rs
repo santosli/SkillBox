@@ -247,6 +247,23 @@ impl GitService {
         path: &str,
         checkout_root: impl AsRef<Path>,
     ) -> Result<String, String> {
+        self.fetch_ref_path_with_timeout(
+            repo_url,
+            reference,
+            path,
+            checkout_root,
+            FETCH_REF_TIMEOUT,
+        )
+    }
+
+    pub fn fetch_ref_path_with_timeout(
+        &self,
+        repo_url: &str,
+        reference: &str,
+        path: &str,
+        checkout_root: impl AsRef<Path>,
+        timeout: Duration,
+    ) -> Result<String, String> {
         validate_git_remote_arg(repo_url)?;
         validate_git_reference_arg(reference)?;
         let checkout_root = checkout_root.as_ref();
@@ -256,7 +273,7 @@ impl GitService {
         self.run_network(
             checkout_root,
             &["fetch", "--depth", "1", "origin", "--", reference],
-            FETCH_REF_TIMEOUT,
+            timeout,
             "git fetch",
         )?;
         let sha = self
