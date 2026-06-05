@@ -54,7 +54,7 @@ button {
 .brand {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 9px;
   padding: 24px 18px 22px;
 }
 
@@ -66,20 +66,16 @@ button {
   object-fit: cover;
 }
 
-.brand strong,
-.brand span {
-  display: block;
+.brand > div {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
 }
 
 .brand strong {
-  font-size: 15px;
-  line-height: 1.2;
-}
-
-.brand span {
-  margin-top: 2px;
-  color: var(--skillbox-text-muted);
-  font-size: 12px;
+  display: block;
+  font-size: 21px;
+  line-height: 36px;
 }
 
 .navGroup {
@@ -3662,7 +3658,8 @@ dd {
 }
 
 .gitCommitForm .gitCommitReview {
-  min-height: min(430px, calc(100vh - 300px));
+  height: clamp(260px, calc(100vh - 300px), 430px);
+  min-height: 0;
 }
 
 .gitCommitDialogBody {
@@ -3685,6 +3682,7 @@ dd {
 
 .gitFilePane {
   display: grid;
+  min-height: 0;
   min-width: 0;
   border-right: 1px solid #e5e7eb;
   grid-template-rows: auto minmax(0, 1fr);
@@ -3720,7 +3718,9 @@ dd {
 }
 
 .gitFileList {
-  overflow: auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .gitFileRow {
