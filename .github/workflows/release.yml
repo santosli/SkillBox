@@ -63,10 +63,9 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
           security find-identity -v -p codesigning build.keychain
 
-      - name: Build, sign, notarize, and upload DMG
+      - name: Build, sign, and notarize DMG
         uses: tauri-apps/tauri-action@v0.6.2
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
@@ -74,39 +73,96 @@ jobs:
         with:
           projectPath: apps/desktop
           tauriScript: npm run tauri
-          tagName: ${{ github.ref_name }}
-          releaseName: SkillBox ${{ github.ref_name }}
-          releaseBody: |
-            Public alpha release for macOS 14+.
-
-            Install options:
-            - Download the signed and notarized universal DMG from this release.
-            - Or use Homebrew: `brew tap santosli/tap && brew install --cask skillbox`.
-
-            This alpha publishes the desktop app only. CLI packages, Windows, and Linux builds are not part of this release.
-          releaseDraft: false
-          prerelease: true
           includeUpdaterJson: false
           args: --target universal-apple-darwin --bundles dmg
-          assetNamePattern: SkillBox_${{ steps.release_version.outputs.version }}_universal[ext]
+
+      - name: Verify signed DMG
+        id: verify_dmg
+        env:
+          RELEASE_VERSION: ${{ steps.release_version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          dmg_list="$(find target -path '*/bundle/dmg/*.dmg' -type f | sort)"
+          dmg_count="$(printf '%s\n' "$dmg_list" | sed '/^$/d' | wc -l | tr -d ' ')"
+          if [ "$dmg_count" != "1" ]; then
+            echo "Expected exactly one DMG artifact, found $dmg_count:" >&2
+            printf '%s\n' "$dmg_list" >&2
+            exit 1
+          fi
+
+          dmg_path="$(printf '%s\n' "$dmg_list" | sed -n '1p')"
+          asset_name="SkillBox_${RELEASE_VERSION}_universal.dmg"
+          mount_dir="$(mktemp -d)"
+          cleanup() {
+            hdiutil detach "$mount_dir" || true
+            rmdir "$mount_dir" || true
+          }
+          trap cleanup EXIT
+
+          hdiutil attach "$dmg_path" -nobrowse -readonly -mountpoint "$mount_dir"
+          app_path="$mount_dir/SkillBox.app"
+          if [ ! -d "$app_path" ]; then
+            echo "SkillBox.app was not found in the mounted DMG." >&2
+            exit 1
+          fi
+
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+          spctl -a -vv --type exec "$app_path"
+
+          app_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_path/Contents/Info.plist")"
+          if [ "$app_version" != "$RELEASE_VERSION" ]; then
+            echo "Expected app version $RELEASE_VERSION, found $app_version." >&2
+            exit 1
+          fi
+
+          bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_path/Contents/Info.plist")"
+          if [ "$bundle_id" != "io.github.santosli.skillbox" ]; then
+            echo "Expected bundle id io.github.santosli.skillbox, found $bundle_id." >&2
+            exit 1
+          fi
+
+          echo "dmg_path=$dmg_path" >> "$GITHUB_OUTPUT"
+          echo "asset_name=$asset_name" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DMG_PATH: ${{ steps.verify_dmg.outputs.dmg_path }}
+          ASSET_NAME: ${{ steps.verify_dmg.outputs.asset_name }}
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<'EOF'
+          Public alpha release for macOS 14+.
+
+          Install options:
+          - Download the signed and notarized universal DMG from this release.
+          - Or use Homebrew: `brew tap santosli/tap && brew install --cask skillbox`.
+
+          This alpha publishes the desktop app only. CLI packages, Windows, and Linux builds are not part of this release.
+          EOF
+          gh release create "$GITHUB_REF_NAME" \
+            "$DMG_PATH#$ASSET_NAME" \
+            --title "SkillBox $GITHUB_REF_NAME" \
+            --notes-file release-notes.md \
+            --prerelease \
+            --verify-tag
 
       - name: Upload checksums
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_VERSION: ${{ steps.release_version.outputs.version }}
+          DMG_PATH: ${{ steps.verify_dmg.outputs.dmg_path }}
+          ASSET_NAME: ${{ steps.verify_dmg.outputs.asset_name }}
         run: |
-          dmg_name="SkillBox_${RELEASE_VERSION}_universal.dmg"
+          set -euo pipefail
           mkdir -p release-assets
-          gh release download "$GITHUB_REF_NAME" \
-            --pattern "$dmg_name" \
-            --dir release-assets \
-            --clobber
+          cp "$DMG_PATH" "release-assets/$ASSET_NAME"
           (
             cd release-assets
-            shasum -a 256 "$dmg_name"
+            shasum -a 256 "$ASSET_NAME"
           ) > SHA256SUMS
-          cp SHA256SUMS "${dmg_name}.sha256"
-          gh release upload "$GITHUB_REF_NAME" SHA256SUMS "${dmg_name}.sha256" --clobber
+          cp SHA256SUMS "${ASSET_NAME}.sha256"
+          gh release upload "$GITHUB_REF_NAME" SHA256SUMS "${ASSET_NAME}.sha256" --clobber
 
       - name: Delete temporary keychain
         if: always()

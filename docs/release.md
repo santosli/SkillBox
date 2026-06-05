@@ -39,8 +39,11 @@ Application certificate. `APPLE_PASSWORD` should be an app-specific password.
    git push origin v0.1.0-alpha.2
    ```
 
-4. Wait for `.github/workflows/release.yml` to publish the prerelease.
-5. Download and smoke-test the DMG.
+4. Wait for `.github/workflows/release.yml` to build, notarize, mount, and
+   verify the DMG before publishing the prerelease. The workflow must pass
+   `codesign --verify`, `spctl`, app version, and bundle identifier checks
+   against the mounted DMG.
+5. Download and smoke-test the published DMG.
 6. Copy `packaging/homebrew/Casks/skillbox.rb` into
    `santosli/homebrew-tap/Casks/skillbox.rb`.
 7. Replace the placeholder SHA with the value from the release checksum asset
