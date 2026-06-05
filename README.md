@@ -2,6 +2,8 @@
 
 > Manage agent skills across local runtimes.
 
+English | [简体中文](README.zh-CN.md)
+
 ![Status](https://img.shields.io/badge/status-local--first%20MVP-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-111827)
 ![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB)
