@@ -64,7 +64,7 @@ jobs:
           security find-identity -v -p codesigning build.keychain
 
       - name: Build, sign, notarize, and upload DMG
-        uses: tauri-apps/tauri-action@v1
+        uses: tauri-apps/tauri-action@v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -79,9 +79,9 @@ jobs:
           releaseBody: Public alpha release. See README.md for installation and uninstall instructions.
           releaseDraft: false
           prerelease: true
-          uploadUpdaterJson: false
+          includeUpdaterJson: false
           args: --target universal-apple-darwin --bundles dmg
-          releaseAssetNamePattern: SkillBox_${{ steps.release_version.outputs.version }}_universal[ext]
+          assetNamePattern: SkillBox_${{ steps.release_version.outputs.version }}_universal[ext]
 
       - name: Upload SHA256SUMS
         env:
