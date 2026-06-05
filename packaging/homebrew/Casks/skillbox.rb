@@ -2,8 +2,7 @@ cask "skillbox" do
   version "0.1.0-alpha.1"
   sha256 "REPLACE_WITH_SHA256_FROM_SHA256SUMS"
 
-  url "https://github.com/santosli/skill-box/releases/download/v#{version}/SkillBox_#{version}_universal.dmg",
-      verified: "github.com/santosli/skill-box/"
+  url "https://github.com/santosli/skill-box/releases/download/v#{version}/SkillBox_#{version}_universal.dmg"
   name "SkillBox"
   desc "Local skill manager for agent runtimes"
   homepage "https://github.com/santosli/skill-box"
