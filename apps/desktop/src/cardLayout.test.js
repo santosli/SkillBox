@@ -41,6 +41,21 @@ test('sidebar footer icons use the same shell as primary nav icons', () => {
   assert.doesNotMatch(css, /\.sidebarFooter button svg\s*\{[^}]*width:\s*22px;/s);
 });
 
+test('sidebar brand does not render a subtitle', () => {
+  const brandRule = css.match(/\.brand\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const brandTextRule = css.match(/\.brand > div\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const brandTitleRule = css.match(/\.brand strong\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(appSource, /<strong>SkillBox<\/strong>/);
+  assert.doesNotMatch(appSource, /Local skill manager/);
+  assert.doesNotMatch(css, /\.brand span/);
+  assert.match(brandRule, /gap:\s*9px;/);
+  assert.match(brandTextRule, /min-height:\s*36px;/);
+  assert.match(brandTextRule, /align-items:\s*center;/);
+  assert.match(brandTitleRule, /font-size:\s*21px;/);
+  assert.match(brandTitleRule, /line-height:\s*36px;/);
+});
+
 test('dashboard actions stay in one equal segmented row', () => {
   const contentRule = css.match(/\.content\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const controlRowRule = css.match(/\.dashboardControlRow\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
@@ -255,6 +270,10 @@ test('diff review dialogs keep large diffs inside the modal viewport', () => {
   const dialogBodyRule = css.match(/\.gitCommitDialogBody\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const formRule = css.match(/\.gitCommitForm\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const reviewRule = css.match(/\.gitCommitReview\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const formReviewRule = css.match(/\.gitCommitForm \.gitCommitReview\s*\{(?<body>[^}]*)\}/s)
+    ?.groups.body || '';
+  const filePaneRule = css.match(/\.gitFilePane\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const fileListRule = css.match(/\.gitFileList\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const diffPaneRule = css.match(/\.gitDiffPane\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const diffScrollerRule = css.match(/\.githubDiffScroller\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
 
@@ -265,6 +284,10 @@ test('diff review dialogs keep large diffs inside the modal viewport', () => {
   assert.match(formRule, /min-height:\s*0;/);
   assert.match(formRule, /overflow-y:\s*auto;/);
   assert.match(reviewRule, /min-height:\s*0;/);
+  assert.match(formReviewRule, /height:\s*clamp\(260px,\s*calc\(100vh - 300px\),\s*430px\);/);
+  assert.match(filePaneRule, /min-height:\s*0;/);
+  assert.match(fileListRule, /min-height:\s*0;/);
+  assert.match(fileListRule, /overflow-y:\s*auto;/);
   assert.match(diffPaneRule, /overflow:\s*hidden;/);
   assert.match(diffScrollerRule, /min-height:\s*0;/);
   assert.match(diffScrollerRule, /max-width:\s*100%;/);

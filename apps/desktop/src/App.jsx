@@ -2385,7 +2385,6 @@ export default function App() {
           <img className="brandMark" src={skillBoxAppIcon} alt="" aria-hidden="true" />
           <div>
             <strong>SkillBox</strong>
-            <span>Local skill manager</span>
           </div>
         </div>
 
