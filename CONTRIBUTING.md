@@ -119,7 +119,7 @@ Public alpha releases must be:
 - tagged as `v*-alpha.*`;
 - built as universal macOS DMGs;
 - signed and notarized before direct install instructions are published;
-- accompanied by `SHA256SUMS`;
+- accompanied by `SHA256SUMS` and a DMG-specific `.sha256` asset;
 - compatible with the Homebrew tap cask;
 - clear that `~/.skillbox` is user data and is not removed by normal uninstall.
 

@@ -54,6 +54,12 @@ For the first alpha, use the asset named:
 SkillBox_0.1.0-alpha.1_universal.dmg
 ```
 
+The matching checksum is published as:
+
+```text
+SkillBox_0.1.0-alpha.1_universal.dmg.sha256
+```
+
 Open the DMG and drag `SkillBox.app` into `/Applications`.
 
 ### Homebrew

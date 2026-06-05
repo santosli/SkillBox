@@ -11,6 +11,7 @@ notarized, universal DMG through GitHub Releases.
 - Bundle identifier: `io.github.santosli.skillbox`
 - First tag: `v0.1.0-alpha.1`
 - First DMG asset: `SkillBox_0.1.0-alpha.1_universal.dmg`
+- First checksum asset: `SkillBox_0.1.0-alpha.1_universal.dmg.sha256`
 
 ## GitHub Actions Secrets
 
@@ -42,7 +43,8 @@ Application certificate. `APPLE_PASSWORD` should be an app-specific password.
 5. Download and smoke-test the DMG.
 6. Copy `packaging/homebrew/Casks/skillbox.rb` into
    `santosli/homebrew-tap/Casks/skillbox.rb`.
-7. Replace the placeholder SHA with the value from the release `SHA256SUMS`.
+7. Replace the placeholder SHA with the value from the release checksum asset
+   or `SHA256SUMS`.
 8. Run:
 
    ```sh

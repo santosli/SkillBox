@@ -76,25 +76,37 @@ jobs:
           tauriScript: npm run tauri
           tagName: ${{ github.ref_name }}
           releaseName: SkillBox ${{ github.ref_name }}
-          releaseBody: Public alpha release. See README.md for installation and uninstall instructions.
+          releaseBody: |
+            Public alpha release for macOS 14+.
+
+            Install options:
+            - Download the signed and notarized universal DMG from this release.
+            - Or use Homebrew: `brew tap santosli/tap && brew install --cask skillbox`.
+
+            This alpha publishes the desktop app only. CLI packages, Windows, and Linux builds are not part of this release.
           releaseDraft: false
           prerelease: true
           includeUpdaterJson: false
           args: --target universal-apple-darwin --bundles dmg
           assetNamePattern: SkillBox_${{ steps.release_version.outputs.version }}_universal[ext]
 
-      - name: Upload SHA256SUMS
+      - name: Upload checksums
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_VERSION: ${{ steps.release_version.outputs.version }}
         run: |
+          dmg_name="SkillBox_${RELEASE_VERSION}_universal.dmg"
           mkdir -p release-assets
           gh release download "$GITHUB_REF_NAME" \
-            --pattern "SkillBox_${RELEASE_VERSION}_universal.dmg" \
+            --pattern "$dmg_name" \
             --dir release-assets \
             --clobber
-          shasum -a 256 "release-assets/SkillBox_${RELEASE_VERSION}_universal.dmg" > SHA256SUMS
-          gh release upload "$GITHUB_REF_NAME" SHA256SUMS --clobber
+          (
+            cd release-assets
+            shasum -a 256 "$dmg_name"
+          ) > SHA256SUMS
+          cp SHA256SUMS "${dmg_name}.sha256"
+          gh release upload "$GITHUB_REF_NAME" SHA256SUMS "${dmg_name}.sha256" --clobber
 
       - name: Delete temporary keychain
         if: always()
