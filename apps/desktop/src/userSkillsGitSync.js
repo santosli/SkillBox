@@ -2,16 +2,21 @@ export const defaultSyncCommitMessage = 'chore(github): sync user skills';
 
 export function normalizeUserSkillsGitStatus(status) {
   const rawStatus = status?.rawStatus || status?.raw_status || '';
-  const changedPaths = status?.changedPaths || status?.changed_paths || parseChangedPaths(rawStatus);
+  const changedPaths = (status?.changedPaths || status?.changed_paths || parseChangedPaths(rawStatus))
+    .filter((path) => !isDefaultUnselectedPath(path));
+  const state = status?.state === 'dirty' && changedPaths.length === 0 ? 'clean' : status?.state || 'not_configured';
+  const dirty = status?.state === 'dirty'
+    ? Boolean(status?.dirty) && changedPaths.length > 0
+    : Boolean(status?.dirty);
 
   return {
     repoPath: status?.repoPath || status?.repo_path || '',
     remoteUrl: status?.remoteUrl || status?.remote_url || '',
     branch: status?.branch || '',
-    dirty: Boolean(status?.dirty),
+    dirty,
     rawStatus,
     changedPaths,
-    state: status?.state || 'not_configured',
+    state,
     message: status?.message || status?.lastError || status?.last_error || ''
   };
 }
@@ -23,6 +28,9 @@ export function normalizeUserSkillsGitChanges(changes) {
     label: gitStatusLabel(file.status || ''),
     diff: file.diff || ''
   })).filter((file) => file.path);
+  const selectedPaths = files
+    .filter((file) => !isDefaultUnselectedPath(file.path))
+    .map((file) => file.path);
 
   return {
     repoPath: changes?.repoPath || changes?.repo_path || '',
@@ -30,8 +38,8 @@ export function normalizeUserSkillsGitChanges(changes) {
     branch: changes?.branch || '',
     remoteUrl: changes?.remoteUrl || changes?.remote_url || '',
     files,
-    selectedPaths: files.map((file) => file.path),
-    activePath: files[0]?.path || ''
+    selectedPaths,
+    activePath: selectedPaths[0] || files[0]?.path || ''
   };
 }
 
@@ -115,7 +123,13 @@ export function userSyncAction(syncStatus, skillType) {
 }
 
 function skillNameFromPath(path) {
-  return (path || '').split('/').filter(Boolean)[0] || '';
+  const parts = (path || '').split('/').filter(Boolean);
+  if (parts.length < 2 || parts[0].startsWith('.')) return '';
+  return parts[0];
+}
+
+function isDefaultUnselectedPath(path = '') {
+  return String(path || '').split('/').some((segment) => segment === '.DS_Store');
 }
 
 function gitStatusLabel(status) {

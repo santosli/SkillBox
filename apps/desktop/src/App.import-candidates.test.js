@@ -24,6 +24,7 @@ import {
 } from './remoteSkills.js';
 import {
   canCommitUserSkillsChanges,
+  defaultSyncCommitMessage,
   normalizeUserSkillsGitChanges,
   normalizeUserSkillsGitStatus,
   suggestUserSkillsCommitMessage,
@@ -93,10 +94,23 @@ test('normalizes changed paths from user skills git status', () => {
   ]);
 });
 
-test('normalizes user skills git changes and selects all files by default', () => {
+test('normalizes user skills git status ignores macOS metadata-only changes', () => {
+  const status = normalizeUserSkillsGitStatus({
+    dirty: true,
+    state: 'dirty',
+    raw_status: '## main\n?? .DS_Store\n'
+  });
+
+  assert.equal(status.dirty, false);
+  assert.equal(status.state, 'clean');
+  assert.deepEqual(status.changedPaths, []);
+});
+
+test('normalizes user skills git changes and skips macOS metadata by default', () => {
   const changes = normalizeUserSkillsGitChanges({
     repo_path: '/tmp/.skillbox/user-skills',
     files: [
+      { path: '.DS_Store', status: '??', diff: 'binary diff' },
       { path: 'alpha/SKILL.md', status: ' M', diff: 'alpha diff' },
       { path: 'beta/SKILL.md', status: '??', diff: 'beta diff' }
     ]
@@ -105,7 +119,12 @@ test('normalizes user skills git changes and selects all files by default', () =
   assert.equal(changes.repoPath, '/tmp/.skillbox/user-skills');
   assert.deepEqual(changes.selectedPaths, ['alpha/SKILL.md', 'beta/SKILL.md']);
   assert.equal(changes.activePath, 'alpha/SKILL.md');
-  assert.equal(changes.files[1].label, 'Added');
+  assert.equal(changes.files[0].label, 'Added');
+  assert.equal(changes.files[2].label, 'Added');
+  assert.equal(
+    suggestUserSkillsCommitMessage(changes.files, changes.selectedPaths),
+    'chore(github): sync alpha and beta skills'
+  );
 });
 
 test('suggests conventional user skills commit messages from selected files', () => {
@@ -128,6 +147,19 @@ test('suggests conventional user skills commit messages from selected files', ()
   assert.equal(
     suggestUserSkillsCommitMessage(changes.files, ['codex-chat-sync/SKILL.md', 'dida-task-sync/SKILL.md']),
     'chore(github): sync codex-chat-sync and dida-task-sync skills'
+  );
+});
+
+test('suggests generic user skills commit message for root metadata files', () => {
+  const changes = normalizeUserSkillsGitChanges({
+    files: [
+      { path: '.gitignore', status: '??', diff: 'diff' }
+    ]
+  });
+
+  assert.equal(
+    suggestUserSkillsCommitMessage(changes.files, changes.selectedPaths),
+    defaultSyncCommitMessage
   );
 });
 
