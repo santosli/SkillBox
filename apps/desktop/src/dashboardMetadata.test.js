@@ -62,6 +62,24 @@ test('derives user skill sync status and default general tag', () => {
   assert.deepEqual(skill.displayTags, ['general']);
 });
 
+test('derives automatic tags only from skill name and description', () => {
+  const skill = deriveDashboardSkill(
+    {
+      name: 'alpha',
+      description: 'Small helper.',
+      sourceRoot: '/Users/santos/github/sync-tools/.codex/skills',
+      source_root: '/Users/santos/github/sync-tools/.codex/skills',
+      type: 'remote',
+      status: 'update available'
+    },
+    { state: 'clean' },
+    normalizeRemoteSkillUpdates(null),
+    new Set()
+  );
+
+  assert.deepEqual(skill.displayTags, ['general']);
+});
+
 test('derives installed agent icons from explicit agent and deployment fields', () => {
   const skill = deriveDashboardSkill(
     {

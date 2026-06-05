@@ -154,11 +154,7 @@ function fallbackStatus(skill) {
 function deriveTags(skill) {
   const haystack = [
     skill.name,
-    skill.description,
-    skill.sourceRoot,
-    skill.source_root,
-    skill.status,
-    skill.type
+    skill.description
   ]
     .filter(Boolean)
     .join(' ')
