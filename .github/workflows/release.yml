@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*-alpha.*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -45,7 +46,11 @@ jobs:
       - name: Set release version
         id: release_version
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version)")"
+          fi
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Import Apple Developer certificate
@@ -126,6 +131,7 @@ jobs:
           echo "asset_name=$asset_name" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub release
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DMG_PATH: ${{ steps.verify_dmg.outputs.dmg_path }}
@@ -149,6 +155,7 @@ jobs:
             --verify-tag
 
       - name: Upload checksums
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DMG_PATH: ${{ steps.verify_dmg.outputs.dmg_path }}
