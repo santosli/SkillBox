@@ -1,6 +1,6 @@
-# SkillBox - Manage agent skills from one local source of truth
+# SkillBox
 
-> A local macOS app and CLI for organizing, importing, deploying, syncing, and updating agent skills across multiple agent runtimes.
+> Manage agent skills across local runtimes.
 
 ![Status](https://img.shields.io/badge/status-local--first%20MVP-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-111827)
