@@ -4,7 +4,7 @@
 
 English | [简体中文](README.zh-CN.md)
 
-![Status](https://img.shields.io/badge/status-public%20alpha-blue)
+![Status](https://img.shields.io/badge/status-macOS%20release-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-111827)
 ![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB)
 ![Rust](https://img.shields.io/badge/Rust-core-B7410E)
@@ -14,7 +14,7 @@ English | [简体中文](README.zh-CN.md)
 
 SkillBox is a local-first macOS app and CLI for managing `SKILL.md`-based skills, rules, prompts, and capability packs without treating any one agent runtime as the source of truth.
 
-Public alpha status: SkillBox is useful today for local skill management, but it is still early software. Keep backups of important skills, and review each filesystem change before applying it.
+Current release: `v0.1.1`. SkillBox is useful today for local skill management, but it is still early software. Keep backups of important skills, and review each filesystem change before applying it.
 
 ## Why
 
@@ -97,7 +97,7 @@ Longer-term support for Claude, OpenClaw, Cursor, Claude Code, Copilot, and othe
 - Git, for user-skill sync and remote skill workflows
 - An agent runtime that uses `SKILL.md` directories
 
-Windows, Linux, and a Homebrew CLI formula are not part of the public alpha.
+Windows, Linux, and a Homebrew CLI formula are not part of the current release.
 
 ## Install
 
@@ -107,23 +107,23 @@ Download the signed and notarized DMG from:
 
 https://github.com/santosli/skill-box/releases
 
-For this alpha, use the asset named:
+For this release, use the asset named:
 
 ```text
-SkillBox_0.1.0-alpha.3_universal.dmg
+SkillBox_0.1.1_universal.dmg
 ```
 
 The matching checksum is published as:
 
 ```text
-SkillBox_0.1.0-alpha.3_universal.dmg.sha256
+SkillBox_0.1.1_universal.dmg.sha256
 ```
 
 Open the DMG and drag `SkillBox.app` into `/Applications`.
 
 ### Homebrew
 
-The public alpha uses the project tap instead of the official Homebrew Cask repository:
+The cask uses the project tap instead of the official Homebrew Cask repository:
 
 ```sh
 brew tap santosli/tap

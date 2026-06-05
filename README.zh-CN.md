@@ -4,7 +4,7 @@
 
 [English](README.md) | 简体中文
 
-![状态](https://img.shields.io/badge/status-public%20alpha-blue)
+![状态](https://img.shields.io/badge/status-macOS%20release-blue)
 ![平台](https://img.shields.io/badge/platform-macOS-111827)
 ![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB)
 ![Rust](https://img.shields.io/badge/Rust-core-B7410E)
@@ -14,7 +14,7 @@
 
 SkillBox 是一个 local-first 的 macOS 应用和 CLI，用来管理基于 `SKILL.md` 的 skills、规则、提示词和能力包，同时避免把某一个 agent runtime 当作唯一真相源。
 
-Public alpha 状态：SkillBox 现在已经可以用于本地 skill 管理，但仍是早期软件。重要 skills 请保留备份，并在应用每一次文件系统变更前先 review。
+当前版本：`v0.1.1`。SkillBox 现在已经可以用于本地 skill 管理，但仍是早期软件。重要 skills 请保留备份，并在应用每一次文件系统变更前先 review。
 
 ## 为什么
 
@@ -97,7 +97,7 @@ Runtime 目录只是部署目标：
 - Git，用于 user-skill sync 和 remote skill workflows
 - 使用 `SKILL.md` 目录的 agent runtime
 
-Windows、Linux 和 Homebrew CLI formula 不属于 public alpha 范围。
+Windows、Linux 和 Homebrew CLI formula 不属于当前版本范围。
 
 ## 安装
 
@@ -107,23 +107,23 @@ Windows、Linux 和 Homebrew CLI formula 不属于 public alpha 范围。
 
 https://github.com/santosli/skill-box/releases
 
-本次 alpha 使用这个 asset：
+本次发布使用这个 asset：
 
 ```text
-SkillBox_0.1.0-alpha.3_universal.dmg
+SkillBox_0.1.1_universal.dmg
 ```
 
 对应 checksum：
 
 ```text
-SkillBox_0.1.0-alpha.3_universal.dmg.sha256
+SkillBox_0.1.1_universal.dmg.sha256
 ```
 
 打开 DMG，把 `SkillBox.app` 拖到 `/Applications`。
 
 ### Homebrew
 
-Public alpha 使用项目自己的 tap，而不是官方 Homebrew Cask 仓库：
+Homebrew cask 使用项目自己的 tap，而不是官方 Homebrew Cask 仓库：
 
 ```sh
 brew tap santosli/tap

@@ -1,7 +1,7 @@
-# Public Alpha Release
+# Release
 
-SkillBox public alpha releases target macOS 14+ and publish a signed,
-notarized, universal DMG through GitHub Releases.
+SkillBox releases target macOS 14+ and publish a signed, notarized, universal
+DMG through GitHub Releases.
 
 ## Release Identity
 
@@ -9,9 +9,9 @@ notarized, universal DMG through GitHub Releases.
 - Main repository: `santosli/skill-box`
 - Homebrew tap: `santosli/homebrew-tap`
 - Bundle identifier: `io.github.santosli.skillbox`
-- Current tag: `v0.1.0-alpha.3`
-- Current DMG asset: `SkillBox_0.1.0-alpha.3_universal.dmg`
-- Current checksum asset: `SkillBox_0.1.0-alpha.3_universal.dmg.sha256`
+- Current tag: `v0.1.1`
+- Current DMG asset: `SkillBox_0.1.1_universal.dmg`
+- Current checksum asset: `SkillBox_0.1.1_universal.dmg.sha256`
 
 ## GitHub Actions Secrets
 
@@ -38,12 +38,12 @@ Application certificate. `APPLE_PASSWORD` should be an app-specific password.
 4. Tag the release:
 
    ```sh
-   git tag v0.1.0-alpha.3
-   git push origin v0.1.0-alpha.3
+   git tag v0.1.1
+   git push origin v0.1.1
    ```
 
 5. Wait for `.github/workflows/release.yml` to build, notarize, mount, and
-   verify the DMG before publishing the prerelease. The workflow must pass
+   verify the DMG before publishing the release. The workflow must pass
    `codesign --verify`, `spctl`, app version, and bundle identifier checks
    against the mounted DMG.
 6. Download and smoke-test the published DMG.

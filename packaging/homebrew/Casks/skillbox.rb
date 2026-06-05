@@ -1,5 +1,5 @@
 cask "skillbox" do
-  version "0.1.0-alpha.3"
+  version "0.1.1"
   sha256 "REPLACE_WITH_SHA256_FROM_SHA256SUMS"
 
   url "https://github.com/santosli/skill-box/releases/download/v#{version}/SkillBox_#{version}_universal.dmg"

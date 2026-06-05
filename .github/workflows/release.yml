@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - "v*-alpha.*"
+      - "v*"
   workflow_dispatch:
 
 permissions:
@@ -138,21 +138,29 @@ jobs:
           ASSET_NAME: ${{ steps.verify_dmg.outputs.asset_name }}
         run: |
           set -euo pipefail
-          cat > release-notes.md <<'EOF'
-          Public alpha release for macOS 14+.
+          release_flags=(--verify-tag)
+          release_label="Release"
+          release_scope="This release publishes the desktop app only. CLI packages, Windows, and Linux builds are not part of this release."
+          if [[ "$GITHUB_REF_NAME" == *"-alpha."* ]]; then
+            release_flags+=(--prerelease)
+            release_label="Public alpha release"
+            release_scope="This alpha publishes the desktop app only. CLI packages, Windows, and Linux builds are not part of this release."
+          fi
 
-          Install options:
-          - Download the signed and notarized universal DMG from this release.
-          - Or use Homebrew: `brew tap santosli/tap && brew install --cask skillbox`.
-
-          This alpha publishes the desktop app only. CLI packages, Windows, and Linux builds are not part of this release.
-          EOF
+          {
+            echo "${release_label} for macOS 14+."
+            echo
+            echo "Install options:"
+            echo "- Download the signed and notarized universal DMG from this release."
+            echo '- Or use Homebrew: `brew tap santosli/tap && brew install --cask skillbox`.'
+            echo
+            echo "${release_scope}"
+          } > release-notes.md
           gh release create "$GITHUB_REF_NAME" \
             "$DMG_PATH#$ASSET_NAME" \
             --title "SkillBox $GITHUB_REF_NAME" \
             --notes-file release-notes.md \
-            --prerelease \
-            --verify-tag
+            "${release_flags[@]}"
 
       - name: Upload checksums
         if: github.event_name == 'push'

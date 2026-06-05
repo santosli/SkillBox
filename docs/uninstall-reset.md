@@ -1,6 +1,6 @@
 # Uninstall And Reset
 
-This guide removes the public alpha app and, optionally, the local data that
+This guide removes the SkillBox app and, optionally, the local data that
 SkillBox manages.
 
 ## Uninstall The App
