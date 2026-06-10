@@ -6,6 +6,9 @@ SkillBox 当前是一个过渡期 monorepo。产品目标是管理跨 agent 的 
 覆盖 Claude、Codex、OpenClaw、Cursor、Claude Code、Copilot 等主流 agent。
 
 - `apps/desktop` 是 Tauri + React 桌面应用。
+  - `src/App.jsx` 保留主 App 组件、状态和事件编排。
+  - `src/components/` 按页面/领域聚合展示组件（dashboard、workspaces、history、settings、importReview、skillDetail、remoteSkills、userSkillsSync、common）。
+  - `src/*.js` 是可独立测试的纯函数模块（如 `previewData.js`、`historyEntries.js`、`usageHooks.js`、`preferences.js`、`importFlow.js`、`skills.js`）。
 - `apps/desktop/src-tauri` 是 Tauri command 层，负责把 UI 请求转发到 Rust crates。
 - `crates/skillbox-core` 是核心业务 crate，当前实现扫描、导入、候选导入、部署、SQLite 基础索引和偏好设置。
 - `crates/skillbox-github` 负责 GitHub skill URL 解析和标准化。

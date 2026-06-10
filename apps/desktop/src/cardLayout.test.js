@@ -4,7 +4,29 @@ import test from 'node:test';
 
 const css = await readFile(new URL('./styles.css', import.meta.url), 'utf8');
 const colorsCss = await readFile(new URL('./colors.css', import.meta.url), 'utf8');
-const appSource = await readFile(new URL('./App.jsx', import.meta.url), 'utf8');
+const appSourcePaths = [
+  './App.jsx',
+  './components/dashboard.jsx',
+  './components/common.jsx',
+  './components/workspaces.jsx',
+  './components/history.jsx',
+  './components/settings.jsx',
+  './components/importReview.jsx',
+  './components/skillDetail.jsx',
+  './components/remoteSkills.jsx',
+  './components/userSkillsSync.jsx',
+  './skills.js',
+  './historyEntries.js',
+  './usageHooks.js',
+  './preferences.js',
+  './previewData.js',
+  './importFlow.js'
+];
+const appSource = (
+  await Promise.all(
+    appSourcePaths.map((path) => readFile(new URL(path, import.meta.url), 'utf8'))
+  )
+).join('\n');
 const mainSource = await readFile(new URL('./main.jsx', import.meta.url), 'utf8');
 const tauriSource = await readFile(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8');
 const tauriMainSource = await readFile(new URL('../src-tauri/src/main.rs', import.meta.url), 'utf8');
