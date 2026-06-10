@@ -1,16 +1,17 @@
 # Security Policy
 
-SkillBox is public alpha software that reads and writes local skill directories.
+SkillBox is early-stage software that reads and writes local skill directories.
 Please report security issues privately before opening public issues.
 
 ## Supported Versions
 
-Only the latest public alpha release is supported for security fixes.
+Only the latest public release is supported for security fixes.
 
 | Version | Supported |
 | --- | --- |
-| `0.1.0-alpha.x` | Yes |
-| older pre-alpha builds | No |
+| `0.1.x` | Yes |
+| `0.1.0-alpha.x` | No |
+| older builds | No |
 
 ## Reporting A Vulnerability
 

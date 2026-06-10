@@ -1,8 +1,8 @@
 # Contributing To SkillBox
 
 SkillBox is a local macOS app and CLI for managing agent skills. Contributions
-are welcome during the public alpha, especially bug reports, install feedback,
-tests, and small focused patches.
+are welcome, especially bug reports, install feedback, tests, and small focused
+patches.
 
 ## Development Environment
 
@@ -132,14 +132,17 @@ Dependabot checks npm, Cargo, and GitHub Actions dependencies weekly.
 
 ## Release Invariants
 
-Public alpha releases must be:
+Public releases must be:
 
-- tagged as `v*-alpha.*`;
+- tagged as `v*`;
 - built as universal macOS DMGs;
 - signed and notarized before direct install instructions are published;
 - accompanied by `SHA256SUMS` and a DMG-specific `.sha256` asset;
 - compatible with the Homebrew tap cask;
 - clear that `~/.skillbox` is user data and is not removed by normal uninstall.
+
+Pre-release alpha tags may use `v*-alpha.*`, but stable releases use normal
+semantic version tags such as `v0.1.1`.
 
 The release workflow expects these GitHub Actions secrets:
 

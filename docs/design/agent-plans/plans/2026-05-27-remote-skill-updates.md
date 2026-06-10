@@ -2902,7 +2902,7 @@ git commit -m "feat(desktop): add remote skill update review"
 - [ ] Run `npm test`.
 - [ ] Run `cargo check -p skillbox-desktop --offline`.
 - [ ] Run `git status --short` and verify only intended files are present.
-- [ ] Review `docs/superpowers/specs/2026-05-27-remote-skill-updates-design.md` against this plan and confirm each requirement has a task:
+- [ ] Review `docs/design/agent-plans/specs/2026-05-27-remote-skill-updates-design.md` against this plan and confirm each requirement has a task:
   - GitHub-only source provider: Tasks 2, 4, 7.
   - Manual binding with exact/same/mismatch: Task 4.
   - Branch/tag/commit display and pinned behavior: Tasks 2, 9, 10.
