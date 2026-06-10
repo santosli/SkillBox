@@ -11,6 +11,9 @@
     "prepare": "node scripts/install-git-hooks.js",
     "hooks:install": "node scripts/install-git-hooks.js",
     "docs:check-staged": "node scripts/check-docs-for-staged-changes.js",
-    "rust:test": "cargo test --offline"
+    "rust:test": "cargo test --offline",
+    "release": "node scripts/release.js",
+    "release:prepare": "node scripts/release.js prepare",
+    "release:publish": "node scripts/release.js publish"
   }
 }

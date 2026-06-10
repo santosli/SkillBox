@@ -28,43 +28,52 @@ Configure these secrets before pushing a release tag:
 `APPLE_CERTIFICATE` should contain a base64-encoded `.p12` Developer ID
 Application certificate. `APPLE_PASSWORD` should be an app-specific password.
 
-## Release Steps
+## Release Command
 
-1. Confirm `main` is clean and CI is passing.
-2. Confirm README install and uninstall instructions match the current release.
-3. Add a `CHANGELOG.md` entry for the release version. The GitHub Release body
-   is generated from that entry, and the release workflow fails if the matching
-   changelog section is missing.
-4. Run the `Release` workflow manually from `main` before tagging. The
-   workflow dispatch path builds, notarizes, mounts, and verifies the DMG
-   without creating a GitHub Release.
-5. Tag the release:
+Run releases through `scripts/release.js` instead of replaying manual GitHub,
+tag, checksum, and tap steps.
+
+1. Start on a clean, up-to-date `main` branch.
+2. Write the main changes as bullets in a temporary notes file:
 
    ```sh
-   git tag v0.2.0
-   git push origin v0.2.0
+   cat > /tmp/skillbox-release-notes.md
    ```
 
-6. Wait for `.github/workflows/release.yml` to build, notarize, mount, and
-   verify the DMG before publishing the release. The workflow must pass
-   `codesign --verify`, `spctl`, app version, and bundle identifier checks
-   against the mounted DMG.
-7. Confirm the GitHub Release notes include the main changes from the matching
-   `CHANGELOG.md` section.
-8. Download and smoke-test the published DMG.
-9. Copy `packaging/homebrew/Casks/skillbox.rb` into
-   `santosli/homebrew-tap/Casks/skillbox.rb`.
-10. Replace the placeholder SHA with the value from the release checksum asset
-   or `SHA256SUMS`.
-11. Run:
+3. Run the full release:
 
    ```sh
-   brew audit --cask santosli/tap/skillbox
-   brew install --cask santosli/tap/skillbox
-   brew uninstall --cask santosli/tap/skillbox
+   npm run release -- 0.2.1 --notes-file /tmp/skillbox-release-notes.md --yes
    ```
 
-12. Commit and push the tap update.
+The command:
+
+- updates package, Rust crate, Tauri, README, SECURITY, roadmap, issue template,
+  release doc, lockfile, and changelog versions;
+- runs the local release checks;
+- commits and pushes the release-prep change to `main`;
+- runs the `Release` workflow once through `workflow_dispatch` as a no-publish
+  dry run;
+- creates and pushes the `v<version>` tag;
+- waits for the tag-triggered Release workflow to build, notarize, mount,
+  verify, publish, and upload checksums;
+- reads the published DMG checksum from GitHub Releases;
+- updates and pushes `packaging/homebrew/Casks/skillbox.rb`;
+- updates and pushes `santosli/homebrew-tap`.
+
+Useful variants:
+
+```sh
+npm run release:prepare -- 0.2.1 --notes-file /tmp/skillbox-release-notes.md
+npm run release:publish -- 0.2.1 --yes
+npm run release -- 0.2.1 --notes-file /tmp/skillbox-release-notes.md --yes --skip-tap
+```
+
+Use `--tap-dir <path>` to reuse an existing local checkout of
+`santosli/homebrew-tap`.
+
+The GitHub Release body is generated from the matching `CHANGELOG.md` section.
+The release workflow fails if that section is missing.
 
 ## Smoke Test
 
