@@ -1,0 +1,408 @@
+use crate::*;
+
+pub(crate) fn open_database(database_path: &Path) -> Result<Connection> {
+    let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
+    connection
+        .execute_batch(
+            "
+            PRAGMA busy_timeout = 5000;
+            PRAGMA journal_mode = WAL;
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(connection)
+}
+
+pub(crate) fn init_database(database_path: &Path) -> Result<()> {
+    if let Some(parent) = database_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let connection = open_database(database_path)?;
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS skills (
+              name TEXT PRIMARY KEY,
+              type TEXT NOT NULL,
+              description TEXT NOT NULL DEFAULT '',
+              version TEXT NOT NULL DEFAULT '',
+              managed_path TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'ok',
+              content_hash TEXT NOT NULL DEFAULT '',
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS deployments (
+              skill_name TEXT NOT NULL,
+              target_root TEXT NOT NULL,
+              target_path TEXT NOT NULL,
+              mode TEXT NOT NULL,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (skill_name, target_root)
+            );
+
+            CREATE TABLE IF NOT EXISTS preferences (
+              key TEXT PRIMARY KEY,
+              value TEXT NOT NULL,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS workspaces (
+              canonical_path TEXT PRIMARY KEY,
+              path TEXT NOT NULL,
+              kind TEXT NOT NULL,
+              source TEXT NOT NULL,
+              agent_id TEXT,
+              display_name TEXT NOT NULL,
+              skill_count INTEGER NOT NULL DEFAULT 0,
+              imported_skill_count INTEGER NOT NULL DEFAULT 0,
+              last_scan_error_count INTEGER NOT NULL DEFAULT 0,
+              last_scan_error TEXT,
+              last_scanned_at TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS operations (
+              id TEXT PRIMARY KEY,
+              type TEXT NOT NULL,
+              status TEXT NOT NULL,
+              actor TEXT NOT NULL,
+              entity_type TEXT NOT NULL,
+              entity_name TEXT NOT NULL,
+              started_at TEXT NOT NULL,
+              finished_at TEXT,
+              summary TEXT NOT NULL,
+              error TEXT,
+              payload_json TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS skill_usage_events (
+              id TEXT PRIMARY KEY,
+              event_id TEXT,
+              skill_name TEXT NOT NULL,
+              agent_id TEXT NOT NULL,
+              runtime_root TEXT NOT NULL,
+              used_at TEXT NOT NULL,
+              recorded_at TEXT NOT NULL,
+              prompt_excerpt TEXT,
+              metadata_json TEXT NOT NULL DEFAULT '{}'
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS skill_usage_events_event_id_unique
+            ON skill_usage_events (agent_id, runtime_root, event_id)
+            WHERE event_id IS NOT NULL;
+
+            CREATE TABLE IF NOT EXISTS skill_usage_stats (
+              skill_name TEXT NOT NULL,
+              agent_id TEXT NOT NULL,
+              runtime_root TEXT NOT NULL,
+              usage_count INTEGER NOT NULL DEFAULT 0,
+              last_used_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (skill_name, agent_id, runtime_root)
+            );
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    ensure_database_column(
+        &connection,
+        "workspaces",
+        "imported_skill_count",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    ensure_database_column(&connection, "skill_usage_events", "prompt_excerpt", "TEXT")?;
+    Ok(())
+}
+
+pub(crate) fn ensure_database_column(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<()> {
+    let mut statement = connection
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(|error| error.to_string())?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| error.to_string())?;
+
+    for existing in columns {
+        if existing.map_err(|error| error.to_string())? == column {
+            return Ok(());
+        }
+    }
+
+    connection
+        .execute(
+            &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+pub(crate) fn operation_id() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    format!("op-{nanos}")
+}
+
+pub(crate) fn operation_timestamp() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default();
+    seconds.to_string()
+}
+
+pub(crate) fn file_modified_timestamp(path: &Path) -> String {
+    use std::time::UNIX_EPOCH;
+
+    fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs().to_string())
+        .unwrap_or_default()
+}
+
+pub(crate) fn usage_event_row_id() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    format!("usage-{nanos}")
+}
+
+pub(crate) fn current_rfc3339_timestamp() -> String {
+    Utc::now().to_rfc3339_opts(SecondsFormat::Secs, false)
+}
+
+pub(crate) fn read_bool_preference(database_path: &Path, key: &str) -> Result<Option<bool>> {
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
+    let value: Option<String> = connection
+        .query_row(
+            "SELECT value FROM preferences WHERE key = ?1",
+            params![key],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+
+    match value.as_deref() {
+        None => Ok(None),
+        Some("true") => Ok(Some(true)),
+        Some("false") => Ok(Some(false)),
+        Some(other) => Err(format!("Invalid boolean preference {key}: {other}")),
+    }
+}
+
+pub(crate) fn write_bool_preference(database_path: &Path, key: &str, value: bool) -> Result<()> {
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
+    connection
+        .execute(
+            "
+            INSERT INTO preferences (key, value)
+            VALUES (?1, ?2)
+            ON CONFLICT(key) DO UPDATE SET
+              value = excluded.value,
+              updated_at = CURRENT_TIMESTAMP
+            ",
+            params![key, if value { "true" } else { "false" }],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+pub(crate) fn read_u32_preference(database_path: &Path, key: &str) -> Result<Option<u32>> {
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
+    let value: Option<String> = connection
+        .query_row(
+            "SELECT value FROM preferences WHERE key = ?1",
+            params![key],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+
+    value
+        .map(|raw| {
+            raw.parse::<u32>()
+                .map_err(|error| format!("Invalid numeric preference {key}: {error}"))
+        })
+        .transpose()
+}
+
+pub(crate) fn write_u32_preference(database_path: &Path, key: &str, value: u32) -> Result<()> {
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
+    connection
+        .execute(
+            "
+            INSERT INTO preferences (key, value)
+            VALUES (?1, ?2)
+            ON CONFLICT(key) DO UPDATE SET
+              value = excluded.value,
+              updated_at = CURRENT_TIMESTAMP
+            ",
+            params![key, value.to_string()],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+pub(crate) fn read_remote_update_cache(
+    database_path: &Path,
+) -> Result<Option<RemoteSkillUpdateCheck>> {
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
+    let value: Option<String> = connection
+        .query_row(
+            "SELECT value FROM preferences WHERE key = ?1",
+            params!["remote_skill_update_cache"],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+
+    value
+        .map(|raw| serde_json::from_str(&raw).map_err(|error| error.to_string()))
+        .transpose()
+}
+
+pub(crate) fn write_remote_update_cache(
+    database_path: &Path,
+    result: &RemoteSkillUpdateCheck,
+) -> Result<()> {
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
+    let value = serde_json::to_string(result).map_err(|error| error.to_string())?;
+    connection
+        .execute(
+            "
+            INSERT INTO preferences (key, value)
+            VALUES (?1, ?2)
+            ON CONFLICT(key) DO UPDATE SET
+              value = excluded.value,
+              updated_at = CURRENT_TIMESTAMP
+            ",
+            params!["remote_skill_update_cache", value],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+pub(crate) fn index_skill(
+    database_path: &Path,
+    skill: &Skill,
+    kind: SkillKind,
+    managed_path: &Path,
+) -> Result<()> {
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
+    connection
+        .execute(
+            "
+            INSERT INTO skills (name, type, description, version, managed_path, status, content_hash)
+            VALUES (?1, ?2, ?3, ?4, ?5, 'ok', ?6)
+            ON CONFLICT(name) DO UPDATE SET
+              type = excluded.type,
+              description = excluded.description,
+              version = excluded.version,
+              managed_path = excluded.managed_path,
+              content_hash = excluded.content_hash,
+              updated_at = CURRENT_TIMESTAMP
+            ",
+            params![
+                skill.name,
+                kind.as_str(),
+                skill.description,
+                skill.version,
+                managed_path.to_string_lossy(),
+                skill.content_hash
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+pub(crate) fn index_deployment(
+    database_path: &Path,
+    skill_name: &str,
+    target_root: &Path,
+    target_path: &Path,
+) -> Result<()> {
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
+    connection
+        .execute(
+            "
+            INSERT INTO deployments (skill_name, target_root, target_path, mode)
+            VALUES (?1, ?2, ?3, 'symlink')
+            ON CONFLICT(skill_name, target_root) DO UPDATE SET
+              target_path = excluded.target_path,
+              mode = excluded.mode,
+              updated_at = CURRENT_TIMESTAMP
+            ",
+            params![
+                skill_name,
+                target_root.to_string_lossy(),
+                target_path.to_string_lossy()
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+pub(crate) fn remove_deployment(
+    database_path: &Path,
+    skill_name: &str,
+    target_root: &Path,
+) -> Result<()> {
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
+    connection
+        .execute(
+            "DELETE FROM deployments WHERE skill_name = ?1 AND target_root = ?2",
+            params![skill_name, target_root.to_string_lossy()],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+pub(crate) fn load_deployments(
+    database_path: &Path,
+) -> Result<HashMap<String, Vec<ManagedSkillDeployment>>> {
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT skill_name, target_root, target_path, mode
+            FROM deployments
+            ORDER BY skill_name, target_root
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                ManagedSkillDeployment {
+                    target_root: PathBuf::from(row.get::<_, String>(1)?),
+                    target_path: PathBuf::from(row.get::<_, String>(2)?),
+                    mode: row.get::<_, String>(3)?,
+                },
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+    let mut deployments: HashMap<String, Vec<ManagedSkillDeployment>> = HashMap::new();
+
+    for row in rows {
+        let (skill_name, deployment) = row.map_err(|error| error.to_string())?;
+        deployments.entry(skill_name).or_default().push(deployment);
+    }
+
+    Ok(deployments)
+}

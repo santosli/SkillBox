@@ -78,6 +78,24 @@ node packages/skillbox-cli/bin/skillbox.js <command>
 
 ## 模块边界
 
+`skillbox-core` 的源码按领域模块组织，`lib.rs` 只保留共享常量、模块声明和 re-export：
+
+- `types.rs` 公共数据结构与序列化类型
+- `paths.rs` managed store 路径计算、初始化和 legacy 迁移
+- `skills.rs` `SKILL.md` 解析、扫描、导入、symlink 部署
+- `import.rs` import candidates 扫描、类型推断、冲突与备份
+- `state.rs` managed state 聚合与用户偏好
+- `workspaces.rs` workspace registry 发现、注册与扫描
+- `remote.rs` remote source 绑定、update check、diff 预览、版本切换
+- `marketplace.rs` Claude marketplace 候选搜索
+- `git_sync.rs` user-skills Git 同步编排
+- `usage.rs` usage 事件规范化与聚合统计
+- `hooks.rs` agent hook 注入与 transcript 解析
+- `operations.rs` operation 与 history 记录
+- `db.rs` SQLite 打开、初始化、索引与偏好存取
+- `fsutil.rs` 文件复制、symlink、哈希等底层工具
+- `tests.rs` crate 级测试
+
 `skillbox-core` 负责：
 
 - skill 根目录扫描和 `SKILL.md` 读取。
