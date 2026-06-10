@@ -10,7 +10,6 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 - UI 刷新 managed state 或扫描 import candidates。
 - Rust CLI 执行 `scan`。
-- Node CLI 执行 `scan`，用于兼容和回归对照。
 
 步骤：
 
@@ -34,7 +33,6 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `cargo test --offline`
 - `npm test`
 - `cargo run -p skillbox-cli --offline -- scan ~/.codex/skills ~/.agents/skills`
-- `node packages/skillbox-cli/bin/skillbox.js scan --json`
 
 ## 2. Import Existing Skills
 
@@ -42,7 +40,6 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 - UI first-use 或用户主动扫描本机已有 skills。
 - Rust CLI 执行 `import`。
-- Node CLI 执行 `import`，用于兼容入口。
 
 步骤：
 
@@ -73,15 +70,15 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 触发条件：
 
-- Node CLI 当前入口：`skillbox install <github-url> [--target <path>]`。
+- Rust CLI 入口：`skillbox install <github-url> [--target <path>]`。
+- Rust core API：`install_github_remote_skill`。
 - UI 当前只支持 URL parse 和提示，尚未执行下载导入。
-- 目标入口：Rust core + Rust CLI + Tauri command。
 
 步骤：
 
 - 解析 GitHub tree、blob、raw 或 contents API URL。
 - 标准化 owner、repo、ref、path、repoUrl、url。
-- 用结构化 Git 参数执行 clone、sparse checkout 或等价下载流程。
+- 用 `skillbox-git::GitService::fetch_ref_path` 通过结构化 Git 参数拉取指定 ref/path。
 - 验证下载目录包含 `SKILL.md`。
 - 读取 skill name 并校验命名。
 - 写入 `remote-skills/<name>/versions/<installedSha>`。
@@ -99,9 +96,9 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 完成验证：
 
-- 当前 Node：`node packages/skillbox-cli/bin/skillbox.js install <github-url> --managed-root <temp-skillbox-root> --json`
 - URL parse：`cargo run -p skillbox-cli --offline -- parse-github-url <github-url>`
-- Rust 迁移完成后必须新增 Rust tests 覆盖 URL parse、版本目录、`source.json` 和 target deploy。
+- Rust install：`cargo run -p skillbox-cli --offline -- install <github-url> --managed-root <temp-skillbox-root>`
+- `cargo test -p skillbox-core --offline install_github_remote_skill`
 
 ## 4. Deploy Managed Skill
 
@@ -110,7 +107,6 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - Rust CLI 执行 `deploy <skill-name> --target <path>`。
 - Rust CLI 执行 `undeploy <skill-name> --target <path>`。
 - 桌面详情页打开 Deploy workspace 弹窗，勾选 workspace 执行 deploy，取消已勾选 workspace 执行 undeploy。
-- Node CLI 执行 `deploy`。
 - import workflow 选择 deploy back to source。
 
 步骤：
@@ -145,10 +141,10 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 触发条件：
 
-- Rust CLI 当前入口：`cargo run -p skillbox-cli --offline -- check-remote-updates [--managed-root <temp-skillbox-root>]`。
+- Rust CLI 当前入口：`cargo run -p skillbox-cli --offline -- check-remote-updates [skill-name] [--managed-root <temp-skillbox-root>]`。
+- Rust CLI 兼容别名：`cargo run -p skillbox-cli --offline -- check-updates [skill-name] [--managed-root <temp-skillbox-root>]`。
 - Tauri command：`check_remote_skill_updates`。
 - 桌面启动只调用 `cached_remote_skill_updates` 读取上一次检查结果，不主动查询远端。
-- Node CLI 兼容入口仍有 `skillbox check-updates [skill-name]`，但桌面 UI 不调用 Node。
 
 步骤：
 
@@ -270,8 +266,8 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 触发条件：
 
-- Node CLI legacy 入口：`skillbox rollback <skill-name> --to <sha>`。
 - Rust CLI 当前入口：`remote-versions`、`remote-preview-change --action rollback`、`remote-apply-change --action rollback`。
+- Rust CLI 兼容别名：`rollback <skill-name> --to <sha>`。
 - Tauri command：`list_remote_skill_versions`、`preview_remote_version_change`、`apply_remote_version_change`。
 - 桌面 UI：remote skill detail 的 version list 对非当前版本显示 `Rollback`，复用 update 的 diff review dialog。
 
@@ -295,11 +291,11 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 完成验证：
 
-- 当前 Node：`node packages/skillbox-cli/bin/skillbox.js rollback <skill-name> --to <sha> --managed-root <temp-skillbox-root> --json`
 - `cargo test -p skillbox-core --offline remote_version`
 - `cargo test -p skillbox-core --offline apply_`
 - `cargo run -p skillbox-cli --offline -- remote-preview-change <skill-name> --action rollback --to <sha-or-prefix> --managed-root <temp-skillbox-root>`
 - `cargo run -p skillbox-cli --offline -- remote-apply-change <skill-name> --action rollback --to <sha-or-prefix> --managed-root <temp-skillbox-root>`
+- `cargo run -p skillbox-cli --offline -- rollback <skill-name> --to <sha-or-prefix> --managed-root <temp-skillbox-root>`
 - 桌面 UI 手动验证：rollback review 展示回滚后会新增、修改、删除的所有文件，确认后 `current` 和版本列表同步刷新。
 
 ## 9. Operation Log
@@ -341,7 +337,6 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - Rust CLI 入口：`skillbox sync-user-skills [--remote <git-url>] [--message <msg>] [--no-push]`。
 - Rust CLI 状态入口：`skillbox user-skills-status`。
 - Tauri command：`user_skills_git_status`、`user_skills_git_changes`、`set_user_skills_git_remote` 和 `sync_user_skills_git`。
-- Node CLI 仍保留 legacy 兼容入口：`skillbox sync-user-skills [--remote <git-url>] [--message <msg>] [--push]`。
 
 步骤：
 
@@ -404,7 +399,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 - 新增 adapter-specific Rust tests 覆盖 scan、import、deploy、conflict 和 rollback/cleanup。
 - `cargo test --offline`
-- 如果 adapter 影响 legacy Node CLI 兼容入口，也运行 `npm test`。
+- 如果 adapter 影响桌面或仓库脚本，也运行 `npm test`。
 - 用临时目录模拟该 agent runtime，不直接修改真实用户 runtime。
 
 ## 12. Manage Workspaces

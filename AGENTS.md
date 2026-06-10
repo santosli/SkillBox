@@ -17,7 +17,7 @@ SkillBox 管理两类内容：
 
 - 业务逻辑优先放在 Rust crates 中，桌面 UI 通过 Tauri commands 调用核心能力。
 - React 层不能直接拥有文件系统、Git、GitHub、下载、迁移或回滚行为。
-- 新增核心业务逻辑不要继续扩展 legacy Node CLI；Node 代码只作为过渡层和兼容参考。
+- 新增核心业务逻辑不要引入 legacy Node CLI；CLI 和桌面入口共享 Rust core。
 - 文件系统操作必须显式、可验证，并尽量具备备份或回滚路径。
 - 不要执行用户提供的 shell 字符串；使用结构化参数和校验后的路径。
 - GitHub URL、远程归档、外部路径和现有 runtime skills 都是不可信输入。
@@ -27,11 +27,10 @@ SkillBox 管理两类内容：
 
 ## 当前实现边界
 
-- Rust 已覆盖 `SKILL.md` 目录的扫描、导入、候选导入、symlink 部署、SQLite 基础索引、GitHub URL 解析、Git 状态读取和 user-skills Git 同步。
-- Tauri 桌面桥接当前调用 Rust commands，不再通过 UI 直接 shell 到 Node CLI。
-- Node CLI 仍覆盖 GitHub install、remote rollback 和部分 legacy 兼容入口。
+- Rust 已覆盖 `SKILL.md` 目录的扫描、导入、候选导入、GitHub install、symlink 部署、SQLite 基础索引、GitHub URL 解析、Git 状态读取和 user-skills Git 同步。
+- Tauri 桌面桥接当前调用 Rust commands，CLI 入口也调用 Rust core；legacy Node CLI/core 已退役。
 - Claude、OpenClaw、Cursor、Claude Code、Copilot 等非 `SKILL.md` 或非 Codex-style runtime 的支持尚需 agent adapter 层。
-- 目标方向是 CLI 和 UI 共享 Rust core；Node CLI 是 legacy transition layer。
+- Node/npm 仅保留为桌面前端、仓库脚本和测试运行时，不承载 SkillBox 产品业务逻辑。
 
 ## 文档导航
 

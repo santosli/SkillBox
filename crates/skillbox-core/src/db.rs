@@ -112,7 +112,97 @@ pub(crate) fn init_database(database_path: &Path) -> Result<()> {
         "INTEGER NOT NULL DEFAULT 0",
     )?;
     ensure_database_column(&connection, "skill_usage_events", "prompt_excerpt", "TEXT")?;
+    migrate_legacy_node_operations_table(&connection)?;
     Ok(())
+}
+
+pub(crate) fn migrate_legacy_node_operations_table(connection: &Connection) -> Result<()> {
+    let columns = table_column_names(connection, "operations")?;
+    let has_legacy_columns = columns.iter().any(|column| column == "skill_name")
+        && columns.iter().any(|column| column == "message")
+        && columns.iter().any(|column| column == "created_at");
+    let has_rust_columns = columns.iter().any(|column| column == "actor")
+        && columns.iter().any(|column| column == "entity_type")
+        && columns.iter().any(|column| column == "payload_json");
+    if !has_legacy_columns || has_rust_columns {
+        return Ok(());
+    }
+
+    connection
+        .execute_batch(
+            "
+            DROP TABLE IF EXISTS operations_new;
+
+            CREATE TABLE operations_new (
+              id TEXT PRIMARY KEY,
+              type TEXT NOT NULL,
+              status TEXT NOT NULL,
+              actor TEXT NOT NULL,
+              entity_type TEXT NOT NULL,
+              entity_name TEXT NOT NULL,
+              started_at TEXT NOT NULL,
+              finished_at TEXT,
+              summary TEXT NOT NULL,
+              error TEXT,
+              payload_json TEXT NOT NULL
+            );
+
+            INSERT INTO operations_new (
+              id, type, status, actor, entity_type, entity_name,
+              started_at, finished_at, summary, error, payload_json
+            )
+            SELECT
+              'legacy-node-' || id,
+              type,
+              CASE status
+                WHEN 'ok' THEN 'succeeded'
+                WHEN 'succeeded' THEN 'succeeded'
+                WHEN 'started' THEN 'started'
+                WHEN 'failed' THEN 'failed'
+                WHEN 'cancelled' THEN 'cancelled'
+                ELSE 'failed'
+              END,
+              'legacy-node',
+              CASE
+                WHEN skill_name IS NULL OR skill_name = '' THEN 'operation'
+                ELSE 'skill'
+              END,
+              COALESCE(skill_name, ''),
+              created_at,
+              CASE
+                WHEN status IN ('ok', 'succeeded', 'failed', 'cancelled') THEN created_at
+                ELSE NULL
+              END,
+              CASE
+                WHEN message = '' THEN type
+                ELSE message
+              END,
+              CASE
+                WHEN status IN ('ok', 'succeeded', 'started', 'failed', 'cancelled') THEN NULL
+                ELSE status
+              END,
+              '{\"legacyNode\":true}'
+            FROM operations;
+
+            DROP TABLE operations;
+            ALTER TABLE operations_new RENAME TO operations;
+            ",
+        )
+        .map_err(|error| error.to_string())
+}
+
+pub(crate) fn table_column_names(connection: &Connection, table: &str) -> Result<Vec<String>> {
+    let mut statement = connection
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(|error| error.to_string())?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| error.to_string())?;
+    let mut names = Vec::new();
+    for column in columns {
+        names.push(column.map_err(|error| error.to_string())?);
+    }
+    Ok(names)
 }
 
 pub(crate) fn ensure_database_column(
@@ -121,15 +211,8 @@ pub(crate) fn ensure_database_column(
     column: &str,
     definition: &str,
 ) -> Result<()> {
-    let mut statement = connection
-        .prepare(&format!("PRAGMA table_info({table})"))
-        .map_err(|error| error.to_string())?;
-    let columns = statement
-        .query_map([], |row| row.get::<_, String>(1))
-        .map_err(|error| error.to_string())?;
-
-    for existing in columns {
-        if existing.map_err(|error| error.to_string())? == column {
+    for existing in table_column_names(connection, table)? {
+        if existing == column {
             return Ok(());
         }
     }
@@ -307,8 +390,10 @@ pub(crate) fn index_skill(
     connection
         .execute(
             "
-            INSERT INTO skills (name, type, description, version, managed_path, status, content_hash)
-            VALUES (?1, ?2, ?3, ?4, ?5, 'ok', ?6)
+            INSERT INTO skills (
+              name, type, description, version, managed_path, status, content_hash, updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, 'ok', ?6, CURRENT_TIMESTAMP)
             ON CONFLICT(name) DO UPDATE SET
               type = excluded.type,
               description = excluded.description,
@@ -340,8 +425,8 @@ pub(crate) fn index_deployment(
     connection
         .execute(
             "
-            INSERT INTO deployments (skill_name, target_root, target_path, mode)
-            VALUES (?1, ?2, ?3, 'symlink')
+            INSERT INTO deployments (skill_name, target_root, target_path, mode, updated_at)
+            VALUES (?1, ?2, ?3, 'symlink', CURRENT_TIMESTAMP)
             ON CONFLICT(skill_name, target_root) DO UPDATE SET
               target_path = excluded.target_path,
               mode = excluded.mode,

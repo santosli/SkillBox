@@ -18,7 +18,7 @@ test('classifies documentation paths', () => {
 test('classifies docs-sensitive implementation paths', () => {
   assert.equal(isDocsSensitivePath('apps/desktop/src/App.jsx'), true);
   assert.equal(isDocsSensitivePath('crates/skillbox-core/src/lib.rs'), true);
-  assert.equal(isDocsSensitivePath('packages/skillbox-cli/bin/skillbox.js'), true);
+  assert.equal(isDocsSensitivePath('crates/skillbox-cli/src/main.rs'), true);
   assert.equal(isDocsSensitivePath('.githooks/pre-commit'), true);
   assert.equal(isDocsSensitivePath('package.json'), true);
   assert.equal(isDocsSensitivePath('README.md'), false);

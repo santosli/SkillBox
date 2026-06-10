@@ -1,6 +1,6 @@
 use skillbox_core::{
-    default_managed_root, deploy_skill, global_runtime_roots, import_skill, managed_paths,
-    scan_skill_roots, undeploy_skill, SkillKind, WorkspaceAddRequest, WorkspaceKind,
+    default_managed_root, deploy_skill, ensure_managed_layout, global_runtime_roots, import_skill,
+    managed_paths, scan_skill_roots, undeploy_skill, SkillKind, WorkspaceAddRequest, WorkspaceKind,
 };
 use skillbox_github::parse_github_skill_url;
 use std::io::Read;
@@ -22,6 +22,11 @@ fn run(args: Vec<String>) -> Result<(), String> {
             println!("{}", help_text());
             Ok(())
         }
+        "version" | "--version" | "-V" => {
+            println!("{}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
+        "init" => print_json(&ensure_managed_layout(managed_root(command_args))?),
         "paths" => print_json(&managed_paths(managed_root(command_args))),
         "scan" => {
             let roots = positional(command_args);
@@ -38,6 +43,19 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 .next()
                 .ok_or_else(|| "Usage: skillbox parse-github-url <github-url>".to_string())?;
             print_json(&parse_github_skill_url(&url)?)
+        }
+        "install" => {
+            let source_url = positional(command_args).into_iter().next().ok_or_else(|| {
+                "Usage: skillbox install <github-url> [--target <path>]".to_string()
+            })?;
+            print_json(&skillbox_core::install_github_remote_skill(
+                skillbox_core::InstallGithubRemoteSkillRequest {
+                    source_url,
+                    target_root: option(command_args, "--target").map(PathBuf::from),
+                    actor: "cli".to_string(),
+                },
+                managed_root(command_args),
+            )?)
         }
         "import" => {
             let source = positional(command_args).into_iter().next().ok_or_else(|| {
@@ -78,9 +96,19 @@ fn run(args: Vec<String>) -> Result<(), String> {
         "user-skills-status" => print_json(&skillbox_core::user_skills_git_status(managed_root(
             command_args,
         ))?),
-        "check-remote-updates" => print_json(&skillbox_core::check_remote_skill_updates(
-            managed_root(command_args),
-        )?),
+        "check-remote-updates" | "check-updates" => {
+            let skill_name = positional(command_args).into_iter().next();
+            if let Some(skill_name) = skill_name {
+                print_json(&skillbox_core::check_remote_skill_update(
+                    managed_root(command_args),
+                    &skill_name,
+                )?)
+            } else {
+                print_json(&skillbox_core::check_remote_skill_updates(managed_root(
+                    command_args,
+                ))?)
+            }
+        }
         "remote-source-candidates" => {
             let skill_name = positional(command_args).into_iter().next().ok_or_else(|| {
                 "Usage: skillbox remote-source-candidates <skill-name>".to_string()
@@ -161,6 +189,24 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     action: remote_change_action(option(command_args, "--action"))?,
                     target_version,
                     preview_id: option(command_args, "--preview-id"),
+                    actor: "cli".to_string(),
+                },
+                managed_root(command_args),
+            )?)
+        }
+        "rollback" => {
+            let skill_name = positional(command_args).into_iter().next().ok_or_else(|| {
+                "Usage: skillbox rollback <skill-name> --to <version>".to_string()
+            })?;
+            let target_version = option(command_args, "--to").ok_or_else(|| {
+                "Usage: skillbox rollback <skill-name> --to <version>".to_string()
+            })?;
+            print_json(&skillbox_core::apply_remote_version_change(
+                skillbox_core::RemoteVersionChangeApplyRequest {
+                    skill_name,
+                    action: skillbox_core::RemoteVersionChangeAction::Rollback,
+                    target_version,
+                    preview_id: None,
                     actor: "cli".to_string(),
                 },
                 managed_root(command_args),
@@ -355,20 +401,25 @@ fn help_text() -> &'static str {
     "SkillBox Rust CLI
 
 Commands:
+  skillbox init [--managed-root <path>]
+  skillbox version
   skillbox paths [--managed-root <path>]
   skillbox scan [root ...] [--managed-root <path>]
   skillbox parse-github-url <github-url>
+  skillbox install <github-url> [--target <path>] [--managed-root <path>]
   skillbox import <source-dir> --type user|remote [--managed-root <path>]
   skillbox deploy <skill-name> --target <path> [--managed-root <path>]
   skillbox undeploy <skill-name> --target <path> [--managed-root <path>]
   skillbox user-skills-status [--managed-root <path>]
-  skillbox check-remote-updates [--managed-root <path>]
+  skillbox check-remote-updates [skill-name] [--managed-root <path>]
+  skillbox check-updates [skill-name] [--managed-root <path>]
   skillbox remote-source-candidates <skill-name> [--managed-root <path>]
   skillbox remote-source-preview <skill-name> <github-url> [--managed-root <path>]
   skillbox bind-remote-source <skill-name> <github-url> [--managed-root <path>]
   skillbox remote-versions <skill-name> [--managed-root <path>]
   skillbox remote-preview-change <skill-name> --action update|rollback [--to <version>] [--managed-root <path>]
   skillbox remote-apply-change <skill-name> --action update|rollback --to <version> [--preview-id <id>] [--managed-root <path>]
+  skillbox rollback <skill-name> --to <version> [--managed-root <path>]
   skillbox usage-record --skill <name> --agent <id> --runtime-root <path> [--event-id <id>] [--used-at <rfc3339>] [--prompt-excerpt <text>] [--metadata-json <json>] [--managed-root <path>]
   skillbox usage-hook codex|claude-code [--managed-root <path>]
   skillbox usage-hook-status
@@ -455,5 +506,93 @@ mod tests {
         ));
         assert!(help_text().contains("skillbox usage-hook codex|claude-code"));
         assert!(help_text().contains("skillbox usage-hook-install <target>"));
+    }
+
+    #[test]
+    fn help_lists_legacy_node_cli_compatibility_commands() {
+        let help = help_text();
+
+        assert!(help.contains("skillbox init [--managed-root <path>]"));
+        assert!(help.contains("skillbox install <github-url>"));
+        assert!(help.contains("skillbox check-updates [skill-name]"));
+        assert!(help.contains("skillbox rollback <skill-name> --to <version>"));
+        assert!(help.contains("skillbox version"));
+    }
+
+    #[test]
+    fn version_commands_are_supported() {
+        assert!(run(vec!["version".to_string()]).is_ok());
+        assert!(run(vec!["--version".to_string()]).is_ok());
+    }
+
+    #[test]
+    fn init_creates_managed_layout() {
+        let root = temp_dir("cli-init").join("SkillBox");
+
+        run(vec![
+            "init".to_string(),
+            "--managed-root".to_string(),
+            root.to_string_lossy().to_string(),
+        ])
+        .unwrap();
+
+        assert!(root.join("user-skills").exists());
+        assert!(root.join("remote-skills").exists());
+        assert!(root.join("skillbox.sqlite").exists());
+    }
+
+    #[test]
+    fn check_updates_legacy_alias_is_supported() {
+        let root = temp_dir("cli-check-updates").join("SkillBox");
+
+        run(vec![
+            "check-updates".to_string(),
+            "missing-skill".to_string(),
+            "--managed-root".to_string(),
+            root.to_string_lossy().to_string(),
+        ])
+        .unwrap();
+    }
+
+    #[test]
+    fn rollback_legacy_alias_routes_to_remote_apply() {
+        let root = temp_dir("cli-rollback").join("SkillBox");
+
+        let error = run(vec![
+            "rollback".to_string(),
+            "missing-skill".to_string(),
+            "--to".to_string(),
+            "1234".to_string(),
+            "--managed-root".to_string(),
+            root.to_string_lossy().to_string(),
+        ])
+        .unwrap_err();
+
+        assert!(!error.contains("Unknown command"));
+    }
+
+    #[test]
+    fn install_legacy_alias_routes_to_github_install() {
+        let root = temp_dir("cli-install").join("SkillBox");
+
+        let error = run(vec![
+            "install".to_string(),
+            "https://example.com/acme/repo/tree/main/skills/demo".to_string(),
+            "--managed-root".to_string(),
+            root.to_string_lossy().to_string(),
+        ])
+        .unwrap_err();
+
+        assert!(!error.contains("Unknown command"));
+    }
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("skillbox-cli-{label}-{nanos}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
     }
 }

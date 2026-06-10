@@ -3,8 +3,7 @@
 ## Completed
 
 - Created the monorepo layout for CLI/core, desktop app, and Rust crates.
-- Added a Node-based core MVP using only built-in Node modules.
-- Added SQLite-backed indexing with Node's built-in `node:sqlite`.
+- Retired the legacy Node CLI/core packages after migrating their product behavior into Rust.
 - Installed Rust stable with rustup.
 - Migrated the core scan, import, symlink deploy, SQLite indexing, and GitHub URL parsing paths into Rust crates.
 - Replaced the temporary system `sqlite3` shell-out with `rusqlite` parameterized writes.
@@ -20,6 +19,8 @@
 - Implemented Rust/Tauri user-skills Git sync for the shared `~/.skillbox/user-skills` repository, including Settings-managed remote configuration, per-skill dirty status, desktop commit review with diff preview, generated Conventional Commit messages, and selected-file commits.
 - Implemented Rust/Tauri/CLI remote skill update status checks, Dashboard status refresh, last-checked timestamps, and configurable 5-minute auto refresh.
 - Implemented GitHub-only remote source search/binding, immutable remote version listing, all-file diff preview, update/rollback apply, and permanent operation logging in Rust core, Rust CLI, Tauri commands, and desktop review dialogs.
+- Implemented network-backed GitHub install in Rust core and Rust CLI, including version snapshots, `current` symlink updates, source metadata, optional deploy, and legacy CLI aliases.
+- Added compatibility coverage for Node MVP SQLite stores, including legacy `operations` migration and explicit timestamp writes for old `skills`/`deployments` tables.
 - Added shared desktop diff rendering and remote skill workflow normalization helpers for source binding and version change previews.
 - Implemented SQLite-backed workspace registry for global and project-local skills roots, including `.codex/skills`, `.agents/skills`, `.claude/skills`, scan-time auto registration, imported skill counts, manual add, manual forget, Rust CLI commands, Tauri commands, and a desktop Workspaces page with per-workspace skill review/import.
 - Added Rust crate scaffolding for the planned Tauri/Rust architecture.
@@ -28,7 +29,7 @@
 ## Next Implementation Targets
 
 - Add SQLite migrations and FTS search in the Rust core.
-- Add network-backed GitHub install flow to the Rust CLI and desktop UI.
+- Add a desktop UI flow for GitHub install using the Rust core install API.
 - Add import review screens for unknown existing skills.
 - Add copy snapshot deployment mode after symlink mode is stable.
 - Use workspace registry as the deploy target picker when deploy workflows move into the desktop UI.
