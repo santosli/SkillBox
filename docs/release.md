@@ -6,7 +6,7 @@ DMG through GitHub Releases.
 ## Release Identity
 
 - Publishing account: `santosli`
-- Main repository: `santosli/skill-box`
+- Main repository: `santosli/SkillBox`
 - Homebrew tap: `santosli/homebrew-tap`
 - Bundle identifier: `io.github.santosli.skillbox`
 - Current tag: `v0.1.1`

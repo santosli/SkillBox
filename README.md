@@ -105,7 +105,7 @@ Windows, Linux, and a Homebrew CLI formula are not part of the current release.
 
 Download the signed and notarized DMG from:
 
-https://github.com/santosli/skill-box/releases
+https://github.com/santosli/SkillBox/releases
 
 For this release, use the asset named:
 
@@ -195,6 +195,8 @@ New core business logic should go into Rust crates. React should call structured
 
 ## Docs
 
+- [Roadmap](docs/roadmap.md)
+- [Good first issues](docs/good-first-issues.md)
 - [Architecture](docs/architecture.md)
 - [Data model](docs/data-model.md)
 - [Workflows](docs/workflows.md)
@@ -208,6 +210,8 @@ New core business logic should go into Rust crates. React should call structured
 ## Development
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, test commands, release invariants, and contribution guidelines.
+New contributors can start with [Good first issues](docs/good-first-issues.md)
+or the public [Roadmap](docs/roadmap.md).
 
 Useful commands:
 

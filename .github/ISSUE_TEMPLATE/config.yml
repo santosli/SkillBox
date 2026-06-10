@@ -1,5 +1,11 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Roadmap
+    url: https://github.com/santosli/SkillBox/blob/main/docs/roadmap.md
+    about: Review the public direction before filing broad feature requests.
+  - name: Good first issues
+    url: https://github.com/santosli/SkillBox/blob/main/docs/good-first-issues.md
+    about: Start here for small, low-risk contribution ideas.
   - name: Security reports
-    url: https://github.com/santosli/skill-box/security/advisories/new
+    url: https://github.com/santosli/SkillBox/security/advisories/new
     about: Please report vulnerabilities privately when possible.

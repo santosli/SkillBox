@@ -105,7 +105,7 @@ Windows、Linux 和 Homebrew CLI formula 不属于当前版本范围。
 
 从 GitHub Releases 下载已签名并公证的 DMG：
 
-https://github.com/santosli/skill-box/releases
+https://github.com/santosli/SkillBox/releases
 
 本次发布使用这个 asset：
 
@@ -195,6 +195,8 @@ docs/                      architecture, data model, workflows, ADRs
 
 ## 文档
 
+- [Roadmap](docs/roadmap.md)
+- [Good first issues](docs/good-first-issues.md)
 - [Architecture](docs/architecture.md)
 - [Data model](docs/data-model.md)
 - [Workflows](docs/workflows.md)
@@ -208,6 +210,7 @@ docs/                      architecture, data model, workflows, ADRs
 ## 开发
 
 本地 setup、测试命令、release invariants 和贡献规范见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+新贡献者可以先看 [Good first issues](docs/good-first-issues.md) 或公开 [Roadmap](docs/roadmap.md)。
 
 常用命令：
 

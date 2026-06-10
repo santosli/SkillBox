@@ -76,6 +76,8 @@ Update docs when a change affects user-visible behavior, workflows, storage,
 schema, release behavior, or long-term architecture. Useful starting points:
 
 - [README.md](README.md)
+- [docs/roadmap.md](docs/roadmap.md)
+- [docs/good-first-issues.md](docs/good-first-issues.md)
 - [docs/architecture.md](docs/architecture.md)
 - [docs/data-model.md](docs/data-model.md)
 - [docs/workflows.md](docs/workflows.md)
@@ -129,6 +131,16 @@ CI also runs dependency security checks:
 - `npm audit --audit-level=high`
 
 Dependabot checks npm, Cargo, and GitHub Actions dependencies weekly.
+
+## Starter Issues
+
+Issues labeled `good first issue` should be small, testable, and avoid
+destructive filesystem behavior. Maintainers should use the `Starter task`
+issue template for this work and include likely files, acceptance criteria,
+verification commands, and guardrails.
+
+See [docs/good-first-issues.md](docs/good-first-issues.md) for the contributor
+and maintainer checklist.
 
 ## Release Invariants
 

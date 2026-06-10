@@ -7,12 +7,12 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for testing the SkillBox public alpha. Please avoid pasting private skill contents, credentials, or sensitive local paths.
+        Thanks for testing SkillBox. Please avoid pasting private skill contents, credentials, or sensitive local paths.
   - type: input
     id: version
     attributes:
       label: SkillBox version
-      placeholder: "0.1.0-alpha.2"
+      placeholder: "0.1.1"
     validations:
       required: true
   - type: input

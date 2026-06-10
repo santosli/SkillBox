@@ -1,0 +1,65 @@
+name: Starter task
+description: Maintainer template for a scoped task suitable for first-time contributors.
+title: "starter: "
+labels:
+  - good first issue
+  - help wanted
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for small, low-risk tasks with clear acceptance criteria.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Documentation
+        - Tests
+        - Desktop UI copy
+        - Issue templates
+        - CLI help
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What small problem should this issue solve?
+    validations:
+      required: true
+  - type: textarea
+    id: likely_files
+    attributes:
+      label: Likely files
+      description: List the files or directories a contributor should inspect first.
+      placeholder: |
+        - README.md
+        - docs/roadmap.md
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: What must be true when this is done?
+      placeholder: |
+        - The stale text is removed.
+        - The new copy links to the current documentation.
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification
+      description: Commands or manual checks the contributor should run.
+      placeholder: |
+        npm test
+        git diff --check
+    validations:
+      required: true
+  - type: textarea
+    id: guardrails
+    attributes:
+      label: Guardrails
+      description: Anything this starter task should avoid changing.
+      placeholder: Do not change import, deploy, or release signing behavior.
