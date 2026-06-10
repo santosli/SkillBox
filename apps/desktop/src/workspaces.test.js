@@ -4,6 +4,7 @@ import test from 'node:test';
 import * as workspaceModule from './workspaces.js';
 
 const {
+  helpIssueUrl,
   normalizeWorkspace,
   sidebarItems,
   workspaceCardMetaLabels,
@@ -239,12 +240,13 @@ test('sidebar keeps primary navigation entries without user or remote entries', 
 test('sidebar footer icons follow the lucide-react convention', () => {
   assert.equal(sidebarIconConvention, 'lucide-react');
   assert.deepEqual(
-    sidebarFooterItems.map((item) => [item.id, item.label, item.icon]),
+    sidebarFooterItems.map((item) => [item.id, item.label, item.icon, item.url || '']),
     [
-      ['settings', 'Settings', 'settings-2'],
-      ['help', 'Help', 'message-circle-question-mark']
+      ['settings', 'Settings', 'settings-2', ''],
+      ['help', 'Help', 'message-circle-question-mark', helpIssueUrl]
     ]
   );
+  assert.equal(helpIssueUrl, 'https://github.com/santosli/SkillBox/issues');
 });
 
 test('workspace card metadata keeps only user-facing fields', () => {

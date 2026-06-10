@@ -12,9 +12,11 @@ export const sidebarItems = [
 // Sidebar and footer icon names resolve to lucide-react components by default.
 export const sidebarIconConvention = 'lucide-react';
 
+export const helpIssueUrl = 'https://github.com/santosli/SkillBox/issues';
+
 export const sidebarFooterItems = [
   { id: 'settings', label: 'Settings', icon: 'settings-2' },
-  { id: 'help', label: 'Help', icon: 'message-circle-question-mark' }
+  { id: 'help', label: 'Help', icon: 'message-circle-question-mark', url: helpIssueUrl }
 ];
 
 export const workspaceCardMetaLabels = ['Scope', 'Skills', 'Imported', 'Calls'];

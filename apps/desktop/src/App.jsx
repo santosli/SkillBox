@@ -2248,7 +2248,7 @@ export default function App() {
               icon={item.icon}
               key={item.id}
               label={item.label}
-              onClick={item.id === 'settings' ? () => setPage('settings') : undefined}
+              onClick={item.url ? () => openRemoteSourceUrl(item.url) : () => setPage(item.id)}
             />
           ))}
           <div className="sidebarVersion">
