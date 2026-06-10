@@ -3,11 +3,24 @@
 All notable changes to SkillBox will be documented in this file.
 
 The format is based on Keep a Changelog, and this project uses semantic
-version tags such as `v0.1.1`.
+version tags such as `v0.2.0`.
 
 ## Unreleased
 
 - No unreleased changes.
+
+## 0.2.0
+
+- Retire the legacy Node CLI/core packages and move GitHub install, rollback,
+  update checking, and compatibility command entry points onto the Rust
+  CLI/core path.
+- Strengthen CI and dependency governance with Rust clippy warnings-as-errors,
+  Rust and npm audit jobs, Dependabot configuration, and a PR template.
+- Add public project roadmap and good-first-issue guidance for contributors.
+- Align public release, security, contribution, architecture, and workflow docs
+  with the Rust-only CLI/core direction.
+- Improve desktop maintainability by splitting large UI and core modules, and
+  link the sidebar Help action to GitHub Issues.
 
 ## 0.1.1
 

@@ -9,9 +9,9 @@ DMG through GitHub Releases.
 - Main repository: `santosli/SkillBox`
 - Homebrew tap: `santosli/homebrew-tap`
 - Bundle identifier: `io.github.santosli.skillbox`
-- Current tag: `v0.1.1`
-- Current DMG asset: `SkillBox_0.1.1_universal.dmg`
-- Current checksum asset: `SkillBox_0.1.1_universal.dmg.sha256`
+- Current tag: `v0.2.0`
+- Current DMG asset: `SkillBox_0.2.0_universal.dmg`
+- Current checksum asset: `SkillBox_0.2.0_universal.dmg.sha256`
 
 ## GitHub Actions Secrets
 
@@ -32,26 +32,31 @@ Application certificate. `APPLE_PASSWORD` should be an app-specific password.
 
 1. Confirm `main` is clean and CI is passing.
 2. Confirm README install and uninstall instructions match the current release.
-3. Run the `Release` workflow manually from `main` before tagging. The
+3. Add a `CHANGELOG.md` entry for the release version. The GitHub Release body
+   is generated from that entry, and the release workflow fails if the matching
+   changelog section is missing.
+4. Run the `Release` workflow manually from `main` before tagging. The
    workflow dispatch path builds, notarizes, mounts, and verifies the DMG
    without creating a GitHub Release.
-4. Tag the release:
+5. Tag the release:
 
    ```sh
-   git tag v0.1.1
-   git push origin v0.1.1
+   git tag v0.2.0
+   git push origin v0.2.0
    ```
 
-5. Wait for `.github/workflows/release.yml` to build, notarize, mount, and
+6. Wait for `.github/workflows/release.yml` to build, notarize, mount, and
    verify the DMG before publishing the release. The workflow must pass
    `codesign --verify`, `spctl`, app version, and bundle identifier checks
    against the mounted DMG.
-6. Download and smoke-test the published DMG.
-7. Copy `packaging/homebrew/Casks/skillbox.rb` into
+7. Confirm the GitHub Release notes include the main changes from the matching
+   `CHANGELOG.md` section.
+8. Download and smoke-test the published DMG.
+9. Copy `packaging/homebrew/Casks/skillbox.rb` into
    `santosli/homebrew-tap/Casks/skillbox.rb`.
-8. Replace the placeholder SHA with the value from the release checksum asset
+10. Replace the placeholder SHA with the value from the release checksum asset
    or `SHA256SUMS`.
-9. Run:
+11. Run:
 
    ```sh
    brew audit --cask santosli/tap/skillbox
@@ -59,7 +64,7 @@ Application certificate. `APPLE_PASSWORD` should be an app-specific password.
    brew uninstall --cask santosli/tap/skillbox
    ```
 
-10. Commit and push the tap update.
+12. Commit and push the tap update.
 
 ## Smoke Test
 

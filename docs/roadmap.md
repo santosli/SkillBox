@@ -4,7 +4,7 @@ SkillBox is early-stage software. This roadmap describes the public direction,
 not a date-based commitment. Implementation details can change as the app gets
 more real-world use.
 
-## Current Focus: 0.1.x
+## Current Focus: 0.2.x
 
 The current release line focuses on making local skill management useful and
 safe on macOS:

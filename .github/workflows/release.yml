@@ -53,6 +53,31 @@ jobs:
           fi
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
+      - name: Extract changelog entry
+        id: changelog_entry
+        env:
+          RELEASE_VERSION: ${{ steps.release_version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          awk -v version="$RELEASE_VERSION" '
+            $0 == "## " version {
+              found = 1
+              next
+            }
+            found && /^## / {
+              exit
+            }
+            found {
+              print
+            }
+          ' CHANGELOG.md > changelog-entry.md
+
+          if ! grep -q '[^[:space:]]' changelog-entry.md; then
+            echo "CHANGELOG.md is missing a release entry for ${RELEASE_VERSION}." >&2
+            exit 1
+          fi
+
       - name: Import Apple Developer certificate
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -149,6 +174,10 @@ jobs:
 
           {
             echo "${release_label} for macOS 14+."
+            echo
+            echo "Main changes:"
+            echo
+            cat changelog-entry.md
             echo
             echo "Install options:"
             echo "- Download the signed and notarized universal DMG from this release."
