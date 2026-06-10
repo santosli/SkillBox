@@ -68,7 +68,7 @@ fn scans_nested_skill_directories() {
     make_skill(&root.join("alpha"), "alpha", "Alpha skill");
     make_skill(&root.join("group").join("beta"), "beta", "Beta skill");
 
-    let scan = scan_skill_roots(&[root.clone()]).unwrap();
+    let scan = scan_skill_roots(std::slice::from_ref(&root)).unwrap();
 
     assert_eq!(scan.errors.len(), 0);
     let names: Vec<_> = scan
@@ -370,10 +370,10 @@ fn record_skill_usage_allows_unmanaged_skill_and_dedupes_event_ids() {
     .unwrap();
 
     assert_eq!(first.usage_count, 1);
-    assert_eq!(first.deduplicated, false);
+    assert!(!first.deduplicated);
     assert_eq!(first.used_at, "2026-06-02T10:15:00+00:00");
     assert_eq!(second.usage_count, 1);
-    assert_eq!(second.deduplicated, true);
+    assert!(second.deduplicated);
     assert_eq!(second.last_used_at, "2026-06-02T10:15:00+00:00");
 
     let history = list_history(HistoryFilter::default(), &managed_root).unwrap();
@@ -464,7 +464,8 @@ fn workspace_and_import_candidates_include_usage_counts() {
     )
     .unwrap();
 
-    let candidates = scan_import_candidates(&[workspace_root.clone()], &managed_root).unwrap();
+    let candidates =
+        scan_import_candidates(std::slice::from_ref(&workspace_root), &managed_root).unwrap();
     let workspaces = list_workspaces(&managed_root).unwrap();
 
     assert_eq!(workspace(&workspaces, &workspace_root).usage_count, 2);
@@ -986,7 +987,8 @@ fn scan_import_candidates_records_scanned_workspaces() {
         "demo-vault local skill",
     );
 
-    let candidates = scan_import_candidates(&[workspace_root.clone()], &managed_root).unwrap();
+    let candidates =
+        scan_import_candidates(std::slice::from_ref(&workspace_root), &managed_root).unwrap();
     let workspaces = list_workspaces(&managed_root).unwrap();
     let recorded = workspace(&workspaces, &workspace_root);
 
@@ -1225,7 +1227,7 @@ fn undeploy_refuses_symlink_pointing_elsewhere() {
 #[test]
 fn managed_state_is_first_use_when_managed_store_has_no_skills() {
     let root = temp_dir("managed-state-empty");
-    let state = managed_state(&root.join("SkillBox")).unwrap();
+    let state = managed_state(root.join("SkillBox")).unwrap();
 
     assert!(state.is_first_use);
     assert_eq!(state.skills.len(), 0);
@@ -1316,7 +1318,7 @@ fn managed_state_detects_workspace_alias_symlink_deployment() {
 #[test]
 fn managed_preferences_default_to_showing_local_import_confirmation() {
     let root = temp_dir("preferences-default");
-    let preferences = managed_preferences(&root.join("SkillBox")).unwrap();
+    let preferences = managed_preferences(root.join("SkillBox")).unwrap();
 
     assert!(!preferences.skip_local_import_confirmation);
     assert_eq!(preferences.status_refresh_interval_minutes, 5);

@@ -112,6 +112,24 @@ ci(release): add signed macos alpha build
 docs(readme): document alpha install paths
 ```
 
+## Pull Request Checks
+
+CI runs the repository's baseline quality gates on pull requests and pushes to
+`main`:
+
+- `npm test`
+- `cargo fmt --check`
+- `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`
+- `cargo test --offline`
+- `git diff --check`
+
+CI also runs dependency security checks:
+
+- `cargo audit`
+- `npm audit --audit-level=high`
+
+Dependabot checks npm, Cargo, and GitHub Actions dependencies weekly.
+
 ## Release Invariants
 
 Public alpha releases must be:

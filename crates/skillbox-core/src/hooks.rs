@@ -406,13 +406,19 @@ pub(crate) fn replace_json_command(
                 );
                 replaced = true;
             }
-            object.values_mut().fold(replaced, |changed, nested| {
-                replace_json_command(nested, old_commands, new_command) || changed
-            })
+            let mut changed = replaced;
+            for nested in object.values_mut() {
+                changed |= replace_json_command(nested, old_commands, new_command);
+            }
+            changed
         }
-        serde_json::Value::Array(values) => values.iter_mut().fold(false, |changed, nested| {
-            replace_json_command(nested, old_commands, new_command) || changed
-        }),
+        serde_json::Value::Array(values) => {
+            let mut changed = false;
+            for nested in values {
+                changed |= replace_json_command(nested, old_commands, new_command);
+            }
+            changed
+        }
         _ => false,
     }
 }

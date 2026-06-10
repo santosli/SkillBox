@@ -526,7 +526,7 @@ pub fn ls_remote_with_timeout(
 
 fn format_duration(duration: Duration) -> String {
     let millis = duration.as_millis();
-    if millis % 1000 == 0 {
+    if millis.is_multiple_of(1000) {
         format!("{}s", millis / 1000)
     } else {
         format!("{millis}ms")
