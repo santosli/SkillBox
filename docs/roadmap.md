@@ -24,12 +24,12 @@ safe on macOS:
 
 These are the next areas where focused contributions are most useful:
 
-- **Rust CLI and desktop parity.** Continue moving legacy Node CLI behavior into
-  Rust core and Tauri commands.
+- **Rust CLI and desktop parity.** Keep CLI behavior and desktop Tauri commands
+  aligned on the shared Rust core.
 - **Search and navigation.** Add SQLite migrations and FTS-backed search for
   skills, operations, and usage history.
-- **GitHub install flow.** Add network-backed GitHub install in Rust CLI and the
-  desktop app with the same review-first safety model.
+- **GitHub install flow.** Add a desktop UI flow on top of the Rust GitHub
+  install API with the same review-first safety model.
 - **First-run onboarding.** Make scan, import, deploy, and backup implications
   clearer for new users.
 - **Dependency hygiene.** Keep Tauri, Vite, Rust crates, and GitHub Actions

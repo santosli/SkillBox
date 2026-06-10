@@ -305,6 +305,193 @@ pub fn bind_remote_source(
     })
 }
 
+pub fn install_github_remote_skill(
+    request: InstallGithubRemoteSkillRequest,
+    managed_root: impl AsRef<Path>,
+) -> Result<InstallGithubRemoteSkillResult> {
+    let managed_root = managed_root.as_ref().to_path_buf();
+    let source = skillbox_github::parse_github_skill_url(&request.source_url)?;
+    let source_url = request.source_url.clone();
+    let operation = start_operation(
+        OperationStart {
+            operation_type: "install_remote_skill".to_string(),
+            actor: request.actor.clone(),
+            entity_type: "source".to_string(),
+            entity_name: source.url.clone(),
+            summary: format!("Install remote skill from {}", source.url),
+            payload: serde_json::json!({"sourceUrl": request.source_url}),
+        },
+        &managed_root,
+    )?;
+    let operation_id = operation.id.clone();
+
+    match install_github_remote_skill_inner(request, source, &managed_root, operation_id.clone()) {
+        Ok(result) => {
+            finish_operation(
+                OperationFinish {
+                    id: operation_id,
+                    status: OperationStatus::Succeeded,
+                    summary: format!("Installed remote skill {}", result.skill_name),
+                    error: None,
+                    payload: serde_json::json!({
+                        "skillName": result.skill_name.clone(),
+                        "installedSha": result.installed_sha.clone(),
+                        "sourceUrl": result.source_url.clone()
+                    }),
+                },
+                &managed_root,
+            )?;
+            Ok(result)
+        }
+        Err(error) => {
+            let _ = finish_operation(
+                OperationFinish {
+                    id: operation_id,
+                    status: OperationStatus::Failed,
+                    summary: "Install remote skill failed".to_string(),
+                    error: Some(error.clone()),
+                    payload: serde_json::json!({"sourceUrl": source_url}),
+                },
+                &managed_root,
+            );
+            Err(error)
+        }
+    }
+}
+
+fn install_github_remote_skill_inner(
+    request: InstallGithubRemoteSkillRequest,
+    source: skillbox_github::GitHubSkillSource,
+    managed_root: &Path,
+    operation_id: String,
+) -> Result<InstallGithubRemoteSkillResult> {
+    let paths = ensure_managed_layout(managed_root.to_path_buf())?;
+    let temp = temporary_work_dir("github-install");
+
+    let result = (|| {
+        let checkout = temp.join("checkout");
+        let installed_sha = skillbox_git::GitService::new().fetch_ref_path(
+            &source.repo_url,
+            &source.reference,
+            &source.path,
+            &checkout,
+        )?;
+        let skill_source_path = checkout.join(&source.path);
+        let skill = read_skill(&skill_source_path)?;
+        validate_skill_name(&skill.name)?;
+        let remote_root = paths.remote_skills_root.join(&skill.name);
+        let version_path = remote_root.join("versions").join(&installed_sha);
+
+        let created_snapshot =
+            install_github_version_snapshot(&skill_source_path, &version_path, &skill.name)?;
+        let current_path = remote_root.join("current");
+        let old_current_target = fs::read_link(&current_path).ok();
+        if let Err(error) = update_current_symlink(&remote_root, &version_path) {
+            if created_snapshot {
+                let _ = remove_path_if_exists(&version_path);
+            }
+            return Err(error);
+        }
+
+        let ref_kind = resolve_ref_kind(&source.repo_url, &source.reference)?;
+        let tracking = ref_kind == "branch";
+        let preview = RemoteSourceBindingPreview {
+            skill_name: skill.name.clone(),
+            source_url: source.url.clone(),
+            repo_url: source.repo_url.clone(),
+            owner: source.owner.clone(),
+            repo: source.repo.clone(),
+            path: source.path.clone(),
+            reference: source.reference.clone(),
+            ref_kind: Some(ref_kind.clone()),
+            tracking,
+            current_version: installed_sha.clone(),
+            installed_sha: Some(installed_sha.clone()),
+            latest_sha: Some(installed_sha.clone()),
+            validation: SourceBindingValidation::ExactMatch,
+            local_hash: skill.content_hash.clone(),
+            remote_hash: Some(skill.content_hash.clone()),
+            message: "Installed remote skill from GitHub.".to_string(),
+        };
+        let source_path = remote_root.join("source.json");
+        if let Err(error) = write_github_source_metadata(&source_path, &preview).and_then(|_| {
+            index_skill(
+                &paths.database_path,
+                &skill,
+                SkillKind::Remote,
+                &version_path,
+            )
+        }) {
+            let _ = restore_current_after_failed_install(&remote_root, old_current_target.as_ref());
+            if created_snapshot {
+                let _ = remove_path_if_exists(&version_path);
+            }
+            return Err(error);
+        }
+
+        let deployment = request
+            .target_root
+            .map(|target_root| deploy_skill(&skill.name, managed_root, target_root))
+            .transpose()?;
+
+        Ok(InstallGithubRemoteSkillResult {
+            skill_name: skill.name,
+            source_url: source.url,
+            repo_url: source.repo_url,
+            owner: source.owner,
+            repo: source.repo,
+            path: source.path,
+            reference: source.reference,
+            ref_kind: Some(ref_kind),
+            tracking,
+            installed_sha,
+            version_path,
+            current_path,
+            source_path,
+            deployment,
+            operation_id,
+        })
+    })();
+
+    let _ = fs::remove_dir_all(&temp);
+    result
+}
+
+fn install_github_version_snapshot(
+    skill_source_path: &Path,
+    version_path: &Path,
+    expected_skill_name: &str,
+) -> Result<bool> {
+    if version_path.exists() {
+        if let Ok(existing) = read_skill(version_path) {
+            if existing.name == expected_skill_name {
+                return Ok(false);
+            }
+            return Err(format!(
+                "Existing version skill name does not match {expected_skill_name}"
+            ));
+        }
+    }
+
+    match copy_skill_dir(skill_source_path, version_path) {
+        Ok(()) => Ok(true),
+        Err(error) => {
+            let _ = remove_path_if_exists(version_path);
+            Err(error)
+        }
+    }
+}
+
+fn restore_current_after_failed_install(
+    remote_root: &Path,
+    old_current_target: Option<&PathBuf>,
+) -> Result<()> {
+    match old_current_target {
+        Some(target) => update_current_symlink(remote_root, target),
+        None => remove_path_if_exists(&remote_root.join("current")),
+    }
+}
+
 pub fn list_remote_skill_versions(
     skill_name: &str,
     managed_root: impl AsRef<Path>,
@@ -975,6 +1162,17 @@ pub(crate) fn temporary_work_dir(label: &str) -> PathBuf {
         .map(|duration| duration.as_nanos())
         .unwrap_or_default();
     std::env::temp_dir().join(format!("skillbox-{label}-{nanos}"))
+}
+
+pub(crate) fn remove_path_if_exists(path: &Path) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+            fs::remove_dir_all(path).map_err(|error| error.to_string())
+        }
+        Ok(_) => fs::remove_file(path).map_err(|error| error.to_string()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 pub(crate) fn resolve_ref_kind(repo_url: &str, reference: &str) -> Result<String> {

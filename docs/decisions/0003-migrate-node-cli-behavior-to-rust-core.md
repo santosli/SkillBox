@@ -25,7 +25,15 @@ SkillBox 早期用 dependency-free Node MVP 快速验证了扫描、导入、部
 
 ## 后果
 
-- Node 代码仍可作为迁移参考和兼容测试入口。
-- 文档必须标注哪些 workflow 当前仍是 Node-only。
 - Rust 迁移旧能力时，要兼容 Node MVP 已写入的目录、`source.json` 和 SQLite 数据。
 - 完成迁移前，不应移除 Node CLI 的现有测试和命令。
+
+## 完成状态
+
+2026-06-10：legacy Node CLI/core 已退役。`packages/skillbox-core` 和
+`packages/skillbox-cli` 被移除，产品业务入口统一到 `crates/skillbox-core` 和
+`crates/skillbox-cli`。Node/npm 仅保留为桌面前端、仓库脚本和测试运行时，不再承载
+SkillBox 产品业务逻辑。
+
+Rust CLI 保留常用 legacy 命令别名（例如 `install`、`check-updates`、`rollback`、
+`init`、`version`），但业务实现来自 Rust core，不再通过 Node 包转发。

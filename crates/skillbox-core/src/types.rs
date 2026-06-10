@@ -454,6 +454,32 @@ pub struct BindRemoteSourceResult {
     pub operation_id: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InstallGithubRemoteSkillRequest {
+    pub source_url: String,
+    pub target_root: Option<PathBuf>,
+    pub actor: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct InstallGithubRemoteSkillResult {
+    pub skill_name: String,
+    pub source_url: String,
+    pub repo_url: String,
+    pub owner: String,
+    pub repo: String,
+    pub path: String,
+    pub reference: String,
+    pub ref_kind: Option<String>,
+    pub tracking: bool,
+    pub installed_sha: String,
+    pub version_path: PathBuf,
+    pub current_path: PathBuf,
+    pub source_path: PathBuf,
+    pub deployment: Option<Deployment>,
+    pub operation_id: String,
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RemoteVersionChangeAction {

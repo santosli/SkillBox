@@ -4,19 +4,13 @@
   "private": true,
   "type": "module",
   "workspaces": [
-    "packages/*",
     "apps/desktop"
   ],
-  "bin": {
-    "skillbox": "packages/skillbox-cli/bin/skillbox.js"
-  },
   "scripts": {
-    "test": "node --test packages/skillbox-core/test/*.test.js apps/desktop/src/*.test.js scripts/*.test.js",
+    "test": "node --test apps/desktop/src/*.test.js scripts/*.test.js",
     "prepare": "node scripts/install-git-hooks.js",
     "hooks:install": "node scripts/install-git-hooks.js",
     "docs:check-staged": "node scripts/check-docs-for-staged-changes.js",
-    "rust:test": "cargo test --offline",
-    "skillbox": "node packages/skillbox-cli/bin/skillbox.js",
-    "scan": "node packages/skillbox-cli/bin/skillbox.js scan --json"
+    "rust:test": "cargo test --offline"
   }
 }

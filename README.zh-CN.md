@@ -182,12 +182,10 @@ Workspace 布局：
 ```text
 apps/desktop/              Tauri + React desktop app
 apps/desktop/src-tauri/    Tauri command bridge
-crates/skillbox-core/      scan, import, deploy, SQLite, workspaces, updates, hooks
+crates/skillbox-core/      scan, import, GitHub install, deploy, SQLite, workspaces, updates, hooks
 crates/skillbox-github/    GitHub skill URL parsing and normalization
 crates/skillbox-git/       structured Git service boundary
 crates/skillbox-cli/       Rust CLI
-packages/skillbox-core/    legacy Node core
-packages/skillbox-cli/     legacy Node CLI
 docs/                      architecture, data model, workflows, ADRs
 ```
 

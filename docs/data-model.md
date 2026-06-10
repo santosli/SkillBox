@@ -229,9 +229,13 @@ Node MVP 旧表差异：
 兼容规则：
 
 - Rust 新 migration 应以 Rust schema 为主。
-- 读取既有 Node 数据时，Rust 不应因为旧列存在而失败。
+- 读取既有 Node 数据时，Rust 不应因为旧列存在或旧表缺少新列而失败。
+- Rust 写入 `skills` 和 `deployments` 时显式写 `updated_at`，兼容 Node MVP 中
+  `updated_at TEXT NOT NULL` 但没有默认值的旧表。
+- Rust 初始化 managed store 时会把 Node MVP `operations` 表迁移为 Rust operation
+  schema；旧记录保留为 `legacy-node-<id>`，`status=ok` 映射为 `succeeded`，
+  actor 标记为 `legacy-node`。
 - 需要读取旧 `source_json` 时，应迁移到文件型 `source.json` 或明确的 Rust schema，而不是继续让 UI 直接解析 Node-only 列。
-- `operations` 是否保留应由后续 ADR 或 migration 决定；在决定前，不能把它当成所有工作流都依赖的唯一审计来源。
 
 ## 命名和版本规则
 

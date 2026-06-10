@@ -52,6 +52,92 @@ fn database_initialization_configures_busy_timeout_and_wal() {
 }
 
 #[test]
+fn legacy_node_sqlite_schema_migrates_operations_and_remains_writable() {
+    let root = temp_dir("legacy-node-sqlite");
+    let managed_root = root.join("SkillBox");
+    let paths = managed_paths(&managed_root);
+    fs::create_dir_all(paths.database_path.parent().unwrap()).unwrap();
+    let connection = rusqlite::Connection::open(&paths.database_path).unwrap();
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE skills (
+              name TEXT PRIMARY KEY,
+              type TEXT NOT NULL,
+              description TEXT NOT NULL DEFAULT '',
+              version TEXT NOT NULL DEFAULT '',
+              managed_path TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'ok',
+              content_hash TEXT NOT NULL DEFAULT '',
+              source_json TEXT NOT NULL DEFAULT '{}',
+              updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE deployments (
+              skill_name TEXT NOT NULL,
+              target_root TEXT NOT NULL,
+              target_path TEXT NOT NULL,
+              mode TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              PRIMARY KEY (skill_name, target_root)
+            );
+
+            CREATE TABLE operations (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              type TEXT NOT NULL,
+              skill_name TEXT,
+              status TEXT NOT NULL,
+              message TEXT NOT NULL DEFAULT '',
+              created_at TEXT NOT NULL
+            );
+
+            INSERT INTO operations (type, skill_name, status, message, created_at)
+            VALUES ('install', 'demo', 'ok', 'Installed demo', '2026-06-10T00:00:00Z');
+            ",
+        )
+        .unwrap();
+    drop(connection);
+
+    ensure_managed_layout(&managed_root).unwrap();
+    let operations = list_operations(OperationFilter::default(), &managed_root).unwrap();
+    let legacy = operations
+        .operations
+        .iter()
+        .find(|operation| operation.id == "legacy-node-1")
+        .unwrap();
+    assert_eq!(legacy.operation_type, "install");
+    assert_eq!(legacy.status, OperationStatus::Succeeded);
+    assert_eq!(legacy.actor, "legacy-node");
+    assert_eq!(legacy.entity_type, "skill");
+    assert_eq!(legacy.entity_name, "demo");
+    assert_eq!(legacy.summary, "Installed demo");
+
+    let source = root.join("source").join("new-skill");
+    make_skill(&source, "new-skill", "New skill");
+    let imported = import_skill(&source, SkillKind::User, &managed_root).unwrap();
+    assert_eq!(imported.name, "new-skill");
+    let deployment = deploy_skill("new-skill", &managed_root, root.join("runtime")).unwrap();
+    assert!(fs::symlink_metadata(deployment.target_path)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+
+    let operation = start_operation(
+        OperationStart {
+            operation_type: "test_operation".to_string(),
+            actor: "test".to_string(),
+            entity_type: "skill".to_string(),
+            entity_name: "new-skill".to_string(),
+            summary: "Test operation".to_string(),
+            payload: serde_json::json!({}),
+        },
+        &managed_root,
+    )
+    .unwrap();
+    assert!(operation.id.starts_with("op-"));
+}
+
+#[test]
 fn unique_backup_path_uses_bounded_suffix_search() {
     let source = include_str!("import.rs");
     let start = source.find("fn unique_backup_path").unwrap();
@@ -1987,6 +2073,267 @@ fn check_remote_skill_updates_reports_update_available_and_up_to_date() {
     assert_eq!(stale.state, RemoteSkillUpdateState::UpdateAvailable);
     assert!(stale.update_available);
     assert_eq!(stale.latest_sha.as_deref(), Some(latest_sha.as_str()));
+}
+
+#[test]
+fn install_github_remote_skill_writes_version_current_metadata_and_index() {
+    let root = temp_dir("install-github-remote");
+    let managed_root = root.join("SkillBox");
+    let remote = bare_remote_with_skill_content(
+        "install-github-remote-origin",
+        "find-skills",
+        "Find skills",
+        "Remote body\n",
+    );
+    let installed_sha = remote_head(&remote);
+    let _rewrite = github_repo_rewrite("acme", "install-github-remote", &remote);
+
+    let result = install_github_remote_skill(
+        InstallGithubRemoteSkillRequest {
+            source_url: github_source_url("acme", "install-github-remote", "find-skills"),
+            target_root: None,
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    let paths = managed_paths(&managed_root);
+    let remote_root = paths.remote_skills_root.join("find-skills");
+    let version_path = remote_root.join("versions").join(&installed_sha);
+    assert_eq!(result.skill_name, "find-skills");
+    assert_eq!(result.installed_sha, installed_sha);
+    assert_eq!(result.version_path, version_path);
+    assert_eq!(
+        fs::canonicalize(remote_root.join("current")).unwrap(),
+        fs::canonicalize(&version_path).unwrap()
+    );
+    assert!(version_path.join("SKILL.md").exists());
+
+    let source_json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(remote_root.join("source.json")).unwrap())
+            .unwrap();
+    assert_eq!(source_json["type"], "github");
+    assert_eq!(source_json["owner"], "acme");
+    assert_eq!(source_json["repo"], "install-github-remote");
+    assert_eq!(source_json["path"], "skills/find-skills");
+    assert_eq!(source_json["ref"], "main");
+    assert_eq!(source_json["currentVersion"], installed_sha);
+    assert_eq!(source_json["installedSha"], installed_sha);
+    assert_eq!(source_json["latestSha"], installed_sha);
+    assert_eq!(source_json["tracking"], true);
+
+    let connection = open_database(&paths.database_path).unwrap();
+    let (kind, indexed_path): (String, String) = connection
+        .query_row(
+            "SELECT type, managed_path FROM skills WHERE name = 'find-skills'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(kind, "remote");
+    assert_eq!(indexed_path, version_path.to_string_lossy().to_string());
+}
+
+#[test]
+fn install_github_remote_skill_deploys_to_target_root() {
+    let root = temp_dir("install-github-deploy");
+    let managed_root = root.join("SkillBox");
+    let target_root = root.join("runtime");
+    let remote = bare_remote_with_skill_content(
+        "install-github-deploy-origin",
+        "find-skills",
+        "Find skills",
+        "",
+    );
+    let _rewrite = github_repo_rewrite("acme", "install-github-deploy", &remote);
+
+    let result = install_github_remote_skill(
+        InstallGithubRemoteSkillRequest {
+            source_url: github_source_url("acme", "install-github-deploy", "find-skills"),
+            target_root: Some(target_root.clone()),
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    let deployment = result.deployment.unwrap();
+    assert_eq!(deployment.target_root, target_root);
+    assert!(fs::symlink_metadata(&deployment.target_path)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(
+        fs::canonicalize(&deployment.target_path).unwrap(),
+        fs::canonicalize(result.current_path).unwrap()
+    );
+}
+
+#[test]
+fn install_github_remote_skill_reuses_existing_version_snapshot() {
+    let root = temp_dir("install-github-reuse-version");
+    let managed_root = root.join("SkillBox");
+    let remote = bare_remote_with_skill_content(
+        "install-github-reuse-version-origin",
+        "find-skills",
+        "Find skills",
+        "",
+    );
+    let _rewrite = github_repo_rewrite("acme", "install-github-reuse-version", &remote);
+
+    let first = install_github_remote_skill(
+        InstallGithubRemoteSkillRequest {
+            source_url: github_source_url("acme", "install-github-reuse-version", "find-skills"),
+            target_root: None,
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+    let marker = first.version_path.join("marker.txt");
+    fs::write(&marker, "kept").unwrap();
+
+    let second = install_github_remote_skill(
+        InstallGithubRemoteSkillRequest {
+            source_url: github_source_url("acme", "install-github-reuse-version", "find-skills"),
+            target_root: None,
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    assert_eq!(second.version_path, first.version_path);
+    assert_eq!(fs::read_to_string(marker).unwrap(), "kept");
+}
+
+#[test]
+fn install_github_remote_skill_cleans_partial_version_on_copy_failure() {
+    let root = temp_dir("install-github-copy-failure");
+    let managed_root = root.join("SkillBox");
+    let remote = bare_remote_with_skill_content(
+        "install-github-copy-failure-origin",
+        "find-skills",
+        "Find skills",
+        "",
+    );
+    let installed_sha = remote_head(&remote);
+    let _rewrite = github_repo_rewrite("acme", "install-github-copy-failure", &remote);
+    let version_path = managed_root
+        .join("remote-skills")
+        .join("find-skills")
+        .join("versions")
+        .join(&installed_sha);
+    fs::create_dir_all(version_path.parent().unwrap()).unwrap();
+    fs::write(&version_path, "not a directory").unwrap();
+
+    let error = install_github_remote_skill(
+        InstallGithubRemoteSkillRequest {
+            source_url: github_source_url("acme", "install-github-copy-failure", "find-skills"),
+            target_root: None,
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+
+    assert!(error.contains("Destination already exists"));
+    assert!(!version_path.exists());
+    assert!(!managed_root
+        .join("remote-skills")
+        .join("find-skills")
+        .join("current")
+        .exists());
+}
+
+#[test]
+fn install_github_remote_skill_rejects_traversal_url_without_creating_store() {
+    let root = temp_dir("install-github-traversal");
+    let managed_root = root.join("SkillBox");
+
+    let error = install_github_remote_skill(
+        InstallGithubRemoteSkillRequest {
+            source_url: "https://github.com/acme/repo/tree/main/skills/../../secret".to_string(),
+            target_root: None,
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+
+    assert!(error.contains("path must stay inside the repository"));
+    assert!(!managed_root.exists());
+}
+
+#[test]
+fn install_github_remote_skill_rejects_non_github_url_without_creating_store() {
+    let root = temp_dir("install-github-non-github");
+    let managed_root = root.join("SkillBox");
+
+    let error = install_github_remote_skill(
+        InstallGithubRemoteSkillRequest {
+            source_url: "https://example.com/acme/repo/tree/main/skills/demo".to_string(),
+            target_root: None,
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+
+    assert!(error.contains("Only GitHub URLs are supported"));
+    assert!(!managed_root.exists());
+}
+
+#[test]
+fn install_github_remote_skill_rejects_invalid_ref_without_creating_store() {
+    let root = temp_dir("install-github-invalid-ref");
+    let managed_root = root.join("SkillBox");
+
+    let error = install_github_remote_skill(
+        InstallGithubRemoteSkillRequest {
+            source_url: "https://github.com/acme/repo/tree/-bad/skills/demo".to_string(),
+            target_root: None,
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+
+    assert!(error.contains("Git reference must not start with '-'"));
+    assert!(!managed_root.exists());
+}
+
+#[test]
+fn install_github_remote_skill_refuses_non_symlink_current_and_removes_new_version() {
+    let root = temp_dir("install-github-current-conflict");
+    let managed_root = root.join("SkillBox");
+    let remote = bare_remote_with_skill_content(
+        "install-github-current-conflict-origin",
+        "find-skills",
+        "Find skills",
+        "",
+    );
+    let installed_sha = remote_head(&remote);
+    let _rewrite = github_repo_rewrite("acme", "install-github-current-conflict", &remote);
+    let remote_root = managed_root.join("remote-skills").join("find-skills");
+    let current_path = remote_root.join("current");
+    fs::create_dir_all(&remote_root).unwrap();
+    fs::write(&current_path, "not a symlink").unwrap();
+
+    let error = install_github_remote_skill(
+        InstallGithubRemoteSkillRequest {
+            source_url: github_source_url("acme", "install-github-current-conflict", "find-skills"),
+            target_root: None,
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+
+    assert!(error.contains("Refusing to replace existing non-symlink current"));
+    assert_eq!(fs::read_to_string(&current_path).unwrap(), "not a symlink");
+    assert!(!remote_root.join("versions").join(installed_sha).exists());
 }
 
 #[test]
