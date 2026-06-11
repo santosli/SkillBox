@@ -1,5 +1,112 @@
+use serde::Serialize;
 use serde_json::Value;
 use std::path::PathBuf;
+use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
+use tauri::Manager;
+use tauri_plugin_updater::{Update, UpdaterExt};
+
+#[derive(Default)]
+struct PendingAppUpdate(Mutex<Option<Update>>);
+
+#[derive(Debug)]
+enum AppUpdateError {
+    NoPendingUpdate,
+    Updater(String),
+}
+
+impl std::fmt::Display for AppUpdateError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoPendingUpdate => {
+                formatter.write_str("There is no pending app update to install.")
+            }
+            Self::Updater(message) => formatter.write_str(message),
+        }
+    }
+}
+
+impl From<tauri_plugin_updater::Error> for AppUpdateError {
+    fn from(error: tauri_plugin_updater::Error) -> Self {
+        Self::Updater(error.to_string())
+    }
+}
+
+impl Serialize for AppUpdateError {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AppUpdateResponse {
+    current_version: String,
+    available: bool,
+    disabled: bool,
+    version: String,
+    date: String,
+    body: String,
+    checked_at: String,
+    message: String,
+}
+
+fn app_update_checked_at() -> String {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs().to_string())
+        .unwrap_or_default()
+}
+
+fn app_updater_disabled() -> bool {
+    cfg!(debug_assertions) || !cfg!(target_os = "macos")
+}
+
+fn app_update_disabled_response(current_version: &str, message: &str) -> AppUpdateResponse {
+    AppUpdateResponse {
+        current_version: current_version.to_string(),
+        available: false,
+        disabled: true,
+        version: String::new(),
+        date: String::new(),
+        body: String::new(),
+        checked_at: app_update_checked_at(),
+        message: message.to_string(),
+    }
+}
+
+fn app_update_response_from_update(update: &Update) -> AppUpdateResponse {
+    AppUpdateResponse {
+        current_version: update.current_version.clone(),
+        available: true,
+        disabled: false,
+        version: update.version.clone(),
+        date: update
+            .date
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_default(),
+        body: update.body.clone().unwrap_or_default(),
+        checked_at: app_update_checked_at(),
+        message: "App update available.".to_string(),
+    }
+}
+
+fn app_update_no_update_response(current_version: &str) -> AppUpdateResponse {
+    AppUpdateResponse {
+        current_version: current_version.to_string(),
+        available: false,
+        disabled: false,
+        version: String::new(),
+        date: String::new(),
+        body: String::new(),
+        checked_at: app_update_checked_at(),
+        message: "SkillBox is up to date.".to_string(),
+    }
+}
 
 fn validate_external_github_url(url: &str) -> Result<&str, String> {
     let trimmed = url.trim();
@@ -468,8 +575,63 @@ fn forget_workspace(path: String) -> Result<Value, String> {
     serde_json::to_value(result).map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+async fn check_app_update(
+    app: tauri::AppHandle,
+    pending_update: tauri::State<'_, PendingAppUpdate>,
+) -> Result<AppUpdateResponse, AppUpdateError> {
+    if app_updater_disabled() {
+        *pending_update.0.lock().unwrap() = None;
+        return Ok(app_update_disabled_response(
+            env!("CARGO_PKG_VERSION"),
+            "App updater is disabled in development or unsupported builds.",
+        ));
+    }
+
+    let update = app.updater()?.check().await?;
+    match update {
+        Some(update) => {
+            let response = app_update_response_from_update(&update);
+            *pending_update.0.lock().unwrap() = Some(update);
+            Ok(response)
+        }
+        None => {
+            *pending_update.0.lock().unwrap() = None;
+            Ok(app_update_no_update_response(env!("CARGO_PKG_VERSION")))
+        }
+    }
+}
+
+#[tauri::command]
+async fn install_app_update(
+    app: tauri::AppHandle,
+    pending_update: tauri::State<'_, PendingAppUpdate>,
+) -> Result<(), AppUpdateError> {
+    if app_updater_disabled() {
+        return Err(AppUpdateError::Updater(
+            "App updater is disabled in development or unsupported builds.".to_string(),
+        ));
+    }
+
+    let update = pending_update
+        .0
+        .lock()
+        .unwrap()
+        .take()
+        .ok_or(AppUpdateError::NoPendingUpdate)?;
+
+    update.download_and_install(|_, _| {}, || {}).await?;
+    app.restart();
+}
+
 pub fn run() {
     let result = tauri::Builder::default()
+        .setup(|app| {
+            app.handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())?;
+            app.manage(PendingAppUpdate::default());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             open_external_url,
             open_local_path,
@@ -509,7 +671,9 @@ pub fn run() {
             list_workspaces,
             scan_workspaces,
             add_workspace,
-            forget_workspace
+            forget_workspace,
+            check_app_update,
+            install_app_update
         ])
         .run(tauri::generate_context!());
 
@@ -581,5 +745,30 @@ mod tests {
         assert!(validate_local_file_path("https://github.com/owner/repo").is_err());
         assert!(validate_local_file_path("relative/path").is_err());
         assert!(validate_local_file_path(cwd.to_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn app_update_disabled_response_is_serializable() {
+        let response = super::app_update_disabled_response(
+            "0.3.0",
+            "App updater is disabled in development or unsupported builds.",
+        );
+
+        assert_eq!(response.current_version, "0.3.0");
+        assert!(!response.available);
+        assert!(response.disabled);
+        assert_eq!(
+            response.message,
+            "App updater is disabled in development or unsupported builds."
+        );
+        assert!(serde_json::to_value(response).unwrap()["currentVersion"].is_string());
+    }
+
+    #[test]
+    fn app_update_error_serializes_as_a_user_message() {
+        assert_eq!(
+            serde_json::to_string(&super::AppUpdateError::NoPendingUpdate).unwrap(),
+            "\"There is no pending app update to install.\""
+        );
     }
 }

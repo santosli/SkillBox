@@ -484,3 +484,35 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `cargo run -p skillbox-cli --offline -- usage-hook-status`
 - 使用相同 `--event-id` 重复上报，确认第二次返回 deduplicated 且计数不增加。
 - `npm test`
+
+## 14. App Updates
+
+触发条件：
+
+- 桌面 app 启动后后台检查一次。
+- 用户在 Settings -> App updates 点击 `Check for updates`。
+- 用户确认后点击 `Install and restart`。
+
+步骤：
+
+- React 调用 `check_app_update`，不直接下载 release asset，也不解析任意 URL。
+- Tauri command 使用 Tauri updater plugin 读取 `latest.json`，并由插件校验签名链。
+- debug/dev/browser preview 不访问 GitHub，返回 disabled 状态。
+- 有可用更新时，Tauri 保存最近一次签名校验通过的 pending update；Settings 显示版本、notes 和安装按钮。
+- `install_app_update` 只能消费 pending update，调用插件下载、验证、安装，然后重启 app。
+- Release workflow 必须上传 DMG、updater `.app.tar.gz`、`.sig` 和 `latest.json`；`latest.json` 同时包含 `darwin-aarch64` 和 `darwin-x86_64`，指向同一个 universal updater archive。
+
+失败与回滚：
+
+- 没有 pending update 时拒绝安装。
+- updater check/download/install 失败时展示错误，不修改 managed store 或 runtime skills。
+- 签名校验失败由 Tauri updater plugin 拒绝安装。
+- 丢失 `TAURI_SIGNING_PRIVATE_KEY` 会导致已安装用户无法接受未来更新，必须保留离线备份。
+
+完成验证：
+
+- `cargo test -p skillbox-desktop --offline app_update`
+- `npm test`
+- `npm --workspace apps/desktop run build`
+- Release workflow `workflow_dispatch` dry run 必须验证 DMG、updater archive、signature 和 `latest.json`。
+- 正式发布后，用前一版 DMG 安装包验证能检查到新版本、确认安装并重启。

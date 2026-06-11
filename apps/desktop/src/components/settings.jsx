@@ -10,11 +10,14 @@ import { userSyncLabel } from '../userSkillsGitSync.js';
 import { Badge, PageHeader, PathList } from './common.jsx';
 
 export function SettingsPage({
+  appUpdate,
   paths,
   preferences,
   status,
   usageHooks,
   userSkillsGit,
+  onCheckAppUpdate,
+  onInstallAppUpdate,
   onInstallUsageHook,
   onOpenUsageHookConfig,
   onRefreshUsageHooks,
@@ -43,6 +46,11 @@ export function SettingsPage({
           onSaveRemoteUpdateTimeout={onSaveRemoteUpdateTimeout}
           onSave={onSaveStatusRefreshInterval}
         />
+        <AppUpdateSettingsPanel
+          appUpdate={appUpdate}
+          onCheck={onCheckAppUpdate}
+          onInstall={onInstallAppUpdate}
+        />
         <UsageHookSettingsPanel
           status={status}
           usageHooks={usageHooks}
@@ -52,6 +60,62 @@ export function SettingsPage({
         />
       </section>
     </>
+  );
+}
+
+function AppUpdateSettingsPanel({ appUpdate, onCheck, onInstall }) {
+  const isChecking = appUpdate?.state === 'checking';
+  const isInstalling = appUpdate?.state === 'installing';
+  const isDisabled = appUpdate?.state === 'disabled';
+  const hasUpdate = Boolean(appUpdate?.available && appUpdate?.version);
+  const message = appUpdate?.message || (hasUpdate ? `Version ${appUpdate.version} is ready.` : '');
+
+  return (
+    <aside className="panel compactPanel appUpdateSettingsPanel">
+      <div className="panelHeader compact">
+        <div>
+          <h2>App updates</h2>
+          <p>Check signed GitHub Releases before installing.</p>
+        </div>
+      </div>
+      <div className="settingsForm">
+        <PathList
+          items={[
+            ['Current version', appUpdate?.currentVersion ? `v${appUpdate.currentVersion}` : 'Unknown'],
+            ['Available version', hasUpdate ? `v${appUpdate.version}` : 'None'],
+            ['Last checked', appUpdate?.checkedAt || 'Not checked']
+          ]}
+        />
+        {appUpdate?.body ? <pre className="appUpdateNotes">{appUpdate.body}</pre> : null}
+        <div className="settingsActions">
+          {message ? (
+            <span className={appUpdate?.state === 'error' ? 'settingsError' : 'settingsSaved'}>
+              {message}
+            </span>
+          ) : (
+            <span />
+          )}
+          <div className="appUpdateActions">
+            <button
+              className="button secondary"
+              disabled={isChecking || isInstalling || isDisabled}
+              type="button"
+              onClick={onCheck}
+            >
+              {isChecking ? 'Checking...' : 'Check for updates'}
+            </button>
+            <button
+              className="button primary"
+              disabled={!hasUpdate || isChecking || isInstalling || isDisabled}
+              type="button"
+              onClick={onInstall}
+            >
+              {isInstalling ? 'Installing...' : 'Install and restart'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </aside>
   );
 }
 

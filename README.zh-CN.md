@@ -14,7 +14,7 @@
 
 SkillBox 是一个 local-first 的 macOS 应用和 CLI，用来管理基于 `SKILL.md` 的 skills、规则、提示词和能力包，同时避免把某一个 agent runtime 当作唯一真相源。
 
-当前版本：`v0.2.0`。SkillBox 现在已经可以用于本地 skill 管理，但仍是早期软件。重要 skills 请保留备份，并在应用每一次文件系统变更前先 review。
+当前版本：`v0.3.0`。SkillBox 现在已经可以用于本地 skill 管理，但仍是早期软件。重要 skills 请保留备份，并在应用每一次文件系统变更前先 review。
 
 ## 为什么
 
@@ -90,6 +90,7 @@ Runtime 目录只是部署目标：
 - 通过共享 Git 仓库同步 user skills，并在桌面端提供 diff review 和 Conventional Commit message 生成。
 - 通过 Codex App、Codex CLI、Claude Code CLI hooks 记录 usage events，但不保存完整聊天正文。
 - 从 SQLite 记录中浏览桌面 operation 和 usage history。
+- 从 GitHub Releases 检查已签名的 macOS app 更新，并只在用户确认后安装。
 
 ## 依赖
 
@@ -110,16 +111,19 @@ https://github.com/santosli/SkillBox/releases
 本次发布使用这个 asset：
 
 ```text
-SkillBox_0.2.0_universal.dmg
+SkillBox_0.3.0_universal.dmg
 ```
 
 对应 checksum：
 
 ```text
-SkillBox_0.2.0_universal.dmg.sha256
+SkillBox_0.3.0_universal.dmg.sha256
 ```
 
 打开 DMG，把 `SkillBox.app` 拖到 `/Applications`。
+
+通过 DMG 安装的 app 可以在 Settings -> App updates 检查已签名的
+GitHub Releases，并在确认后安装更新。
 
 ### Homebrew
 

@@ -1,6 +1,6 @@
 [package]
 name = "skillbox-desktop"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 
 [lib]
@@ -20,3 +20,4 @@ serde_json = "1"
 skillbox-core = { path = "../../../crates/skillbox-core" }
 skillbox-github = { path = "../../../crates/skillbox-github" }
 tauri = { version = "2", features = [] }
+tauri-plugin-updater = "2"

@@ -18,6 +18,7 @@ const appSourcePaths = [
   './skills.js',
   './historyEntries.js',
   './usageHooks.js',
+  './appUpdates.js',
   './preferences.js',
   './previewData.js',
   './importFlow.js'
@@ -76,6 +77,25 @@ test('sidebar brand does not render a subtitle', () => {
   assert.match(brandTextRule, /align-items:\s*center;/);
   assert.match(brandTitleRule, /font-size:\s*21px;/);
   assert.match(brandTitleRule, /line-height:\s*36px;/);
+});
+
+test('settings exposes app update checks without downloading automatically', () => {
+  assert.match(appSource, /function AppUpdateSettingsPanel/);
+  assert.match(appSource, /Check for updates/);
+  assert.match(appSource, /Install and restart/);
+  assert.match(appSource, /invoke\('check_app_update'/);
+  assert.match(appSource, /invoke\('install_app_update'/);
+  assert.match(appSource, /shouldCheckAppUpdateOnStartup/);
+  assert.doesNotMatch(appSource, /downloadAndInstall/);
+});
+
+test('tauri desktop bridge registers app update commands and pending state', () => {
+  assert.match(tauriSource, /struct PendingAppUpdate/);
+  assert.match(tauriSource, /fn app_update_disabled_response/);
+  assert.match(tauriSource, /async fn check_app_update/);
+  assert.match(tauriSource, /async fn install_app_update/);
+  assert.match(tauriSource, /tauri_plugin_updater::Builder::new\(\)\.build\(\)/);
+  assert.match(tauriSource, /app\.manage\(PendingAppUpdate::default\(\)\)/);
 });
 
 test('dashboard actions stay in one equal segmented row', () => {

@@ -9,7 +9,8 @@ Only the latest public release is supported for security fixes.
 
 | Version | Supported |
 | --- | --- |
-| `0.2.x` | Yes |
+| `0.3.x` | Yes |
+| `0.2.x` | No |
 | `0.1.x` | No |
 | `0.1.0-alpha.x` | No |
 | older builds | No |

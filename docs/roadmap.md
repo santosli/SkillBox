@@ -4,7 +4,7 @@ SkillBox is early-stage software. This roadmap describes the public direction,
 not a date-based commitment. Implementation details can change as the app gets
 more real-world use.
 
-## Current Focus: 0.2.x
+## Current Focus: 0.3.x
 
 The current release line focuses on making local skill management useful and
 safe on macOS:
@@ -18,6 +18,8 @@ safe on macOS:
 - sync user skills through a shared Git repository;
 - record usage counts from supported local agent hooks without storing full
   transcripts;
+- keep signed app updates available for DMG installs while preserving Homebrew
+  upgrades as a separate distribution path;
 - keep release, CI, and dependency hygiene visible.
 
 ## Near-Term Priorities

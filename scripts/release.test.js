@@ -2,11 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  assertReleaseAssets,
+  buildLatestJson,
   extractChangelogEntry,
   insertChangelogEntry,
   normalizeVersion,
   releaseAssetName,
   releaseSeries,
+  updaterBundleAssetName,
+  updaterSignatureAssetName,
   updateCaskContent,
   updateIssueTemplateVersionPlaceholder,
   updateSecuritySupport
@@ -21,6 +25,52 @@ test('normalizes semantic release versions', () => {
 test('derives release labels and assets', () => {
   assert.equal(releaseSeries('0.2.1'), '0.2.x');
   assert.equal(releaseAssetName('0.2.1'), 'SkillBox_0.2.1_universal.dmg');
+  assert.equal(updaterBundleAssetName('0.2.1'), 'SkillBox_0.2.1_universal.app.tar.gz');
+  assert.equal(updaterSignatureAssetName('0.2.1'), 'SkillBox_0.2.1_universal.app.tar.gz.sig');
+});
+
+test('builds latest updater json for both universal macOS architectures', () => {
+  assert.deepEqual(
+    buildLatestJson({
+      version: '0.3.0',
+      notes: '- App auto updates.',
+      pubDate: '2026-06-11T10:00:00Z',
+      url: 'https://github.com/santosli/SkillBox/releases/download/v0.3.0/SkillBox_0.3.0_universal.app.tar.gz',
+      signature: 'minisignature'
+    }),
+    {
+      version: '0.3.0',
+      notes: '- App auto updates.',
+      pub_date: '2026-06-11T10:00:00Z',
+      platforms: {
+        'darwin-aarch64': {
+          signature: 'minisignature',
+          url: 'https://github.com/santosli/SkillBox/releases/download/v0.3.0/SkillBox_0.3.0_universal.app.tar.gz'
+        },
+        'darwin-x86_64': {
+          signature: 'minisignature',
+          url: 'https://github.com/santosli/SkillBox/releases/download/v0.3.0/SkillBox_0.3.0_universal.app.tar.gz'
+        }
+      }
+    }
+  );
+});
+
+test('release asset validation requires DMG, updater bundle, signature, and latest json', () => {
+  const release = {
+    assets: [
+      { name: 'SkillBox_0.3.0_universal.dmg', digest: 'sha256:' + 'a'.repeat(64) },
+      { name: 'SkillBox_0.3.0_universal.app.tar.gz', digest: 'sha256:' + 'b'.repeat(64) },
+      { name: 'SkillBox_0.3.0_universal.app.tar.gz.sig', digest: 'sha256:' + 'c'.repeat(64) },
+      { name: 'latest.json', digest: 'sha256:' + 'd'.repeat(64) }
+    ]
+  };
+
+  assert.doesNotThrow(() => assertReleaseAssets(release, '0.3.0'));
+  assert.throws(
+    () => assertReleaseAssets({ assets: release.assets.slice(0, 3) }, '0.3.0'),
+    /latest\.json/
+  );
 });
 
 test('inserts and extracts changelog release notes', () => {

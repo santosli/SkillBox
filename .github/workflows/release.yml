@@ -100,6 +100,8 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
           tauriScript: npm run tauri
@@ -155,12 +157,70 @@ jobs:
           echo "dmg_path=$dmg_path" >> "$GITHUB_OUTPUT"
           echo "asset_name=$asset_name" >> "$GITHUB_OUTPUT"
 
+      - name: Verify updater artifacts
+        id: verify_updater
+        env:
+          RELEASE_VERSION: ${{ steps.release_version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          updater_list="$(find target -path '*/bundle/macos/*.app.tar.gz' -type f | sort)"
+          updater_count="$(printf '%s\n' "$updater_list" | sed '/^$/d' | wc -l | tr -d ' ')"
+          if [ "$updater_count" != "1" ]; then
+            echo "Expected exactly one updater archive, found $updater_count:" >&2
+            printf '%s\n' "$updater_list" >&2
+            exit 1
+          fi
+
+          updater_path="$(printf '%s\n' "$updater_list" | sed -n '1p')"
+          updater_sig_path="${updater_path}.sig"
+          if [ ! -s "$updater_sig_path" ]; then
+            echo "Updater signature was not found or is empty: $updater_sig_path" >&2
+            exit 1
+          fi
+
+          if ! tar -tzf "$updater_path" | grep -q 'SkillBox.app'; then
+            echo "Updater archive does not contain SkillBox.app." >&2
+            exit 1
+          fi
+
+          updater_asset_name="SkillBox_${RELEASE_VERSION}_universal.app.tar.gz"
+          updater_sig_asset_name="${updater_asset_name}.sig"
+          echo "updater_path=$updater_path" >> "$GITHUB_OUTPUT"
+          echo "updater_asset_name=$updater_asset_name" >> "$GITHUB_OUTPUT"
+          echo "updater_sig_path=$updater_sig_path" >> "$GITHUB_OUTPUT"
+          echo "updater_sig_asset_name=$updater_sig_asset_name" >> "$GITHUB_OUTPUT"
+
+      - name: Write updater JSON
+        env:
+          RELEASE_VERSION: ${{ steps.release_version.outputs.version }}
+          UPDATER_PATH: ${{ steps.verify_updater.outputs.updater_path }}
+          UPDATER_SIG_PATH: ${{ steps.verify_updater.outputs.updater_sig_path }}
+          UPDATER_ASSET_NAME: ${{ steps.verify_updater.outputs.updater_asset_name }}
+        run: |
+          set -euo pipefail
+
+          release_tag="v${RELEASE_VERSION}"
+          updater_url="https://github.com/santosli/SkillBox/releases/download/${release_tag}/${UPDATER_ASSET_NAME}"
+          node scripts/write-updater-json.js \
+            --version "$RELEASE_VERSION" \
+            --notes-file changelog-entry.md \
+            --pub-date "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+            --url "$updater_url" \
+            --signature-file "$UPDATER_SIG_PATH" \
+            --output latest.json
+          node -e "const latest = JSON.parse(require('fs').readFileSync('latest.json', 'utf8')); for (const key of ['darwin-aarch64', 'darwin-x86_64']) { if (!latest.platforms[key]?.url || !latest.platforms[key]?.signature) process.exit(1); }"
+
       - name: Create GitHub release
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DMG_PATH: ${{ steps.verify_dmg.outputs.dmg_path }}
           ASSET_NAME: ${{ steps.verify_dmg.outputs.asset_name }}
+          UPDATER_PATH: ${{ steps.verify_updater.outputs.updater_path }}
+          UPDATER_ASSET_NAME: ${{ steps.verify_updater.outputs.updater_asset_name }}
+          UPDATER_SIG_PATH: ${{ steps.verify_updater.outputs.updater_sig_path }}
+          UPDATER_SIG_ASSET_NAME: ${{ steps.verify_updater.outputs.updater_sig_asset_name }}
         run: |
           set -euo pipefail
           release_flags=(--verify-tag)
@@ -187,6 +247,9 @@ jobs:
           } > release-notes.md
           gh release create "$GITHUB_REF_NAME" \
             "$DMG_PATH#$ASSET_NAME" \
+            "$UPDATER_PATH#$UPDATER_ASSET_NAME" \
+            "$UPDATER_SIG_PATH#$UPDATER_SIG_ASSET_NAME" \
+            "latest.json#latest.json" \
             --title "SkillBox $GITHUB_REF_NAME" \
             --notes-file release-notes.md \
             "${release_flags[@]}"
@@ -197,13 +260,20 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DMG_PATH: ${{ steps.verify_dmg.outputs.dmg_path }}
           ASSET_NAME: ${{ steps.verify_dmg.outputs.asset_name }}
+          UPDATER_PATH: ${{ steps.verify_updater.outputs.updater_path }}
+          UPDATER_ASSET_NAME: ${{ steps.verify_updater.outputs.updater_asset_name }}
+          UPDATER_SIG_PATH: ${{ steps.verify_updater.outputs.updater_sig_path }}
+          UPDATER_SIG_ASSET_NAME: ${{ steps.verify_updater.outputs.updater_sig_asset_name }}
         run: |
           set -euo pipefail
           mkdir -p release-assets
           cp "$DMG_PATH" "release-assets/$ASSET_NAME"
+          cp "$UPDATER_PATH" "release-assets/$UPDATER_ASSET_NAME"
+          cp "$UPDATER_SIG_PATH" "release-assets/$UPDATER_SIG_ASSET_NAME"
+          cp latest.json release-assets/latest.json
           (
             cd release-assets
-            shasum -a 256 "$ASSET_NAME"
+            shasum -a 256 "$ASSET_NAME" "$UPDATER_ASSET_NAME" "$UPDATER_SIG_ASSET_NAME" latest.json
           ) > SHA256SUMS
           cp SHA256SUMS "${ASSET_NAME}.sha256"
           gh release upload "$GITHUB_REF_NAME" SHA256SUMS "${ASSET_NAME}.sha256" --clobber

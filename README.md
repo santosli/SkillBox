@@ -14,7 +14,7 @@ English | [简体中文](README.zh-CN.md)
 
 SkillBox is a local-first macOS app and CLI for managing `SKILL.md`-based skills, rules, prompts, and capability packs without treating any one agent runtime as the source of truth.
 
-Current release: `v0.2.0`. SkillBox is useful today for local skill management, but it is still early software. Keep backups of important skills, and review each filesystem change before applying it.
+Current release: `v0.3.0`. SkillBox is useful today for local skill management, but it is still early software. Keep backups of important skills, and review each filesystem change before applying it.
 
 ## Why
 
@@ -90,6 +90,8 @@ Longer-term support for Claude, OpenClaw, Cursor, Claude Code, Copilot, and othe
 - Sync user skills through a shared Git repository with desktop diff review and Conventional Commit message generation.
 - Record usage events from Codex App, Codex CLI, and Claude Code CLI hooks without storing full chat transcripts.
 - Browse desktop operation and usage history from SQLite-backed records.
+- Check signed macOS app updates from GitHub Releases and install them only
+  after user confirmation.
 
 ## Requirements
 
@@ -110,16 +112,19 @@ https://github.com/santosli/SkillBox/releases
 For this release, use the asset named:
 
 ```text
-SkillBox_0.2.0_universal.dmg
+SkillBox_0.3.0_universal.dmg
 ```
 
 The matching checksum is published as:
 
 ```text
-SkillBox_0.2.0_universal.dmg.sha256
+SkillBox_0.3.0_universal.dmg.sha256
 ```
 
 Open the DMG and drag `SkillBox.app` into `/Applications`.
+
+DMG installs can use Settings -> App updates to check signed GitHub Releases
+and install updates after confirmation.
 
 ### Homebrew
 

@@ -3,11 +3,20 @@
 All notable changes to SkillBox will be documented in this file.
 
 The format is based on Keep a Changelog, and this project uses semantic
-version tags such as `v0.2.0`.
+version tags such as `v0.3.0`.
 
 ## Unreleased
 
 - No unreleased changes.
+
+## 0.3.0
+
+- Add signed in-app update checks for the macOS desktop app, with
+  user-confirmed install and restart.
+- Publish Tauri updater artifacts and `latest.json` alongside the signed DMG in
+  the release workflow.
+- Extend release automation and documentation so app updater assets are verified
+  before Homebrew publication.
 
 ## 0.2.0
 

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "SkillBox",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "identifier": "io.github.santosli.skillbox",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -28,6 +28,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -35,5 +36,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEEyODI1NTM0MEMyQzJENUQKUldSZExTd01ORldDb2xBS1ZlSnA0SXR6M0VsT2hJeVNjY2x6a0RCRjRRUXAyNDQySmNIZVBzR3EK",
+      "endpoints": [
+        "https://github.com/santosli/SkillBox/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

@@ -32,6 +32,11 @@ import {
 import { normalizeHistory } from './historyEntries.js';
 import { normalizeImportCandidate } from './importCandidates.js';
 import {
+  appUpdateNotice,
+  normalizeAppUpdateStatus,
+  shouldCheckAppUpdateOnStartup
+} from './appUpdates.js';
+import {
   importNotice,
   isHttpUrl,
   isImportableCandidate,
@@ -232,9 +237,13 @@ export default function App() {
   const [history, setHistory] = useState(normalizeHistory(null));
   const [remoteContextLoading, setRemoteContextLoading] = useState({});
   const [userContextLoading, setUserContextLoading] = useState({});
+  const [appUpdate, setAppUpdate] = useState(() =>
+    normalizeAppUpdateStatus(null, desktopPackage.version)
+  );
   const contentRef = useRef(null);
   const autoRefreshStateRef = useRef({ status: 'idle', isFirstUse: false });
   const refreshSkillStatusesRef = useRef(null);
+  const appUpdateAutoCheckedRef = useRef(false);
   const dismissNotice = () => setNotice('');
   const lastStatusCheckedLabel = useMemo(
     () => formatStatusCheckedAt(lastStatusCheckedAt),
@@ -246,12 +255,43 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!window.__TAURI_INTERNALS__) {
+      setAppUpdate(
+        normalizeAppUpdateStatus(
+          {
+            disabled: true,
+            current_version: desktopPackage.version,
+            message: 'App updater is disabled in browser preview.'
+          },
+          desktopPackage.version
+        )
+      );
+    }
+  }, []);
+
+  useEffect(() => {
     autoRefreshStateRef.current = { status, isFirstUse };
   }, [status, isFirstUse]);
 
   useEffect(() => {
     refreshSkillStatusesRef.current = () => refreshSkillStatuses({ automatic: true });
   });
+
+  useEffect(() => {
+    if (appUpdateAutoCheckedRef.current) {
+      return;
+    }
+
+    if (
+      shouldCheckAppUpdateOnStartup({
+        tauriAvailable: Boolean(window.__TAURI_INTERNALS__),
+        updateStatus: appUpdate
+      })
+    ) {
+      appUpdateAutoCheckedRef.current = true;
+      checkAppUpdate({ automatic: true });
+    }
+  }, [appUpdate]);
 
   useEffect(() => {
     const intervalMinutes = normalizeStatusRefreshIntervalMinutes(
@@ -420,6 +460,81 @@ export default function App() {
       setError('');
       setNotice(scanError.message || 'Browser preview is mocking an empty managed store.');
       setStatus('prototype');
+    }
+  }
+
+  async function checkAppUpdate({ automatic = false } = {}) {
+    if (!automatic) {
+      setNotice('');
+    }
+
+    if (!window.__TAURI_INTERNALS__) {
+      const disabledStatus = normalizeAppUpdateStatus(
+        {
+          disabled: true,
+          current_version: desktopPackage.version,
+          message: 'App updater is disabled in browser preview.'
+        },
+        desktopPackage.version
+      );
+      setAppUpdate(disabledStatus);
+      if (!automatic) {
+        setNotice(disabledStatus.message);
+      }
+      return;
+    }
+
+    setAppUpdate((current) => ({
+      ...current,
+      state: 'checking',
+      message: ''
+    }));
+
+    try {
+      const result = await invoke('check_app_update');
+      const nextStatus = normalizeAppUpdateStatus(result, desktopPackage.version);
+      setAppUpdate(nextStatus);
+
+      if (nextStatus.available) {
+        setNotice(appUpdateNotice(nextStatus));
+      } else if (!automatic) {
+        setNotice(appUpdateNotice(nextStatus) || nextStatus.message || 'SkillBox is up to date.');
+      }
+    } catch (updateError) {
+      const nextStatus = normalizeAppUpdateStatus(
+        {
+          error: updateError.message || String(updateError) || 'Unable to check for app updates.',
+          current_version: desktopPackage.version,
+          checked_at: new Date().toISOString()
+        },
+        desktopPackage.version
+      );
+      setAppUpdate(nextStatus);
+      if (!automatic) {
+        setError(nextStatus.message);
+      }
+    }
+  }
+
+  async function installAppUpdate() {
+    setAppUpdate((current) => ({
+      ...current,
+      state: 'installing',
+      message: ''
+    }));
+
+    try {
+      await invoke('install_app_update');
+      setNotice('App update installed. Restarting SkillBox.');
+    } catch (updateError) {
+      const message =
+        updateError.message || String(updateError) || 'Unable to install the app update.';
+      setAppUpdate((current) => ({
+        ...current,
+        state: current.available ? 'available' : 'error',
+        message
+      }));
+      setError(message);
     }
   }
 
@@ -2261,11 +2376,14 @@ export default function App() {
       <section className="content" ref={contentRef}>
         {page === 'settings' ? (
           <SettingsPage
+            appUpdate={appUpdate}
             paths={paths}
             preferences={preferences}
             status={status}
             usageHooks={usageHooks}
             userSkillsGit={userSkillsGit}
+            onCheckAppUpdate={() => checkAppUpdate()}
+            onInstallAppUpdate={installAppUpdate}
             onOpenUsageHookConfig={openUsageHookConfig}
             onInstallUsageHook={installUsageHook}
             onRefreshUsageHooks={refreshUsageHookStatuses}

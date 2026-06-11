@@ -62,6 +62,61 @@ export function releaseAssetName(version) {
   return `SkillBox_${normalizeVersion(version)}_universal.dmg`;
 }
 
+export function updaterBundleAssetName(version) {
+  return `SkillBox_${normalizeVersion(version)}_universal.app.tar.gz`;
+}
+
+export function updaterSignatureAssetName(version) {
+  return `${updaterBundleAssetName(version)}.sig`;
+}
+
+export function buildLatestJson({ version, notes, pubDate, url, signature }) {
+  const releaseVersion = normalizeVersion(version);
+  const normalizedUrl = String(url || '').trim();
+  const normalizedSignature = String(signature || '').trim();
+  if (!normalizedUrl.startsWith('https://')) {
+    throw new Error(`Updater URL must be HTTPS: ${url || ''}`);
+  }
+  if (!normalizedSignature) {
+    throw new Error('Updater signature must not be empty.');
+  }
+
+  return {
+    version: releaseVersion,
+    notes: String(notes || '').trim(),
+    pub_date: String(pubDate || '').trim(),
+    platforms: {
+      'darwin-aarch64': {
+        signature: normalizedSignature,
+        url: normalizedUrl
+      },
+      'darwin-x86_64': {
+        signature: normalizedSignature,
+        url: normalizedUrl
+      }
+    }
+  };
+}
+
+export function assertReleaseAssets(release, version) {
+  const releaseVersion = normalizeVersion(version);
+  const assets = release?.assets || [];
+  for (const expectedName of [
+    releaseAssetName(releaseVersion),
+    updaterBundleAssetName(releaseVersion),
+    updaterSignatureAssetName(releaseVersion),
+    'latest.json'
+  ]) {
+    const asset = assets.find((candidate) => candidate.name === expectedName);
+    if (!asset) {
+      throw new Error(`Release asset ${expectedName} is missing.`);
+    }
+    if (!asset.digest) {
+      throw new Error(`Release asset ${expectedName} is missing a digest.`);
+    }
+  }
+}
+
 export function extractChangelogEntry(content, version) {
   const lines = String(content).split('\n');
   const header = `## ${normalizeVersion(version)}`;
@@ -248,6 +303,16 @@ function prepareRelease(version, notesFile) {
 
   replaceInFile('docs/release.md', /Current tag: `v[^`]+`/, `Current tag: \`v${releaseVersion}\``);
   replaceInFile('docs/release.md', /Current DMG asset: `SkillBox_[^`]+_universal\.dmg`/, `Current DMG asset: \`${assetName}\``);
+  replaceInFile(
+    'docs/release.md',
+    /Current updater asset: `SkillBox_[^`]+_universal\.app\.tar\.gz`/,
+    `Current updater asset: \`${updaterBundleAssetName(releaseVersion)}\``
+  );
+  replaceInFile(
+    'docs/release.md',
+    /Current updater signature: `SkillBox_[^`]+_universal\.app\.tar\.gz\.sig`/,
+    `Current updater signature: \`${updaterSignatureAssetName(releaseVersion)}\``
+  );
   replaceInFile('docs/release.md', /Current checksum asset: `SkillBox_[^`]+_universal\.dmg\.sha256`/, `Current checksum asset: \`${assetName}.sha256\``);
   replaceInFile('docs/release.md', /git tag v[0-9A-Za-z.-]+/, `git tag v${releaseVersion}`);
   replaceInFile('docs/release.md', /git push origin v[0-9A-Za-z.-]+/, `git push origin v${releaseVersion}`);
@@ -396,6 +461,7 @@ function latestWorkflowRunId({ branch, event, headSha }) {
 function releaseDmgSha(version) {
   const assetName = releaseAssetName(version);
   const release = JSON.parse(capture('gh', ['release', 'view', `v${version}`, '--json', 'assets']));
+  assertReleaseAssets(release, version);
   const asset = release.assets.find((candidate) => candidate.name === assetName);
   if (!asset?.digest) {
     throw new Error(`Release asset ${assetName} is missing a digest.`);
