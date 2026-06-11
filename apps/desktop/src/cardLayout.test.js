@@ -511,6 +511,18 @@ test('skill cards show usage directly under the skill name', () => {
   assert.match(css, /\.skillCardUsage\s*\{/);
 });
 
+test('skill cards use a shorter fixed card rhythm with aligned metadata rows', () => {
+  const cardRule = css.match(/\.skillCard\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const hitAreaRule = css.match(/\.skillCardHitArea\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const tagRule = css.match(/\.skillCardTags\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(cardRule, /height:\s*216px;/);
+  assert.match(hitAreaRule, /height:\s*100%;/);
+  assert.match(hitAreaRule, /min-height:\s*216px;/);
+  assert.match(hitAreaRule, /grid-template-rows:\s*auto minmax\(42px,\s*1fr\) 26px auto;/);
+  assert.match(tagRule, /min-height:\s*26px;/);
+});
+
 test('skill card status and favorite action share one aligned header row', () => {
   const skillCardStart = appSource.indexOf('function SkillCard');
   const skillCardEnd = appSource.indexOf('function AgentIconStack', skillCardStart);
