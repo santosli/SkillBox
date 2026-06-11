@@ -96,19 +96,19 @@ test('dashboard combined filters match query, type, tag, agent, and favorites', 
   );
 });
 
-test('dashboard skills sort by type then name', () => {
+test('dashboard skills sort favorites first then by name', () => {
   const skills = [
-    { name: 'zeta-remote', type: 'remote' },
+    { name: 'zeta-remote', type: 'remote', isFavorite: true },
     { name: 'beta-user', type: 'user' },
     { name: 'alpha-remote', type: 'remote' },
-    { name: 'Alpha-user', type: 'user' }
+    { name: 'Alpha-user', type: 'user', isFavorite: true }
   ];
 
   const sorted = sortDashboardSkills(skills);
 
   assert.deepEqual(
     sorted.map((skill) => skill.name),
-    ['Alpha-user', 'beta-user', 'alpha-remote', 'zeta-remote']
+    ['Alpha-user', 'zeta-remote', 'alpha-remote', 'beta-user']
   );
   assert.deepEqual(
     skills.map((skill) => skill.name),

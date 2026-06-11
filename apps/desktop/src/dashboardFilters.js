@@ -58,13 +58,9 @@ export function skillMatchesDashboardFilters(skill, filters = {}) {
 }
 
 export function sortDashboardSkills(skills = []) {
-  const typeRank = { user: 0, remote: 1 };
-
   return [...skills].sort((left, right) => {
-    const leftRank = typeRank[left.type] ?? 2;
-    const rightRank = typeRank[right.type] ?? 2;
-    if (leftRank !== rightRank) {
-      return leftRank - rightRank;
+    if (Boolean(left.isFavorite) !== Boolean(right.isFavorite)) {
+      return left.isFavorite ? -1 : 1;
     }
 
     const nameCompare = String(left.name || '').localeCompare(String(right.name || ''), undefined, {
