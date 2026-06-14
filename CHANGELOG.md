@@ -15,6 +15,8 @@ version tags such as `v0.3.0`.
   user-confirmed install and restart.
 - Publish Tauri updater artifacts and `latest.json` alongside the signed DMG in
   the release workflow.
+- Build both macOS app and DMG bundles in the release workflow so updater
+  archives are generated, verified, and published.
 - Extend release automation and documentation so app updater assets are verified
   before Homebrew publication.
 - Upgrade the desktop build tooling to Vite 8 to clear high-severity npm audit

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -71,6 +72,12 @@ test('release asset validation requires DMG, updater bundle, signature, and late
     () => assertReleaseAssets({ assets: release.assets.slice(0, 3) }, '0.3.0'),
     /latest\.json/
   );
+});
+
+test('release workflow builds app and dmg bundles for updater artifacts', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8');
+
+  assert.match(workflow, /args:\s*--target universal-apple-darwin --bundles app,dmg/);
 });
 
 test('inserts and extracts changelog release notes', () => {
