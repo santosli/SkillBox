@@ -7,7 +7,7 @@ cask "skillbox" do
   desc "Local skill manager for agent runtimes"
   homepage "https://github.com/santosli/SkillBox"
 
-  depends_on macos: ">= :sonoma"
+  depends_on macos: :sonoma
 
   app "SkillBox.app"
 
