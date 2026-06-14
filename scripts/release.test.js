@@ -14,6 +14,7 @@ import {
   updaterSignatureAssetName,
   updateCaskContent,
   updateIssueTemplateVersionPlaceholder,
+  updateReadmeReleaseAssets,
   updateSecuritySupport
 } from './release.js';
 
@@ -28,6 +29,25 @@ test('derives release labels and assets', () => {
   assert.equal(releaseAssetName('0.2.1'), 'SkillBox_0.2.1_universal.dmg');
   assert.equal(updaterBundleAssetName('0.2.1'), 'SkillBox_0.2.1_universal.app.tar.gz');
   assert.equal(updaterSignatureAssetName('0.2.1'), 'SkillBox_0.2.1_universal.app.tar.gz.sig');
+});
+
+test('updates readme dmg and checksum asset names together', () => {
+  const content = [
+    'Current release: `v0.3.0`.',
+    'SkillBox_0.3.0_universal.dmg',
+    'SkillBox_0.3.0_universal.dmg.sha256',
+    ''
+  ].join('\n');
+
+  assert.equal(
+    updateReadmeReleaseAssets(content, '0.3.1'),
+    [
+      'Current release: `v0.3.0`.',
+      'SkillBox_0.3.1_universal.dmg',
+      'SkillBox_0.3.1_universal.dmg.sha256',
+      ''
+    ].join('\n')
+  );
 });
 
 test('builds latest updater json for both universal macOS architectures', () => {

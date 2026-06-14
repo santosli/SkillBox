@@ -201,6 +201,21 @@ export function updateIssueTemplateVersionPlaceholder(content, version) {
   return updated;
 }
 
+export function updateReadmeReleaseAssets(content, version) {
+  const assetName = releaseAssetName(version);
+  const checksumPattern = /SkillBox_[0-9A-Za-z.-]+_universal\.dmg\.sha256/g;
+  const dmgPattern = /SkillBox_[0-9A-Za-z.-]+_universal\.dmg(?!\.sha256)/g;
+  if (!checksumPattern.test(content)) {
+    throw new Error('README release assets are missing a DMG checksum filename.');
+  }
+  if (!dmgPattern.test(content)) {
+    throw new Error('README release assets are missing a DMG filename.');
+  }
+  return content
+    .replace(checksumPattern, `${assetName}.sha256`)
+    .replace(dmgPattern, assetName);
+}
+
 function normalizeReleaseNotes(notes) {
   const normalized = String(notes || '').replace(/\r\n/g, '\n').trim();
   if (!normalized) {
@@ -294,12 +309,10 @@ function prepareRelease(version, notesFile) {
   writeText('SECURITY.md', updateSecuritySupport(readText('SECURITY.md'), releaseVersion));
 
   replaceInFile('README.md', /Current release: `v[^`]+`/, `Current release: \`v${releaseVersion}\``);
-  replaceInFile('README.md', /SkillBox_[0-9A-Za-z.-]+_universal\.dmg/g, assetName);
-  replaceInFile('README.md', /SkillBox_[0-9A-Za-z.-]+_universal\.dmg\.sha256/g, `${assetName}.sha256`);
+  writeText('README.md', updateReadmeReleaseAssets(readText('README.md'), releaseVersion));
 
   replaceInFile('README.zh-CN.md', /当前版本：`v[^`]+`/, `当前版本：\`v${releaseVersion}\``);
-  replaceInFile('README.zh-CN.md', /SkillBox_[0-9A-Za-z.-]+_universal\.dmg/g, assetName);
-  replaceInFile('README.zh-CN.md', /SkillBox_[0-9A-Za-z.-]+_universal\.dmg\.sha256/g, `${assetName}.sha256`);
+  writeText('README.zh-CN.md', updateReadmeReleaseAssets(readText('README.zh-CN.md'), releaseVersion));
 
   replaceInFile('docs/release.md', /Current tag: `v[^`]+`/, `Current tag: \`v${releaseVersion}\``);
   replaceInFile('docs/release.md', /Current DMG asset: `SkillBox_[^`]+_universal\.dmg`/, `Current DMG asset: \`${assetName}\``);
