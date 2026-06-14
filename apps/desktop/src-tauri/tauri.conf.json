@@ -39,7 +39,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEEyODI1NTM0MEMyQzJENUQKUldSZExTd01ORldDb2xBS1ZlSnA0SXR6M0VsT2hJeVNjY2x6a0RCRjRRUXAyNDQySmNIZVBzR3EK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc4MDY0NUM3OEEyMkMxOTUKUldTVndTS0t4MFVHZUFzTi9aSVNNUUpXN0ZkanpyeVhYQU0xUVh4L3FvYWJGS082QS9WeUdoZkwK",
       "endpoints": [
         "https://github.com/santosli/SkillBox/releases/latest/download/latest.json"
       ]
