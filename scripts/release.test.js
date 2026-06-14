@@ -14,6 +14,7 @@ import {
   updaterSignatureAssetName,
   updateCaskContent,
   updateIssueTemplateVersionPlaceholder,
+  updateReleaseDocTagCommands,
   updateReadmeReleaseAssets,
   updateSecuritySupport
 } from './release.js';
@@ -47,6 +48,17 @@ test('updates readme dmg and checksum asset names together', () => {
       'SkillBox_0.3.1_universal.dmg.sha256',
       ''
     ].join('\n')
+  );
+});
+
+test('updates optional release doc tag commands when present', () => {
+  assert.equal(
+    updateReleaseDocTagCommands('Release automation creates tags internally.\n', '0.3.1'),
+    'Release automation creates tags internally.\n'
+  );
+  assert.equal(
+    updateReleaseDocTagCommands('git tag v0.3.0\ngit push origin v0.3.0\n', '0.3.1'),
+    'git tag v0.3.1\ngit push origin v0.3.1\n'
   );
 });
 

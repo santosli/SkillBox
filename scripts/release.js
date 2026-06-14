@@ -216,6 +216,13 @@ export function updateReadmeReleaseAssets(content, version) {
     .replace(dmgPattern, assetName);
 }
 
+export function updateReleaseDocTagCommands(content, version) {
+  const releaseVersion = normalizeVersion(version);
+  return String(content)
+    .replace(/git tag v[0-9A-Za-z.-]+/g, `git tag v${releaseVersion}`)
+    .replace(/git push origin v[0-9A-Za-z.-]+/g, `git push origin v${releaseVersion}`);
+}
+
 function normalizeReleaseNotes(notes) {
   const normalized = String(notes || '').replace(/\r\n/g, '\n').trim();
   if (!normalized) {
@@ -327,8 +334,7 @@ function prepareRelease(version, notesFile) {
     `Current updater signature: \`${updaterSignatureAssetName(releaseVersion)}\``
   );
   replaceInFile('docs/release.md', /Current checksum asset: `SkillBox_[^`]+_universal\.dmg\.sha256`/, `Current checksum asset: \`${assetName}.sha256\``);
-  replaceInFile('docs/release.md', /git tag v[0-9A-Za-z.-]+/, `git tag v${releaseVersion}`);
-  replaceInFile('docs/release.md', /git push origin v[0-9A-Za-z.-]+/, `git push origin v${releaseVersion}`);
+  writeText('docs/release.md', updateReleaseDocTagCommands(readText('docs/release.md'), releaseVersion));
 
   replaceInFile('docs/roadmap.md', /Current Focus: \d+\.\d+\.x/, `Current Focus: ${releaseSeries(releaseVersion)}`);
   writeText(
