@@ -9,12 +9,12 @@ DMG plus Tauri updater artifacts through GitHub Releases.
 - Main repository: `santosli/SkillBox`
 - Homebrew tap: `santosli/homebrew-tap`
 - Bundle identifier: `io.github.santosli.skillbox`
-- Current tag: `v0.3.0`
-- Current DMG asset: `SkillBox_0.3.0_universal.dmg`
-- Current updater asset: `SkillBox_0.3.0_universal.app.tar.gz`
-- Current updater signature: `SkillBox_0.3.0_universal.app.tar.gz.sig`
+- Current tag: `v0.3.1`
+- Current DMG asset: `SkillBox_0.3.1_universal.dmg`
+- Current updater asset: `SkillBox_0.3.1_universal.app.tar.gz`
+- Current updater signature: `SkillBox_0.3.1_universal.app.tar.gz.sig`
 - Current updater manifest: `latest.json`
-- Current checksum asset: `SkillBox_0.3.0_universal.dmg.sha256`
+- Current checksum asset: `SkillBox_0.3.1_universal.dmg.sha256`
 
 ## GitHub Actions Secrets
 

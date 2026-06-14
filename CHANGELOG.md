@@ -9,6 +9,12 @@ version tags such as `v0.3.0`.
 
 - No unreleased changes.
 
+## 0.3.1
+
+- Fix remote update previews when a version diff includes directory entries.
+- Fix applying remote updates for skills that symlink to shared directories inside the same GitHub repository.
+- Preserve symlink escape protections for local imports and external paths while snapshotting safe same-repo shared files.
+
 ## 0.3.0
 
 - Add signed in-app update checks for the macOS desktop app, with
