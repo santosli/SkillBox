@@ -1434,6 +1434,15 @@ pub(crate) fn file_metadata(path: &Path) -> Result<FileMetadata> {
         });
     }
 
+    if path.is_dir() {
+        return Ok(FileMetadata {
+            hash: None,
+            size: None,
+            binary: false,
+            too_large: false,
+        });
+    }
+
     let bytes = fs::read(path).map_err(|error| error.to_string())?;
     let size = bytes.len() as u64;
     let too_large = bytes.len() > 120_000;

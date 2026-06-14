@@ -3061,6 +3061,36 @@ fn remote_version_preview_keeps_binary_file_metadata() {
 }
 
 #[test]
+fn remote_diff_file_handles_directory_paths_without_file_metadata() {
+    let root = temp_dir("remote-diff-directory");
+    let old_root = root.join("old");
+    let new_root = root.join("new");
+    fs::create_dir_all(old_root.join("assets")).unwrap();
+    fs::create_dir_all(&new_root).unwrap();
+
+    let diff_file = remote_diff_file(
+        &old_root,
+        &new_root,
+        skillbox_git::GitDiffFile {
+            path: "assets".to_string(),
+            old_path: None,
+            status: "D".to_string(),
+            diff: String::new(),
+        },
+    )
+    .unwrap();
+
+    assert_eq!(diff_file.path, "assets");
+    assert_eq!(diff_file.label, "Deleted");
+    assert_eq!(diff_file.old_hash, None);
+    assert_eq!(diff_file.new_hash, None);
+    assert_eq!(diff_file.old_size, None);
+    assert_eq!(diff_file.new_size, None);
+    assert!(!diff_file.binary);
+    assert!(!diff_file.too_large);
+}
+
+#[test]
 fn remote_version_preview_update_uses_temp_snapshot_without_installing_version() {
     let root = temp_dir("remote-preview-update");
     let managed_root = root.join("SkillBox");
