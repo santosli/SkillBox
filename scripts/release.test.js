@@ -15,6 +15,7 @@ import {
   updateCaskContent,
   updateIssueTemplateVersionPlaceholder,
   updateReleaseDocTagCommands,
+  updateRoadmapReleaseSeries,
   updateReadmeReleaseAssets,
   updateSecuritySupport
 } from './release.js';
@@ -59,6 +60,17 @@ test('updates optional release doc tag commands when present', () => {
   assert.equal(
     updateReleaseDocTagCommands('git tag v0.3.0\ngit push origin v0.3.0\n', '0.3.1'),
     'git tag v0.3.1\ngit push origin v0.3.1\n'
+  );
+});
+
+test('updates roadmap release series while allowing same-series patches', () => {
+  assert.equal(
+    updateRoadmapReleaseSeries('## Current Focus: 0.3.x\n', '0.3.1'),
+    '## Current Focus: 0.3.x\n'
+  );
+  assert.equal(
+    updateRoadmapReleaseSeries('## Current Focus: 0.2.x\n', '0.3.0'),
+    '## Current Focus: 0.3.x\n'
   );
 });
 

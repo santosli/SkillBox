@@ -223,6 +223,15 @@ export function updateReleaseDocTagCommands(content, version) {
     .replace(/git push origin v[0-9A-Za-z.-]+/g, `git push origin v${releaseVersion}`);
 }
 
+export function updateRoadmapReleaseSeries(content, version) {
+  const series = releaseSeries(version);
+  const pattern = /Current Focus: \d+\.\d+\.x/;
+  if (!pattern.test(content)) {
+    throw new Error('docs/roadmap.md is missing the current focus release series.');
+  }
+  return String(content).replace(pattern, `Current Focus: ${series}`);
+}
+
 function normalizeReleaseNotes(notes) {
   const normalized = String(notes || '').replace(/\r\n/g, '\n').trim();
   if (!normalized) {
@@ -336,7 +345,7 @@ function prepareRelease(version, notesFile) {
   replaceInFile('docs/release.md', /Current checksum asset: `SkillBox_[^`]+_universal\.dmg\.sha256`/, `Current checksum asset: \`${assetName}.sha256\``);
   writeText('docs/release.md', updateReleaseDocTagCommands(readText('docs/release.md'), releaseVersion));
 
-  replaceInFile('docs/roadmap.md', /Current Focus: \d+\.\d+\.x/, `Current Focus: ${releaseSeries(releaseVersion)}`);
+  writeText('docs/roadmap.md', updateRoadmapReleaseSeries(readText('docs/roadmap.md'), releaseVersion));
   writeText(
     '.github/ISSUE_TEMPLATE/bug_report.yml',
     updateIssueTemplateVersionPlaceholder(readText('.github/ISSUE_TEMPLATE/bug_report.yml'), releaseVersion)
