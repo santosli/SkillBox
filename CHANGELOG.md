@@ -17,6 +17,8 @@ version tags such as `v0.3.0`.
   the release workflow.
 - Extend release automation and documentation so app updater assets are verified
   before Homebrew publication.
+- Upgrade the desktop build tooling to Vite 8 to clear high-severity npm audit
+  findings before release.
 
 ## 0.2.0
 
