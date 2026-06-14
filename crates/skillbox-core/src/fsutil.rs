@@ -54,6 +54,22 @@ pub(crate) fn resolve_managed_skill_path(
 }
 
 pub(crate) fn copy_skill_dir(source: &Path, destination: &Path) -> Result<()> {
+    copy_skill_dir_with_link_root(source, destination, None)
+}
+
+pub(crate) fn copy_skill_dir_from_checkout(
+    source: &Path,
+    destination: &Path,
+    checkout_root: &Path,
+) -> Result<()> {
+    copy_skill_dir_with_link_root(source, destination, Some(checkout_root))
+}
+
+fn copy_skill_dir_with_link_root(
+    source: &Path,
+    destination: &Path,
+    link_root: Option<&Path>,
+) -> Result<()> {
     if destination.exists() {
         return Err(format!(
             "Destination already exists: {}",
@@ -68,6 +84,10 @@ pub(crate) fn copy_skill_dir(source: &Path, destination: &Path) -> Result<()> {
         ));
     }
     let source_root = fs::canonicalize(source).map_err(|error| error.to_string())?;
+    let link_root = link_root
+        .map(fs::canonicalize)
+        .transpose()
+        .map_err(|error| error.to_string())?;
     fs::create_dir_all(&temp_destination).map_err(|error| error.to_string())?;
 
     let result = (|| {
@@ -81,6 +101,7 @@ pub(crate) fn copy_skill_dir(source: &Path, destination: &Path) -> Result<()> {
                 &entry.path(),
                 &temp_destination.join(file_name),
                 &source_root,
+                link_root.as_deref(),
             )?;
         }
         fs::rename(&temp_destination, destination).map_err(|error| error.to_string())
@@ -96,6 +117,7 @@ pub(crate) fn copy_recursively(
     source: &Path,
     destination: &Path,
     source_root: &Path,
+    link_root: Option<&Path>,
 ) -> Result<()> {
     let metadata = fs::symlink_metadata(source).map_err(|error| error.to_string())?;
     if metadata.is_dir() {
@@ -106,18 +128,31 @@ pub(crate) fn copy_recursively(
                 &entry.path(),
                 &destination.join(entry.file_name()),
                 source_root,
+                link_root,
             )?;
         }
     } else if metadata.file_type().is_symlink() {
         let target = fs::read_link(source).map_err(|error| error.to_string())?;
         let checked_target = symlink_target_for_boundary_check(source, &target)?;
-        if !checked_target.starts_with(source_root) {
+        if checked_target.starts_with(source_root) {
+            symlink_any(&target, destination)?;
+        } else if link_root
+            .map(|root| checked_target.starts_with(root))
+            .unwrap_or(false)
+        {
+            if !checked_target.exists() {
+                return Err(format!(
+                    "Symlink target does not exist inside checkout: {}",
+                    checked_target.display()
+                ));
+            }
+            copy_recursively(&checked_target, destination, source_root, None)?;
+        } else {
             return Err(format!(
                 "Refusing to copy symlink outside source root: {}",
                 source.display()
             ));
         }
-        symlink_any(&target, destination)?;
     } else {
         fs::copy(source, destination).map_err(|error| error.to_string())?;
     }

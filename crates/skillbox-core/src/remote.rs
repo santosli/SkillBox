@@ -1645,8 +1645,8 @@ pub(crate) fn ensure_github_version_snapshot(
     let result = (|| {
         let checkout = temp.join("checkout");
         let git = skillbox_git::GitService::new();
-        git.fetch_ref_path(&repo_url, target_sha, &source_path, &checkout)?;
-        copy_skill_dir(&checkout.join(source_path), &version_path)?;
+        git.fetch_ref_tree(&repo_url, target_sha, &checkout)?;
+        copy_skill_dir_from_checkout(&checkout.join(source_path), &version_path, &checkout)?;
         read_skill(&version_path)?;
         Ok(version_path.clone())
     })();

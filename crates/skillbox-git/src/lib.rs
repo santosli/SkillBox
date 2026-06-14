@@ -292,6 +292,42 @@ impl GitService {
         Ok(sha)
     }
 
+    pub fn fetch_ref_tree(
+        &self,
+        repo_url: &str,
+        reference: &str,
+        checkout_root: impl AsRef<Path>,
+    ) -> Result<String, String> {
+        self.fetch_ref_tree_with_timeout(repo_url, reference, checkout_root, FETCH_REF_TIMEOUT)
+    }
+
+    pub fn fetch_ref_tree_with_timeout(
+        &self,
+        repo_url: &str,
+        reference: &str,
+        checkout_root: impl AsRef<Path>,
+        timeout: Duration,
+    ) -> Result<String, String> {
+        validate_git_remote_arg(repo_url)?;
+        validate_git_reference_arg(reference)?;
+        let checkout_root = checkout_root.as_ref();
+        fs::create_dir_all(checkout_root).map_err(|error| error.to_string())?;
+        self.run(checkout_root, &["init", "-b", "main"])?;
+        self.run(checkout_root, &["remote", "add", "origin", repo_url])?;
+        self.run_network(
+            checkout_root,
+            &["fetch", "--depth", "1", "origin", "--", reference],
+            timeout,
+            "git fetch",
+        )?;
+        let sha = self
+            .run(checkout_root, &["rev-parse", "FETCH_HEAD"])?
+            .trim()
+            .to_string();
+        self.run(checkout_root, &["checkout", "FETCH_HEAD"])?;
+        Ok(sha)
+    }
+
     pub fn diff_no_index_tree(
         &self,
         old_root: impl AsRef<Path>,
@@ -542,6 +578,14 @@ pub fn fetch_ref_path(
     GitService::new().fetch_ref_path(repo_url, reference, path, checkout_root)
 }
 
+pub fn fetch_ref_tree(
+    repo_url: &str,
+    reference: &str,
+    checkout_root: impl AsRef<Path>,
+) -> Result<String, String> {
+    GitService::new().fetch_ref_tree(repo_url, reference, checkout_root)
+}
+
 fn validate_git_remote_arg(repo_url: &str) -> Result<(), String> {
     if repo_url.trim().is_empty() {
         return Err("Git remote URL is required.".to_string());
@@ -788,6 +832,19 @@ mod tests {
         assert!(!sha.is_empty());
         assert!(checkout.join("skills/demo/SKILL.md").exists());
         assert!(!checkout.join("README.md").exists());
+    }
+
+    #[test]
+    fn snapshot_fetch_ref_tree_checks_out_full_tree() {
+        let remote = bare_remote_with_skill("git-snapshot-tree-origin");
+        let temp = temp_dir("git-snapshot-tree-work");
+        let checkout = temp.join("checkout");
+
+        let sha = fetch_ref_tree(remote.to_str().unwrap(), "main", &checkout).unwrap();
+
+        assert!(!sha.is_empty());
+        assert!(checkout.join("skills/demo/SKILL.md").exists());
+        assert!(checkout.join("README.md").exists());
     }
 
     #[test]

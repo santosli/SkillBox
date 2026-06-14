@@ -3360,6 +3360,98 @@ fn apply_update_writes_latest_version_and_preserves_old_version() {
 }
 
 #[test]
+fn apply_update_snapshots_same_repo_symlinked_directories() {
+    let root = temp_dir("apply-update-repo-symlink");
+    let managed_root = root.join("SkillBox");
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    let source = root.join("local").join("find-skills");
+    make_skill(&source, "find-skills", "Find skills");
+    import_skill(&source, SkillKind::Remote, &managed_root).unwrap();
+
+    let remote = bare_remote("apply-update-repo-symlink-origin");
+    let work = temp_dir("apply-update-repo-symlink-work");
+    run_git(&work, &["init", "-b", "main"]);
+    let skill_dir = work.join("skills").join("find-skills");
+    make_skill(&skill_dir, "find-skills", "Find skills");
+    fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: find-skills\ndescription: Find skills\n---\nupdated\n",
+    )
+    .unwrap();
+    fs::create_dir_all(work.join("shared-scripts")).unwrap();
+    fs::write(
+        work.join("shared-scripts").join("design_system.py"),
+        "print('shared')\n",
+    )
+    .unwrap();
+    symlink_dir(
+        Path::new("../../shared-scripts"),
+        &skill_dir.join("scripts"),
+    )
+    .unwrap();
+    run_git(&work, &["add", "."]);
+    run_git(
+        &work,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Add skill with shared scripts",
+        ],
+    );
+    run_git(
+        &work,
+        &["remote", "add", "origin", remote.to_str().unwrap()],
+    );
+    run_git(&work, &["push", "origin", "main"]);
+    let _rewrite = github_repo_rewrite("acme", "apply-update-repo-symlink", &remote);
+    let source_url = github_source_url("acme", "apply-update-repo-symlink", "find-skills");
+    bind_remote_source(
+        BindRemoteSourceRequest {
+            skill_name: "find-skills".to_string(),
+            source_url,
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+    let latest_sha = read_remote_source(&paths.remote_skills_root.join("find-skills"))
+        .unwrap()
+        .latest_sha
+        .unwrap();
+
+    let result = apply_remote_version_change(
+        RemoteVersionChangeApplyRequest {
+            skill_name: "find-skills".to_string(),
+            action: RemoteVersionChangeAction::Update,
+            target_version: latest_sha,
+            preview_id: None,
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    let version_path = paths
+        .remote_skills_root
+        .join("find-skills")
+        .join("versions")
+        .join(result.to_version);
+    let scripts_path = version_path.join("scripts");
+    assert!(!fs::symlink_metadata(&scripts_path)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(
+        fs::read_to_string(scripts_path.join("design_system.py")).unwrap(),
+        "print('shared')\n"
+    );
+}
+
+#[test]
 fn source_candidates_rank_by_name_path_trust_and_popularity() {
     let candidates = rank_remote_source_candidates(
         "find-skills",
