@@ -245,11 +245,16 @@ jobs:
             echo
             echo "${release_scope}"
           } > release-notes.md
+          mkdir -p release-assets
+          cp "$DMG_PATH" "release-assets/$ASSET_NAME"
+          cp "$UPDATER_PATH" "release-assets/$UPDATER_ASSET_NAME"
+          cp "$UPDATER_SIG_PATH" "release-assets/$UPDATER_SIG_ASSET_NAME"
+          cp latest.json release-assets/latest.json
           gh release create "$GITHUB_REF_NAME" \
-            "$DMG_PATH#$ASSET_NAME" \
-            "$UPDATER_PATH#$UPDATER_ASSET_NAME" \
-            "$UPDATER_SIG_PATH#$UPDATER_SIG_ASSET_NAME" \
-            "latest.json#latest.json" \
+            "release-assets/$ASSET_NAME" \
+            "release-assets/$UPDATER_ASSET_NAME" \
+            "release-assets/$UPDATER_SIG_ASSET_NAME" \
+            "release-assets/latest.json" \
             --title "SkillBox $GITHUB_REF_NAME" \
             --notes-file release-notes.md \
             "${release_flags[@]}"

@@ -85,6 +85,9 @@ Use `--tap-dir <path>` to reuse an existing local checkout of
 
 The GitHub Release body is generated from the matching `CHANGELOG.md` section.
 The release workflow fails if that section is missing.
+Release assets are uploaded from versioned filenames under `release-assets/`;
+the updater URLs in `latest.json` must match those asset filenames, not only
+GitHub release labels.
 
 ## Smoke Test
 

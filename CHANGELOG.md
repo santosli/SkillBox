@@ -17,6 +17,8 @@ version tags such as `v0.3.0`.
   the release workflow.
 - Build both macOS app and DMG bundles in the release workflow so updater
   archives are generated, verified, and published.
+- Upload updater artifacts with versioned asset filenames so `latest.json`
+  update URLs match the GitHub Release downloads.
 - Extend release automation and documentation so app updater assets are verified
   before Homebrew publication.
 - Upgrade the desktop build tooling to Vite 8 to clear high-severity npm audit

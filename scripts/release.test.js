@@ -78,6 +78,8 @@ test('release workflow builds app and dmg bundles for updater artifacts', () => 
   const workflow = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8');
 
   assert.match(workflow, /args:\s*--target universal-apple-darwin --bundles app,dmg/);
+  assert.match(workflow, /cp "\$UPDATER_PATH" "release-assets\/\$UPDATER_ASSET_NAME"/);
+  assert.doesNotMatch(workflow, /\$UPDATER_PATH#\$UPDATER_ASSET_NAME/);
 });
 
 test('inserts and extracts changelog release notes', () => {
