@@ -9,6 +9,13 @@ version tags such as `v0.3.0`.
 
 - No unreleased changes.
 
+## 0.3.2
+
+- Install GitHub-backed remote skills from the desktop Install dialog without deploying them automatically.
+- Stop counting managed remote skill `current` symlinks as active runtime workspaces.
+- Keep newly imported skill tags empty until users add their own labels.
+- Align dashboard page title spacing with the sidebar brand.
+
 ## 0.3.1
 
 - Fix remote update previews when a version diff includes directory entries.
