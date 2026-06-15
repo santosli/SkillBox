@@ -9,7 +9,7 @@ import {
 } from './dashboardMetadata.js';
 import { normalizeRemoteSkillUpdates } from './skillStatusRefresh.js';
 
-test('derives dashboard tags, agent label, source label, status, and favorite state', () => {
+test('derives dashboard labels, status, and favorite state without generated tags', () => {
   const remoteUpdates = normalizeRemoteSkillUpdates({
     statuses: [
       { skill_name: 'note-manager', state: 'update_available', update_available: true }
@@ -30,16 +30,14 @@ test('derives dashboard tags, agent label, source label, status, and favorite st
 
   assert.equal(skill.agentLabel, 'Codex');
   assert.equal(skill.sourceLabel, '~/.codex/skills');
-  assert.deepEqual(skill.installedAgents, [
-    { id: 'codex', label: 'Codex', iconClass: 'codex-app', iconAsset: 'codex-app' }
-  ]);
+  assert.deepEqual(skill.installedAgents, []);
   assert.equal(skill.statusLabel, 'Update available');
   assert.equal(skill.statusTone, 'amber');
   assert.equal(skill.isFavorite, true);
-  assert.deepEqual(skill.displayTags, ['manage', 'doc', 'obsidian', 'github', 'sync']);
+  assert.deepEqual(skill.displayTags, []);
 });
 
-test('derives user skill sync status and default general tag', () => {
+test('derives user skill sync status without a default tag', () => {
   const skill = deriveDashboardSkill(
     {
       name: 'alpha',
@@ -53,16 +51,14 @@ test('derives user skill sync status and default general tag', () => {
   );
 
   assert.equal(skill.agentLabel, 'Codex CLI');
-  assert.deepEqual(skill.installedAgents, [
-    { id: 'agents', label: 'Codex CLI', iconClass: 'codex-cli', iconAsset: 'codex-cli' }
-  ]);
+  assert.deepEqual(skill.installedAgents, []);
   assert.equal(skill.statusLabel, 'Synced');
   assert.equal(skill.statusTone, 'green');
   assert.equal(skill.isFavorite, false);
-  assert.deepEqual(skill.displayTags, ['general']);
+  assert.deepEqual(skill.displayTags, []);
 });
 
-test('derives automatic tags only from skill name and description', () => {
+test('does not derive tags from skill name and description', () => {
   const skill = deriveDashboardSkill(
     {
       name: 'alpha',
@@ -77,7 +73,25 @@ test('derives automatic tags only from skill name and description', () => {
     new Set()
   );
 
-  assert.deepEqual(skill.displayTags, ['general']);
+  assert.deepEqual(skill.displayTags, []);
+});
+
+test('managed current symlinks do not count as active workspace deployments', () => {
+  const skill = deriveDashboardSkill(
+    {
+      name: 'last30days',
+      description: 'Research what people actually say about any topic in the last 30 days.',
+      sourceRoot: '/Users/example/.skillbox/remote-skills',
+      type: 'remote',
+      isSymlink: true,
+      deployments: []
+    },
+    { state: 'clean' },
+    normalizeRemoteSkillUpdates(null),
+    new Set()
+  );
+
+  assert.deepEqual(skill.installedAgents, []);
 });
 
 test('derives installed agent icons from explicit agent and deployment fields', () => {
@@ -213,7 +227,7 @@ test('normalizes editable dashboard tag overrides from persisted values', () => 
   assert.deepEqual(normalizeDashboardTagOverrides('not-json'), {});
 });
 
-test('falls back to the current symlink deployment target for installed agent icons', () => {
+test('does not infer installed agents from managed current symlink status', () => {
   const skill = deriveDashboardSkill(
     {
       name: 'managed-skill',
@@ -228,20 +242,18 @@ test('falls back to the current symlink deployment target for installed agent ic
   );
 
   assert.equal(skill.agentLabel, 'Local');
-  assert.deepEqual(skill.installedAgents, [
-    { id: 'codex', label: 'Codex', iconClass: 'codex-app', iconAsset: 'codex-app' }
-  ]);
+  assert.deepEqual(skill.installedAgents, []);
 });
 
 test('builds stable dashboard filter options from derived skills', () => {
   const skills = [
     { displayTags: ['sync', 'github'], agentLabel: 'Codex' },
-    { displayTags: ['general'], agentLabel: 'Codex CLI' },
+    { displayTags: [], agentLabel: 'Codex CLI' },
     { displayTags: ['sync'], agentLabel: 'Local' }
   ];
 
   assert.deepEqual(dashboardFilterOptions(skills), {
-    tags: ['sync', 'github', 'general'],
+    tags: ['sync', 'github'],
     agents: ['Codex', 'Codex CLI', 'Local']
   });
 });

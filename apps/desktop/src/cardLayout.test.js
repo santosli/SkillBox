@@ -240,6 +240,40 @@ test('remote source bind validation commands run off the command handler', () =>
   }
 });
 
+test('remote skill URL import installs GitHub skills through the desktop bridge', () => {
+  const submitRemoteImport = appSource.match(
+    /async function submitRemoteImport\(event\)\s*\{(?<body>[\s\S]*?)\n  \}/
+  )?.groups.body || '';
+
+  assert.match(submitRemoteImport, /invoke\('install_github_remote_skill',\s*\{\s*request:\s*\{/);
+  assert.match(submitRemoteImport, /source_url:\s*value/);
+  assert.match(submitRemoteImport, /target_root:\s*null/);
+  assert.match(submitRemoteImport, /actor:\s*'desktop'/);
+  assert.match(submitRemoteImport, /await refresh\(\);/);
+  assert.doesNotMatch(submitRemoteImport, /invoke\('parse_github_url'/);
+  assert.doesNotMatch(appSource, /Remote download\/import is not wired yet\./);
+});
+
+test('remote skill URL import restores ready state when install fails', () => {
+  const submitRemoteImport = appSource.match(
+    /async function submitRemoteImport\(event\)\s*\{(?<body>[\s\S]*?)\n  \}/
+  )?.groups.body || '';
+  const catchBlock = submitRemoteImport.match(/catch \(submitError\) \{(?<body>[\s\S]*?)\n    \}/)
+    ?.groups.body || '';
+
+  assert.match(catchBlock, /setStatus\('ready'\);/);
+});
+
+test('remote GitHub install command runs off the command handler', () => {
+  const commandStart = tauriSource.indexOf('async fn install_github_remote_skill');
+  const nextCommandStart = tauriSource.indexOf('#[tauri::command]', commandStart + 1);
+  const command = tauriSource.slice(commandStart, nextCommandStart);
+
+  assert.ok(commandStart > 0, 'install_github_remote_skill should be registered as a command');
+  assert.match(command, /tauri::async_runtime::spawn_blocking/);
+  assert.match(tauriSource, /install_github_remote_skill,/);
+});
+
 test('dashboard startup loads cached remote update state without refreshing', () => {
   assert.match(appSource, /invoke\('cached_remote_skill_updates'\)/);
   assert.match(appSource, /setRemoteSkillUpdates\(cachedRemoteUpdates\)/);

@@ -72,7 +72,8 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 - Rust CLI 入口：`skillbox install <github-url> [--target <path>]`。
 - Rust core API：`install_github_remote_skill`。
-- UI 当前只支持 URL parse 和提示，尚未执行下载导入。
+- Desktop UI `Install` dialog accepts GitHub tree/blob/raw/API URLs and calls the
+  Rust install API without a deploy target.
 
 步骤：
 
@@ -86,6 +87,8 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 写入 `source.json`，包含 GitHub 来源和 `installedSha`、`latestSha`。
 - 写入 SQLite `skills`。
 - 如果提供 target，执行 deploy workflow。
+- Desktop UI import does not provide target by default, so a newly installed
+  GitHub skill remains in the managed store until the user explicitly deploys it.
 
 失败与回滚：
 

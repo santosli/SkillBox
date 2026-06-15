@@ -706,8 +706,18 @@ export default function App() {
 
     try {
       if (remoteImport.mode === 'url') {
-        await invoke('parse_github_url', { url: value });
-        setNotice('Remote URL was accepted. Remote download/import is not wired yet.');
+        setStatus('importing');
+        const result = await invoke('install_github_remote_skill', {
+          request: {
+            source_url: value,
+            target_root: null,
+            actor: 'desktop'
+          }
+        });
+        setRemoteImport((current) => ({ ...current, open: false, value: '', error: '' }));
+        await refresh();
+        setNotice(`Installed ${result.skillName || result.skill_name || 'remote skill'} from GitHub.`);
+        return;
       } else {
         setNotice('Markdown file import is not wired yet.');
       }
@@ -716,6 +726,7 @@ export default function App() {
         ...current,
         error: submitError.message || String(submitError) || 'Unable to prepare this import.'
       }));
+      setStatus('ready');
       return;
     }
 

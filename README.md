@@ -30,7 +30,7 @@ Current release: `v0.3.1`. SkillBox is useful today for local skill management, 
 
 <img src="docs/screenshots/skillbox-dashboard-card.png" alt="SkillBox skill card detail" width="680">
 
-Skill cards make usage and maintenance state visible at a glance, including call counts, update status, tags, favorites, and deployed runtime targets.
+Skill cards make usage and maintenance state visible at a glance, including call counts, update status, user-edited tags, favorites, and deployed runtime targets.
 
 ![SkillBox skill detail](docs/screenshots/skillbox-skill-detail.png)
 
@@ -84,7 +84,7 @@ Longer-term support for Claude, OpenClaw, Cursor, Claude Code, Copilot, and othe
 - Scan local `SKILL.md` roots and return sorted skills with frontmatter metadata, content hashes, symlink status, and scan errors.
 - Import existing local skills into `~/.skillbox/user-skills` or `~/.skillbox/remote-skills`.
 - Deploy and undeploy managed skills into runtime folders through symlinks.
-- Parse GitHub tree, blob, raw, and contents API URLs that point to skill directories or `SKILL.md`.
+- Install remote skills from GitHub tree, blob, raw, and contents API URLs that point to skill directories or `SKILL.md`.
 - Track remote GitHub sources, check for updates, preview all-file diffs, apply updates, and roll back to immutable versions.
 - Manage workspace roots for global and project-local runtimes.
 - Sync user skills through a shared Git repository with desktop diff review and Conventional Commit message generation.
@@ -154,8 +154,9 @@ Homebrew uninstall does not delete `~/.skillbox`.
 1. Open SkillBox.
 2. Run `Scan` to discover known global and project-local skill workspaces.
 3. Use `Import` to review candidates before SkillBox copies them into `~/.skillbox`.
-4. Deploy imported skills to selected runtime workspaces.
-5. Optional: enable usage hook injection in Settings to record real skill calls.
+4. Use `Install` to add GitHub-backed remote skills to the managed store without deploying them automatically.
+5. Deploy managed skills to selected runtime workspaces when you want an agent to use them.
+6. Optional: enable usage hook injection in Settings to record real skill calls.
 
 ## Permissions And Local Changes
 

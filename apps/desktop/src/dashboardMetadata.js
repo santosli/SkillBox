@@ -7,16 +7,6 @@ import { remoteSkillRowStatus } from './skillStatusRefresh.js';
 import { userSkillRowStatus } from './userSkillsGitSync.js';
 import { normalizeWorkspaces } from './workspaces.js';
 
-const tagRules = [
-  ['manage', ['manage', 'manager', 'organize', 'maintain']],
-  ['doc', ['doc', 'docs', 'document', 'markdown', 'writing']],
-  ['code', ['coding', 'development', 'review', 'frontend', 'api']],
-  ['obsidian', ['obsidian', 'vault']],
-  ['github', ['github', 'git']],
-  ['research', ['research', 'search', 'browser']],
-  ['sync', ['sync', 'import', 'update', 'deploy']]
-];
-
 export function deriveDashboardSkill(
   skill,
   userSkillsGit,
@@ -151,28 +141,13 @@ function fallbackStatus(skill) {
   return { label: 'Sync not checked', tone: 'slate' };
 }
 
-function deriveTags(skill) {
-  const haystack = [
-    skill.name,
-    skill.description
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
-  const tags = tagRules
-    .filter(([, needles]) => needles.some((needle) => haystack.includes(needle)))
-    .map(([tag]) => tag);
-
-  return tags.length > 0 ? tags : ['general'];
-}
-
 function displayTagsForSkill(skill, tagOverrides) {
   const normalizedOverrides = normalizeDashboardTagOverrides(tagOverrides);
   if (Object.prototype.hasOwnProperty.call(normalizedOverrides, skill.name)) {
     return normalizedOverrides[skill.name];
   }
 
-  return deriveTags(skill);
+  return [];
 }
 
 function deriveAgentLabel(sourceRoot = '') {
@@ -201,16 +176,10 @@ function deriveInstalledAgents(skill, workspaces = []) {
   addDeploymentAgents(agents, skill.deploymentTargets);
   addDeploymentAgents(agents, skill.deployment_targets);
 
-  addAgentFromPath(agents, skill.sourceRoot);
-  addAgentFromPath(agents, skill.source_root);
   addAgentFromPath(agents, skill.targetRoot);
   addAgentFromPath(agents, skill.target_root);
   addAgentFromPath(agents, skill.targetPath);
   addAgentFromPath(agents, skill.target_path);
-
-  if (agents.length === 0 && isSkillDeployed(skill)) {
-    pushAgent(agents, agentWorkspaceIconForId('codex'));
-  }
 
   return agents;
 }
@@ -318,15 +287,6 @@ function pushAgent(agents, agent) {
   if (agent && !agents.some((item) => item.id === agent.id)) {
     agents.push(agent);
   }
-}
-
-function isSkillDeployed(skill) {
-  const normalized = String(skill.status || '').toLowerCase();
-  return (
-    Boolean(skill.isSymlink || skill.is_symlink) ||
-    normalized.includes('deployed') ||
-    normalized.includes('healthy')
-  );
 }
 
 function pushUnique(items, item) {

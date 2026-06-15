@@ -332,6 +332,21 @@ fn parse_github_url(url: String) -> Result<Value, String> {
 }
 
 #[tauri::command]
+async fn install_github_remote_skill(
+    request: skillbox_core::InstallGithubRemoteSkillRequest,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = skillbox_core::install_github_remote_skill(
+            request,
+            skillbox_core::default_managed_root(),
+        )?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Remote skill install task failed: {error}"))?
+}
+
+#[tauri::command]
 fn user_skills_git_status() -> Result<Value, String> {
     let status = skillbox_core::user_skills_git_status(skillbox_core::default_managed_root())?;
     serde_json::to_value(status).map_err(|error| error.to_string())
@@ -649,6 +664,7 @@ pub fn run() {
             deploy_skill,
             undeploy_skill,
             parse_github_url,
+            install_github_remote_skill,
             user_skills_git_status,
             user_skills_git_changes,
             set_user_skills_git_remote,
