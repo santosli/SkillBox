@@ -133,6 +133,12 @@ test('dashboard actions stay in one equal segmented row', () => {
   assert.match(appSource, /setPreviewAction\(null\);/);
 });
 
+test('dashboard content keeps a compact title offset from the window top', () => {
+  const contentRule = css.match(/\.content\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(contentRule, /padding:\s*24px 48px 48px;/);
+});
+
 test('workspace type tabs use three columns without an empty slot', () => {
   const workspaceTypeTabsRule = css.match(/\.workspaceTypeTabs\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
 
