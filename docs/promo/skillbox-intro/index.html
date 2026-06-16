@@ -1,0 +1,1149 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080, initial-scale=1" />
+    <title>SkillBox Intro Promo</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      @font-face {
+        font-family: "IBM Plex Sans";
+        src: url("assets/fonts/ibm-plex-sans-300.woff2") format("woff2");
+        font-weight: 300;
+        font-style: normal;
+      }
+
+      @font-face {
+        font-family: "IBM Plex Sans";
+        src: url("assets/fonts/ibm-plex-sans-400.woff2") format("woff2");
+        font-weight: 400;
+        font-style: normal;
+      }
+
+      @font-face {
+        font-family: "IBM Plex Sans";
+        src: url("assets/fonts/ibm-plex-sans-600.woff2") format("woff2");
+        font-weight: 600;
+        font-style: normal;
+      }
+
+      @font-face {
+        font-family: "IBM Plex Sans";
+        src: url("assets/fonts/ibm-plex-sans-700.woff2") format("woff2");
+        font-weight: 700;
+        font-style: normal;
+      }
+
+      @font-face {
+        font-family: "Space Grotesk";
+        src: url("assets/fonts/space-grotesk-400.woff2") format("woff2");
+        font-weight: 400;
+        font-style: normal;
+      }
+
+      @font-face {
+        font-family: "Space Grotesk";
+        src: url("assets/fonts/space-grotesk-700.woff2") format("woff2");
+        font-weight: 700 900;
+        font-style: normal;
+      }
+
+      @font-face {
+        font-family: "IBM Plex Mono";
+        src: url("assets/fonts/ibm-plex-mono-400.woff2") format("woff2");
+        font-weight: 400;
+        font-style: normal;
+      }
+
+      @font-face {
+        font-family: "IBM Plex Mono";
+        src: url("assets/fonts/ibm-plex-mono-700.woff2") format("woff2");
+        font-weight: 700;
+        font-style: normal;
+      }
+
+      :root {
+        color-scheme: dark;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: #08111f;
+      }
+
+      body {
+        font-family: "IBM Plex Sans", sans-serif;
+        color: #f8fafc;
+      }
+
+      #skillbox-intro {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at 18% 18%, rgba(10, 132, 255, 0.2), rgba(8, 17, 31, 0) 30%),
+          radial-gradient(circle at 84% 78%, rgba(47, 209, 124, 0.14), rgba(8, 17, 31, 0) 28%),
+          #08111f;
+      }
+
+      .bg-grid,
+      .ambient-line,
+      .orbital {
+        position: absolute;
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      .bg-grid {
+        inset: 0;
+        opacity: 0.22;
+        background-image:
+          linear-gradient(rgba(143, 211, 255, 0.08) 1px, rgba(8, 17, 31, 0) 1px),
+          linear-gradient(90deg, rgba(143, 211, 255, 0.08) 1px, rgba(8, 17, 31, 0) 1px);
+        background-size: 80px 80px;
+        mask-image: radial-gradient(circle at 50% 45%, #000 0%, rgba(0, 0, 0, 0.6) 48%, rgba(0, 0, 0, 0) 78%);
+      }
+
+      .ambient-line {
+        width: 620px;
+        height: 1px;
+        background: linear-gradient(90deg, rgba(143, 211, 255, 0), rgba(143, 211, 255, 0.5), rgba(47, 209, 124, 0));
+        filter: drop-shadow(0 0 18px rgba(10, 132, 255, 0.35));
+      }
+
+      .line-a {
+        top: 190px;
+        right: 130px;
+      }
+
+      .line-b {
+        left: 80px;
+        bottom: 160px;
+      }
+
+      .orbital {
+        right: -170px;
+        top: -160px;
+        width: 560px;
+        height: 560px;
+        border: 1px solid rgba(143, 211, 255, 0.14);
+        border-radius: 50%;
+        box-shadow: inset 0 0 60px rgba(10, 132, 255, 0.08);
+      }
+
+      .scene {
+        position: absolute;
+        inset: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background-color: #08111f;
+      }
+
+      .scene-content {
+        position: relative;
+        z-index: 2;
+        display: flex;
+        width: 100%;
+        height: 100%;
+        padding: 112px 128px;
+        gap: 56px;
+      }
+
+      .scene-content.column {
+        flex-direction: column;
+        justify-content: center;
+      }
+
+      .scene-content.split {
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        width: fit-content;
+        min-height: 44px;
+        padding: 10px 18px;
+        border: 1px solid rgba(143, 211, 255, 0.22);
+        border-radius: 999px;
+        background: rgba(17, 24, 39, 0.82);
+        color: #8fd3ff;
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      h1,
+      h2 {
+        font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
+        letter-spacing: 0.01em;
+      }
+
+      h1 {
+        max-width: 760px;
+        font-size: 96px;
+        line-height: 1.02;
+        font-weight: 900;
+      }
+
+      h2 {
+        max-width: 760px;
+        font-size: 70px;
+        line-height: 1.06;
+        font-weight: 900;
+      }
+
+      .lead {
+        max-width: 820px;
+        color: #c8d3e1;
+        font-size: 34px;
+        line-height: 1.34;
+        font-weight: 350;
+      }
+
+      .muted {
+        color: #9aa7b8;
+      }
+
+      .scene-copy {
+        display: flex;
+        flex: 0 0 660px;
+        flex-direction: column;
+        gap: 28px;
+      }
+
+      .path {
+        font-family: "IBM Plex Mono", monospace;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .logo-mark {
+        display: grid;
+        place-items: center;
+        width: 116px;
+        height: 116px;
+        border-radius: 28px;
+        filter: drop-shadow(0 0 34px rgba(10, 132, 255, 0.44));
+      }
+
+      .logo-mark.app-icon {
+        background: url("assets/skillbox-app-icon.png") center / contain no-repeat;
+      }
+
+      .screenshot-frame {
+        position: relative;
+        overflow: hidden;
+        border: 1px solid rgba(143, 211, 255, 0.2);
+        background: rgba(248, 250, 252, 0.06);
+        box-shadow: 0 40px 100px rgba(0, 0, 0, 0.42), 0 0 70px rgba(10, 132, 255, 0.16);
+      }
+
+      .screenshot-frame img {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        filter: contrast(1.05) saturate(1.03);
+        transform: translateZ(0);
+      }
+
+      .browser-frame {
+        border-radius: 34px;
+        padding-top: 44px;
+      }
+
+      .browser-frame::before {
+        content: "";
+        position: absolute;
+        top: 17px;
+        left: 24px;
+        width: 15px;
+        height: 15px;
+        border-radius: 50%;
+        background: #f87171;
+        box-shadow: 26px 0 0 #facc15, 52px 0 0 #2fd17c;
+        z-index: 3;
+      }
+
+      .browser-frame img {
+        height: calc(100% - 44px);
+      }
+
+      .chip-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        align-items: center;
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        min-height: 48px;
+        padding: 11px 18px;
+        border-radius: 999px;
+        background: rgba(143, 211, 255, 0.11);
+        border: 1px solid rgba(143, 211, 255, 0.18);
+        color: #dbeafe;
+        font-size: 22px;
+        font-weight: 700;
+      }
+
+      .chip.green {
+        color: #d8ffe7;
+        background: rgba(47, 209, 124, 0.14);
+        border-color: rgba(47, 209, 124, 0.28);
+      }
+
+      .chip.blue {
+        color: #e2f2ff;
+        background: rgba(10, 132, 255, 0.18);
+        border-color: rgba(10, 132, 255, 0.34);
+      }
+
+      #scene-1 {
+        z-index: 1;
+      }
+
+      .scatter-wrap {
+        position: relative;
+        flex: 0 0 870px;
+        height: 680px;
+      }
+
+      .skill-card {
+        position: absolute;
+        width: 410px;
+        min-height: 190px;
+        padding: 28px;
+        border-radius: 26px;
+        border: 1px solid rgba(143, 211, 255, 0.16);
+        background: rgba(17, 24, 39, 0.86);
+        box-shadow: 0 30px 80px rgba(0, 0, 0, 0.36);
+      }
+
+      .skill-card strong {
+        display: block;
+        color: #f8fafc;
+        font-size: 31px;
+        line-height: 1.1;
+      }
+
+      .skill-card span {
+        display: block;
+        margin-top: 16px;
+        color: #9aa7b8;
+        font-size: 22px;
+        line-height: 1.32;
+      }
+
+      .card-a {
+        left: 40px;
+        top: 70px;
+        border-color: rgba(10, 132, 255, 0.32);
+      }
+
+      .card-b {
+        right: 40px;
+        top: 0;
+        border-color: rgba(143, 211, 255, 0.22);
+      }
+
+      .card-c {
+        left: 210px;
+        bottom: 80px;
+        border-color: rgba(47, 209, 124, 0.3);
+      }
+
+      .hub-mini {
+        position: absolute;
+        left: 420px;
+        top: 248px;
+        display: grid;
+        place-items: center;
+        width: 210px;
+        height: 210px;
+        border-radius: 44px;
+        background: rgba(10, 132, 255, 0.16);
+        border: 1px solid rgba(143, 211, 255, 0.36);
+        box-shadow: 0 0 90px rgba(10, 132, 255, 0.38);
+      }
+
+      .hub-mini .logo-mark {
+        width: 100px;
+        height: 100px;
+        border-radius: 26px;
+      }
+
+      .connector {
+        position: absolute;
+        height: 2px;
+        width: 250px;
+        background: linear-gradient(90deg, rgba(143, 211, 255, 0), rgba(143, 211, 255, 0.72), rgba(47, 209, 124, 0));
+        transform-origin: left center;
+        opacity: 0.72;
+      }
+
+      .conn-a {
+        left: 292px;
+        top: 204px;
+        transform: rotate(18deg);
+      }
+
+      .conn-b {
+        left: 610px;
+        top: 280px;
+        transform: rotate(-24deg);
+      }
+
+      .conn-c {
+        left: 410px;
+        top: 492px;
+        transform: rotate(-50deg);
+      }
+
+      #scene-2 {
+        z-index: 2;
+        opacity: 0;
+      }
+
+      #scene-2 .scene-content {
+        padding: 82px 100px 74px;
+        gap: 38px;
+      }
+
+      .reveal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 40px;
+      }
+
+      .brand-lockup {
+        display: flex;
+        align-items: center;
+        gap: 26px;
+      }
+
+      .brand-lockup h2 {
+        font-size: 88px;
+      }
+
+      .dashboard-shot {
+        position: relative;
+        width: 1740px;
+        height: 760px;
+        align-self: center;
+      }
+
+      .dashboard-shot img {
+        object-position: 50% 35%;
+        transform: scale(1.13) translateZ(0);
+      }
+
+      .dashboard-closeup {
+        position: absolute;
+        right: 72px;
+        bottom: 58px;
+        z-index: 4;
+        width: 610px;
+        padding: 18px;
+        border-radius: 30px;
+        background: rgba(8, 17, 31, 0.78);
+        border: 1px solid rgba(143, 211, 255, 0.32);
+        box-shadow: 0 30px 90px rgba(0, 0, 0, 0.5), 0 0 70px rgba(10, 132, 255, 0.22);
+        backdrop-filter: blur(8px);
+      }
+
+      .dashboard-card-visual {
+        width: 100%;
+        height: 336px;
+        border-radius: 22px;
+        background: url("assets/skillbox-dashboard-card.png") 50% 50% / cover no-repeat;
+      }
+
+      .evidence-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      .evidence-chip {
+        display: inline-flex;
+        align-items: center;
+        min-height: 44px;
+        padding: 10px 15px;
+        border-radius: 999px;
+        color: #e6f4ff;
+        background: rgba(10, 132, 255, 0.22);
+        border: 1px solid rgba(143, 211, 255, 0.32);
+        font-size: 22px;
+        font-weight: 800;
+      }
+
+      #scene-3 {
+        z-index: 3;
+        opacity: 0;
+      }
+
+      .store-map {
+        position: relative;
+        width: 900px;
+        height: 720px;
+        flex: 0 0 900px;
+      }
+
+      .store-core {
+        position: absolute;
+        z-index: 3;
+        left: 275px;
+        top: 210px;
+        width: 350px;
+        height: 220px;
+        padding: 40px;
+        border-radius: 42px;
+        background: rgba(17, 24, 39, 0.92);
+        border: 1px solid rgba(143, 211, 255, 0.28);
+        box-shadow: 0 0 96px rgba(10, 132, 255, 0.24);
+      }
+
+      .store-core .path {
+        color: #8fd3ff;
+        font-size: 34px;
+        font-weight: 700;
+      }
+
+      .store-core p {
+        margin-top: 18px;
+        color: #c8d3e1;
+        font-size: 24px;
+        line-height: 1.28;
+      }
+
+      .runtime {
+        position: absolute;
+        z-index: 2;
+        width: 310px;
+        padding: 22px 24px;
+        border-radius: 26px;
+        background: rgba(248, 250, 252, 0.06);
+        border: 1px solid rgba(143, 211, 255, 0.2);
+        color: #e5edf7;
+        font-size: 24px;
+        font-weight: 700;
+      }
+
+      .runtime .path {
+        display: block;
+        margin-top: 10px;
+        color: #9aa7b8;
+        font-size: 19px;
+      }
+
+      .runtime.r1 {
+        left: 20px;
+        top: 44px;
+      }
+
+      .runtime.r2 {
+        right: 18px;
+        top: 54px;
+      }
+
+      .runtime.r3 {
+        left: 12px;
+        bottom: 74px;
+      }
+
+      .runtime.r4 {
+        right: 30px;
+        bottom: 70px;
+      }
+
+      .map-line {
+        position: absolute;
+        z-index: 1;
+        height: 2px;
+        width: 310px;
+        background: linear-gradient(90deg, rgba(47, 209, 124, 0), rgba(47, 209, 124, 0.9), rgba(143, 211, 255, 0));
+        transform-origin: center;
+        opacity: 0.85;
+      }
+
+      .ml1 {
+        left: 230px;
+        top: 174px;
+        transform: rotate(28deg);
+      }
+
+      .ml2 {
+        right: 214px;
+        top: 182px;
+        transform: rotate(-28deg);
+      }
+
+      .ml3 {
+        left: 220px;
+        bottom: 204px;
+        transform: rotate(-28deg);
+      }
+
+      .ml4 {
+        right: 220px;
+        bottom: 204px;
+        transform: rotate(28deg);
+      }
+
+      #scene-4 {
+        z-index: 4;
+        opacity: 0;
+      }
+
+      .review-stack {
+        display: grid;
+        gap: 20px;
+        width: 940px;
+      }
+
+      .import-shot {
+        height: 590px;
+        border-radius: 30px;
+      }
+
+      .import-shot img {
+        object-position: 0% 50%;
+        transform-origin: left center;
+        transform: scale(1.04) translateZ(0);
+      }
+
+      .update-motif {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 24px;
+        padding: 24px 28px;
+        border-radius: 26px;
+        background: rgba(17, 24, 39, 0.9);
+        border: 1px solid rgba(47, 209, 124, 0.32);
+        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34), 0 0 54px rgba(47, 209, 124, 0.12);
+      }
+
+      .update-motif strong {
+        color: #f8fafc;
+        font-size: 26px;
+      }
+
+      .update-motif span {
+        display: block;
+        margin-top: 8px;
+        color: #9aa7b8;
+        font-size: 20px;
+      }
+
+      .review-button {
+        min-height: 56px;
+        padding: 14px 22px;
+        border-radius: 16px;
+        background: #0a84ff;
+        color: #f8fafc;
+        font-size: 21px;
+        font-weight: 900;
+      }
+
+      .safety-panel {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px;
+        margin-top: 20px;
+      }
+
+      .safety-row {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 50px;
+        padding: 11px 16px;
+        border-radius: 999px;
+        background: rgba(17, 24, 39, 0.78);
+        border: 1px solid rgba(143, 211, 255, 0.16);
+        color: #d6e2ee;
+        font-size: 20px;
+        font-weight: 700;
+      }
+
+      .check-dot {
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: #2fd17c;
+        box-shadow: 0 0 24px rgba(47, 209, 124, 0.5);
+      }
+
+      #scene-5 {
+        z-index: 5;
+        opacity: 0;
+      }
+
+      .usage-layout {
+        display: grid;
+        grid-template-columns: 760px 1fr;
+        gap: 36px;
+        align-items: center;
+        width: 100%;
+      }
+
+      .card-detail-shot {
+        width: 760px;
+        height: 530px;
+        border-radius: 34px;
+      }
+
+      .history-shot {
+        width: 840px;
+        height: 570px;
+        border-radius: 34px;
+      }
+
+      .card-detail-shot img {
+        object-position: 50% 45%;
+        transform: scale(1.12) translateZ(0);
+      }
+
+      .history-shot img {
+        object-position: 50% 34%;
+        transform: scale(1.16) translateZ(0);
+      }
+
+      .stat-callout {
+        display: grid;
+        width: 760px;
+        margin-top: 28px;
+        padding: 34px 38px;
+        border-radius: 28px;
+        background: rgba(17, 24, 39, 0.88);
+        border: 1px solid rgba(47, 209, 124, 0.28);
+        box-shadow: 0 0 64px rgba(47, 209, 124, 0.12);
+      }
+
+      .stat-callout strong {
+        font-family: "IBM Plex Mono", monospace;
+        color: #2fd17c;
+        font-size: 78px;
+        line-height: 1;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .stat-callout span {
+        margin-top: 10px;
+        color: #c8d3e1;
+        font-size: 24px;
+      }
+
+      #scene-6 {
+        z-index: 6;
+        opacity: 0;
+      }
+
+      #scene-6 .scene-content {
+        align-items: center;
+        text-align: center;
+        padding: 116px 180px;
+      }
+
+      .final-logo {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 34px;
+      }
+
+      .final-logo h1 {
+        font-size: 84px;
+        color: #9aa7b8;
+      }
+
+      .final-action {
+        max-width: 1120px;
+        color: #f8fafc;
+        font-size: 104px;
+        line-height: 1.02;
+        text-align: center;
+      }
+
+      .cta-copy {
+        max-width: 960px;
+        margin: 0 auto;
+        color: #d9e5f2;
+        font-size: 42px;
+        line-height: 1.25;
+      }
+
+      .github-url {
+        display: inline-flex;
+        align-items: center;
+        min-height: 82px;
+        padding: 18px 34px;
+        border-radius: 22px;
+        background: #0a84ff;
+        border: 1px solid rgba(143, 211, 255, 0.5);
+        box-shadow: 0 0 70px rgba(10, 132, 255, 0.28);
+        color: #f8fafc;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 34px;
+        font-weight: 700;
+      }
+
+      .transition {
+        position: absolute;
+        inset: 0;
+        z-index: 30;
+        pointer-events: none;
+        opacity: 0;
+      }
+
+      .wipe-band {
+        position: absolute;
+        left: -14%;
+        top: -10%;
+        width: 36%;
+        height: 120%;
+        background: linear-gradient(90deg, rgba(8, 17, 31, 0), rgba(10, 132, 255, 0.52), rgba(143, 211, 255, 0.18), rgba(8, 17, 31, 0));
+        transform: skewX(-16deg);
+        filter: blur(2px);
+      }
+
+      .focus-flash {
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(circle at 50% 50%, rgba(143, 211, 255, 0.34), rgba(10, 132, 255, 0.12) 34%, rgba(8, 17, 31, 0) 66%);
+        opacity: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="skillbox-intro"
+      data-composition-id="skillbox-intro"
+      data-width="1920"
+      data-height="1080"
+      data-start="0"
+      data-duration="30"
+      data-track-index="0"
+    >
+      <audio
+        id="narration"
+        data-start="0.4"
+        data-duration="26.6"
+        data-track-index="3"
+        src="assets/narration-v2.wav"
+        data-volume="0.74"
+      ></audio>
+      <audio
+        id="ambient-bed"
+        data-start="0"
+        data-duration="30"
+        data-track-index="4"
+        src="assets/ambient-bed.wav"
+        data-volume="1"
+      ></audio>
+      <audio id="whoosh-1" data-start="4.42" data-duration="0.65" data-track-index="5" src="assets/transition-whoosh.wav" data-volume="0.8"></audio>
+      <audio id="whoosh-2" data-start="8.92" data-duration="0.65" data-track-index="5" src="assets/transition-whoosh.wav" data-volume="0.8"></audio>
+      <audio id="whoosh-3" data-start="14.42" data-duration="0.65" data-track-index="5" src="assets/transition-whoosh.wav" data-volume="0.8"></audio>
+      <audio id="whoosh-4" data-start="20.42" data-duration="0.65" data-track-index="5" src="assets/transition-whoosh.wav" data-volume="0.8"></audio>
+      <audio id="whoosh-5" data-start="25.92" data-duration="0.65" data-track-index="5" src="assets/transition-whoosh.wav" data-volume="0.8"></audio>
+      <audio id="ui-click-dashboard" data-start="6.42" data-duration="0.09" data-track-index="6" src="assets/ui-click.wav" data-volume="0.75"></audio>
+      <audio id="ui-click-safety" data-start="15.76" data-duration="0.09" data-track-index="6" src="assets/ui-click.wav" data-volume="0.75"></audio>
+      <audio id="ui-click-usage" data-start="21.92" data-duration="0.09" data-track-index="6" src="assets/ui-click.wav" data-volume="0.75"></audio>
+      <audio id="ui-click-cta" data-start="27.44" data-duration="0.09" data-track-index="6" src="assets/ui-click.wav" data-volume="0.75"></audio>
+      <audio id="cta-tail" data-start="26" data-duration="4" data-track-index="7" src="assets/cta-tail.wav" data-volume="1"></audio>
+      <div class="bg-grid" data-layout-ignore></div>
+      <div class="ambient-line line-a" data-layout-ignore></div>
+      <div class="ambient-line line-b" data-layout-ignore></div>
+      <div class="orbital" data-layout-ignore></div>
+
+      <section id="scene-1" class="scene clip" data-start="0" data-duration="4.5" data-track-index="1">
+        <div class="scene-content split">
+          <div class="scene-copy">
+            <div class="eyebrow">Problem</div>
+            <h1>Your agent skills are scattered.</h1>
+            <p class="lead">Codex, Claude, project folders, remote installs.</p>
+          </div>
+          <div class="scatter-wrap" aria-label="Scattered skill cards">
+            <div class="skill-card card-a">
+              <strong>open-source-readme</strong>
+              <span class="path">~/.codex/skills</span>
+            </div>
+            <div class="skill-card card-b">
+              <strong>frontend-design</strong>
+              <span class="path">~/.claude/skills</span>
+            </div>
+            <div class="skill-card card-c">
+              <strong>git-merge-to-main</strong>
+              <span class="path">project/.agents/skills</span>
+            </div>
+            <div class="connector conn-a"></div>
+            <div class="connector conn-b"></div>
+            <div class="connector conn-c"></div>
+            <div class="hub-mini">
+              <div class="logo-mark app-icon" role="img" aria-label="SkillBox app icon"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="scene-2" class="scene clip" data-start="4.5" data-duration="4.5" data-track-index="2">
+        <div class="scene-content column">
+          <div class="reveal-header">
+            <div class="brand-lockup">
+              <div class="logo-mark app-icon" role="img" aria-label="SkillBox app icon"></div>
+              <h2>SkillBox</h2>
+            </div>
+            <p class="lead">Manage agent skills across local runtimes.</p>
+          </div>
+          <div class="screenshot-frame browser-frame dashboard-shot" data-layout-allow-overflow>
+            <img src="assets/skillbox-dashboard.png" alt="SkillBox dashboard showing local skills" />
+            <div class="dashboard-closeup" data-layout-allow-overflow>
+              <div class="dashboard-card-visual" role="img" aria-label="SkillBox usage and update card close-up"></div>
+              <div class="evidence-chips">
+                <span class="evidence-chip">Usage count</span>
+                <span class="evidence-chip">Update state</span>
+                <span class="evidence-chip">Runtime target</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="scene-3" class="scene clip" data-start="9" data-duration="5.5" data-track-index="1">
+        <div class="scene-content split">
+          <div class="scene-copy">
+            <div class="eyebrow">Local first</div>
+            <h2>One managed store. Deploy anywhere.</h2>
+            <p class="lead">SkillBox keeps durable state in <span class="path">~/.skillbox</span>, then deploys to runtime folders through symlinks.</p>
+            <div class="chip-row">
+              <span class="chip blue">source of truth</span>
+              <span class="chip green">symlink deploy</span>
+            </div>
+          </div>
+          <div class="store-map" aria-label="Managed store deployment map">
+            <div class="runtime r1">Codex<span class="path">~/.codex/skills</span></div>
+            <div class="runtime r2">Codex CLI<span class="path">~/.agents/skills</span></div>
+            <div class="runtime r3">Claude<span class="path">~/.claude/skills</span></div>
+            <div class="runtime r4">Projects<span class="path">./.agents/skills</span></div>
+            <div class="map-line ml1"></div>
+            <div class="map-line ml2"></div>
+            <div class="map-line ml3"></div>
+            <div class="map-line ml4"></div>
+            <div class="store-core">
+              <div class="path">~/.skillbox</div>
+              <p>managed store for local and remote skills</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="scene-4" class="scene clip" data-start="14.5" data-duration="6" data-track-index="2">
+        <div class="scene-content split">
+          <div class="scene-copy">
+            <div class="eyebrow">Safety</div>
+            <h2>Review before import. Preview before update.</h2>
+            <p class="lead">Runtime folders, GitHub URLs, and existing skills are treated as untrusted input.</p>
+            <div class="safety-panel">
+              <div class="safety-row"><span class="check-dot"></span> classify before copying</div>
+              <div class="safety-row"><span class="check-dot"></span> preview remote diffs</div>
+              <div class="safety-row"><span class="check-dot"></span> roll back versions</div>
+            </div>
+          </div>
+          <div class="review-stack">
+            <div class="screenshot-frame import-shot" data-layout-allow-overflow>
+              <img src="assets/skillbox-import-review-crop.png" alt="SkillBox import review dialog" />
+            </div>
+            <div class="update-motif">
+              <div>
+                <strong>Remote update ready to review</strong>
+                <span>Preview changes before applying.</span>
+              </div>
+              <div class="review-button">Review update</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="scene-5" class="scene clip" data-start="20.5" data-duration="5.5" data-track-index="1">
+        <div class="scene-content column">
+          <div class="usage-layout">
+            <div>
+              <div class="eyebrow">Maintenance</div>
+              <h2>Know what is used. Keep skills current.</h2>
+              <div class="screenshot-frame card-detail-shot" data-layout-allow-overflow>
+                <img src="assets/skillbox-dashboard-card.png" alt="SkillBox card showing usage count" />
+              </div>
+              <div class="stat-callout">
+                <strong>8 calls</strong>
+                <span>Usage stats from supported agent hooks.</span>
+              </div>
+            </div>
+            <div class="screenshot-frame browser-frame history-shot" data-layout-allow-overflow>
+              <img src="assets/skillbox-history.png" alt="SkillBox history showing skill calls and operations" />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="scene-6" class="scene clip" data-start="26" data-duration="4" data-track-index="2">
+        <div class="scene-content column">
+          <div class="final-logo">
+            <div class="logo-mark app-icon" role="img" aria-label="SkillBox app icon"></div>
+            <h1>SkillBox</h1>
+          </div>
+          <h2 class="final-action">Get SkillBox on GitHub</h2>
+          <p class="cta-copy">Local skill management for agent builders.</p>
+          <div class="chip-row">
+            <span class="chip blue">macOS</span>
+            <span class="chip green">open source</span>
+            <span class="chip">local-first</span>
+          </div>
+          <div class="github-url">github.com/santosli/SkillBox</div>
+        </div>
+      </section>
+
+      <div id="transition-1" class="transition" data-layout-ignore>
+        <div id="transition-1-band" class="wipe-band"></div>
+        <div id="transition-1-flash" class="focus-flash"></div>
+      </div>
+      <div id="transition-2" class="transition" data-layout-ignore>
+        <div id="transition-2-band" class="wipe-band"></div>
+        <div id="transition-2-flash" class="focus-flash"></div>
+      </div>
+      <div id="transition-3" class="transition" data-layout-ignore>
+        <div id="transition-3-band" class="wipe-band"></div>
+        <div id="transition-3-flash" class="focus-flash"></div>
+      </div>
+      <div id="transition-4" class="transition" data-layout-ignore>
+        <div id="transition-4-band" class="wipe-band"></div>
+        <div id="transition-4-flash" class="focus-flash"></div>
+      </div>
+      <div id="transition-5" class="transition" data-layout-ignore>
+        <div id="transition-5-band" class="wipe-band"></div>
+        <div id="transition-5-flash" class="focus-flash"></div>
+      </div>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+
+      const tl = gsap.timeline({ paused: true });
+      const comp = "#skillbox-intro";
+      const transitions = [4.5, 9, 14.5, 20.5, 26];
+      const scenes = ["#scene-2", "#scene-3", "#scene-4", "#scene-5", "#scene-6"];
+
+      tl.to(".ambient-line", { x: 72, duration: 6, repeat: 4, yoyo: true, ease: "sine.inOut" }, 0);
+      tl.to(".orbital", { rotation: 18, scale: 1.04, duration: 10, repeat: 2, yoyo: true, ease: "sine.inOut" }, 0);
+
+      scenes.forEach((selector, index) => {
+        tl.set(selector, { opacity: 1 }, transitions[index]);
+      });
+
+      tl.fromTo("#transition-1", { opacity: 0 }, { opacity: 1, duration: 0.08, ease: "power2.out" }, 4.48);
+      tl.fromTo("#transition-1-band", { x: -520 }, { x: 2450, duration: 0.52, ease: "power3.inOut" }, 4.42);
+      tl.fromTo("#transition-1-flash", { opacity: 0, scale: 0.96 }, { opacity: 0.48, scale: 1.08, duration: 0.18, ease: "sine.out" }, 4.54);
+      tl.to("#transition-1-flash", { opacity: 0, duration: 0.3, ease: "sine.inOut" }, 4.72);
+      tl.to("#transition-1", { opacity: 0, duration: 0.14, ease: "power2.in" }, 5.0);
+
+      tl.fromTo("#transition-2", { opacity: 0 }, { opacity: 1, duration: 0.08, ease: "power2.out" }, 8.98);
+      tl.fromTo("#transition-2-band", { x: -520 }, { x: 2450, duration: 0.52, ease: "power3.inOut" }, 8.92);
+      tl.fromTo("#transition-2-flash", { opacity: 0, scale: 0.96 }, { opacity: 0.48, scale: 1.08, duration: 0.18, ease: "sine.out" }, 9.04);
+      tl.to("#transition-2-flash", { opacity: 0, duration: 0.3, ease: "sine.inOut" }, 9.22);
+      tl.to("#transition-2", { opacity: 0, duration: 0.14, ease: "power2.in" }, 9.5);
+
+      tl.fromTo("#transition-3", { opacity: 0 }, { opacity: 1, duration: 0.08, ease: "power2.out" }, 14.48);
+      tl.fromTo("#transition-3-band", { x: -520 }, { x: 2450, duration: 0.52, ease: "power3.inOut" }, 14.42);
+      tl.fromTo("#transition-3-flash", { opacity: 0, scale: 0.96 }, { opacity: 0.48, scale: 1.08, duration: 0.18, ease: "sine.out" }, 14.54);
+      tl.to("#transition-3-flash", { opacity: 0, duration: 0.3, ease: "sine.inOut" }, 14.72);
+      tl.to("#transition-3", { opacity: 0, duration: 0.14, ease: "power2.in" }, 15.0);
+
+      tl.fromTo("#transition-4", { opacity: 0 }, { opacity: 1, duration: 0.08, ease: "power2.out" }, 20.48);
+      tl.fromTo("#transition-4-band", { x: -520 }, { x: 2450, duration: 0.52, ease: "power3.inOut" }, 20.42);
+      tl.fromTo("#transition-4-flash", { opacity: 0, scale: 0.96 }, { opacity: 0.48, scale: 1.08, duration: 0.18, ease: "sine.out" }, 20.54);
+      tl.to("#transition-4-flash", { opacity: 0, duration: 0.3, ease: "sine.inOut" }, 20.72);
+      tl.to("#transition-4", { opacity: 0, duration: 0.14, ease: "power2.in" }, 21.0);
+
+      tl.fromTo("#transition-5", { opacity: 0 }, { opacity: 1, duration: 0.08, ease: "power2.out" }, 25.98);
+      tl.fromTo("#transition-5-band", { x: -520 }, { x: 2450, duration: 0.52, ease: "power3.inOut" }, 25.92);
+      tl.fromTo("#transition-5-flash", { opacity: 0, scale: 0.96 }, { opacity: 0.48, scale: 1.08, duration: 0.18, ease: "sine.out" }, 26.04);
+      tl.to("#transition-5-flash", { opacity: 0, duration: 0.3, ease: "sine.inOut" }, 26.22);
+      tl.to("#transition-5", { opacity: 0, duration: 0.14, ease: "power2.in" }, 26.5);
+
+      tl.from("#scene-1 .eyebrow", { y: 24, opacity: 0, duration: 0.42, ease: "power2.out" }, 0.18);
+      tl.from("#scene-1 h1", { x: -60, opacity: 0, duration: 0.72, ease: "expo.out" }, 0.34);
+      tl.from("#scene-1 .lead", { y: 36, opacity: 0, duration: 0.58, ease: "power3.out" }, 0.68);
+      tl.from(".skill-card.card-a", { x: -80, y: -42, rotation: -5, opacity: 0, duration: 0.64, ease: "back.out(1.2)" }, 0.72);
+      tl.from(".skill-card.card-b", { x: 90, y: -30, rotation: 4, opacity: 0, duration: 0.6, ease: "power2.out" }, 0.9);
+      tl.from(".skill-card.card-c", { y: 96, scale: 0.92, opacity: 0, duration: 0.64, ease: "circ.out" }, 1.08);
+      tl.from(".hub-mini", { scale: 0.72, opacity: 0, duration: 0.58, ease: "elastic.out(1, 0.65)" }, 1.35);
+      tl.from(".connector", { scaleX: 0, opacity: 0, duration: 0.46, stagger: 0.07, ease: "power4.out" }, 1.58);
+
+      tl.from("#scene-2 .brand-lockup .logo-mark", { scale: 0.72, opacity: 0, duration: 0.5, ease: "back.out(1.4)" }, 4.78);
+      tl.from("#scene-2 h2", { y: 46, opacity: 0, duration: 0.58, ease: "expo.out" }, 4.9);
+      tl.from("#scene-2 .lead", { x: 48, opacity: 0, duration: 0.52, ease: "power2.out" }, 5.08);
+      tl.from("#scene-2 .dashboard-shot", { y: 88, scale: 0.94, opacity: 0, duration: 0.78, ease: "power3.out" }, 5.24);
+      tl.from(".dashboard-closeup", { x: 80, y: 40, scale: 0.86, opacity: 0, duration: 0.62, ease: "back.out(1.2)" }, 6.1);
+      tl.from(".evidence-chip", { y: 16, opacity: 0, duration: 0.28, stagger: 0.07, ease: "power2.out" }, 6.42);
+      tl.to(".dashboard-closeup", { scale: 1.035, duration: 1.0, ease: "sine.inOut" }, 7.0);
+
+      tl.from("#scene-3 .eyebrow", { y: 26, opacity: 0, duration: 0.4, ease: "power2.out" }, 9.28);
+      tl.from("#scene-3 h2", { x: -54, opacity: 0, duration: 0.62, ease: "expo.out" }, 9.44);
+      tl.from("#scene-3 .lead", { y: 40, opacity: 0, duration: 0.54, ease: "power3.out" }, 9.74);
+      tl.from("#scene-3 .chip", { y: 22, opacity: 0, duration: 0.38, stagger: 0.08, ease: "back.out(1.3)" }, 10.1);
+      tl.from(".store-core", { scale: 0.78, opacity: 0, duration: 0.62, ease: "elastic.out(1, 0.7)" }, 9.62);
+      tl.from(".runtime", { y: 42, opacity: 0, duration: 0.5, stagger: 0.09, ease: "power2.out" }, 10.12);
+      tl.from(".map-line", { scaleX: 0, opacity: 0, duration: 0.48, stagger: 0.06, ease: "power4.out" }, 10.58);
+
+      tl.from("#scene-4 .eyebrow", { y: 26, opacity: 0, duration: 0.4, ease: "power2.out" }, 14.8);
+      tl.from("#scene-4 h2", { x: -50, opacity: 0, duration: 0.62, ease: "expo.out" }, 14.98);
+      tl.from("#scene-4 .lead", { y: 38, opacity: 0, duration: 0.54, ease: "power3.out" }, 15.28);
+      tl.from(".safety-row", { x: -30, opacity: 0, duration: 0.42, stagger: 0.08, ease: "back.out(1.1)" }, 15.72);
+      tl.from(".import-shot", { x: 72, y: -28, opacity: 0, duration: 0.6, ease: "power2.out" }, 15.0);
+      tl.from(".update-motif", { y: 34, opacity: 0, duration: 0.5, ease: "back.out(1.1)" }, 15.56);
+
+      tl.from("#scene-5 .eyebrow", { y: 24, opacity: 0, duration: 0.38, ease: "power2.out" }, 20.82);
+      tl.from("#scene-5 h2", { y: 46, opacity: 0, duration: 0.58, ease: "expo.out" }, 20.98);
+      tl.from(".card-detail-shot", { x: -58, scale: 0.94, opacity: 0, duration: 0.58, ease: "power3.out" }, 21.28);
+      tl.from(".stat-callout", { y: 40, opacity: 0, duration: 0.48, ease: "back.out(1.2)" }, 21.64);
+      tl.from(".history-shot", { x: 80, opacity: 0, duration: 0.72, ease: "circ.out" }, 21.14);
+      tl.from(".stat-callout strong", { textShadow: "0 0 0px rgba(47, 209, 124, 0)", scale: 0.92, duration: 0.48, ease: "elastic.out(1, 0.7)" }, 21.9);
+      tl.to(".stat-callout strong", { scale: 1.08, duration: 0.18, yoyo: true, repeat: 1, ease: "power2.inOut" }, 22.42);
+      tl.to(".card-detail-shot", { scale: 1.035, duration: 1.2, ease: "sine.inOut" }, 22.0);
+
+      tl.from("#scene-6 .final-logo .logo-mark", { scale: 0.72, opacity: 0, duration: 0.54, ease: "back.out(1.5)" }, 26.28);
+      tl.from("#scene-6 h1", { y: 52, opacity: 0, duration: 0.62, ease: "expo.out" }, 26.42);
+      tl.from(".final-action", { y: 58, opacity: 0, duration: 0.62, ease: "expo.out" }, 26.68);
+      tl.from(".cta-copy", { y: 34, opacity: 0, duration: 0.5, ease: "power3.out" }, 27.06);
+      tl.from("#scene-6 .chip", { y: 26, opacity: 0, duration: 0.36, stagger: 0.08, ease: "back.out(1.2)" }, 27.36);
+      tl.from(".github-url", { y: 32, opacity: 0, duration: 0.5, ease: "circ.out" }, 27.42);
+      tl.to("#scene-6 .scene-content", { opacity: 0, y: -20, duration: 0.5, ease: "power2.in" }, 29.38);
+
+      window.__timelines["skillbox-intro"] = tl;
+    </script>
+  </body>
+</html>

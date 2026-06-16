@@ -1,0 +1,7 @@
+.hyperframes/
+renders/
+*.mp4
+*.webm
+*.mov
+*-contact.jpg
+*-cta.png

@@ -1,0 +1,7 @@
+Your agent skills are scattered across Codex, Claude, project folders, and remote installs.
+SkillBox brings them into one local source of truth.
+Keep managed copies in ~/.skillbox, then deploy them into each runtime with symlinks.
+Review skills before import. Preview remote updates before applying them.
+Track usage, keep versions, and roll back when needed.
+SkillBox is local-first skill management for agent builders.
+Open source, built for macOS.
