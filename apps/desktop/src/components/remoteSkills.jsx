@@ -5,6 +5,7 @@ import { closeOnBackdropClick } from '../modalEvents.js';
 import {
   canApplyRemoteVersionChange,
   formatRemoteRefBehavior,
+  remoteDiffOmissionNotice,
   remoteVersionActionLabel
 } from '../remoteSkills.js';
 import { LoadingNotice } from './common.jsx';
@@ -221,6 +222,7 @@ export function RemoteVersionReviewDialog({ dialog, onActivatePath, onApply, onC
   const hasNoFileChanges = Boolean(preview && preview.files.length === 0);
   const allowNoFileChanges =
     hasNoFileChanges && Boolean(preview?.fromVersion && preview?.toVersion && preview.fromVersion !== preview.toVersion);
+  const diffOmission = activeFile && !hasNoFileChanges ? remoteDiffOmissionNotice(activeFile) : null;
   const canApply = canApplyRemoteVersionChange({
     allowNoFileChanges,
     files: preview?.files || [],
@@ -283,9 +285,12 @@ export function RemoteVersionReviewDialog({ dialog, onActivatePath, onApply, onC
                     <strong>No file changes in this skill</strong>
                     <span>Applying records the latest source revision without changing local files.</span>
                   </div>
-                ) : activeFile?.binary || activeFile?.tooLarge ? (
-                  <div className="gitDiffEmpty">
-                    <span>{`${activeFile.oldHash || 'new'} -> ${activeFile.newHash || 'deleted'}`}</span>
+                ) : diffOmission ? (
+                  <div className="gitDiffEmpty diffOmission">
+                    <strong>{diffOmission.title}</strong>
+                    <span>{diffOmission.detail}</span>
+                    <code>{diffOmission.sizeSummary}</code>
+                    <code>{diffOmission.hashSummary}</code>
                   </div>
                 ) : (
                   <GitDiffView diff={activeFile?.diff || ''} />

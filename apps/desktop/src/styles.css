@@ -3911,14 +3911,43 @@ dd {
   padding: 24px;
 }
 
+.gitDiffEmpty.diffOmission,
+.gitDiffEmpty.noFileChanges {
+  align-content: center;
+}
+
+.gitDiffEmpty.diffOmission {
+  gap: 8px;
+  padding: 28px;
+}
+
+.gitDiffEmpty.diffOmission strong,
 .gitDiffEmpty.noFileChanges strong {
   color: #111827;
   font-size: 14px;
   font-weight: 720;
 }
 
+.gitDiffEmpty.diffOmission span,
 .gitDiffEmpty.noFileChanges span {
   max-width: 360px;
+  line-height: 1.45;
+}
+
+.gitDiffEmpty.diffOmission code {
+  max-width: min(680px, 100%);
+  padding: 6px 8px;
+  overflow-wrap: anywhere;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #475569;
+  font-family:
+    "SF Mono",
+    ui-monospace,
+    Menlo,
+    monospace;
+  font-size: 11px;
   line-height: 1.45;
 }
 

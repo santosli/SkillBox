@@ -18,6 +18,7 @@ import {
   normalizeRemoteSourceCandidates,
   normalizeRemoteSourceBindingPreview,
   normalizeRemoteVersionPreview,
+  remoteDiffOmissionNotice,
   remoteSkillUpdateVersionLabel,
   remoteVersionActionLabel,
   shouldShowRemoteUpdateSummary
@@ -569,6 +570,29 @@ test('normalizes remote version preview files', () => {
   assert.equal(preview.skillName, 'demo');
   assert.equal(preview.files[0].label, 'Modified');
   assert.equal(remoteVersionActionLabel(preview), 'Rollback');
+});
+
+test('explains omitted remote diff previews for large files', () => {
+  const preview = normalizeRemoteVersionPreview({
+    files: [
+      {
+        path: 'SKILL.md',
+        status: 'M',
+        diff: '',
+        old_size: 130813,
+        new_size: 140901,
+        old_hash: 'old-hash',
+        new_hash: 'new-hash',
+        too_large: true
+      }
+    ]
+  });
+
+  const notice = remoteDiffOmissionNotice(preview.files[0]);
+
+  assert.equal(notice.title, 'Large file diff preview omitted');
+  assert.equal(notice.sizeSummary, '128 KB -> 138 KB');
+  assert.equal(notice.hashSummary, 'old-hash -> new-hash');
 });
 
 test('dashboard status notice summarizes local sync and remote checks', () => {

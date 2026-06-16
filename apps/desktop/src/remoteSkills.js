@@ -96,6 +96,61 @@ export function normalizeRemoteVersionPreview(preview = {}) {
   };
 }
 
+export function formatRemoteDiffSize(size) {
+  if (size === null || size === undefined || Number.isNaN(Number(size))) {
+    return 'unknown size';
+  }
+
+  const bytes = Number(size);
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export function remoteDiffOmissionNotice(file = null) {
+  if (!file) {
+    return null;
+  }
+
+  const oldSize = formatRemoteDiffSize(file.oldSize);
+  const newSize = formatRemoteDiffSize(file.newSize);
+  const sizeSummary = `${oldSize} -> ${newSize}`;
+  const hashSummary = `${file.oldHash || 'new'} -> ${file.newHash || 'deleted'}`;
+
+  if (file.binary) {
+    return {
+      title: 'Binary file diff preview omitted',
+      detail: 'SkillBox does not render binary file contents in update review.',
+      sizeSummary,
+      hashSummary
+    };
+  }
+
+  if (file.tooLarge) {
+    return {
+      title: 'Large file diff preview omitted',
+      detail: 'This file is over the 120 KB inline preview limit. Review hashes and sizes before applying.',
+      sizeSummary,
+      hashSummary
+    };
+  }
+
+  if (!file.diff) {
+    return {
+      title: 'No textual diff returned',
+      detail: 'This file changed, but no unified diff content was returned for preview.',
+      sizeSummary,
+      hashSummary
+    };
+  }
+
+  return null;
+}
+
 export function canApplyRemoteVersionChange({ allowNoFileChanges = false, files = [], loading = false } = {}) {
   return !loading && (files.length > 0 || allowNoFileChanges);
 }
