@@ -591,6 +591,7 @@ test('explains omitted remote diff previews for large files', () => {
   const notice = remoteDiffOmissionNotice(preview.files[0]);
 
   assert.equal(notice.title, 'Large file diff preview omitted');
+  assert.match(notice.detail, /1 MB/);
   assert.equal(notice.sizeSummary, '128 KB -> 138 KB');
   assert.equal(notice.hashSummary, 'old-hash -> new-hash');
 });

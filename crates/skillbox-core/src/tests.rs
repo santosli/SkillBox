@@ -1889,6 +1889,19 @@ fn user_skills_git_changes_include_files_and_diff() {
 }
 
 #[test]
+fn user_skill_new_file_diff_inlines_text_under_one_megabyte() {
+    let root = temp_dir("user-skill-large-text-diff");
+    fs::create_dir_all(&root).unwrap();
+    let content = "large text line\n".repeat(9_000);
+    fs::write(root.join("large.txt"), &content).unwrap();
+
+    let diff = new_file_diff(&root, "large.txt").unwrap();
+
+    assert!(!diff.contains("Diff omitted"));
+    assert!(diff.contains("+large text line"));
+}
+
+#[test]
 fn user_skills_git_status_reports_changed_paths() {
     let root = temp_dir("user-skills-status-changed-paths");
     let managed_root = root.join("SkillBox");
@@ -3058,6 +3071,33 @@ fn remote_version_preview_keeps_binary_file_metadata() {
     assert_eq!(binary.old_size, Some(3));
     assert!(binary.old_hash.is_some());
     assert_eq!(binary.diff, "");
+}
+
+#[test]
+fn remote_diff_file_inlines_text_under_one_megabyte() {
+    let root = temp_dir("remote-diff-large-text");
+    let old_root = root.join("old");
+    let new_root = root.join("new");
+    fs::create_dir_all(&old_root).unwrap();
+    fs::create_dir_all(&new_root).unwrap();
+    let content = "large text line\n".repeat(9_000);
+    fs::write(new_root.join("SKILL.md"), &content).unwrap();
+
+    let diff_file = remote_diff_file(
+        &old_root,
+        &new_root,
+        skillbox_git::GitDiffFile {
+            path: "SKILL.md".to_string(),
+            old_path: None,
+            status: "A".to_string(),
+            diff: "@@\n+large text line\n".to_string(),
+        },
+    )
+    .unwrap();
+
+    assert!(!diff_file.too_large);
+    assert_eq!(diff_file.diff, "@@\n+large text line\n");
+    assert_eq!(diff_file.new_size, Some(content.len() as u64));
 }
 
 #[test]

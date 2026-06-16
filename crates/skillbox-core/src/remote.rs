@@ -1445,7 +1445,7 @@ pub(crate) fn file_metadata(path: &Path) -> Result<FileMetadata> {
 
     let bytes = fs::read(path).map_err(|error| error.to_string())?;
     let size = bytes.len() as u64;
-    let too_large = bytes.len() > 120_000;
+    let too_large = bytes.len() > MAX_TEXT_DIFF_PREVIEW_BYTES;
     let binary = std::str::from_utf8(&bytes).is_err();
     Ok(FileMetadata {
         hash: Some(sha256_bytes(&bytes)),

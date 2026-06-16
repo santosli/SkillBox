@@ -1624,7 +1624,7 @@ pub fn preview_remote_version_change(
 }
 ```
 
-`remote_diff_file` must fill `old_hash`, `new_hash`, `old_size`, `new_size`, `binary`, and `too_large`. Treat files over `120_000` bytes as `too_large`; treat files that cannot be decoded as UTF-8 as `binary`; keep them in the file list with empty `diff` and hash/size metadata.
+`remote_diff_file` must fill `old_hash`, `new_hash`, `old_size`, `new_size`, `binary`, and `too_large`. Treat files over 1 MB as `too_large`; treat files that cannot be decoded as UTF-8 as `binary`; keep them in the file list with empty `diff` and hash/size metadata.
 
 Add the supporting helpers used above:
 

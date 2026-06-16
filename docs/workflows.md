@@ -240,7 +240,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 在临时工作树中 fetch 目标 ref，并只 checkout `source.json.path` 对应的 skill 目录。
 - 验证 `SKILL.md` 和 skill name。
 - 应用前对当前 `current` 目录和目标 snapshot 生成 no-index diff；diff 必须包含所有新增、修改、删除文件，路径规范化为 skill 内相对路径。
-- diff preview 对二进制文件或超过 120 KB 的文件保留文件行、hash 和 size，但不展开文本 diff。
+- diff preview 对二进制文件或超过 1 MB 的文件保留文件行、hash 和 size，但不展开文本 diff。
 - 如果 source revision 已变化但 skill 文件内容没有变化，diff review 必须明确显示 no file changes，并允许用户确认以记录最新 revision。
 - apply 阶段写入 `versions/<latestSha>`；如果目录已存在，则复用并重新验证。
 - apply 阶段更新 `current` symlink。

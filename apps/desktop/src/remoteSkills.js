@@ -133,7 +133,7 @@ export function remoteDiffOmissionNotice(file = null) {
   if (file.tooLarge) {
     return {
       title: 'Large file diff preview omitted',
-      detail: 'This file is over the 120 KB inline preview limit. Review hashes and sizes before applying.',
+      detail: 'This file is over the 1 MB inline preview limit. Review hashes and sizes before applying.',
       sizeSummary,
       hashSummary
     };

@@ -385,9 +385,9 @@ pub(crate) fn new_file_diff(repo: &Path, relative_path: &str) -> Result<String> 
     let path = repo.join(&relative_path);
     let bytes = fs::read(&path).map_err(|error| error.to_string())?;
 
-    if bytes.len() > 120_000 {
+    if bytes.len() > MAX_TEXT_DIFF_PREVIEW_BYTES {
         return Ok(format!(
-            "diff --git a/{relative_path} b/{relative_path}\nnew file mode 100644\n--- /dev/null\n+++ b/{relative_path}\n@@\n+Diff omitted because the file is larger than 120 KB.\n"
+            "diff --git a/{relative_path} b/{relative_path}\nnew file mode 100644\n--- /dev/null\n+++ b/{relative_path}\n@@\n+Diff omitted because the file is larger than 1 MB.\n"
         ));
     }
 
