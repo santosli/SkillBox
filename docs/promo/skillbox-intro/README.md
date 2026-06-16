@@ -18,7 +18,14 @@ Open the Studio URL reported by the command for the `skillbox-intro` project.
 npx hyperframes render --output /tmp/skillbox-promo-v3.mp4 --quality high
 ```
 
-The approved rendered MP4 is stored outside git at `/tmp/skillbox-promo-v3.mp4`. Rendered videos and temporary inspection captures are intentionally not committed by default.
+The approved rendered MP4 is stored outside git at `/tmp/skillbox-promo-v3.mp4`.
+
+The public README uses these committed media files:
+
+- `skillbox-promo.mp4` - stable repository-relative video link.
+- `skillbox-promo-poster.jpg` - clickable poster image.
+
+Other rendered videos and temporary inspection captures are intentionally not committed by default.
 
 ## Verification
 

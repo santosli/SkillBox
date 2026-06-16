@@ -16,6 +16,12 @@ SkillBox 是一个 local-first 的 macOS 应用和 CLI，用来管理基于 `SKI
 
 当前版本：`v0.3.2`。SkillBox 现在已经可以用于本地 skill 管理，但仍是早期软件。重要 skills 请保留备份，并在应用每一次文件系统变更前先 review。
 
+## 宣传视频
+
+[![观看 SkillBox 宣传视频](docs/promo/skillbox-intro/skillbox-promo-poster.jpg)](docs/promo/skillbox-intro/skillbox-promo.mp4)
+
+30 秒快速了解 SkillBox：本地优先的 skill 管理、导入前审核、远程更新、使用历史和 GitHub 发布。
+
 ## 为什么
 
 - **一个 managed store，面向多个 runtime。** 把持久 skill 状态放在 `~/.skillbox`，再按需部署到各个 agent runtime。
