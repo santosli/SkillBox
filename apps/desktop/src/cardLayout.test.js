@@ -376,6 +376,14 @@ test('diff review dialogs keep large diffs inside the modal viewport', () => {
   assert.match(appSource, /<div className="gitCommitDialogBody">/);
 });
 
+test('remote diff review footer separates actions from the diff pane edge', () => {
+  const footerRule = css.match(/\.remoteDialogFooter\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(footerRule, /padding:\s*18px 24px 20px;/);
+  assert.match(footerRule, /border-top:\s*1px solid #e5edf6;/);
+  assert.match(footerRule, /background:\s*#ffffff;/);
+});
+
 test('remote update preview command runs off the command handler', () => {
   const previewCommandStart = tauriSource.indexOf('async fn preview_remote_version_change');
   const nextCommandStart = tauriSource.indexOf('#[tauri::command]', previewCommandStart + 1);

@@ -4064,7 +4064,13 @@ dd {
   gap: 10px;
 }
 
-.remoteDialogFooter,
+.remoteDialogFooter {
+  margin: 0;
+  padding: 18px 24px 20px;
+  border-top: 1px solid #e5edf6;
+  background: #ffffff;
+}
+
 .remoteDialogError {
   margin: 0 24px 24px;
 }
