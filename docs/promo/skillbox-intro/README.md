@@ -18,9 +18,9 @@ Open the Studio URL reported by the command for the `skillbox-intro` project.
 npx hyperframes render --output /tmp/skillbox-promo-v3.mp4 --quality high
 ```
 
-The approved rendered MP4 is stored outside git at `/tmp/skillbox-promo-v3.mp4`.
+The render command writes the review output to `/tmp/skillbox-promo-v3.mp4`.
 
-The public README uses these committed media files:
+The public README uses these committed media files from this folder:
 
 - `skillbox-promo.mp4` - stable repository-relative video link.
 - `skillbox-promo-poster.jpg` - clickable poster image.
