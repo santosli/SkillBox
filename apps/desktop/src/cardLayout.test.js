@@ -89,6 +89,53 @@ test('settings exposes app update checks without downloading automatically', () 
   assert.doesNotMatch(appSource, /downloadAndInstall/);
 });
 
+test('settings page uses a workbench rail with status summary and section nav', () => {
+  assert.match(appSource, /className="settingsWorkbench"/);
+  assert.match(appSource, /function SettingsRail/);
+  assert.match(appSource, /className="settingsRailSummary"/);
+  assert.match(appSource, /System status/);
+  assert.match(appSource, /<SettingsStatusRow label="Store"/);
+  assert.match(appSource, /<SettingsStatusRow label="Git" value=\{userSyncLabel\(userSkillsGit\)\}/);
+  assert.match(appSource, /<SettingsStatusRow label="Updates" value=\{appUpdateStatusLabel\(appUpdate\)\}/);
+  assert.match(appSource, /<SettingsStatusRow label="Hooks" value=\{`\$\{injectedHookCount\}\/\$\{supportedHookCount\} injected`\}/);
+  assert.match(appSource, /className="settingsRailNav"/);
+  assert.match(appSource, /href="#settings-storage"/);
+  assert.match(appSource, /href="#settings-sync"/);
+  assert.match(appSource, /href="#settings-updates"/);
+  assert.match(appSource, /href="#settings-hooks"/);
+});
+
+test('settings sections are anchored and sync controls are grouped together', () => {
+  assert.match(appSource, /id="settings-storage"/);
+  assert.match(appSource, /id="settings-sync"/);
+  assert.match(appSource, /id="settings-updates"/);
+  assert.match(appSource, /id="settings-hooks"/);
+  assert.match(appSource, /function SyncRefreshSettingsPanel/);
+  assert.match(appSource, /<h2>Sync & refresh<\/h2>/);
+  assert.match(appSource, /<UserSkillsGitSettingsForm/);
+  assert.match(appSource, /<StatusRefreshSettingsForm/);
+  assert.match(appSource, /onSaveUserSkillsRemote/);
+  assert.match(appSource, /onSaveStatusRefreshInterval/);
+  assert.match(appSource, /onSaveRemoteUpdateTimeout/);
+});
+
+test('settings workbench CSS defines a desktop rail and responsive fallback', () => {
+  const workbenchRule = css.match(/\.settingsWorkbench\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const railRule = css.match(/\.settingsRail\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const syncRule = css.match(/\.syncRefreshGrid\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const responsiveRule = css.match(/@media \(max-width: 1180px\)\s*\{(?<body>[\s\S]*?)@media \(max-width: 1360px\)/)
+    ?.groups.body || '';
+
+  assert.match(workbenchRule, /grid-template-columns:\s*minmax\(220px,\s*240px\)\s+minmax\(0,\s*960px\);/);
+  assert.match(workbenchRule, /max-width:\s*1220px;/);
+  assert.match(railRule, /position:\s*sticky;/);
+  assert.match(railRule, /top:\s*24px;/);
+  assert.match(syncRule, /grid-template-columns:\s*minmax\(0,\s*1\.18fr\)\s+minmax\(260px,\s*0\.82fr\);/);
+  assert.match(responsiveRule, /\.settingsWorkbench\s*\{[^}]*grid-template-columns:\s*1fr;/s);
+  assert.match(responsiveRule, /\.settingsRail\s*\{[^}]*position:\s*static;/s);
+  assert.match(responsiveRule, /\.settingsRailNav\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\);/s);
+});
+
 test('tauri desktop bridge registers app update commands and pending state', () => {
   assert.match(tauriSource, /struct PendingAppUpdate/);
   assert.match(tauriSource, /fn app_update_disabled_response/);
@@ -424,7 +471,8 @@ test('settings exposes usage hook injection for supported agents', () => {
   assert.match(appSource, /onRefresh=\{onRefreshUsageHooks\}/);
   assert.match(appSource, /aria-label="Refresh usage hook status"/);
   assert.match(appSource, /function groupUsageHooksByConfig/);
-  assert.match(appSource, /const hookGroups = groupUsageHooksByConfig\(normalizeUsageHookStatuses\(usageHooks\)\)/);
+  assert.match(appSource, /const normalizedUsageHooks = normalizeUsageHookStatuses\(usageHooks\);/);
+  assert.match(appSource, /const usageHookGroups = groupUsageHooksByConfig\(normalizedUsageHooks\);/);
   assert.match(appSource, /hookGroups\.map/);
   assert.match(appSource, /group\.labels\.join\(' \/ '\)/);
   assert.match(appSource, /group\.installed \? onOpenConfig\(group\.configPath\) : onInstall\(group\.target\)/);

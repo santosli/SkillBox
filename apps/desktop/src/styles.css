@@ -1154,15 +1154,183 @@ button {
   grid-template-columns: 1fr;
 }
 
-.settingsGrid {
+.settingsWorkbench {
   display: grid;
-  gap: 18px;
-  max-width: 760px;
+  max-width: 1220px;
+  grid-template-columns: minmax(220px, 240px) minmax(0, 960px);
+  gap: 20px;
+  align-items: start;
+}
+
+.settingsRail {
+  position: sticky;
+  top: 24px;
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+}
+
+.settingsRailSummary,
+.settingsRailNav {
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.035);
+}
+
+.settingsRailSummary {
+  display: grid;
+  gap: 0;
+  padding: 14px 14px 8px;
+}
+
+.settingsRailEyebrow {
+  margin-bottom: 6px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 720;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.settingsStatusRow {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  padding: 9px 0;
+  border-top: 1px solid #f1f5f9;
+}
+
+.settingsStatusRow span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 680;
+}
+
+.settingsStatusRow strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 680;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settingsRailNav {
+  display: grid;
+  padding: 6px;
+}
+
+.settingsRailNav a {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  border-radius: 7px;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 680;
+  padding: 0 10px;
+  text-decoration: none;
+}
+
+.settingsRailNav a:hover,
+.settingsRailNav a[aria-current="true"] {
+  background: #eff6ff;
+  color: #0a63d8;
+}
+
+.settingsContent {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+}
+
+.settingsPanel {
+  scroll-margin-top: 24px;
+}
+
+.settingsPanel .panelHeader {
+  padding: 18px 22px 12px;
+}
+
+.settingsPanel .panelHeader h2 {
+  font-size: 18px;
+}
+
+.settingsPanel .panelHeader p {
+  margin-top: 4px;
+}
+
+.settingsPanel > .pathList,
+.settingsPanel .settingsForm > .pathList {
+  padding: 2px 22px 16px;
+}
+
+.settingsPanel > .pathList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 28px;
+}
+
+.settingsPanel > .pathList div,
+.settingsPanel .settingsForm > .pathList div {
+  grid-template-columns: minmax(112px, 150px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: baseline;
+  padding: 9px 0;
+}
+
+.settingsPanel > .pathList div {
+  grid-template-columns: 1fr;
+  gap: 4px;
+}
+
+.settingsPanel dd {
+  font-size: 13px;
+}
+
+.syncRefreshGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.18fr) minmax(260px, 0.82fr);
+  align-items: start;
+}
+
+.settingsSubform {
+  min-width: 0;
+  padding: 16px 22px 18px;
+}
+
+.settingsSubform + .settingsSubform {
+  border-left: 1px solid #eef2f7;
+}
+
+.settingsSubformHeader {
+  display: grid;
+  gap: 3px;
+}
+
+.settingsSubformHeader h3 {
+  margin: 0;
+  color: #111827;
+  font-size: 15px;
+  font-weight: 720;
+  line-height: 1.2;
+}
+
+.settingsSubformHeader p {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.35;
 }
 
 .usageHookList {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   padding: 4px 18px 18px;
 }
 
@@ -1170,12 +1338,12 @@ button {
   display: grid;
   min-width: 0;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 14px;
+  gap: 12px;
   align-items: center;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   background: #f8fafc;
-  padding: 12px;
+  padding: 10px 12px;
 }
 
 .usageHookMain {
@@ -1627,6 +1795,15 @@ button {
   display: grid;
   gap: 16px;
   padding: 18px 24px 22px;
+}
+
+.settingsPanel .settingsForm {
+  gap: 12px;
+  padding: 14px 22px 18px;
+}
+
+.settingsPanel .settingsSubform {
+  padding: 16px 22px 18px;
 }
 
 .settingsActions {
@@ -4584,6 +4761,42 @@ dd {
     grid-template-columns: 1fr;
   }
 
+  .settingsWorkbench {
+    max-width: 960px;
+    grid-template-columns: 1fr;
+  }
+
+  .settingsRail {
+    position: static;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settingsRailSummary {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0;
+    align-items: stretch;
+  }
+
+  .settingsRailEyebrow {
+    grid-column: 1 / -1;
+  }
+
+  .settingsStatusRow {
+    grid-template-columns: 1fr;
+    gap: 4px;
+    padding: 8px 10px;
+    border-top: 1px solid #f1f5f9;
+    border-left: 1px solid #f1f5f9;
+  }
+
+  .settingsStatusRow:nth-of-type(1) {
+    border-left: 0;
+  }
+
+  .settingsRailNav {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
   .sideStack {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -4599,6 +4812,15 @@ dd {
   .setupGrid,
   .firstUseGrid {
     grid-template-columns: 1fr;
+  }
+
+  .syncRefreshGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .settingsSubform + .settingsSubform {
+    border-top: 1px solid #eef2f7;
+    border-left: 0;
   }
 
   .sideStack {
@@ -4656,6 +4878,10 @@ dd {
 
   .skillDetailVersionHistory {
     grid-template-columns: 1fr;
+  }
+
+  .settingsRailSummary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .skillDetailBodyGrid > .operationHistoryPanel {

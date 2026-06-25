@@ -25,42 +25,96 @@ export function SettingsPage({
   onSaveStatusRefreshInterval,
   onSaveUserSkillsRemote
 }) {
+  const normalizedUsageHooks = normalizeUsageHookStatuses(usageHooks);
+  const usageHookGroups = groupUsageHooksByConfig(normalizedUsageHooks);
+
   return (
     <>
       <PageHeader
         eyebrow="Settings"
         title="Settings"
-        subtitle="Review managed storage roots and deployment defaults."
+        subtitle="Storage, sync, updates, and hooks."
       />
 
-      <section className="settingsGrid">
-        <ManagedRootsPanel paths={paths} />
-        <UserSkillsGitSettingsPanel
-          status={status}
-          userSkillsGit={userSkillsGit}
-          onSave={onSaveUserSkillsRemote}
-        />
-        <StatusRefreshSettingsPanel
-          preferences={preferences}
-          status={status}
-          onSaveRemoteUpdateTimeout={onSaveRemoteUpdateTimeout}
-          onSave={onSaveStatusRefreshInterval}
-        />
-        <AppUpdateSettingsPanel
+      <section className="settingsWorkbench" aria-label="Settings workbench">
+        <SettingsRail
           appUpdate={appUpdate}
-          onCheck={onCheckAppUpdate}
-          onInstall={onInstallAppUpdate}
+          paths={paths}
+          usageHooks={normalizedUsageHooks}
+          userSkillsGit={userSkillsGit}
         />
-        <UsageHookSettingsPanel
-          status={status}
-          usageHooks={usageHooks}
-          onInstall={onInstallUsageHook}
-          onOpenConfig={onOpenUsageHookConfig}
-          onRefresh={onRefreshUsageHooks}
-        />
+        <div className="settingsContent">
+          <ManagedRootsPanel paths={paths} />
+          <SyncRefreshSettingsPanel
+            preferences={preferences}
+            status={status}
+            userSkillsGit={userSkillsGit}
+            onSaveRemoteUpdateTimeout={onSaveRemoteUpdateTimeout}
+            onSaveStatusRefreshInterval={onSaveStatusRefreshInterval}
+            onSaveUserSkillsRemote={onSaveUserSkillsRemote}
+          />
+          <AppUpdateSettingsPanel
+            appUpdate={appUpdate}
+            onCheck={onCheckAppUpdate}
+            onInstall={onInstallAppUpdate}
+          />
+          <UsageHookSettingsPanel
+            hookGroups={usageHookGroups}
+            status={status}
+            onInstall={onInstallUsageHook}
+            onOpenConfig={onOpenUsageHookConfig}
+            onRefresh={onRefreshUsageHooks}
+          />
+        </div>
       </section>
     </>
   );
+}
+
+function SettingsRail({ appUpdate, paths, usageHooks, userSkillsGit }) {
+  const injectedHookCount = usageHooks.filter((hook) => hook.installed).length;
+  const supportedHookCount = usageHooks.length;
+
+  return (
+    <aside className="settingsRail" aria-label="Settings summary">
+      <div className="settingsRailSummary">
+        <span className="settingsRailEyebrow">System status</span>
+        <SettingsStatusRow label="Store" value={compactHomePath(paths?.root || '~/.skillbox')} />
+        <SettingsStatusRow label="Git" value={userSyncLabel(userSkillsGit)} />
+        <SettingsStatusRow label="Updates" value={appUpdateStatusLabel(appUpdate)} />
+        <SettingsStatusRow label="Hooks" value={`${injectedHookCount}/${supportedHookCount} injected`} />
+      </div>
+      <nav className="settingsRailNav" aria-label="Settings sections">
+        <a aria-current="true" href="#settings-storage">Storage</a>
+        <a href="#settings-sync">Sync</a>
+        <a href="#settings-updates">Updates</a>
+        <a href="#settings-hooks">Hooks</a>
+      </nav>
+    </aside>
+  );
+}
+
+function SettingsStatusRow({ label, value }) {
+  return (
+    <div className="settingsStatusRow">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function appUpdateStatusLabel(appUpdate) {
+  if (appUpdate?.state === 'error') return 'Error';
+  if (appUpdate?.state === 'checking') return 'Checking';
+  if (appUpdate?.state === 'installing') return 'Installing';
+  if (appUpdate?.state === 'disabled') return 'Disabled';
+  if (appUpdate?.available && appUpdate?.version) return 'Ready';
+  if (!appUpdate?.checkedAt) return 'Not checked';
+  return 'Up to date';
+}
+
+function compactHomePath(path) {
+  return String(path || '').replace(/^\/Users\/[^/]+/, '~');
 }
 
 function AppUpdateSettingsPanel({ appUpdate, onCheck, onInstall }) {
@@ -71,7 +125,7 @@ function AppUpdateSettingsPanel({ appUpdate, onCheck, onInstall }) {
   const message = appUpdate?.message || (hasUpdate ? `Version ${appUpdate.version} is ready.` : '');
 
   return (
-    <aside className="panel compactPanel appUpdateSettingsPanel">
+    <aside className="panel compactPanel appUpdateSettingsPanel settingsPanel" id="settings-updates">
       <div className="panelHeader compact">
         <div>
           <h2>App updates</h2>
@@ -119,12 +173,11 @@ function AppUpdateSettingsPanel({ appUpdate, onCheck, onInstall }) {
   );
 }
 
-function UsageHookSettingsPanel({ status, usageHooks, onInstall, onOpenConfig, onRefresh }) {
-  const hookGroups = groupUsageHooksByConfig(normalizeUsageHookStatuses(usageHooks));
+function UsageHookSettingsPanel({ hookGroups, status, onInstall, onOpenConfig, onRefresh }) {
   const isInstalling = status === 'installing_usage_hook';
 
   return (
-    <aside className="panel compactPanel usageHookSettingsPanel">
+    <aside className="panel compactPanel usageHookSettingsPanel settingsPanel" id="settings-hooks">
       <div className="panelHeader compact">
         <div>
           <h2>Usage hook injection</h2>
@@ -176,7 +229,40 @@ function UsageHookSettingsPanel({ status, usageHooks, onInstall, onOpenConfig, o
   );
 }
 
-function StatusRefreshSettingsPanel({ preferences, status, onSave, onSaveRemoteUpdateTimeout }) {
+function SyncRefreshSettingsPanel({
+  preferences,
+  status,
+  userSkillsGit,
+  onSaveRemoteUpdateTimeout,
+  onSaveStatusRefreshInterval,
+  onSaveUserSkillsRemote
+}) {
+  return (
+    <aside className="panel compactPanel settingsPanel syncRefreshSettingsPanel" id="settings-sync">
+      <div className="panelHeader compact">
+        <div>
+          <h2>Sync & refresh</h2>
+          <p>Keep user skills backed by Git and status checks current.</p>
+        </div>
+      </div>
+      <div className="syncRefreshGrid">
+        <UserSkillsGitSettingsForm
+          status={status}
+          userSkillsGit={userSkillsGit}
+          onSave={onSaveUserSkillsRemote}
+        />
+        <StatusRefreshSettingsForm
+          preferences={preferences}
+          status={status}
+          onSaveRemoteUpdateTimeout={onSaveRemoteUpdateTimeout}
+          onSave={onSaveStatusRefreshInterval}
+        />
+      </div>
+    </aside>
+  );
+}
+
+function StatusRefreshSettingsForm({ preferences, status, onSave, onSaveRemoteUpdateTimeout }) {
   const [intervalMinutes, setIntervalMinutes] = useState(
     String(preferences.statusRefreshIntervalMinutes || 5)
   );
@@ -208,60 +294,56 @@ function StatusRefreshSettingsPanel({ preferences, status, onSave, onSaveRemoteU
   }
 
   return (
-    <aside className="panel compactPanel">
-      <div className="panelHeader compact">
-        <div>
-          <h2>Status refresh</h2>
-          <p>Dashboard status checks run automatically.</p>
-        </div>
+    <form className="settingsForm settingsSubform" onSubmit={submit}>
+      <div className="settingsSubformHeader">
+        <h3>Status refresh</h3>
+        <p>Dashboard checks run automatically.</p>
       </div>
-      <form className="settingsForm" onSubmit={submit}>
-        <label className="remoteImportField">
-          <span>Auto refresh interval</span>
-          <div className="numberFieldRow">
-            <input
-              min="1"
-              max="1440"
-              step="1"
-              type="number"
-              value={intervalMinutes}
-              onChange={(event) => {
-                setIntervalMinutes(event.target.value);
-                setMessage('');
-              }}
-            />
-            <span>minutes</span>
-          </div>
-        </label>
-        <label className="remoteImportField">
-          <span>Git check timeout</span>
-          <div className="numberFieldRow">
-            <input
-              min="5"
-              max="300"
-              step="1"
-              type="number"
-              value={timeoutSeconds}
-              onChange={(event) => {
-                setTimeoutSeconds(event.target.value);
-                setMessage('');
-              }}
-            />
-            <span>seconds</span>
-          </div>
-        </label>
-        <div className="settingsActions">
-          {message ? <span className={saveStatus === 'error' ? 'settingsError' : 'settingsSaved'}>{message}</span> : <span />}
-          <button className="button primary" disabled={status === 'checking' || saveStatus === 'saving'} type="submit">
-            {saveStatus === 'saving' ? 'Saving...' : 'Save status settings'}
-          </button>
+      <label className="remoteImportField">
+        <span>Auto refresh interval</span>
+        <div className="numberFieldRow">
+          <input
+            min="1"
+            max="1440"
+            step="1"
+            type="number"
+            value={intervalMinutes}
+            onChange={(event) => {
+              setIntervalMinutes(event.target.value);
+              setMessage('');
+            }}
+          />
+          <span>minutes</span>
         </div>
-      </form>
-    </aside>
+      </label>
+      <label className="remoteImportField">
+        <span>Git check timeout</span>
+        <div className="numberFieldRow">
+          <input
+            min="5"
+            max="300"
+            step="1"
+            type="number"
+            value={timeoutSeconds}
+            onChange={(event) => {
+              setTimeoutSeconds(event.target.value);
+              setMessage('');
+            }}
+          />
+          <span>seconds</span>
+        </div>
+      </label>
+      <div className="settingsActions">
+        {message ? <span className={saveStatus === 'error' ? 'settingsError' : 'settingsSaved'}>{message}</span> : <span />}
+        <button className="button primary" disabled={status === 'checking' || saveStatus === 'saving'} type="submit">
+          {saveStatus === 'saving' ? 'Saving...' : 'Save status settings'}
+        </button>
+      </div>
+    </form>
   );
 }
 
-function UserSkillsGitSettingsPanel({ status, userSkillsGit, onSave }) {
+function UserSkillsGitSettingsForm({ status, userSkillsGit, onSave }) {
   const [remoteUrl, setRemoteUrl] = useState(userSkillsGit.remoteUrl || '');
   const [saveStatus, setSaveStatus] = useState('idle');
   const [message, setMessage] = useState('');
@@ -286,43 +368,39 @@ function UserSkillsGitSettingsPanel({ status, userSkillsGit, onSave }) {
   }
 
   return (
-    <aside className="panel compactPanel">
-      <div className="panelHeader compact">
-        <div>
-          <h2>User skills Git</h2>
-          <p>Shared repository used by every local user skill.</p>
-        </div>
+    <form className="settingsForm settingsSubform" onSubmit={submit}>
+      <div className="settingsSubformHeader">
+        <h3>User skills Git</h3>
+        <p>Shared repository used by every local user skill.</p>
       </div>
-      <form className="settingsForm" onSubmit={submit}>
-        <label className="remoteImportField">
-          <span>Remote URL</span>
-          <input
-            placeholder="git@github.com:santosli/user-skills.git"
-            value={remoteUrl}
-            onChange={(event) => setRemoteUrl(event.target.value)}
-          />
-        </label>
-        <PathList
-          items={[
-            ['Repository', userSkillsGit.repoPath || '~/.skillbox/user-skills'],
-            ['Branch', userSkillsGit.branch || 'main'],
-            ['State', userSyncLabel(userSkillsGit)]
-          ]}
+      <label className="remoteImportField">
+        <span>Remote URL</span>
+        <input
+          placeholder="git@github.com:santosli/user-skills.git"
+          value={remoteUrl}
+          onChange={(event) => setRemoteUrl(event.target.value)}
         />
-        <div className="settingsActions">
-          {message ? <span className={saveStatus === 'error' ? 'settingsError' : 'settingsSaved'}>{message}</span> : <span />}
-          <button className="button primary" disabled={status === 'syncing' || saveStatus === 'saving'} type="submit">
-            {saveStatus === 'saving' ? 'Saving...' : 'Save remote'}
-          </button>
-        </div>
-      </form>
-    </aside>
+      </label>
+      <PathList
+        items={[
+          ['Repository', userSkillsGit.repoPath || '~/.skillbox/user-skills'],
+          ['Branch', userSkillsGit.branch || 'main'],
+          ['State', userSyncLabel(userSkillsGit)]
+        ]}
+      />
+      <div className="settingsActions">
+        {message ? <span className={saveStatus === 'error' ? 'settingsError' : 'settingsSaved'}>{message}</span> : <span />}
+        <button className="button primary" disabled={status === 'syncing' || saveStatus === 'saving'} type="submit">
+          {saveStatus === 'saving' ? 'Saving...' : 'Save remote'}
+        </button>
+      </div>
+    </form>
   );
 }
 
 function ManagedRootsPanel({ paths }) {
   return (
-    <aside className="panel compactPanel">
+    <aside className="panel compactPanel settingsPanel" id="settings-storage">
       <div className="panelHeader compact">
         <div>
           <h2>Managed roots</h2>
