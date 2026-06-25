@@ -89,27 +89,27 @@ test('settings exposes app update checks without downloading automatically', () 
   assert.doesNotMatch(appSource, /downloadAndInstall/);
 });
 
-test('settings page uses a workbench rail with status summary and section nav', () => {
-  const railSource = appSource.match(/function SettingsRail[\s\S]*?function SettingsStatusRow/)?.[0] || '';
+test('settings page uses a workbench rail with state-driven section nav only', () => {
+  const railSource = appSource.match(/function SettingsRail[\s\S]*?function AppUpdateSettingsPanel/)?.[0] || '';
 
   assert.match(appSource, /className="settingsWorkbench"/);
+  assert.match(appSource, /const \[activeSettingsSection,\s*setActiveSettingsSection\]\s*=\s*useState\('storage'\);/);
   assert.match(appSource, /function SettingsRail/);
-  assert.match(appSource, /className="settingsRailSummary"/);
   assert.match(appSource, /className="settingsRailNav"/);
-  assert.ok(
-    railSource.indexOf('className="settingsRailNav"') <
-      railSource.indexOf('className="settingsRailSummary"')
-  );
+  assert.match(appSource, /activeSettingsSection=\{activeSettingsSection\}/);
+  assert.match(appSource, /onSelectSection=\{setActiveSettingsSection\}/);
+  assert.match(appSource, /const settingsSections = \[/);
+  assert.match(appSource, /activeSettingsSection === item\.id \? 'true' : undefined/);
+  assert.match(appSource, /className=\{activeSettingsSection === item\.id \? 'active' : ''\}/);
+  assert.match(appSource, /onClick=\{\(\) => onSelectSection\(item\.id\)\}/);
   assert.doesNotMatch(appSource, /System status/);
-  assert.doesNotMatch(appSource, /<SettingsStatusRow label="Store"/);
-  assert.match(appSource, /<SettingsStatusRow label="Git" value=\{userSyncLabel\(userSkillsGit\)\}/);
-  assert.match(appSource, /<SettingsStatusRow label="Updates" value=\{appUpdateStatusLabel\(appUpdate\)\}/);
-  assert.match(appSource, /<SettingsStatusRow label="Hooks" value=\{`\$\{injectedHookCount\}\/\$\{supportedHookCount\} injected`\}/);
-  assert.match(appSource, /className="settingsStoreHint"/);
-  assert.match(appSource, /href="#settings-storage"/);
-  assert.match(appSource, /href="#settings-sync"/);
-  assert.match(appSource, /href="#settings-updates"/);
-  assert.match(appSource, /href="#settings-hooks"/);
+  assert.doesNotMatch(railSource, /settingsRailSummary/);
+  assert.doesNotMatch(railSource, /SettingsStatusRow/);
+  assert.doesNotMatch(railSource, /settingsStoreHint/);
+  assert.match(appSource, /href:\s*'#settings-storage'/);
+  assert.match(appSource, /href:\s*'#settings-sync'/);
+  assert.match(appSource, /href:\s*'#settings-updates'/);
+  assert.match(appSource, /href:\s*'#settings-hooks'/);
 });
 
 test('settings sections are anchored and sync controls are grouped together', () => {
@@ -129,8 +129,8 @@ test('settings sections are anchored and sync controls are grouped together', ()
 test('settings workbench CSS defines a desktop rail and responsive fallback', () => {
   const workbenchRule = css.match(/\.settingsWorkbench\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const railRule = css.match(/\.settingsRail\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
-  const railSummaryRule = css.match(/\.settingsRailSummary\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const syncRule = css.match(/\.syncRefreshGrid\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const subformRule = css.match(/\.settingsSubform \+ \.settingsSubform\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const responsiveRule = css.match(/@media \(max-width: 1180px\)\s*\{(?<body>[\s\S]*?)@media \(max-width: 1360px\)/)
     ?.groups.body || '';
 
@@ -138,9 +138,12 @@ test('settings workbench CSS defines a desktop rail and responsive fallback', ()
   assert.match(workbenchRule, /max-width:\s*1220px;/);
   assert.match(railRule, /position:\s*sticky;/);
   assert.match(railRule, /top:\s*24px;/);
-  assert.doesNotMatch(railSummaryRule, /border:/);
-  assert.doesNotMatch(railSummaryRule, /box-shadow:/);
-  assert.match(syncRule, /grid-template-columns:\s*minmax\(0,\s*1\.18fr\)\s+minmax\(260px,\s*0\.82fr\);/);
+  assert.doesNotMatch(css, /\.settingsRailSummary/);
+  assert.doesNotMatch(css, /\.settingsStatusRow/);
+  assert.doesNotMatch(css, /\.settingsStoreHint/);
+  assert.match(syncRule, /grid-template-columns:\s*1fr;/);
+  assert.match(subformRule, /border-top:\s*1px solid #eef2f7;/);
+  assert.doesNotMatch(subformRule, /border-left:/);
   assert.match(responsiveRule, /\.settingsWorkbench\s*\{[^}]*grid-template-columns:\s*1fr;/s);
   assert.match(responsiveRule, /\.settingsRail\s*\{[^}]*position:\s*static;/s);
   assert.match(responsiveRule, /\.settingsRailNav\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\);/s);

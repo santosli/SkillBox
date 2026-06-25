@@ -1178,46 +1178,6 @@ button {
   box-shadow: 0 16px 34px rgba(15, 23, 42, 0.035);
 }
 
-.settingsRailSummary {
-  display: grid;
-  gap: 7px;
-  padding: 2px 8px;
-}
-
-.settingsStatusRow {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.settingsStatusRow span {
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 680;
-}
-
-.settingsStatusRow strong {
-  min-width: 0;
-  overflow: hidden;
-  color: #111827;
-  font-size: 13px;
-  font-weight: 680;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.settingsStoreHint {
-  overflow: hidden;
-  color: #94a3b8;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-size: 11px;
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .settingsRailNav {
   display: grid;
   padding: 6px;
@@ -1236,6 +1196,7 @@ button {
 }
 
 .settingsRailNav a:hover,
+.settingsRailNav a.active,
 .settingsRailNav a[aria-current="true"] {
   background: #eff6ff;
   color: #0a63d8;
@@ -1293,7 +1254,7 @@ button {
 
 .syncRefreshGrid {
   display: grid;
-  grid-template-columns: minmax(0, 1.18fr) minmax(260px, 0.82fr);
+  grid-template-columns: 1fr;
   align-items: start;
 }
 
@@ -1303,7 +1264,7 @@ button {
 }
 
 .settingsSubform + .settingsSubform {
-  border-left: 1px solid #eef2f7;
+  border-top: 1px solid #eef2f7;
 }
 
 .settingsSubformHeader {
@@ -4769,16 +4730,6 @@ dd {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .settingsRailSummary {
-    grid-template-columns: repeat(3, minmax(0, 1fr)) max-content;
-    gap: 10px;
-    padding: 0 4px;
-  }
-
-  .settingsStatusRow {
-    gap: 4px;
-  }
-
   .settingsRailNav {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
@@ -4798,15 +4749,6 @@ dd {
   .setupGrid,
   .firstUseGrid {
     grid-template-columns: 1fr;
-  }
-
-  .syncRefreshGrid {
-    grid-template-columns: 1fr;
-  }
-
-  .settingsSubform + .settingsSubform {
-    border-top: 1px solid #eef2f7;
-    border-left: 0;
   }
 
   .sideStack {

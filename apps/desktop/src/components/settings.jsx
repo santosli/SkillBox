@@ -9,6 +9,13 @@ import {
 import { userSyncLabel } from '../userSkillsGitSync.js';
 import { Badge, PageHeader, PathList } from './common.jsx';
 
+const settingsSections = [
+  { id: 'storage', label: 'Storage', href: '#settings-storage' },
+  { id: 'sync', label: 'Sync', href: '#settings-sync' },
+  { id: 'updates', label: 'Updates', href: '#settings-updates' },
+  { id: 'hooks', label: 'Hooks', href: '#settings-hooks' }
+];
+
 export function SettingsPage({
   appUpdate,
   paths,
@@ -27,6 +34,7 @@ export function SettingsPage({
 }) {
   const normalizedUsageHooks = normalizeUsageHookStatuses(usageHooks);
   const usageHookGroups = groupUsageHooksByConfig(normalizedUsageHooks);
+  const [activeSettingsSection, setActiveSettingsSection] = useState('storage');
 
   return (
     <>
@@ -38,10 +46,8 @@ export function SettingsPage({
 
       <section className="settingsWorkbench" aria-label="Settings workbench">
         <SettingsRail
-          appUpdate={appUpdate}
-          paths={paths}
-          usageHooks={normalizedUsageHooks}
-          userSkillsGit={userSkillsGit}
+          activeSettingsSection={activeSettingsSection}
+          onSelectSection={setActiveSettingsSection}
         />
         <div className="settingsContent">
           <ManagedRootsPanel paths={paths} />
@@ -71,49 +77,24 @@ export function SettingsPage({
   );
 }
 
-function SettingsRail({ appUpdate, paths, usageHooks, userSkillsGit }) {
-  const injectedHookCount = usageHooks.filter((hook) => hook.installed).length;
-  const supportedHookCount = usageHooks.length;
-
+function SettingsRail({ activeSettingsSection, onSelectSection }) {
   return (
-    <aside className="settingsRail" aria-label="Settings summary">
+    <aside className="settingsRail" aria-label="Settings navigation">
       <nav className="settingsRailNav" aria-label="Settings sections">
-        <a aria-current="true" href="#settings-storage">Storage</a>
-        <a href="#settings-sync">Sync</a>
-        <a href="#settings-updates">Updates</a>
-        <a href="#settings-hooks">Hooks</a>
+        {settingsSections.map((item) => (
+          <a
+            aria-current={activeSettingsSection === item.id ? 'true' : undefined}
+            className={activeSettingsSection === item.id ? 'active' : ''}
+            href={item.href}
+            key={item.id}
+            onClick={() => onSelectSection(item.id)}
+          >
+            {item.label}
+          </a>
+        ))}
       </nav>
-      <div className="settingsRailSummary">
-        <SettingsStatusRow label="Git" value={userSyncLabel(userSkillsGit)} />
-        <SettingsStatusRow label="Updates" value={appUpdateStatusLabel(appUpdate)} />
-        <SettingsStatusRow label="Hooks" value={`${injectedHookCount}/${supportedHookCount} injected`} />
-        <span className="settingsStoreHint">{compactHomePath(paths?.root || '~/.skillbox')}</span>
-      </div>
     </aside>
   );
-}
-
-function SettingsStatusRow({ label, value }) {
-  return (
-    <div className="settingsStatusRow">
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
-function appUpdateStatusLabel(appUpdate) {
-  if (appUpdate?.state === 'error') return 'Error';
-  if (appUpdate?.state === 'checking') return 'Checking';
-  if (appUpdate?.state === 'installing') return 'Installing';
-  if (appUpdate?.state === 'disabled') return 'Disabled';
-  if (appUpdate?.available && appUpdate?.version) return 'Ready';
-  if (!appUpdate?.checkedAt) return 'Not checked';
-  return 'Up to date';
-}
-
-function compactHomePath(path) {
-  return String(path || '').replace(/^\/Users\/[^/]+/, '~');
 }
 
 function AppUpdateSettingsPanel({ appUpdate, onCheck, onInstall }) {
