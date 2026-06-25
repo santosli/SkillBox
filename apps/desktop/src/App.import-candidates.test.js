@@ -5,6 +5,7 @@ import {
   dashboardStatusNotice,
   formatStatusCheckedAt,
   formatStatusNoticeCountdown,
+  mergeRemoteSkillUpdates,
   normalizeRemoteSkillUpdates,
   normalizeRemoteUpdateTimeoutSeconds,
   normalizeStatusRefreshIntervalMinutes,
@@ -397,6 +398,33 @@ test('remote skill row status follows refreshed update state', () => {
     tone: 'blue'
   });
   assert.equal(remoteSkillRowStatus({ name: 'local', type: 'user' }, updates), null);
+});
+
+test('single remote update refresh replaces one status without dropping the rest', () => {
+  const current = normalizeRemoteSkillUpdates({
+    checked_at: '1779840000',
+    statuses: [
+      { skill_name: 'ui-ux-pro-max', state: 'update_available', update_available: true },
+      { skill_name: 'find-skills', state: 'up_to_date', update_available: false }
+    ]
+  });
+  const incoming = normalizeRemoteSkillUpdates({
+    checked_at: '1779840300',
+    statuses: [
+      { skill_name: 'ui-ux-pro-max', state: 'up_to_date', update_available: false }
+    ]
+  });
+
+  const merged = mergeRemoteSkillUpdates(current, incoming);
+
+  assert.equal(merged.checkedAt, '1779840300');
+  assert.deepEqual(
+    merged.statuses.map((status) => [status.skillName, status.state]),
+    [
+      ['ui-ux-pro-max', 'up_to_date'],
+      ['find-skills', 'up_to_date']
+    ]
+  );
 });
 
 test('formats remote ref behavior for tracking and pinned sources', () => {

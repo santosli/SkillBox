@@ -215,6 +215,7 @@ export function RemoteSourceCandidateBindDialog({ dialog, skillName, onClose, on
 
 export function RemoteVersionReviewDialog({ dialog, onActivatePath, onApply, onClose }) {
   const preview = dialog.preview;
+  const applyLabel = preview?.action === 'rollback' ? 'Apply Rollback' : 'Apply Update';
   const activeFile =
     preview?.files.find((file) => file.path === dialog.activePath) ||
     preview?.files[0] ||
@@ -311,7 +312,7 @@ export function RemoteVersionReviewDialog({ dialog, onActivatePath, onApply, onC
                 Applying...
               </>
             ) : (
-              'Apply change'
+              applyLabel
             )}
           </button>
         </div>

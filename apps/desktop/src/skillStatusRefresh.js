@@ -99,6 +99,33 @@ export function normalizeRemoteSkillUpdates(result) {
   };
 }
 
+export function mergeRemoteSkillUpdates(currentUpdates, incomingUpdates) {
+  const current = normalizeRemoteSkillUpdates(currentUpdates);
+  const incoming = normalizeRemoteSkillUpdates(incomingUpdates);
+  const incomingByName = new Map(
+    incoming.statuses
+      .filter((status) => status.skillName)
+      .map((status) => [status.skillName, status])
+  );
+  const mergedNames = new Set();
+  const statuses = current.statuses.map((status) => {
+    const incomingStatus = incomingByName.get(status.skillName);
+    if (!incomingStatus) return status;
+    mergedNames.add(status.skillName);
+    return incomingStatus;
+  });
+
+  for (const status of incoming.statuses) {
+    if (!status.skillName || mergedNames.has(status.skillName)) continue;
+    statuses.push(status);
+  }
+
+  return {
+    checkedAt: incoming.checkedAt || current.checkedAt,
+    statuses
+  };
+}
+
 function remoteUpdateStateLabel(state) {
   if (state === 'no_source') return 'No source';
   if (state === 'update_available') return 'Update available';

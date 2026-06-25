@@ -83,6 +83,7 @@ import {
 import {
   dashboardStatusNotice,
   formatStatusCheckedAt,
+  mergeRemoteSkillUpdates,
   normalizeRemoteSkillUpdates,
   normalizeStatusRefreshIntervalMinutes
 } from './skillStatusRefresh.js';
@@ -567,19 +568,37 @@ export default function App() {
       return;
     }
 
+    if (skillName) {
+      try {
+        const remoteUpdatesResult = await invoke('check_remote_skill_update', {
+          skillName,
+          timeoutSeconds: preferences.remoteUpdateTimeoutSeconds
+        });
+        const checkedRemoteUpdates = normalizeRemoteSkillUpdates(remoteUpdatesResult);
+        const nextRemoteUpdates = mergeRemoteSkillUpdates(remoteSkillUpdates, checkedRemoteUpdates);
+
+        setRemoteSkillUpdates(nextRemoteUpdates);
+        setLastStatusCheckedAt(nextRemoteUpdates.checkedAt || new Date().toISOString());
+        if (!automatic) {
+          setNotice(dashboardStatusNotice({ userSkillsGit, remoteUpdates: nextRemoteUpdates }));
+        }
+        setStatus('ready');
+        return;
+      } catch (refreshError) {
+        setLastStatusCheckedAt(new Date().toISOString());
+        setError(refreshError.message || String(refreshError) || 'Unable to refresh skill status.');
+        setStatus('ready');
+        return;
+      }
+    }
+
     try {
-      const remoteUpdateRequest = skillName
-        ? invoke('check_remote_skill_update', {
-            skillName,
-            timeoutSeconds: preferences.remoteUpdateTimeoutSeconds
-          })
-        : invoke('check_remote_skill_updates', {
-            timeoutSeconds: preferences.remoteUpdateTimeoutSeconds
-          });
       const [state, gitStatus, remoteUpdatesResult] = await Promise.all([
         invoke('managed_state'),
         invoke('user_skills_git_status').catch(() => null),
-        remoteUpdateRequest
+        invoke('check_remote_skill_updates', {
+          timeoutSeconds: preferences.remoteUpdateTimeoutSeconds
+        })
       ]);
       const managedSkills = state.skills?.map(normalizeSkill) || [];
       const nextUserSkillsGit = normalizeUserSkillsGitStatus(gitStatus);
@@ -2076,7 +2095,7 @@ export default function App() {
         }
       });
       setRemoteVersionDialog((current) => ({ ...current, open: false, applying: false }));
-      await refreshSkillStatuses();
+      await refreshSkillStatuses({ skillName: preview.skillName });
       await loadRemoteSkillContext(preview.skillName);
       setNotice(`${remoteVersionActionLabel(preview)} applied for ${preview.skillName}.`);
     } catch (applyError) {

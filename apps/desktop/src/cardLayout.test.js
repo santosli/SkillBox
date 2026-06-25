@@ -399,10 +399,26 @@ test('dashboard refresh checks all remote skills while detail check targets one 
     /async function refreshSkillStatuses\(\{ automatic = false, skillName = '' \} = \{\}\)\s*\{(?<body>[\s\S]*?)\n  \}/
   )?.groups.body || '';
 
-  assert.match(refreshStatuses, /skillName\s*\?\s*invoke\('check_remote_skill_update'/);
-  assert.match(refreshStatuses, /:\s*invoke\('check_remote_skill_updates'/);
+  assert.match(refreshStatuses, /if \(skillName\) \{[\s\S]*invoke\('check_remote_skill_update'/);
+  assert.match(refreshStatuses, /invoke\('check_remote_skill_updates'/);
   assert.match(appSource, /onRefreshStatuses=\{refreshSkillStatuses\}/);
   assert.match(appSource, /onCheckUpdates=\{\(\) => refreshSkillStatuses\(\{ skillName: selectedSkill\.name \}\)\}/);
+});
+
+test('single skill status refresh skips full managed state refresh', () => {
+  const refreshStatuses = appSource.match(
+    /async function refreshSkillStatuses\(\{ automatic = false, skillName = '' \} = \{\}\)\s*\{(?<body>[\s\S]*?)\n  \}/
+  )?.groups.body || '';
+  const targetedStart = refreshStatuses.indexOf('if (skillName) {');
+  const fullRefreshStart = refreshStatuses.indexOf("invoke('managed_state')");
+  const targetedRefresh = refreshStatuses.slice(targetedStart, fullRefreshStart);
+
+  assert.ok(targetedStart >= 0);
+  assert.ok(fullRefreshStart > targetedStart);
+  assert.match(targetedRefresh, /invoke\('check_remote_skill_update'/);
+  assert.doesNotMatch(targetedRefresh, /invoke\('check_remote_skill_updates'/);
+  assert.doesNotMatch(targetedRefresh, /invoke\('managed_state'/);
+  assert.doesNotMatch(targetedRefresh, /invoke\('user_skills_git_status'/);
 });
 
 test('remote update review uses the checked latest sha as preview target', () => {
@@ -415,6 +431,21 @@ test('remote update review uses the checked latest sha as preview target', () =>
     appSource,
     /onReviewUpdate=\{\(\) => openRemoteVersionReview\(selectedSkill, 'update', selectedRemoteUpdate\?\.latestSha \|\| ''\)\}/
   );
+});
+
+test('remote version review labels apply actions by version action', () => {
+  assert.match(appSource, /'Apply Update'/);
+  assert.match(appSource, /'Apply Rollback'/);
+  assert.doesNotMatch(appSource, /'Apply change'/);
+});
+
+test('remote version apply refreshes only the updated skill status', () => {
+  const applyRemoteVersionChange = appSource.match(
+    /async function applyRemoteVersionChange\(\)\s*\{(?<body>[\s\S]*?)\n  \}/
+  )?.groups.body || '';
+
+  assert.match(applyRemoteVersionChange, /await refreshSkillStatuses\(\{\s*skillName:\s*preview\.skillName\s*\}\);/);
+  assert.doesNotMatch(applyRemoteVersionChange, /await refreshSkillStatuses\(\);/);
 });
 
 test('remote update checks pass the configured git timeout', () => {
