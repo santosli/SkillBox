@@ -9,6 +9,12 @@ version tags such as `v0.3.0`.
 
 - No unreleased changes.
 
+## 0.3.4
+
+- Rename the remote skill update confirmation button to Apply Update.
+- Refresh only the updated remote skill status after applying a version change to avoid unnecessary dashboard stalls.
+- Preserve the rest of the remote update status table during targeted refreshes.
+
 ## 0.3.3
 
 - Share the Dashboard page title template across Dashboard, Settings, Workspaces, and History for consistent page headers.

@@ -3092,7 +3092,7 @@ checksum = "8ee5873ec9cce0195efcb7a4e9507a04cd49aec9c83d0389df45b1ef7ba2e649"
 
 [[package]]
 name = "skillbox-cli"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -3102,7 +3102,7 @@ dependencies = [
 
 [[package]]
 name = "skillbox-core"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "chrono",
  "rusqlite",
@@ -3115,7 +3115,7 @@ dependencies = [
 
 [[package]]
 name = "skillbox-desktop"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -3128,11 +3128,11 @@ dependencies = [
 
 [[package]]
 name = "skillbox-git"
-version = "0.3.3"
+version = "0.3.4"
 
 [[package]]
 name = "skillbox-github"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "serde",
  "url",
