@@ -1170,7 +1170,6 @@ button {
   gap: 14px;
 }
 
-.settingsRailSummary,
 .settingsRailNav {
   overflow: hidden;
   border: 1px solid #e5e7eb;
@@ -1181,27 +1180,16 @@ button {
 
 .settingsRailSummary {
   display: grid;
-  gap: 0;
-  padding: 14px 14px 8px;
-}
-
-.settingsRailEyebrow {
-  margin-bottom: 6px;
-  color: #64748b;
-  font-size: 11px;
-  font-weight: 720;
-  letter-spacing: 0;
-  text-transform: uppercase;
+  gap: 7px;
+  padding: 2px 8px;
 }
 
 .settingsStatusRow {
-  display: grid;
+  display: flex;
   min-width: 0;
-  grid-template-columns: 72px minmax(0, 1fr);
-  gap: 10px;
-  align-items: baseline;
-  padding: 9px 0;
-  border-top: 1px solid #f1f5f9;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .settingsStatusRow span {
@@ -1216,6 +1204,16 @@ button {
   color: #111827;
   font-size: 13px;
   font-weight: 680;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settingsStoreHint {
+  overflow: hidden;
+  color: #94a3b8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -4772,25 +4770,13 @@ dd {
   }
 
   .settingsRailSummary {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 0;
-    align-items: stretch;
-  }
-
-  .settingsRailEyebrow {
-    grid-column: 1 / -1;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) max-content;
+    gap: 10px;
+    padding: 0 4px;
   }
 
   .settingsStatusRow {
-    grid-template-columns: 1fr;
     gap: 4px;
-    padding: 8px 10px;
-    border-top: 1px solid #f1f5f9;
-    border-left: 1px solid #f1f5f9;
-  }
-
-  .settingsStatusRow:nth-of-type(1) {
-    border-left: 0;
   }
 
   .settingsRailNav {
@@ -4878,10 +4864,6 @@ dd {
 
   .skillDetailVersionHistory {
     grid-template-columns: 1fr;
-  }
-
-  .settingsRailSummary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .skillDetailBodyGrid > .operationHistoryPanel {

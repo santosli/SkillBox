@@ -77,19 +77,18 @@ function SettingsRail({ appUpdate, paths, usageHooks, userSkillsGit }) {
 
   return (
     <aside className="settingsRail" aria-label="Settings summary">
-      <div className="settingsRailSummary">
-        <span className="settingsRailEyebrow">System status</span>
-        <SettingsStatusRow label="Store" value={compactHomePath(paths?.root || '~/.skillbox')} />
-        <SettingsStatusRow label="Git" value={userSyncLabel(userSkillsGit)} />
-        <SettingsStatusRow label="Updates" value={appUpdateStatusLabel(appUpdate)} />
-        <SettingsStatusRow label="Hooks" value={`${injectedHookCount}/${supportedHookCount} injected`} />
-      </div>
       <nav className="settingsRailNav" aria-label="Settings sections">
         <a aria-current="true" href="#settings-storage">Storage</a>
         <a href="#settings-sync">Sync</a>
         <a href="#settings-updates">Updates</a>
         <a href="#settings-hooks">Hooks</a>
       </nav>
+      <div className="settingsRailSummary">
+        <SettingsStatusRow label="Git" value={userSyncLabel(userSkillsGit)} />
+        <SettingsStatusRow label="Updates" value={appUpdateStatusLabel(appUpdate)} />
+        <SettingsStatusRow label="Hooks" value={`${injectedHookCount}/${supportedHookCount} injected`} />
+        <span className="settingsStoreHint">{compactHomePath(paths?.root || '~/.skillbox')}</span>
+      </div>
     </aside>
   );
 }
