@@ -1157,29 +1157,23 @@ button {
 .settingsPage {
   display: grid;
   max-width: 1220px;
-  gap: 16px;
+  gap: 14px;
 }
 
-.settingsPage .pageHeader {
+.settingsPageHeader {
+  display: flex;
   min-height: 48px;
+  min-width: 0;
   align-items: flex-end;
-  border-bottom: 1px solid #e5e7eb;
-  margin-bottom: 0;
-  padding-bottom: 10px;
 }
 
-.settingsPage .pageHeader h1 {
+.settingsPageHeader h1 {
+  margin: 0;
+  color: var(--skillbox-text);
   font-size: 28px;
+  font-weight: 670;
+  letter-spacing: 0;
   line-height: 1.08;
-}
-
-.settingsPage .pageHeader p {
-  margin-top: 4px;
-  font-size: 14px;
-}
-
-.settingsPage .pageHeader .eyebrow {
-  margin-bottom: 4px;
 }
 
 .settingsWorkbench {

@@ -113,18 +113,22 @@ test('settings page uses a workbench rail with state-driven section nav only', (
   assert.match(appSource, /href:\s*'#settings-hooks'/);
 });
 
-test('settings header shares the workbench alignment contract', () => {
+test('settings header renders one scoped title aligned with the workbench', () => {
+  const settingsPageSource = appSource.match(/export function SettingsPage[\s\S]*?function SettingsRail/)?.[0] || '';
   const pageRule = css.match(/\.settingsPage\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
-  const pageHeaderRule = css.match(/\.settingsPage \.pageHeader\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
-  const pageHeaderTitleRule = css.match(/\.settingsPage \.pageHeader h1\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const pageHeaderRule = css.match(/\.settingsPageHeader\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const pageHeaderTitleRule = css.match(/\.settingsPageHeader h1\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const workbenchRule = css.match(/\.settingsWorkbench\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
 
+  assert.match(settingsPageSource, /<header className="settingsPageHeader">/);
+  assert.match(settingsPageSource, /<h1>Settings<\/h1>/);
+  assert.doesNotMatch(settingsPageSource, /<PageHeader/);
+  assert.doesNotMatch(settingsPageSource, /eyebrow="Settings"/);
+  assert.doesNotMatch(settingsPageSource, /subtitle="Storage, sync, updates, and hooks\."/);
   assert.match(pageRule, /display:\s*grid;/);
   assert.match(pageRule, /max-width:\s*1220px;/);
-  assert.match(pageRule, /gap:\s*16px;/);
-  assert.match(pageHeaderRule, /border-bottom:\s*1px solid #e5e7eb;/);
-  assert.match(pageHeaderRule, /margin-bottom:\s*0;/);
-  assert.match(pageHeaderRule, /padding-bottom:\s*10px;/);
+  assert.match(pageRule, /gap:\s*14px;/);
+  assert.doesNotMatch(pageHeaderRule, /border-bottom:/);
   assert.match(pageHeaderTitleRule, /font-size:\s*28px;/);
   assert.match(workbenchRule, /width:\s*100%;/);
   assert.match(workbenchRule, /max-width:\s*1220px;/);
