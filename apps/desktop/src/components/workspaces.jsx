@@ -16,7 +16,7 @@ import {
   workspaceDeploymentChanges,
   workspaceDeployRequiresConfirmation
 } from '../workspaces.js';
-import { AgentIconBadge, Badge } from './common.jsx';
+import { AgentIconBadge, Badge, PageTitleRow } from './common.jsx';
 import { DashboardStatusNotice } from './dashboard.jsx';
 
 export function WorkspacePage({
@@ -39,12 +39,7 @@ export function WorkspacePage({
   return (
     <section className="dashboardFrame workspaceFrame" aria-label="Workspace registry">
       {error ? <div className="notice">{error}</div> : null}
-      <div className="dashboardTitleRow">
-        <div className="dashboardTitleGroup">
-          <h1>Workspaces</h1>
-          <span className="dashboardCountPill">{workspaces.length}</span>
-        </div>
-      </div>
+      <PageTitleRow title="Workspaces" count={workspaces.length} />
 
       <div className="dashboardControlRow workspaceControlRow">
         <div className="dashboardTypeTabs workspaceTypeTabs" role="tablist" aria-label="Workspace type">

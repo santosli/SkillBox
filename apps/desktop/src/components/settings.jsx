@@ -7,7 +7,7 @@ import {
   usageHookStatusLabel
 } from '../usageHooks.js';
 import { userSyncLabel } from '../userSkillsGitSync.js';
-import { Badge, PathList } from './common.jsx';
+import { Badge, PageTitleRow, PathList } from './common.jsx';
 
 const settingsSections = [
   { id: 'storage', label: 'Storage', href: '#settings-storage' },
@@ -38,9 +38,7 @@ export function SettingsPage({
 
   return (
     <div className="settingsPage">
-      <header className="settingsPageHeader">
-        <h1>Settings</h1>
-      </header>
+      <PageTitleRow title="Settings" />
 
       <section className="settingsWorkbench" aria-label="Settings workbench">
         <SettingsRail

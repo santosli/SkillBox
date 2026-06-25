@@ -15,7 +15,7 @@ import {
   formatStatusNoticeCountdown,
   statusNoticeAutoCloseSeconds
 } from '../skillStatusRefresh.js';
-import { AgentIconStack, Badge, Icon } from './common.jsx';
+import { AgentIconStack, Badge, Icon, PageTitleRow } from './common.jsx';
 
 export function Dashboard({
   activeTag,
@@ -55,12 +55,7 @@ export function Dashboard({
         <FirstUseDashboard status={status} onInstall={onInstall} onScan={onRefresh} />
       ) : (
         <section className="dashboardFrame" aria-label="Skills dashboard">
-          <div className="dashboardTitleRow">
-            <div className="dashboardTitleGroup">
-              <h1>Skills</h1>
-              <span className="dashboardCountPill">{filtered.length}</span>
-            </div>
-          </div>
+          <PageTitleRow title="Skills" count={filtered.length} />
 
           <div className="dashboardControlRow">
             <label className="searchField dashboardSearch" aria-label="Search skills">

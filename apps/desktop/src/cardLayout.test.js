@@ -113,23 +113,41 @@ test('settings page uses a workbench rail with state-driven section nav only', (
   assert.match(appSource, /href:\s*'#settings-hooks'/);
 });
 
-test('settings header renders one scoped title aligned with the workbench', () => {
+test('dashboard and settings use the shared page title row template', () => {
+  const dashboardSource = appSource.match(/export function Dashboard[\s\S]*?function DashboardActionGroup/)?.[0] || '';
   const settingsPageSource = appSource.match(/export function SettingsPage[\s\S]*?function SettingsRail/)?.[0] || '';
+  const commonSource = appSource.match(/export function PageTitleRow[\s\S]*?export function NavButton/)?.[0] || '';
   const pageRule = css.match(/\.settingsPage\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
-  const pageHeaderRule = css.match(/\.settingsPageHeader\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
-  const pageHeaderTitleRule = css.match(/\.settingsPageHeader h1\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const pageTitleRowRule = css.match(/\.pageTitleRow\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const pageTitleGroupRule = css.match(/\.pageTitleGroup\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const pageTitleHeadingRule = css.match(/\.pageTitleGroup h1\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const pageTitlePillRule = css.match(/\.pageTitlePill\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const workbenchRule = css.match(/\.settingsWorkbench\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
 
-  assert.match(settingsPageSource, /<header className="settingsPageHeader">/);
-  assert.match(settingsPageSource, /<h1>Settings<\/h1>/);
+  assert.match(commonSource, /export function PageTitleRow\(\{ actions, count, title \}\)/);
+  assert.match(commonSource, /className="pageTitleRow"/);
+  assert.match(commonSource, /className="pageTitleGroup"/);
+  assert.match(commonSource, /className="pageTitlePill"/);
+  assert.match(dashboardSource, /<PageTitleRow title="Skills" count=\{filtered\.length\} \/>/);
+  assert.match(settingsPageSource, /<PageTitleRow title="Settings" \/>/);
   assert.doesNotMatch(settingsPageSource, /<PageHeader/);
+  assert.doesNotMatch(settingsPageSource, /settingsPageHeader/);
   assert.doesNotMatch(settingsPageSource, /eyebrow="Settings"/);
   assert.doesNotMatch(settingsPageSource, /subtitle="Storage, sync, updates, and hooks\."/);
+  assert.doesNotMatch(css, /\.settingsPageHeader/);
+  assert.doesNotMatch(css, /\.dashboardTitleRow/);
+  assert.doesNotMatch(css, /\.dashboardTitleGroup/);
+  assert.doesNotMatch(css, /\.dashboardCountPill/);
   assert.match(pageRule, /display:\s*grid;/);
   assert.match(pageRule, /max-width:\s*1220px;/);
-  assert.match(pageRule, /gap:\s*14px;/);
-  assert.doesNotMatch(pageHeaderRule, /border-bottom:/);
-  assert.match(pageHeaderTitleRule, /font-size:\s*28px;/);
+  assert.match(pageRule, /gap:\s*18px;/);
+  assert.match(pageTitleRowRule, /min-height:\s*48px;/);
+  assert.match(pageTitleRowRule, /border-bottom:\s*1px solid #e5e7eb;/);
+  assert.match(pageTitleGroupRule, /gap:\s*12px;/);
+  assert.match(pageTitleHeadingRule, /font-size:\s*28px;/);
+  assert.match(pageTitleHeadingRule, /font-weight:\s*700;/);
+  assert.match(pageTitlePillRule, /min-width:\s*40px;/);
+  assert.match(pageTitlePillRule, /height:\s*32px;/);
   assert.match(workbenchRule, /width:\s*100%;/);
   assert.match(workbenchRule, /max-width:\s*1220px;/);
 });

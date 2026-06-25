@@ -7,7 +7,7 @@ import {
 } from '../historyEntries.js';
 import { formatOperationTimestamp } from '../remoteSkills.js';
 import { compactPath, numberOrZero } from '../skills.js';
-import { Badge } from './common.jsx';
+import { Badge, PageTitleRow } from './common.jsx';
 
 export function HistoryPage({ error, filter, history, status, onFilter, onRefresh }) {
   const entries = history.entries || [];
@@ -28,12 +28,7 @@ export function HistoryPage({ error, filter, history, status, onFilter, onRefres
   return (
     <section className="dashboardFrame historyFrame" aria-label="History">
       {error ? <div className="notice">{error}</div> : null}
-      <div className="dashboardTitleRow">
-        <div className="dashboardTitleGroup">
-          <h1>History</h1>
-          <span className="dashboardCountPill">{filteredEntries.length}</span>
-        </div>
-      </div>
+      <PageTitleRow title="History" count={filteredEntries.length} />
 
       <div className="dashboardControlRow historyControlRow">
         <div className="dashboardTypeTabs historyTypeTabs" role="tablist" aria-label="History type">

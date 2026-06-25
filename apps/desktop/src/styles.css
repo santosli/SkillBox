@@ -386,7 +386,7 @@ button {
   min-width: 0;
 }
 
-.dashboardTitleRow {
+.pageTitleRow {
   display: flex;
   min-height: 48px;
   align-items: center;
@@ -394,14 +394,14 @@ button {
   border-bottom: 1px solid #e5e7eb;
 }
 
-.dashboardTitleGroup {
+.pageTitleGroup {
   display: flex;
   min-width: 0;
   align-items: center;
   gap: 12px;
 }
 
-.dashboardTitleGroup h1 {
+.pageTitleGroup h1 {
   margin: 0;
   color: #111827;
   font-size: 28px;
@@ -410,7 +410,7 @@ button {
   line-height: 1.1;
 }
 
-.dashboardCountPill {
+.pageTitlePill {
   display: inline-flex;
   min-width: 40px;
   height: 32px;
@@ -424,6 +424,13 @@ button {
   font-weight: 680;
   line-height: 1;
   padding: 0 12px;
+}
+
+.pageTitleActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .dashboardControlRow {
@@ -1157,23 +1164,7 @@ button {
 .settingsPage {
   display: grid;
   max-width: 1220px;
-  gap: 14px;
-}
-
-.settingsPageHeader {
-  display: flex;
-  min-height: 48px;
-  min-width: 0;
-  align-items: flex-end;
-}
-
-.settingsPageHeader h1 {
-  margin: 0;
-  color: var(--skillbox-text);
-  font-size: 28px;
-  font-weight: 670;
-  letter-spacing: 0;
-  line-height: 1.08;
+  gap: 18px;
 }
 
 .settingsWorkbench {
@@ -4845,7 +4836,7 @@ dd {
     grid-template-columns: 1fr;
   }
 
-  .workspaceFrame .dashboardTitleRow {
+  .workspaceFrame .pageTitleRow {
     align-items: flex-start;
     flex-direction: column;
     gap: 14px;

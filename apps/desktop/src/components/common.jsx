@@ -91,6 +91,20 @@ export function PageHeader({ actions, eyebrow, subtitle, title }) {
   );
 }
 
+export function PageTitleRow({ actions, count, title }) {
+  const hasCount = count !== undefined && count !== null;
+
+  return (
+    <div className="pageTitleRow">
+      <div className="pageTitleGroup">
+        <h1>{title}</h1>
+        {hasCount ? <span className="pageTitlePill">{count}</span> : null}
+      </div>
+      {actions ? <div className="pageTitleActions">{actions}</div> : null}
+    </div>
+  );
+}
+
 export function NavButton({ active, icon, label, onClick }) {
   return (
     <button className={active ? 'navButton active' : 'navButton'} type="button" onClick={onClick}>
