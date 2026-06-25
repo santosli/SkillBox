@@ -9,6 +9,13 @@ version tags such as `v0.3.0`.
 
 - No unreleased changes.
 
+## 0.3.3
+
+- Share the Dashboard page title template across Dashboard, Settings, Workspaces, and History for consistent page headers.
+- Compact the Settings page into a clearer tabbed workbench with stacked setting groups and no duplicate status summary.
+- Improve remote diff review readability by explaining omitted oversized previews and separating footer actions from the diff pane.
+- Add the SkillBox promo video and source package to the public documentation.
+
 ## 0.3.2
 
 - Install GitHub-backed remote skills from the desktop Install dialog without deploying them automatically.
