@@ -37,7 +37,7 @@ export function SettingsPage({
   const [activeSettingsSection, setActiveSettingsSection] = useState('storage');
 
   return (
-    <>
+    <div className="settingsPage">
       <PageHeader
         eyebrow="Settings"
         title="Settings"
@@ -73,7 +73,7 @@ export function SettingsPage({
           />
         </div>
       </section>
-    </>
+    </div>
   );
 }
 

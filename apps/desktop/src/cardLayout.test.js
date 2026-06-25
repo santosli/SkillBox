@@ -92,6 +92,7 @@ test('settings exposes app update checks without downloading automatically', () 
 test('settings page uses a workbench rail with state-driven section nav only', () => {
   const railSource = appSource.match(/function SettingsRail[\s\S]*?function AppUpdateSettingsPanel/)?.[0] || '';
 
+  assert.match(appSource, /className="settingsPage"/);
   assert.match(appSource, /className="settingsWorkbench"/);
   assert.match(appSource, /const \[activeSettingsSection,\s*setActiveSettingsSection\]\s*=\s*useState\('storage'\);/);
   assert.match(appSource, /function SettingsRail/);
@@ -110,6 +111,23 @@ test('settings page uses a workbench rail with state-driven section nav only', (
   assert.match(appSource, /href:\s*'#settings-sync'/);
   assert.match(appSource, /href:\s*'#settings-updates'/);
   assert.match(appSource, /href:\s*'#settings-hooks'/);
+});
+
+test('settings header shares the workbench alignment contract', () => {
+  const pageRule = css.match(/\.settingsPage\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const pageHeaderRule = css.match(/\.settingsPage \.pageHeader\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const pageHeaderTitleRule = css.match(/\.settingsPage \.pageHeader h1\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const workbenchRule = css.match(/\.settingsWorkbench\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(pageRule, /display:\s*grid;/);
+  assert.match(pageRule, /max-width:\s*1220px;/);
+  assert.match(pageRule, /gap:\s*16px;/);
+  assert.match(pageHeaderRule, /border-bottom:\s*1px solid #e5e7eb;/);
+  assert.match(pageHeaderRule, /margin-bottom:\s*0;/);
+  assert.match(pageHeaderRule, /padding-bottom:\s*10px;/);
+  assert.match(pageHeaderTitleRule, /font-size:\s*28px;/);
+  assert.match(workbenchRule, /width:\s*100%;/);
+  assert.match(workbenchRule, /max-width:\s*1220px;/);
 });
 
 test('settings sections are anchored and sync controls are grouped together', () => {

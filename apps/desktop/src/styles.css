@@ -1154,8 +1154,37 @@ button {
   grid-template-columns: 1fr;
 }
 
+.settingsPage {
+  display: grid;
+  max-width: 1220px;
+  gap: 16px;
+}
+
+.settingsPage .pageHeader {
+  min-height: 48px;
+  align-items: flex-end;
+  border-bottom: 1px solid #e5e7eb;
+  margin-bottom: 0;
+  padding-bottom: 10px;
+}
+
+.settingsPage .pageHeader h1 {
+  font-size: 28px;
+  line-height: 1.08;
+}
+
+.settingsPage .pageHeader p {
+  margin-top: 4px;
+  font-size: 14px;
+}
+
+.settingsPage .pageHeader .eyebrow {
+  margin-bottom: 4px;
+}
+
 .settingsWorkbench {
   display: grid;
+  width: 100%;
   max-width: 1220px;
   grid-template-columns: minmax(220px, 240px) minmax(0, 960px);
   gap: 20px;
