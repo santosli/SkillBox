@@ -405,7 +405,14 @@ export function SkillDetailDialog({
                   <div className="skillDetailDeploySummary">
                     <span className="skillDetailDeployMetric">{skill.installedAgents.length || 0}</span>
                     <div>
-                      <strong>Active workspaces</strong>
+                      <div className="skillDetailDeployLabelRow">
+                        <strong>Active workspaces</strong>
+                        <AgentIconStack
+                          agents={skill.installedAgents}
+                          emptyLabel="No deployed workspace"
+                          labelPrefix="Deploy workspaces"
+                        />
+                      </div>
                       <small>{skill.installedAgents.length ? 'Active runtime workspaces' : 'No workspace deployed'}</small>
                     </div>
                   </div>
@@ -417,11 +424,6 @@ export function SkillDetailDialog({
                     </div>
                   </div>
                 </div>
-                <AgentIconStack
-                  agents={skill.installedAgents}
-                  emptyLabel="No deployed workspace"
-                  labelPrefix="Deploy workspaces"
-                />
               </div>
             </section>
 

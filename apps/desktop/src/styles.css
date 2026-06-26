@@ -2918,7 +2918,7 @@ dd {
 
 .skillDetailDeploySurface {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   align-items: center;
   gap: 16px;
@@ -2945,6 +2945,18 @@ dd {
   display: grid;
   min-width: 0;
   gap: 3px;
+}
+
+.skillDetailDeployLabelRow {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.skillDetailDeployLabelRow .skillAgentIcons {
+  flex: 0 0 auto;
+  justify-content: flex-start;
 }
 
 .skillDetailDeployMetric {

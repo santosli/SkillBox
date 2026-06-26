@@ -671,8 +671,22 @@ test('skill detail metadata starts with deploy workspace', () => {
   assert.match(appSource, /<strong>Active workspaces<\/strong>/);
   assert.match(appSource, /className="skillDetailUsageSummary"[\s\S]*\{skill\.usageCount \|\| 0\}[\s\S]*<strong>Usage<\/strong>/);
   assert.match(appSource, /labelPrefix="Deploy workspaces"/);
-  assert.match(css, /\.skillDetailDeploySurface\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto;/s);
+  assert.match(css, /\.skillDetailDeploySurface\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
   assert.match(css, /\.skillDetailDeployMetric\s*\{/);
+});
+
+test('active workspace icons sit beside the active workspaces label', () => {
+  const deploySummary = appSource.match(
+    /<div className="skillDetailDeploySummary">(?<body>[\s\S]*?)<\/div>\s*<\/div>/
+  )?.groups.body || '';
+
+  assert.match(deploySummary, /<div className="skillDetailDeployLabelRow">[\s\S]*<strong>Active workspaces<\/strong>[\s\S]*<AgentIconStack/);
+  assert.doesNotMatch(appSource, /<div className="skillDetailDeploySurface">[\s\S]*<\/div>\s*<AgentIconStack/);
+  assert.match(css, /\.skillDetailDeployLabelRow\s*\{[^}]*display:\s*inline-flex;/s);
+  assert.match(css, /\.skillDetailDeployLabelRow\s*\{[^}]*align-items:\s*center;/s);
+  assert.match(css, /\.skillDetailDeployLabelRow\s*\{[^}]*gap:\s*10px;/s);
+  assert.match(css, /\.skillDetailDeployLabelRow \.skillAgentIcons\s*\{[^}]*flex:\s*0 0 auto;/s);
+  assert.doesNotMatch(css, /\.skillDetailDeploySurface\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto;/s);
 });
 
 test('skill cards show usage directly under the skill name', () => {
