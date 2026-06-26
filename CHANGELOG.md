@@ -9,6 +9,11 @@ version tags such as `v0.3.0`.
 
 - No unreleased changes.
 
+## 0.3.5
+
+- Move active workspace agent icons next to the Active workspaces label in the skill detail deployment panel.
+- Keep the active workspace icon stack vertically centered with the label text.
+
 ## 0.3.4
 
 - Rename the remote skill update confirmation button to Apply Update.
