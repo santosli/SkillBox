@@ -52,6 +52,14 @@ fn database_initialization_configures_busy_timeout_and_wal() {
 }
 
 #[test]
+fn sha256_outputs_lowercase_hex_digest() {
+    assert_eq!(
+        sha256("abc"),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
+}
+
+#[test]
 fn legacy_node_sqlite_schema_migrates_operations_and_remains_writable() {
     let root = temp_dir("legacy-node-sqlite");
     let managed_root = root.join("SkillBox");
