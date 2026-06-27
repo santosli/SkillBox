@@ -293,7 +293,13 @@ pub(crate) fn sha256(content: &str) -> String {
 }
 
 pub(crate) fn sha256_bytes(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    let digest = Sha256::digest(bytes);
+    let mut output = String::with_capacity(digest.len() * 2);
+    for byte in digest.iter() {
+        use std::fmt::Write as _;
+        write!(&mut output, "{byte:02x}").expect("writing to a String should not fail");
+    }
+    output
 }
 
 #[cfg(unix)]
