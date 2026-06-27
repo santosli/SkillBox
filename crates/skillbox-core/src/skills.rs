@@ -418,7 +418,7 @@ fn symlink_targets_any_path(symlink: &Path, expected_paths: &[PathBuf]) -> Resul
             .join(target)
     };
     let target = normalize_lexical_path(&target);
-    Ok(expected_paths.iter().any(|expected| *expected == target))
+    Ok(expected_paths.contains(&target))
 }
 
 pub fn deploy_skill(
