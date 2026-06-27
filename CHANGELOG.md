@@ -9,6 +9,11 @@ version tags such as `v0.3.0`.
 
 - No unreleased changes.
 
+## 0.3.6
+
+- Fix a desktop startup blank screen caused by duplicate React runtimes after dependency updates.
+- Keep the desktop React dependency resolved to a single runtime so icon rendering does not crash the app.
+
 ## 0.3.5
 
 - Move active workspace agent icons next to the Active workspaces label in the skill detail deployment panel.
