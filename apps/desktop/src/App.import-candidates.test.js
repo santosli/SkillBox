@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  filterImportCandidatesByQuery,
   filterWorkspaceSkillCandidates,
   normalizeImportCandidate,
+  visibleImportCandidates,
   workspaceSkillTabs
 } from './importCandidates.js';
 import {
@@ -39,6 +41,7 @@ import {
   userSkillRowStatus,
   userSyncAction
 } from './userSkillsGitSync.js';
+import { toggleImportCandidateSelection } from './importFlow.js';
 
 test('normalizes backend is_selected false without selecting importable candidate', () => {
   const candidate = normalizeImportCandidate({
@@ -73,7 +76,7 @@ test('normalizes symlink import candidate source metadata', () => {
   assert.equal(candidate.usageCount, 2);
 });
 
-test('builds workspace skill tabs and separates symlink, imported, and system skills', () => {
+test('builds workspace skill tabs and separates unimported, imported, and system skills', () => {
   const candidates = [
     normalizeImportCandidate({
       name: 'alpha',
@@ -102,13 +105,13 @@ test('builds workspace skill tabs and separates symlink, imported, and system sk
 
   assert.deepEqual(workspaceSkillTabs(candidates), [
     { id: 'all', label: 'All', count: 4 },
-    { id: 'symlink', label: 'Symlink', count: 1 },
+    { id: 'unimported', label: 'Unimported', count: 2 },
     { id: 'imported', label: 'Imported', count: 1 },
     { id: 'system', label: 'System', count: 1 }
   ]);
   assert.deepEqual(
-    filterWorkspaceSkillCandidates(candidates, 'symlink').map((candidate) => candidate.name),
-    ['alpha']
+    filterWorkspaceSkillCandidates(candidates, 'unimported').map((candidate) => candidate.name),
+    ['alpha', 'gamma']
   );
   assert.deepEqual(
     filterWorkspaceSkillCandidates(candidates, 'imported').map((candidate) => candidate.name),
@@ -117,6 +120,103 @@ test('builds workspace skill tabs and separates symlink, imported, and system sk
   assert.deepEqual(
     filterWorkspaceSkillCandidates(candidates, 'system').map((candidate) => candidate.name),
     ['delta']
+  );
+});
+
+test('hides duplicate symlink candidates when the source skill is present', () => {
+  const candidates = [
+    normalizeImportCandidate({
+      name: 'defuddle',
+      source_path: '/Users/example/.agents/skills/defuddle',
+      real_path: '/Users/example/.agents/skills/defuddle',
+      import_status: 'importable'
+    }),
+    normalizeImportCandidate({
+      name: 'defuddle',
+      source_path: '/Users/example/.claude/skills/defuddle',
+      real_path: '/Users/example/.agents/skills/defuddle',
+      is_symlink: true,
+      symlink_target_path: '/Users/example/.agents/skills/defuddle',
+      import_status: 'importable'
+    }),
+    normalizeImportCandidate({
+      name: 'json-canvas',
+      source_path: '/Users/example/.claude/skills/json-canvas',
+      real_path: '/Users/example/.agents/skills/json-canvas',
+      is_symlink: true,
+      symlink_target_path: '/Users/example/.agents/skills/json-canvas',
+      import_status: 'importable'
+    })
+  ];
+
+  assert.deepEqual(
+    visibleImportCandidates(candidates).map((candidate) => candidate.sourcePath),
+    ['/Users/example/.agents/skills/defuddle', '/Users/example/.claude/skills/json-canvas']
+  );
+  assert.deepEqual(workspaceSkillTabs(candidates), [
+    { id: 'all', label: 'All', count: 2 },
+    { id: 'unimported', label: 'Unimported', count: 2 },
+    { id: 'imported', label: 'Imported', count: 0 },
+    { id: 'system', label: 'System', count: 0 }
+  ]);
+  assert.deepEqual(
+    filterWorkspaceSkillCandidates(candidates, 'unimported').map((candidate) => candidate.sourcePath),
+    ['/Users/example/.agents/skills/defuddle', '/Users/example/.claude/skills/json-canvas']
+  );
+});
+
+test('filters import candidates by name, description, path, and symlink source', () => {
+  const candidates = [
+    normalizeImportCandidate({
+      name: 'defuddle',
+      description: 'Extract clean markdown content.',
+      source_path: '/Users/example/.agents/skills/defuddle',
+      import_status: 'importable'
+    }),
+    normalizeImportCandidate({
+      name: 'json-canvas',
+      description: 'Create and edit canvas files.',
+      source_path: '/Users/example/.claude/skills/json-canvas',
+      real_path: '/Users/example/.agents/skills/json-canvas',
+      is_symlink: true,
+      symlink_target_path: '/Users/example/.agents/skills/json-canvas',
+      import_status: 'importable'
+    })
+  ];
+
+  assert.deepEqual(
+    filterImportCandidatesByQuery(candidates, 'clean markdown').map((candidate) => candidate.name),
+    ['defuddle']
+  );
+  assert.deepEqual(
+    filterImportCandidatesByQuery(candidates, 'agents/skills/json').map((candidate) => candidate.name),
+    ['json-canvas']
+  );
+  assert.deepEqual(filterImportCandidatesByQuery(candidates, 'missing'), []);
+});
+
+test('toggles selection only for visible import candidates when duplicates are hidden', () => {
+  const visible = [
+    normalizeImportCandidate({
+      name: 'defuddle',
+      source_path: '/Users/example/.agents/skills/defuddle',
+      import_status: 'importable',
+      is_selected: false
+    })
+  ];
+  const hidden = normalizeImportCandidate({
+    name: 'defuddle',
+    source_path: '/Users/example/.claude/skills/defuddle',
+    is_symlink: true,
+    symlink_target_path: '/Users/example/.agents/skills/defuddle',
+    import_status: 'importable',
+    is_selected: false
+  });
+  const candidates = [...visible, hidden];
+
+  assert.deepEqual(
+    toggleImportCandidateSelection(candidates, visible).map((candidate) => candidate.isSelected),
+    [true, false]
   );
 });
 

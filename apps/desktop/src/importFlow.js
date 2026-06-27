@@ -96,12 +96,15 @@ export function candidateSource(candidate) {
   return null;
 }
 
-export function toggleImportCandidateSelection(candidates) {
-  const selectable = candidates.filter(isImportableCandidate);
+export function toggleImportCandidateSelection(candidates, targetCandidates = candidates) {
+  const targetPaths = new Set(targetCandidates.map((candidate) => candidate.sourcePath));
+  const selectable = targetCandidates.filter(isImportableCandidate);
   const shouldSelectAll = selectable.some((candidate) => !candidate.isSelected);
 
   return candidates.map((candidate) =>
-    isImportableCandidate(candidate) ? { ...candidate, isSelected: shouldSelectAll } : candidate
+    targetPaths.has(candidate.sourcePath) && isImportableCandidate(candidate)
+      ? { ...candidate, isSelected: shouldSelectAll }
+      : candidate
   );
 }
 

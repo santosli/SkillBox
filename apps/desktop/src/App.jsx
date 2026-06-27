@@ -30,7 +30,10 @@ import {
   normalizeEditableTags
 } from './dashboardMetadata.js';
 import { normalizeHistory } from './historyEntries.js';
-import { normalizeImportCandidate } from './importCandidates.js';
+import {
+  normalizeImportCandidate,
+  visibleImportCandidates
+} from './importCandidates.js';
 import {
   appUpdateNotice,
   normalizeAppUpdateStatus,
@@ -160,8 +163,7 @@ export default function App() {
     errors: [],
     title: 'Import Review',
     subtitle: 'Confirm each skill type before SkillBox copies it into the managed store.',
-    noticePrefix: '',
-    showWorkspaceTabs: false
+    noticePrefix: ''
   });
   const [preferences, setPreferences] = useState({
     skipLocalImportConfirmation: false,
@@ -642,8 +644,7 @@ export default function App() {
           errors: [],
           title: 'Import Review',
           subtitle: 'Confirm each skill type before SkillBox copies it into the managed store.',
-          noticePrefix: '',
-          showWorkspaceTabs: false
+          noticePrefix: ''
         });
         setNotice('Browser preview is using mock scan candidates.');
         setStatus('prototype');
@@ -661,8 +662,7 @@ export default function App() {
         errors: scan.errors || [],
         title: 'Import Review',
         subtitle: 'Confirm each skill type before SkillBox copies it into the managed store.',
-        noticePrefix: '',
-        showWorkspaceTabs: false
+        noticePrefix: ''
       });
       setNotice(candidates.length === 0 ? 'No new local skills found.' : '');
       setStatus('ready');
@@ -718,8 +718,7 @@ export default function App() {
         errors: [],
         title: 'Import Review',
         subtitle: 'Confirm each skill type before SkillBox copies it into the managed store.',
-        noticePrefix: '',
-        showWorkspaceTabs: false
+        noticePrefix: ''
       });
       setRemoteImport((current) => ({ ...current, open: false, value: '', error: '' }));
       setNotice('Browser preview is using a provided remote source.');
@@ -773,12 +772,14 @@ export default function App() {
   function toggleAllImportCandidates() {
     setImportReview((current) => ({
       ...current,
-      candidates: toggleImportCandidateSelection(current.candidates)
+      candidates: toggleImportCandidateSelection(current.candidates, visibleImportCandidates(current.candidates))
     }));
   }
 
   async function importSelectedCandidates() {
-    const selected = importReview.candidates.filter((candidate) => candidate.isSelected && isImportableCandidate(candidate));
+    const selected = visibleImportCandidates(importReview.candidates).filter(
+      (candidate) => candidate.isSelected && isImportableCandidate(candidate)
+    );
     if (selected.length === 0) {
       setNotice('Select at least one candidate without conflicts to import.');
       return;
@@ -808,7 +809,7 @@ export default function App() {
       setSkills((current) => mergeSkills(current, importedSkills));
       setSelectedName('');
       setIsFirstUse(false);
-      setImportReview({ open: false, candidates: [], errors: [], noticePrefix: '', showWorkspaceTabs: false });
+      setImportReview({ open: false, candidates: [], errors: [], noticePrefix: '' });
       setStatus('prototype');
       setNotice(importNotice(noticePrefix, `Mock imported ${importedSkills.length} skills.`));
       return;
@@ -824,7 +825,7 @@ export default function App() {
       });
       const importErrors = result.errors || [];
 
-      setImportReview({ open: false, candidates: [], errors: [], noticePrefix: '', showWorkspaceTabs: false });
+      setImportReview({ open: false, candidates: [], errors: [], noticePrefix: '' });
       await refresh();
       setNotice(
         importNotice(
@@ -2220,7 +2221,6 @@ export default function App() {
         open: true,
         candidates,
         errors: [],
-        showWorkspaceTabs: true,
         ...reviewMeta
       });
       setNotice(`Browser preview is using mock skills for ${workspace.displayName}.`);
@@ -2238,7 +2238,6 @@ export default function App() {
         open: true,
         candidates,
         errors: scan.errors || [],
-        showWorkspaceTabs: true,
         ...reviewMeta
       });
       setNotice(candidates.length === 0 ? `${workspace.displayName}: no skills found.` : '');
@@ -2521,7 +2520,6 @@ export default function App() {
           }
           onTypeChange={(candidate, skillType) => updateImportCandidate(candidate.sourcePath, { skillType })}
           status={status}
-          showWorkspaceTabs={importReview.showWorkspaceTabs}
           subtitle={importReview.subtitle}
           title={importReview.title}
         />

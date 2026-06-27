@@ -1,8 +1,11 @@
 import React, { useState } from 'react';
+import { Search } from 'lucide-react';
 import codexAppIcon from '../assets/codex-app-icon.png';
 import codexCliIcon from '../assets/codex-cli-icon.png';
 import {
+  filterImportCandidatesByQuery,
   filterWorkspaceSkillCandidates,
+  visibleImportCandidates,
   workspaceSkillTabs
 } from '../importCandidates.js';
 import {
@@ -167,25 +170,15 @@ export function ImportReview({
   onToggleAll,
   onToggleSelected,
   onTypeChange,
-  showWorkspaceTabs = false,
   status,
   subtitle = 'Confirm each skill type before SkillBox copies it into the managed store.',
   title = 'Import Review'
 }) {
-  const [isImportedExpanded, setIsImportedExpanded] = useState(true);
-  const [isSystemExpanded, setIsSystemExpanded] = useState(false);
-  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState('all');
-  const importedCandidates = candidates.filter((candidate) => candidate.importStatus === 'imported');
-  const systemCandidates = candidates.filter((candidate) => candidate.importStatus === 'system');
-  const reviewCandidates = candidates.filter(
-    (candidate) => candidate.importStatus !== 'imported' && candidate.importStatus !== 'system'
-  );
-  const workspaceTabs = showWorkspaceTabs ? workspaceSkillTabs(candidates) : [];
-  const workspaceCandidates = showWorkspaceTabs
-    ? filterWorkspaceSkillCandidates(candidates, activeWorkspaceTab)
-    : [];
-  const selectableCount = candidates.filter(isImportableCandidate).length;
-  const selectedCount = candidates.filter((candidate) => candidate.isSelected && isImportableCandidate(candidate)).length;
+  const visibleCandidates = visibleImportCandidates(candidates);
+  const selectableCount = visibleCandidates.filter(isImportableCandidate).length;
+  const selectedCount = visibleCandidates.filter(
+    (candidate) => candidate.isSelected && isImportableCandidate(candidate)
+  ).length;
   const isAllSelected = selectableCount > 0 && selectedCount === selectableCount;
 
   return (
@@ -211,63 +204,19 @@ export function ImportReview({
               {errors.length} scan {errors.length === 1 ? 'issue' : 'issues'} found.
             </div>
           ) : null}
-          {candidates.length === 0 && errors.length === 0 ? (
+          {visibleCandidates.length === 0 && errors.length === 0 ? (
             <div className="emptyState dashboardEmptyState workspaceSkillEmptyState">
               <strong>No skills found</strong>
               <span>This workspace has no importable SKILL.md directories yet.</span>
             </div>
           ) : null}
-          {showWorkspaceTabs && candidates.length > 0 ? (
-            <WorkspaceSkillTabs
-              activeTab={activeWorkspaceTab}
-              tabs={workspaceTabs}
-              onTabChange={setActiveWorkspaceTab}
+          {visibleCandidates.length > 0 ? (
+            <CandidateReviewList
+              candidates={visibleCandidates}
+              onToggleSelected={onToggleSelected}
+              onTypeChange={onTypeChange}
             />
           ) : null}
-          {showWorkspaceTabs ? (
-            workspaceCandidates.length > 0 ? (
-              workspaceCandidates.map((candidate) => (
-                <CandidateRow
-                  candidate={candidate}
-                  key={candidate.sourcePath}
-                  onToggleSelected={onToggleSelected}
-                  onTypeChange={onTypeChange}
-                />
-              ))
-            ) : candidates.length > 0 ? (
-              <div className="emptyState dashboardEmptyState workspaceSkillEmptyState">
-                <strong>No skills in this view</strong>
-                <span>Switch tabs to review the rest of this workspace.</span>
-              </div>
-            ) : null
-          ) : (
-            <>
-              {reviewCandidates.map((candidate) => (
-                <CandidateRow
-                  candidate={candidate}
-                  key={candidate.sourcePath}
-                  onToggleSelected={onToggleSelected}
-                  onTypeChange={onTypeChange}
-                />
-              ))}
-              <CollapsedCandidateGroup
-                candidates={systemCandidates}
-                isExpanded={isSystemExpanded}
-                label="System skills"
-                onToggle={() => setIsSystemExpanded((current) => !current)}
-                onToggleSelected={onToggleSelected}
-                onTypeChange={onTypeChange}
-              />
-              <CollapsedCandidateGroup
-                candidates={importedCandidates}
-                isExpanded={isImportedExpanded}
-                label="Imported skills"
-                onToggle={() => setIsImportedExpanded((current) => !current)}
-                onToggleSelected={onToggleSelected}
-                onTypeChange={onTypeChange}
-              />
-            </>
-          )}
         </div>
 
         <div className="importSheetFooter">
@@ -301,6 +250,57 @@ export function ImportReview({
   );
 }
 
+function CandidateReviewList({ candidates, onToggleSelected, onTypeChange }) {
+  const [activeTab, setActiveTab] = useState('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const searchedCandidates = filterImportCandidatesByQuery(candidates, searchQuery);
+  const tabs = workspaceSkillTabs(searchedCandidates);
+  const filteredCandidates = filterWorkspaceSkillCandidates(searchedCandidates, activeTab);
+
+  return (
+    <>
+      <div className="candidateReviewToolbar">
+        <label className="searchField candidateSearchField" aria-label="Search review skills">
+          <Search aria-hidden="true" />
+          <input
+            autoCapitalize="none"
+            autoComplete="off"
+            autoCorrect="off"
+            inputMode="search"
+            name="import-review-search"
+            placeholder="Search review skills..."
+            role="searchbox"
+            spellCheck={false}
+            type="text"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+          />
+        </label>
+        <WorkspaceSkillTabs
+          activeTab={activeTab}
+          tabs={tabs}
+          onTabChange={setActiveTab}
+        />
+      </div>
+      {filteredCandidates.length > 0 ? (
+        filteredCandidates.map((candidate) => (
+          <CandidateRow
+            candidate={candidate}
+            key={candidate.sourcePath}
+            onToggleSelected={onToggleSelected}
+            onTypeChange={onTypeChange}
+          />
+        ))
+      ) : (
+        <div className="emptyState dashboardEmptyState workspaceSkillEmptyState">
+          <strong>No skills in this view</strong>
+          <span>{searchQuery ? 'Try another search or switch tabs.' : 'Switch tabs to review the rest.'}</span>
+        </div>
+      )}
+    </>
+  );
+}
+
 function WorkspaceSkillTabs({ activeTab, tabs, onTabChange }) {
   return (
     <div className="workspaceSkillTabs" role="tablist" aria-label="Workspace skill view">
@@ -318,48 +318,6 @@ function WorkspaceSkillTabs({ activeTab, tabs, onTabChange }) {
         </button>
       ))}
     </div>
-  );
-}
-
-function CollapsedCandidateGroup({
-  candidates,
-  isExpanded,
-  label,
-  onToggle,
-  onToggleSelected,
-  onTypeChange
-}) {
-  if (candidates.length === 0) {
-    return null;
-  }
-
-  return (
-    <section className="collapsedCandidateGroup">
-      <button
-        className="collapsedCandidateToggle"
-        type="button"
-        aria-expanded={isExpanded}
-        onClick={onToggle}
-      >
-        <span>
-          {label}
-          <strong>{candidates.length}</strong>
-        </span>
-        <span>{isExpanded ? 'Hide' : 'Show'}</span>
-      </button>
-      {isExpanded ? (
-        <div className="collapsedCandidateRows">
-          {candidates.map((candidate) => (
-            <CandidateRow
-              candidate={candidate}
-              key={candidate.sourcePath}
-              onToggleSelected={onToggleSelected}
-              onTypeChange={onTypeChange}
-            />
-          ))}
-        </div>
-      ) : null}
-    </section>
   );
 }
 

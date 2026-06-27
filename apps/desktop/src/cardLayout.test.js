@@ -279,6 +279,30 @@ test('import candidate path uses a labeled metadata row', () => {
   assert.match(candidatePathCodeRule, /display:\s*inline;/);
 });
 
+test('import review uses the shared searchable candidate list template', () => {
+  const importReviewSource = appSource.match(
+    /export function ImportReview\(\{(?<body>[\s\S]*?)function CandidateReviewList/
+  )?.groups.body || '';
+  const candidateReviewListSource = appSource.match(
+    /function CandidateReviewList\(\{(?<body>[\s\S]*?)function WorkspaceSkillTabs/
+  )?.groups.body || '';
+  const searchRule = css.match(/\.candidateSearchField\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(importReviewSource, /<CandidateReviewList/);
+  assert.doesNotMatch(importReviewSource, /<CollapsedCandidateGroup/);
+  assert.match(candidateReviewListSource, /className="searchField candidateSearchField"/);
+  assert.match(candidateReviewListSource, /placeholder="Search review skills\.\.\."/);
+  assert.match(candidateReviewListSource, /autoComplete="off"/);
+  assert.match(candidateReviewListSource, /autoCorrect="off"/);
+  assert.match(candidateReviewListSource, /autoCapitalize="none"/);
+  assert.match(candidateReviewListSource, /spellCheck=\{false\}/);
+  assert.match(candidateReviewListSource, /role="searchbox"/);
+  assert.match(candidateReviewListSource, /type="text"/);
+  assert.doesNotMatch(candidateReviewListSource, /type="search"/);
+  assert.match(candidateReviewListSource, /workspaceSkillTabs\(searchedCandidates\)/);
+  assert.match(searchRule, /width:\s*100%;/);
+});
+
 test('remote source binding dialog keeps long candidate lists inside the viewport', () => {
   const dialogRule = css.match(/\.remoteImportDialog\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const formRule = css.match(/\.remoteImportForm\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
@@ -292,11 +316,12 @@ test('remote source binding dialog keeps long candidate lists inside the viewpor
   assert.match(candidateListRule, /overflow-y:\s*auto;/);
 });
 
-test('import review shows imported candidates by default', () => {
+test('import review uses all candidates by default in the shared review list', () => {
   assert.match(
     appSource,
-    /const \[isImportedExpanded,\s*setIsImportedExpanded\]\s*=\s*useState\(true\);/
+    /const \[activeTab,\s*setActiveTab\]\s*=\s*useState\('all'\);/
   );
+  assert.match(appSource, /const filteredCandidates = filterWorkspaceSkillCandidates\(searchedCandidates,\s*activeTab\);/);
 });
 
 test('workspace cards show the shared workspace icon beside the workspace name', () => {

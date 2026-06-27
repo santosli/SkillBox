@@ -31,27 +31,77 @@ export function normalizeImportCandidate(candidate) {
 }
 
 export function workspaceSkillTabs(candidates = []) {
-  const symlinkCandidates = candidates.filter(isWorkspaceSymlinkCandidate);
+  const visibleCandidates = visibleImportCandidates(candidates);
+  const unimportedCandidates = visibleCandidates.filter(isUnimportedCandidate);
 
   return [
-    { id: 'all', label: 'All', count: candidates.length },
-    { id: 'symlink', label: 'Symlink', count: symlinkCandidates.length },
-    { id: 'imported', label: 'Imported', count: candidates.filter(isImportedCandidate).length },
-    { id: 'system', label: 'System', count: candidates.filter(isSystemCandidate).length }
+    { id: 'all', label: 'All', count: visibleCandidates.length },
+    { id: 'unimported', label: 'Unimported', count: unimportedCandidates.length },
+    { id: 'imported', label: 'Imported', count: visibleCandidates.filter(isImportedCandidate).length },
+    { id: 'system', label: 'System', count: visibleCandidates.filter(isSystemCandidate).length }
   ];
 }
 
 export function filterWorkspaceSkillCandidates(candidates = [], activeTab = 'all') {
-  if (activeTab === 'symlink') {
-    return candidates.filter(isWorkspaceSymlinkCandidate);
+  const visibleCandidates = visibleImportCandidates(candidates);
+
+  if (activeTab === 'unimported') {
+    return visibleCandidates.filter(isUnimportedCandidate);
   }
   if (activeTab === 'imported') {
-    return candidates.filter(isImportedCandidate);
+    return visibleCandidates.filter(isImportedCandidate);
   }
   if (activeTab === 'system') {
-    return candidates.filter(isSystemCandidate);
+    return visibleCandidates.filter(isSystemCandidate);
   }
-  return candidates;
+  return visibleCandidates;
+}
+
+export function visibleImportCandidates(candidates = []) {
+  const sourcePaths = new Set(
+    candidates
+      .filter((candidate) => !candidate.isSymlink)
+      .map((candidate) => normalizedCandidatePath(candidate.realPath || candidate.sourcePath))
+      .filter(Boolean)
+  );
+
+  return candidates.filter((candidate) => {
+    if (!candidate.isSymlink) {
+      return true;
+    }
+
+    const targetPath = normalizedCandidatePath(candidate.symlinkTargetPath || candidate.realPath);
+    return !targetPath || !sourcePaths.has(targetPath);
+  });
+}
+
+export function filterImportCandidatesByQuery(candidates = [], query = '') {
+  const tokens = String(query)
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (tokens.length === 0) {
+    return candidates;
+  }
+
+  return candidates.filter((candidate) => {
+    const searchable = [
+      candidate.name,
+      candidate.description,
+      candidate.sourcePath,
+      candidate.realPath,
+      candidate.symlinkTargetPath,
+      candidate.skillType,
+      candidate.importStatus
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+
+    return tokens.every((token) => searchable.includes(token));
+  });
 }
 
 function isImportedCandidate(candidate) {
@@ -62,6 +112,10 @@ function isSystemCandidate(candidate) {
   return candidate.importStatus === 'system';
 }
 
-function isWorkspaceSymlinkCandidate(candidate) {
-  return candidate.isSymlink && !isImportedCandidate(candidate) && !isSystemCandidate(candidate);
+function isUnimportedCandidate(candidate) {
+  return !isImportedCandidate(candidate) && !isSystemCandidate(candidate);
+}
+
+function normalizedCandidatePath(path) {
+  return String(path || '').replace(/\/+$/, '');
 }
