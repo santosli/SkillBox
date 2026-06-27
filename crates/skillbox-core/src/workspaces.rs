@@ -2,7 +2,7 @@ use crate::*;
 
 pub fn list_workspaces(managed_root: impl AsRef<Path>) -> Result<Vec<Workspace>> {
     let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
-    load_workspaces(&paths.database_path)
+    load_workspaces_with_visible_usage(&paths)
 }
 
 pub fn scan_workspaces(managed_root: impl AsRef<Path>) -> Result<WorkspaceScanResult> {
@@ -32,7 +32,7 @@ pub(crate) fn scan_workspaces_under(
     prune_stale_auto_workspaces(&paths.database_path, &active_auto_workspace_paths)?;
 
     Ok(WorkspaceScanResult {
-        workspaces: load_workspaces(&paths.database_path)?,
+        workspaces: load_workspaces_with_visible_usage(&paths)?,
         scanned_count,
         error_count,
     })
@@ -93,7 +93,7 @@ pub fn forget_workspace(
         )
         .map_err(|error| error.to_string())?;
 
-    load_workspaces(&paths.database_path)
+    load_workspaces_with_visible_usage(&paths)
 }
 
 pub(crate) fn record_scanned_workspaces(paths: &ManagedPaths, roots: &[PathBuf]) -> Result<()> {
@@ -177,7 +177,7 @@ pub(crate) fn upsert_workspace(
         )
         .map_err(|error| error.to_string())?;
 
-    load_workspace_by_canonical_path(&paths.database_path, &canonical_path)?
+    load_workspace_by_canonical_path_with_visible_usage(paths, &canonical_path)?
         .ok_or_else(|| format!("Workspace was not saved: {}", path.display()))
 }
 
@@ -252,6 +252,12 @@ pub(crate) fn load_workspaces(database_path: &Path) -> Result<Vec<Workspace>> {
     Ok(workspaces)
 }
 
+pub(crate) fn load_workspaces_with_visible_usage(paths: &ManagedPaths) -> Result<Vec<Workspace>> {
+    let mut workspaces = load_workspaces(&paths.database_path)?;
+    apply_visible_workspace_usage(paths, &mut workspaces)?;
+    Ok(workspaces)
+}
+
 pub(crate) fn load_workspace_by_canonical_path(
     database_path: &Path,
     canonical_path: &Path,
@@ -288,6 +294,62 @@ pub(crate) fn load_workspace_by_canonical_path(
         }
         workspace
     }))
+}
+
+pub(crate) fn load_workspace_by_canonical_path_with_visible_usage(
+    paths: &ManagedPaths,
+    canonical_path: &Path,
+) -> Result<Option<Workspace>> {
+    let mut workspace = load_workspace_by_canonical_path(&paths.database_path, canonical_path)?;
+    if let Some(workspace) = workspace.as_mut() {
+        let usage_by_skill_runtime = load_usage_by_skill_runtime(&paths.database_path)?;
+        if let Ok(usage_count) =
+            workspace_visible_usage_count(&workspace.path, paths, &usage_by_skill_runtime)
+        {
+            workspace.usage_count = usage_count;
+        }
+    }
+    Ok(workspace)
+}
+
+pub(crate) fn apply_visible_workspace_usage(
+    paths: &ManagedPaths,
+    workspaces: &mut [Workspace],
+) -> Result<()> {
+    let usage_by_skill_runtime = load_usage_by_skill_runtime(&paths.database_path)?;
+
+    for workspace in workspaces {
+        if let Ok(usage_count) =
+            workspace_visible_usage_count(&workspace.path, paths, &usage_by_skill_runtime)
+        {
+            workspace.usage_count = usage_count;
+        }
+    }
+
+    Ok(())
+}
+
+pub(crate) fn workspace_visible_usage_count(
+    root: &Path,
+    paths: &ManagedPaths,
+    usage_by_skill_runtime: &HashMap<(String, String), UsageSummary>,
+) -> Result<usize> {
+    let scan = scan_skill_roots_for_import(&[root.to_path_buf()], paths)?;
+    let mut seen = HashSet::new();
+    let mut usage_count = 0;
+
+    for skill in scan.skills {
+        for runtime_key in skill_usage_runtime_keys(&skill, paths) {
+            if !seen.insert((skill.name.clone(), runtime_key.clone())) {
+                continue;
+            }
+            if let Some(usage) = usage_by_skill_runtime.get(&(skill.name.clone(), runtime_key)) {
+                usage_count += usage.usage_count;
+            }
+        }
+    }
+
+    Ok(usage_count)
 }
 
 pub(crate) fn workspace_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Workspace> {
@@ -386,6 +448,7 @@ pub(crate) fn scan_skill_roots_for_import(
     let mut scan = scan_skill_roots(roots)?;
     let mut seen_paths: HashSet<PathBuf> =
         scan.skills.iter().map(|skill| skill.path.clone()).collect();
+    let trusted_symlink_roots = trusted_skill_symlink_roots(roots, paths);
 
     for root in scan.roots.clone() {
         if !root.exists() {
@@ -394,7 +457,7 @@ pub(crate) fn scan_skill_roots_for_import(
 
         let mut symlink_dirs = Vec::new();
         if let Err(error) =
-            find_managed_skill_symlink_dirs(&root, 0, 3, &paths.root, &mut symlink_dirs)
+            find_trusted_skill_symlink_dirs(&root, 0, 3, &trusted_symlink_roots, &mut symlink_dirs)
         {
             scan.errors.push(ScanError {
                 root,
@@ -429,11 +492,41 @@ pub(crate) fn scan_skill_roots_for_import(
     Ok(scan)
 }
 
-pub(crate) fn find_managed_skill_symlink_dirs(
+pub(crate) fn trusted_skill_symlink_roots(roots: &[PathBuf], paths: &ManagedPaths) -> Vec<PathBuf> {
+    let mut trusted_roots = vec![paths.root.clone()];
+
+    for root in roots {
+        trusted_roots.push(root.clone());
+        if let Some(base) = runtime_workspace_base(root) {
+            for runtime_parent in [".agents", ".codex", ".claude"] {
+                let runtime_root = base.join(runtime_parent).join("skills");
+                if runtime_root.is_dir() {
+                    trusted_roots.push(runtime_root);
+                }
+            }
+        }
+    }
+
+    dedupe_runtime_roots(trusted_roots)
+}
+
+pub(crate) fn runtime_workspace_base(root: &Path) -> Option<PathBuf> {
+    let root_name = root.file_name()?.to_str()?;
+    let parent = root.parent()?;
+    let parent_name = parent.file_name()?.to_str()?;
+
+    if root_name == "skills" && matches!(parent_name, ".agents" | ".codex" | ".claude") {
+        parent.parent().map(Path::to_path_buf)
+    } else {
+        None
+    }
+}
+
+pub(crate) fn find_trusted_skill_symlink_dirs(
     current: &Path,
     depth: usize,
     max_depth: usize,
-    managed_root: &Path,
+    trusted_roots: &[PathBuf],
     found: &mut Vec<PathBuf>,
 ) -> Result<()> {
     if depth > max_depth {
@@ -442,7 +535,11 @@ pub(crate) fn find_managed_skill_symlink_dirs(
 
     let current_metadata = fs::symlink_metadata(current).map_err(|error| error.to_string())?;
     if current_metadata.file_type().is_symlink() {
-        if current.join("SKILL.md").exists() && is_under_path(current, managed_root) {
+        if current.join("SKILL.md").exists()
+            && trusted_roots
+                .iter()
+                .any(|trusted_root| is_under_path(current, trusted_root))
+        {
             found.push(current.to_path_buf());
         }
         return Ok(());
@@ -463,7 +560,7 @@ pub(crate) fn find_managed_skill_symlink_dirs(
 
         let file_type = entry.file_type().map_err(|error| error.to_string())?;
         if file_type.is_dir() || file_type.is_symlink() {
-            find_managed_skill_symlink_dirs(&path, depth + 1, max_depth, managed_root, found)?;
+            find_trusted_skill_symlink_dirs(&path, depth + 1, max_depth, trusted_roots, found)?;
         }
     }
 
@@ -541,7 +638,7 @@ pub(crate) fn workspace_agent_label(agent_id: Option<&str>) -> Option<String> {
     let label = match agent_id {
         Some("codex") => "Codex",
         Some("agents") => "Agents",
-        Some("claude") => "Claude",
+        Some("claude") => "Claude Code",
         _ => return None,
     };
 

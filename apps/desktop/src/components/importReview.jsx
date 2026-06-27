@@ -2,6 +2,10 @@ import React, { useState } from 'react';
 import codexAppIcon from '../assets/codex-app-icon.png';
 import codexCliIcon from '../assets/codex-cli-icon.png';
 import {
+  filterWorkspaceSkillCandidates,
+  workspaceSkillTabs
+} from '../importCandidates.js';
+import {
   candidateRowClass,
   candidateSource,
   candidateStatusNote,
@@ -163,17 +167,23 @@ export function ImportReview({
   onToggleAll,
   onToggleSelected,
   onTypeChange,
+  showWorkspaceTabs = false,
   status,
   subtitle = 'Confirm each skill type before SkillBox copies it into the managed store.',
   title = 'Import Review'
 }) {
   const [isImportedExpanded, setIsImportedExpanded] = useState(true);
   const [isSystemExpanded, setIsSystemExpanded] = useState(false);
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState('all');
   const importedCandidates = candidates.filter((candidate) => candidate.importStatus === 'imported');
   const systemCandidates = candidates.filter((candidate) => candidate.importStatus === 'system');
   const reviewCandidates = candidates.filter(
     (candidate) => candidate.importStatus !== 'imported' && candidate.importStatus !== 'system'
   );
+  const workspaceTabs = showWorkspaceTabs ? workspaceSkillTabs(candidates) : [];
+  const workspaceCandidates = showWorkspaceTabs
+    ? filterWorkspaceSkillCandidates(candidates, activeWorkspaceTab)
+    : [];
   const selectableCount = candidates.filter(isImportableCandidate).length;
   const selectedCount = candidates.filter((candidate) => candidate.isSelected && isImportableCandidate(candidate)).length;
   const isAllSelected = selectableCount > 0 && selectedCount === selectableCount;
@@ -207,30 +217,57 @@ export function ImportReview({
               <span>This workspace has no importable SKILL.md directories yet.</span>
             </div>
           ) : null}
-          {reviewCandidates.map((candidate) => (
-            <CandidateRow
-              candidate={candidate}
-              key={candidate.sourcePath}
-              onToggleSelected={onToggleSelected}
-              onTypeChange={onTypeChange}
+          {showWorkspaceTabs && candidates.length > 0 ? (
+            <WorkspaceSkillTabs
+              activeTab={activeWorkspaceTab}
+              tabs={workspaceTabs}
+              onTabChange={setActiveWorkspaceTab}
             />
-          ))}
-          <CollapsedCandidateGroup
-            candidates={systemCandidates}
-            isExpanded={isSystemExpanded}
-            label="System skills"
-            onToggle={() => setIsSystemExpanded((current) => !current)}
-            onToggleSelected={onToggleSelected}
-            onTypeChange={onTypeChange}
-          />
-          <CollapsedCandidateGroup
-            candidates={importedCandidates}
-            isExpanded={isImportedExpanded}
-            label="Imported skills"
-            onToggle={() => setIsImportedExpanded((current) => !current)}
-            onToggleSelected={onToggleSelected}
-            onTypeChange={onTypeChange}
-          />
+          ) : null}
+          {showWorkspaceTabs ? (
+            workspaceCandidates.length > 0 ? (
+              workspaceCandidates.map((candidate) => (
+                <CandidateRow
+                  candidate={candidate}
+                  key={candidate.sourcePath}
+                  onToggleSelected={onToggleSelected}
+                  onTypeChange={onTypeChange}
+                />
+              ))
+            ) : candidates.length > 0 ? (
+              <div className="emptyState dashboardEmptyState workspaceSkillEmptyState">
+                <strong>No skills in this view</strong>
+                <span>Switch tabs to review the rest of this workspace.</span>
+              </div>
+            ) : null
+          ) : (
+            <>
+              {reviewCandidates.map((candidate) => (
+                <CandidateRow
+                  candidate={candidate}
+                  key={candidate.sourcePath}
+                  onToggleSelected={onToggleSelected}
+                  onTypeChange={onTypeChange}
+                />
+              ))}
+              <CollapsedCandidateGroup
+                candidates={systemCandidates}
+                isExpanded={isSystemExpanded}
+                label="System skills"
+                onToggle={() => setIsSystemExpanded((current) => !current)}
+                onToggleSelected={onToggleSelected}
+                onTypeChange={onTypeChange}
+              />
+              <CollapsedCandidateGroup
+                candidates={importedCandidates}
+                isExpanded={isImportedExpanded}
+                label="Imported skills"
+                onToggle={() => setIsImportedExpanded((current) => !current)}
+                onToggleSelected={onToggleSelected}
+                onTypeChange={onTypeChange}
+              />
+            </>
+          )}
         </div>
 
         <div className="importSheetFooter">
@@ -260,6 +297,26 @@ export function ImportReview({
           </div>
         </div>
       </section>
+    </div>
+  );
+}
+
+function WorkspaceSkillTabs({ activeTab, tabs, onTabChange }) {
+  return (
+    <div className="workspaceSkillTabs" role="tablist" aria-label="Workspace skill view">
+      {tabs.map((tab) => (
+        <button
+          aria-selected={activeTab === tab.id}
+          className={activeTab === tab.id ? 'active' : ''}
+          key={tab.id}
+          role="tab"
+          type="button"
+          onClick={() => onTabChange(tab.id)}
+        >
+          <span>{tab.label}</span>
+          <strong>{tab.count}</strong>
+        </button>
+      ))}
     </div>
   );
 }
@@ -331,7 +388,16 @@ function CandidateRow({ candidate, onToggleSelected, onTypeChange }) {
           {candidate.conflict ? <Badge tone="red">Conflict</Badge> : null}
         </div>
         <small>{candidate.description || 'No description in SKILL.md'}</small>
-        <code>{compactPath(candidate.sourcePath)}</code>
+        <span className="candidatePath">
+          <span>Path</span>
+          <code>{compactPath(candidate.sourcePath)}</code>
+        </span>
+        {candidate.isSymlink ? (
+          <span className="candidateSymlinkSource">
+            <span>Symlink source</span>
+            <code>{compactPath(candidate.symlinkTargetPath || candidate.realPath || '')}</code>
+          </span>
+        ) : null}
         <span className="candidateUsage">Calls {candidate.usageCount || 0}</span>
         {candidateStatusNote(candidate) ? <p>{candidateStatusNote(candidate)}</p> : null}
       </div>

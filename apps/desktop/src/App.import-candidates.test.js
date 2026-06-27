@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { normalizeImportCandidate } from './importCandidates.js';
+import {
+  filterWorkspaceSkillCandidates,
+  normalizeImportCandidate,
+  workspaceSkillTabs
+} from './importCandidates.js';
 import {
   dashboardStatusNotice,
   formatStatusCheckedAt,
@@ -51,6 +55,69 @@ test('normalizes backend is_selected false without selecting importable candidat
 
   assert.equal(candidate.isSelected, false);
   assert.equal(candidate.usageCount, 4);
+});
+
+test('normalizes symlink import candidate source metadata', () => {
+  const candidate = normalizeImportCandidate({
+    name: 'lark-mail',
+    source_path: '/Users/example/.claude/skills/lark-mail',
+    source_root: '/Users/example/.claude/skills',
+    real_path: '/Users/example/.agents/skills/lark-mail',
+    is_symlink: true,
+    symlink_target_path: '/Users/example/.agents/skills/lark-mail',
+    usage_count: 2
+  });
+
+  assert.equal(candidate.isSymlink, true);
+  assert.equal(candidate.symlinkTargetPath, '/Users/example/.agents/skills/lark-mail');
+  assert.equal(candidate.usageCount, 2);
+});
+
+test('builds workspace skill tabs and separates symlink, imported, and system skills', () => {
+  const candidates = [
+    normalizeImportCandidate({
+      name: 'alpha',
+      source_path: '/Users/example/.claude/skills/alpha',
+      is_symlink: true,
+      import_status: 'importable'
+    }),
+    normalizeImportCandidate({
+      name: 'beta',
+      source_path: '/Users/example/.claude/skills/beta',
+      is_symlink: true,
+      import_status: 'imported'
+    }),
+    normalizeImportCandidate({
+      name: 'gamma',
+      source_path: '/Users/example/.claude/skills/gamma',
+      import_status: 'importable'
+    }),
+    normalizeImportCandidate({
+      name: 'delta',
+      source_path: '/Users/example/.codex/skills/.system/delta',
+      is_symlink: true,
+      import_status: 'system'
+    })
+  ];
+
+  assert.deepEqual(workspaceSkillTabs(candidates), [
+    { id: 'all', label: 'All', count: 4 },
+    { id: 'symlink', label: 'Symlink', count: 1 },
+    { id: 'imported', label: 'Imported', count: 1 },
+    { id: 'system', label: 'System', count: 1 }
+  ]);
+  assert.deepEqual(
+    filterWorkspaceSkillCandidates(candidates, 'symlink').map((candidate) => candidate.name),
+    ['alpha']
+  );
+  assert.deepEqual(
+    filterWorkspaceSkillCandidates(candidates, 'imported').map((candidate) => candidate.name),
+    ['beta']
+  );
+  assert.deepEqual(
+    filterWorkspaceSkillCandidates(candidates, 'system').map((candidate) => candidate.name),
+    ['delta']
+  );
 });
 
 test('user sync action is setup before remote and hidden for remote skills', () => {

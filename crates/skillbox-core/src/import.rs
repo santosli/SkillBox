@@ -47,7 +47,9 @@ pub fn scan_import_candidates(
             import_status,
             &usage_by_skill,
             &usage_by_skill_runtime,
+            &paths,
         );
+        let symlink_target_path = skill_symlink_target_path(&skill);
 
         candidates.push(ImportCandidate {
             name: skill.name,
@@ -55,6 +57,8 @@ pub fn scan_import_candidates(
             source_path: skill.path,
             source_root: skill.source_root,
             real_path: skill.real_path,
+            is_symlink: skill.is_symlink,
+            symlink_target_path,
             content_hash: skill.content_hash,
             suggested_type,
             suggestion_reason,
@@ -94,6 +98,7 @@ pub(crate) fn import_candidate_usage_count(
     import_status: ImportCandidateStatus,
     usage_by_skill: &HashMap<String, UsageSummary>,
     usage_by_skill_runtime: &HashMap<(String, String), UsageSummary>,
+    paths: &ManagedPaths,
 ) -> usize {
     if import_status == ImportCandidateStatus::Imported {
         return usage_by_skill
@@ -102,12 +107,11 @@ pub(crate) fn import_candidate_usage_count(
             .unwrap_or_default();
     }
 
-    skill
-        .source_root
-        .as_ref()
-        .and_then(|root| usage_by_skill_runtime.get(&(skill.name.clone(), usage_runtime_key(root))))
+    skill_usage_runtime_keys(skill, paths)
+        .into_iter()
+        .filter_map(|runtime_key| usage_by_skill_runtime.get(&(skill.name.clone(), runtime_key)))
         .map(|usage| usage.usage_count)
-        .unwrap_or_default()
+        .sum()
 }
 
 pub fn import_candidates(

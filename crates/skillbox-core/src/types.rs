@@ -634,6 +634,8 @@ pub struct ImportCandidate {
     pub source_path: PathBuf,
     pub source_root: Option<PathBuf>,
     pub real_path: PathBuf,
+    pub is_symlink: bool,
+    pub symlink_target_path: Option<PathBuf>,
     pub content_hash: String,
     pub suggested_type: SkillKind,
     pub suggestion_reason: String,

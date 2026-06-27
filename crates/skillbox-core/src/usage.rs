@@ -297,6 +297,71 @@ pub(crate) fn usage_runtime_key(path: &Path) -> String {
         .to_string()
 }
 
+pub(crate) fn skill_symlink_target_path(skill: &Skill) -> Option<PathBuf> {
+    if skill.is_symlink {
+        Some(skill.real_path.clone())
+    } else {
+        None
+    }
+}
+
+pub(crate) fn skill_usage_runtime_keys(skill: &Skill, paths: &ManagedPaths) -> Vec<String> {
+    let mut keys = Vec::new();
+
+    if let Some(source_root) = skill.source_root.as_ref() {
+        push_unique_usage_runtime_key(&mut keys, source_root);
+    }
+
+    if skill.is_symlink {
+        for runtime_root in symlink_target_usage_roots(&skill.real_path, paths) {
+            push_unique_usage_runtime_key(&mut keys, &runtime_root);
+        }
+    }
+
+    keys
+}
+
+pub(crate) fn symlink_target_usage_roots(real_path: &Path, paths: &ManagedPaths) -> Vec<PathBuf> {
+    let real_path = fs::canonicalize(real_path).unwrap_or_else(|_| real_path.to_path_buf());
+    let mut roots = Vec::new();
+
+    if let Some(runtime_root) = runtime_skill_root_for_path(&real_path) {
+        roots.push(runtime_root);
+    }
+    if is_under_path(&real_path, &paths.user_skills_root) {
+        roots.push(paths.user_skills_root.clone());
+    }
+    if is_under_path(&real_path, &paths.remote_skills_root) {
+        for ancestor in real_path.ancestors() {
+            if ancestor.file_name().and_then(|name| name.to_str()) == Some("versions")
+                && is_under_path(ancestor, &paths.remote_skills_root)
+            {
+                roots.push(ancestor.to_path_buf());
+                break;
+            }
+        }
+    }
+
+    dedupe_runtime_roots(roots)
+}
+
+pub(crate) fn runtime_skill_root_for_path(path: &Path) -> Option<PathBuf> {
+    for ancestor in path.ancestors() {
+        if !is_runtime_skill_root(ancestor) {
+            continue;
+        }
+        return Some(fs::canonicalize(ancestor).unwrap_or_else(|_| ancestor.to_path_buf()));
+    }
+    None
+}
+
+pub(crate) fn push_unique_usage_runtime_key(keys: &mut Vec<String>, root: &Path) {
+    let key = usage_runtime_key(root);
+    if !keys.contains(&key) {
+        keys.push(key);
+    }
+}
+
 pub(crate) fn load_usage_by_skill(database_path: &Path) -> Result<HashMap<String, UsageSummary>> {
     let connection = open_database(database_path).map_err(|error| error.to_string())?;
     let mut statement = connection

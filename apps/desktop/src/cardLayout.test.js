@@ -247,6 +247,38 @@ test('workspace type tabs use three columns without an empty slot', () => {
   assert.doesNotMatch(workspaceTypeTabsRule, /repeat\(4,/);
 });
 
+test('workspace skill tabs stay visible instead of collapsing into a scrollbar', () => {
+  const workspaceSkillTabsRule = css.match(/\.workspaceSkillTabs\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const workspaceSkillTabButtonRule = css.match(/\.workspaceSkillTabs button\s*\{(?<body>[^}]*)\}/s)
+    ?.groups.body || '';
+
+  assert.match(workspaceSkillTabsRule, /display:\s*flex;/);
+  assert.match(workspaceSkillTabsRule, /flex-wrap:\s*wrap;/);
+  assert.match(workspaceSkillTabsRule, /width:\s*100%;/);
+  assert.match(workspaceSkillTabsRule, /overflow:\s*visible;/);
+  assert.match(workspaceSkillTabButtonRule, /flex:\s*0 0 auto;/);
+  assert.doesNotMatch(workspaceSkillTabsRule, /width:\s*max-content;/);
+  assert.doesNotMatch(workspaceSkillTabsRule, /overflow-x:\s*auto;/);
+});
+
+test('import candidate path uses a labeled metadata row', () => {
+  const candidateRowSource = appSource.match(
+    /function CandidateRow\(\{ candidate, onToggleSelected, onTypeChange \}\)\s*\{(?<body>[\s\S]*?)\n\}/
+  )?.groups.body || '';
+  const candidatePathMetaRule = css.match(/\.candidatePath,\s*\.candidateSymlinkSource\s*\{(?<body>[^}]*)\}/s)
+    ?.groups.body || '';
+  const candidatePathRule = css.match(/\.candidatePath\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const candidatePathCodeRule = css.match(/\.candidatePath code,\s*\.candidateSymlinkSource code\s*\{(?<body>[^}]*)\}/s)
+    ?.groups.body || '';
+
+  assert.match(candidateRowSource, /className="candidatePath"/);
+  assert.match(candidateRowSource, /<span>Path<\/span>/);
+  assert.match(candidateRowSource, /<code>\{compactPath\(candidate\.sourcePath\)\}<\/code>/);
+  assert.match(candidatePathMetaRule, /white-space:\s*nowrap;/);
+  assert.match(candidatePathRule, /margin-top:\s*7px;/);
+  assert.match(candidatePathCodeRule, /display:\s*inline;/);
+});
+
 test('remote source binding dialog keeps long candidate lists inside the viewport', () => {
   const dialogRule = css.match(/\.remoteImportDialog\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const formRule = css.match(/\.remoteImportForm\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';

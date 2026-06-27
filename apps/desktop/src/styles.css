@@ -4466,6 +4466,62 @@ dd {
   color: #2563eb;
 }
 
+.workspaceSkillTabs {
+  display: flex;
+  flex-wrap: wrap;
+  width: 100%;
+  max-width: 100%;
+  align-items: center;
+  gap: 4px;
+  overflow: visible;
+  border: 1px solid #dbe3ee;
+  border-radius: 9px;
+  background: #eef2f7;
+  padding: 3px;
+}
+
+.workspaceSkillTabs button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 680;
+  padding: 0 12px;
+}
+
+.workspaceSkillTabs button.active {
+  background: #ffffff;
+  color: #111827;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+.workspaceSkillTabs strong {
+  display: inline-flex;
+  min-width: 22px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 760;
+  padding: 0 7px;
+}
+
+.workspaceSkillTabs button.active strong {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
 .candidateRow {
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr) auto;
@@ -4602,6 +4658,8 @@ dd {
 .candidateMain small,
 .candidateMain code,
 .candidateMain p,
+.candidatePath,
+.candidateSymlinkSource,
 .candidateUsage {
   display: block;
   min-width: 0;
@@ -4633,6 +4691,37 @@ dd {
 .candidateMain p {
   margin: 6px 0 0;
   color: #64748b;
+  font-size: 12px;
+}
+
+.candidatePath,
+.candidateSymlinkSource {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidatePath {
+  margin-top: 7px;
+}
+
+.candidateSymlinkSource {
+  margin-top: 6px;
+}
+
+.candidatePath span,
+.candidateSymlinkSource span {
+  color: #475569;
+  font-weight: 650;
+}
+
+.candidatePath code,
+.candidateSymlinkSource code {
+  display: inline;
+  margin: 0 0 0 6px;
+  color: #334155;
   font-size: 12px;
 }
 

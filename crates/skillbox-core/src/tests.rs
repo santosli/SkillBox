@@ -567,6 +567,38 @@ fn workspace_and_import_candidates_include_usage_counts() {
 }
 
 #[test]
+fn workspace_usage_counts_symlinked_runtime_skill_calls() {
+    let root = temp_dir("usage-workspace-runtime-symlink");
+    let managed_root = root.join("SkillBox");
+    let agents_root = root.join(".agents").join("skills");
+    let claude_root = root.join(".claude").join("skills");
+    let agents_skill = agents_root.join("lark-mail");
+    let claude_skill = claude_root.join("lark-mail");
+
+    make_skill(&agents_skill, "lark-mail", "Lark mail skill");
+    fs::create_dir_all(&claude_root).unwrap();
+    symlink_dir(&agents_skill, &claude_skill).unwrap();
+    record_skill_usage(
+        RecordSkillUsageRequest {
+            skill_name: "lark-mail".to_string(),
+            agent_id: "agents".to_string(),
+            runtime_root: agents_root.clone(),
+            event_id: None,
+            used_at: Some("2026-06-02T12:00:00Z".to_string()),
+            prompt_excerpt: None,
+            metadata: None,
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    scan_workspaces_under(&root, &managed_root).unwrap();
+    let workspaces = list_workspaces(&managed_root).unwrap();
+
+    assert_eq!(workspace(&workspaces, &claude_root).usage_count, 1);
+}
+
+#[test]
 fn record_skill_usage_rejects_content_metadata() {
     let root = temp_dir("usage-metadata-content");
     let managed_root = root.join("SkillBox");
@@ -997,7 +1029,7 @@ fn scan_workspaces_discovers_global_and_user_roots() {
     assert_eq!(global_codex.display_name, "Codex");
     assert_eq!(global_claude.kind, WorkspaceKind::Global);
     assert_eq!(global_claude.agent_id.as_deref(), Some("claude"));
-    assert_eq!(global_claude.display_name, "Claude");
+    assert_eq!(global_claude.display_name, "Claude Code");
     assert_eq!(project_agents.kind, WorkspaceKind::User);
     assert_eq!(project_agents.agent_id.as_deref(), Some("agents"));
     assert_eq!(project_agents.display_name, "demo-vault");
@@ -1119,6 +1151,47 @@ fn scan_import_candidates_uses_discovered_project_local_roots() {
     assert_eq!(candidate.suggested_type, SkillKind::User);
     assert_eq!(candidate.source_root, Some(project_agents_root));
     assert!(candidate.is_selected);
+}
+
+#[test]
+fn scan_import_candidates_includes_symlinks_to_discovered_runtime_roots() {
+    let root = temp_dir("candidate-runtime-symlink");
+    let agents_root = root.join(".agents").join("skills");
+    let claude_root = root.join(".claude").join("skills");
+    let managed_root = root.join("SkillBox");
+    let agents_skill = agents_root.join("lark-mail");
+    let claude_skill = claude_root.join("lark-mail");
+
+    make_skill(&agents_skill, "lark-mail", "Lark mail skill");
+    fs::create_dir_all(&claude_root).unwrap();
+    symlink_dir(&agents_skill, &claude_skill).unwrap();
+    record_skill_usage(
+        RecordSkillUsageRequest {
+            skill_name: "lark-mail".to_string(),
+            agent_id: "agents".to_string(),
+            runtime_root: agents_root.clone(),
+            event_id: None,
+            used_at: Some("2026-06-02T12:00:00Z".to_string()),
+            prompt_excerpt: None,
+            metadata: None,
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    let candidates =
+        scan_import_candidates(std::slice::from_ref(&claude_root), &managed_root).unwrap();
+    let candidate = candidate(&candidates.candidates, "lark-mail");
+
+    assert_eq!(candidate.source_root, Some(claude_root));
+    assert_eq!(candidate.source_path, claude_skill);
+    assert_eq!(candidate.real_path, fs::canonicalize(agents_skill).unwrap());
+    assert!(candidate.is_symlink);
+    assert_eq!(
+        candidate.symlink_target_path,
+        Some(candidate.real_path.clone())
+    );
+    assert_eq!(candidate.usage_count, 1);
 }
 
 #[test]
