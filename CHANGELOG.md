@@ -9,6 +9,12 @@ version tags such as `v0.3.0`.
 
 - No unreleased changes.
 
+## 0.3.7
+
+- Add workspace skill review tabs that separate unimported, imported, and system candidates while preserving symlink-only workspace skills.
+- Reuse the searchable skill review list in Import Review, hiding duplicate symlink candidates when their source skill is already present.
+- Allow managed skills to be changed between User and Remote storage with a confirmation flow that retargets existing workspace deployments.
+
 ## 0.3.6
 
 - Fix a desktop startup blank screen caused by duplicate React runtimes after dependency updates.
