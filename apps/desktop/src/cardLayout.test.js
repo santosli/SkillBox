@@ -817,6 +817,34 @@ test('skill detail tags live inside controls rail', () => {
   assert.match(css, /\.skillDetailTagsControl \+ \.remoteSkillPanel,\s*\.skillDetailTagsControl \+ \.userSkillPanel\s*\{[^}]*border-top:\s*1px solid #eef2f7;/s);
 });
 
+test('skill detail can request a confirmed skill type change', () => {
+  assert.match(tauriSource, /async fn change_skill_kind\([\s\S]*skill_name:\s*String,[\s\S]*skill_type:\s*skillbox_core::SkillKind,[\s\S]*\)/);
+  assert.match(tauriSource, /skillbox_core::change_skill_kind\([\s\S]*&skill_name,[\s\S]*skill_type,/);
+  assert.match(tauriSource, /change_skill_kind,/);
+  assert.match(appSource, /const \[skillTypeChangeDialog,\s*setSkillTypeChangeDialog\]\s*=\s*useState/);
+  assert.match(appSource, /async function confirmSkillTypeChange\(\)/);
+  assert.match(appSource, /invoke\('change_skill_kind',\s*\{\s*skillName:\s*skillTypeChangeDialog\.skillName,\s*skillType:\s*skillTypeChangeDialog\.targetType\s*\}\)/);
+  assert.match(appSource, /export function ConfirmDialog\(/);
+  assert.match(appSource, /function SkillTypeChangeDialog/);
+  assert.match(appSource, /<ConfirmDialog[\s\S]*className="skillTypeChangeDialog"[\s\S]*confirmLabel="Confirm change"/);
+  assert.match(appSource, /Confirm type change/);
+  assert.doesNotMatch(appSource, /className="remoteImportDialog skillTypeChangeDialog"/);
+  assert.match(appSource, /onRequestTypeChange=\{openSkillTypeChangeDialog\}/);
+  assert.match(appSource, /<section className="skillDetailControlSection skillDetailTypeControl" aria-label="Skill type">/);
+  assert.match(appSource, /className="skillDetailTypeSegment"/);
+  assert.doesNotMatch(appSource, /className="candidateTypeToggle skillDetailTypeToggle"/);
+  assert.match(appSource, /onRequestTypeChange\(skill,\s*'remote'\)/);
+  assert.match(appSource, /onRequestTypeChange\(skill,\s*'user'\)/);
+  assert.match(css, /\.skillDetailTypeSegment\s*\{[^}]*background:\s*#eef2f7;/s);
+  assert.match(css, /\.skillDetailTypeSegment button\.active\s*\{[^}]*background:\s*var\(--skillbox-blue\);/s);
+  assert.match(css, /\.skillDetailTypeSegment button\.active\s*\{[^}]*color:\s*#ffffff;/s);
+  assert.match(css, /\.skillDetailTypeSegment button:disabled\s*\{[^}]*opacity:\s*1;/s);
+  assert.match(css, /\.confirmDialog\s*\{[^}]*width:\s*min\(520px,\s*calc\(100vw - 64px\)\);/s);
+  assert.match(css, /\.confirmDialogHeader\s*\{[^}]*border-bottom:\s*1px solid #eef2f7;/s);
+  assert.match(css, /\.confirmDialogFooter\s*\{[^}]*border-top:\s*1px solid #eef2f7;/s);
+  assert.match(css, /\.skillTypeChangeSummary\s*\{[^}]*background:\s*#f8fbff;/s);
+});
+
 test('remote update actions live in the detail control rail', () => {
   assert.match(appSource, /<RemoteSkillControlPanel[\s\S]*onCheckUpdates=\{onCheckUpdates\}/);
   assert.match(appSource, /className="skillDetailControlRail"[\s\S]*<RemoteSkillControlPanel/);

@@ -15,7 +15,7 @@ import {
 } from '../remoteSkills.js';
 import { labelize } from '../skills.js';
 import { userSyncAction } from '../userSkillsGitSync.js';
-import { AgentIconStack, Badge, LoadingNotice } from './common.jsx';
+import { AgentIconStack, Badge, ConfirmDialog, LoadingNotice } from './common.jsx';
 
 function RemoteSkillControlPanel({
   isChecking,
@@ -269,6 +269,75 @@ function OperationHistoryPanel({ operations }) {
   );
 }
 
+function skillTypeLabel(type = '') {
+  return type === 'remote' ? 'Remote' : 'User';
+}
+
+function skillTypeTone(type = '') {
+  return type === 'user' ? 'green' : 'blue';
+}
+
+function SkillTypeControl({ skill, onRequestTypeChange }) {
+  return (
+    <section className="skillDetailControlSection skillDetailTypeControl" aria-label="Skill type">
+      <div className="skillDetailSectionHeader">
+        <span>Type</span>
+        <small>{skillTypeLabel(skill.type)} skill</small>
+      </div>
+      <div className="skillDetailTypeSegment" role="group" aria-label="Change skill type">
+        <button
+          className={skill.type === 'user' ? 'active' : ''}
+          disabled={skill.type === 'user'}
+          aria-pressed={skill.type === 'user'}
+          type="button"
+          onClick={() => onRequestTypeChange(skill, 'user')}
+        >
+          User
+        </button>
+        <button
+          className={skill.type === 'remote' ? 'active' : ''}
+          disabled={skill.type === 'remote'}
+          aria-pressed={skill.type === 'remote'}
+          type="button"
+          onClick={() => onRequestTypeChange(skill, 'remote')}
+        >
+          Remote
+        </button>
+      </div>
+    </section>
+  );
+}
+
+export function SkillTypeChangeDialog({ dialog, onClose, onConfirm }) {
+  const currentLabel = skillTypeLabel(dialog.currentType);
+  const targetLabel = skillTypeLabel(dialog.targetType);
+
+  return (
+    <ConfirmDialog
+      className="skillTypeChangeDialog"
+      closeLabel="Close skill type confirmation"
+      confirmLabel="Confirm change"
+      description={`Change ${dialog.skillName} from ${currentLabel} to ${targetLabel}.`}
+      error={dialog.error}
+      loading={dialog.loading}
+      loadingLabel="Changing..."
+      title="Confirm type change"
+      titleId="skill-type-change-title"
+      onClose={onClose}
+      onConfirm={onConfirm}
+    >
+      <div className="skillTypeChangeSummary" aria-label="Skill type change">
+        <Badge tone={skillTypeTone(dialog.currentType)}>{currentLabel} skill</Badge>
+        <span>to</span>
+        <Badge tone={skillTypeTone(dialog.targetType)}>{targetLabel} skill</Badge>
+      </div>
+      <p className="confirmDialogImpact">
+        SkillBox will move the managed folder and retarget existing workspace deployments for this skill.
+      </p>
+    </ConfirmDialog>
+  );
+}
+
 export function SkillDetailDialog({
   skill,
   operations,
@@ -286,6 +355,7 @@ export function SkillDetailDialog({
   onOpenLocalFolder,
   onOpenSourceUrl,
   onOpenSyncSetup,
+  onRequestTypeChange,
   onReviewRollback,
   onReviewUpdate,
   sourceUrl,
@@ -449,6 +519,10 @@ export function SkillDetailDialog({
               <span>Controls</span>
               <small>{isChecking ? 'Checking remote' : isSyncing ? 'Working' : 'Ready'}</small>
             </div>
+            <SkillTypeControl
+              skill={skill}
+              onRequestTypeChange={onRequestTypeChange}
+            />
             <section className="skillDetailControlSection skillDetailTagsControl" aria-label="Skill tags">
               <div className="skillDetailSectionHeader">
                 <span>Tags</span>

@@ -298,6 +298,23 @@ async fn import_candidates(items: Vec<skillbox_core::ImportRequestItem>) -> Resu
 }
 
 #[tauri::command]
+async fn change_skill_kind(
+    skill_name: String,
+    skill_type: skillbox_core::SkillKind,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = skillbox_core::change_skill_kind(
+            &skill_name,
+            skill_type,
+            skillbox_core::default_managed_root(),
+        )?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Skill type change task failed: {error}"))?
+}
+
+#[tauri::command]
 async fn deploy_skill(skill_name: String, target_root: String) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let result = skillbox_core::deploy_skill(
@@ -661,6 +678,7 @@ pub fn run() {
             scan_import_candidates,
             scan_workspace_import_candidates,
             import_candidates,
+            change_skill_kind,
             deploy_skill,
             undeploy_skill,
             parse_github_url,

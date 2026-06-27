@@ -2638,6 +2638,67 @@ dd {
   box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
 }
 
+.confirmDialog {
+  display: grid;
+  width: min(520px, calc(100vw - 64px));
+  overflow: hidden;
+  border: 1px solid #dbe3ee;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
+}
+
+.confirmDialogHeader {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  border-bottom: 1px solid #eef2f7;
+  padding: 22px 24px;
+}
+
+.confirmDialogHeader > div {
+  min-width: 0;
+}
+
+.confirmDialogHeader h2 {
+  margin: 0;
+  color: #111827;
+  font-size: 24px;
+  font-weight: 680;
+  line-height: 1.12;
+}
+
+.confirmDialogHeader p {
+  margin: 8px 0 0;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.confirmDialogBody {
+  display: grid;
+  gap: 16px;
+  padding: 20px 24px;
+}
+
+.confirmDialogImpact {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.confirmDialogFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  border-top: 1px solid #eef2f7;
+  background: #ffffff;
+  padding: 18px 24px;
+}
+
 .skillDetailDialog {
   display: grid;
   width: min(920px, calc(100vw - 48px));
@@ -3240,6 +3301,59 @@ dd {
   line-height: 1.45;
 }
 
+.skillDetailTypeControl {
+  gap: 9px;
+}
+
+.skillDetailTypeSegment {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  border: 1px solid #dbe3ee;
+  border-radius: 9px;
+  background: #eef2f7;
+  padding: 3px;
+}
+
+.skillDetailTypeSegment button {
+  display: inline-flex;
+  height: 34px;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 680;
+  line-height: 1;
+  padding: 0 10px;
+}
+
+.skillDetailTypeSegment button.active {
+  background: var(--skillbox-blue);
+  box-shadow: 0 6px 14px rgba(10, 132, 255, 0.22);
+  color: #ffffff;
+}
+
+.skillDetailTypeSegment button:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.skillDetailTypeSegment button:not(.active):hover {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.skillDetailTypeSegment button:focus-visible {
+  outline: 2px solid rgba(10, 132, 255, 0.35);
+  outline-offset: 2px;
+}
+
 .skillDetailControlSection + .skillDetailControlSection {
   border-top: 1px solid #eef2f7;
   padding-top: 12px;
@@ -3679,6 +3793,25 @@ dd {
 
 .detailFavoriteButton.active svg {
   fill: currentColor;
+}
+
+.skillTypeChangeSummary {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  background: #f8fbff;
+  padding: 12px;
+}
+
+.skillTypeChangeSummary > span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 720;
 }
 
 .remoteImportForm {

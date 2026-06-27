@@ -16,7 +16,10 @@ import {
   RemoteVersionReviewDialog
 } from './components/remoteSkills.jsx';
 import { SettingsPage } from './components/settings.jsx';
-import { SkillDetailDialog } from './components/skillDetail.jsx';
+import {
+  SkillDetailDialog,
+  SkillTypeChangeDialog
+} from './components/skillDetail.jsx';
 import { UserSkillsSyncDialog } from './components/userSkillsSync.jsx';
 import {
   DeployWorkspaceDialog,
@@ -76,6 +79,7 @@ import {
 } from './remoteSkills.js';
 import {
   compactPath,
+  defaultSkillStatus,
   hasAvailableUpdate,
   mergeSkills,
   normalizeOperationRecords,
@@ -126,6 +130,7 @@ const autoRefreshBlockedStatuses = new Set([
   'scanning',
   'scanning_workspace_skills',
   'scanning_workspaces',
+  'changing_skill_type',
   'syncing'
 ]);
 
@@ -211,6 +216,14 @@ export default function App() {
     skillName: '',
     rows: [],
     confirmUndeploy: false,
+    error: ''
+  });
+  const [skillTypeChangeDialog, setSkillTypeChangeDialog] = useState({
+    open: false,
+    skillName: '',
+    currentType: '',
+    targetType: '',
+    loading: false,
     error: ''
   });
   const [remoteSourceDialog, setRemoteSourceDialog] = useState({
@@ -1301,6 +1314,123 @@ export default function App() {
 
   function closeSkillDetail() {
     setSelectedName('');
+  }
+
+  function openSkillTypeChangeDialog(skill, targetType) {
+    if (!skill || skill.type === targetType) {
+      return;
+    }
+
+    setSkillTypeChangeDialog({
+      open: true,
+      skillName: skill.name,
+      currentType: skill.type,
+      targetType,
+      loading: false,
+      error: ''
+    });
+    setError('');
+    setNotice('');
+  }
+
+  function closeSkillTypeChangeDialog() {
+    if (skillTypeChangeDialog.loading) {
+      return;
+    }
+
+    setSkillTypeChangeDialog({
+      open: false,
+      skillName: '',
+      currentType: '',
+      targetType: '',
+      loading: false,
+      error: ''
+    });
+  }
+
+  async function confirmSkillTypeChange() {
+    if (!skillTypeChangeDialog.open || !skillTypeChangeDialog.skillName || !skillTypeChangeDialog.targetType) {
+      return;
+    }
+
+    const skillName = skillTypeChangeDialog.skillName;
+    const targetType = skillTypeChangeDialog.targetType;
+    setStatus('changing_skill_type');
+    setError('');
+    setNotice('');
+    setSkillTypeChangeDialog((current) => ({ ...current, loading: true, error: '' }));
+
+    if (!window.__TAURI_INTERNALS__) {
+      setSkills((current) =>
+        current.map((skill) =>
+          skill.name === skillName
+            ? { ...skill, type: targetType, status: defaultSkillStatus(targetType) }
+            : skill
+        )
+      );
+      setSkillTypeChangeDialog({
+        open: false,
+        skillName: '',
+        currentType: '',
+        targetType: '',
+        loading: false,
+        error: ''
+      });
+      if (targetType === 'remote') {
+        void loadRemoteSkillContext(skillName);
+      } else {
+        void loadUserSkillContext(skillName);
+      }
+      setNotice(`Changed ${skillName} to ${targetType} skill.`);
+      setStatus('prototype');
+      return;
+    }
+
+    try {
+      await invoke('change_skill_kind', {
+        skillName: skillTypeChangeDialog.skillName,
+        skillType: skillTypeChangeDialog.targetType
+      });
+      const [state, gitStatus, workspaceRows, cachedRemoteUpdatesResult] = await Promise.all([
+        invoke('managed_state'),
+        invoke('user_skills_git_status').catch(() => null),
+        invoke('list_workspaces').catch(() => workspaces),
+        invoke('cached_remote_skill_updates').catch(() => remoteSkillUpdates)
+      ]);
+      const managedSkills = state.skills?.map(normalizeSkill) || [];
+
+      setSkills(managedSkills);
+      setWorkspaces(normalizeWorkspaces(workspaceRows));
+      setPaths(normalizePaths(state.paths));
+      setUserSkillsGit(normalizeUserSkillsGitStatus(gitStatus));
+      setRemoteSkillUpdates(normalizeRemoteSkillUpdates(cachedRemoteUpdatesResult));
+      setIsFirstUse(Boolean(state.isFirstUse ?? state.is_first_use));
+      setSelectedName((currentName) =>
+        currentName && managedSkills.some((skill) => skill.name === currentName) ? currentName : ''
+      );
+      setSkillTypeChangeDialog({
+        open: false,
+        skillName: '',
+        currentType: '',
+        targetType: '',
+        loading: false,
+        error: ''
+      });
+      if (targetType === 'remote') {
+        void loadRemoteSkillContext(skillName);
+      } else {
+        void loadUserSkillContext(skillName);
+      }
+      setNotice(`Changed ${skillName} to ${targetType} skill.`);
+      setStatus('ready');
+    } catch (typeError) {
+      setSkillTypeChangeDialog((current) => ({
+        ...current,
+        loading: false,
+        error: typeError.message || String(typeError) || 'Unable to change skill type.'
+      }));
+      setStatus('ready');
+    }
   }
 
   function openDeployDialog(skill) {
@@ -2498,11 +2628,20 @@ export default function App() {
           onOpenLocalFolder={openLocalSkillFolder}
           onOpenSourceUrl={openRemoteSourceUrl}
           onOpenSyncSetup={openSyncDialog}
+          onRequestTypeChange={openSkillTypeChangeDialog}
           onReviewRollback={(version) => openRemoteVersionReview(selectedSkill, 'rollback', version.version)}
           onReviewUpdate={() => openRemoteVersionReview(selectedSkill, 'update', selectedRemoteUpdate?.latestSha || '')}
           sourceUrl={selectedRemoteUpdate?.sourceUrl || ''}
           onTagsChange={updateDashboardSkillTags}
           onToggleFavorite={toggleDashboardFavorite}
+        />
+      ) : null}
+
+      {skillTypeChangeDialog.open ? (
+        <SkillTypeChangeDialog
+          dialog={skillTypeChangeDialog}
+          onClose={closeSkillTypeChangeDialog}
+          onConfirm={confirmSkillTypeChange}
         />
       ) : null}
 

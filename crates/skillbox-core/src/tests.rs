@@ -1417,6 +1417,66 @@ fn managed_state_lists_remote_skill_current_once() {
 }
 
 #[test]
+fn change_skill_kind_moves_user_skill_to_remote_and_retargets_deployments() {
+    let root = temp_dir("change-kind-user-to-remote");
+    let source = root.join("source").join("agently-mail");
+    let managed_root = root.join("SkillBox");
+    let target_root = root.join("runtime");
+    make_skill(&source, "agently-mail", "Mail skill");
+    import_skill(&source, SkillKind::User, &managed_root).unwrap();
+    let deployment = deploy_skill("agently-mail", &managed_root, &target_root).unwrap();
+
+    let changed = change_skill_kind("agently-mail", SkillKind::Remote, &managed_root).unwrap();
+    let current = managed_root
+        .join("remote-skills")
+        .join("agently-mail")
+        .join("current");
+    let state = managed_state(&managed_root).unwrap();
+
+    assert_eq!(changed.kind, SkillKind::Remote);
+    assert!(!managed_root
+        .join("user-skills")
+        .join("agently-mail")
+        .exists());
+    assert!(changed.managed_path.parent().unwrap().ends_with("versions"));
+    assert_eq!(fs::read_link(&current).unwrap(), changed.managed_path);
+    assert_eq!(fs::read_link(&deployment.target_path).unwrap(), current);
+    assert_eq!(state.skills.len(), 1);
+    assert_eq!(state.skills[0].kind, SkillKind::Remote);
+    assert!(state.skills[0].path.ends_with("current"));
+}
+
+#[test]
+fn change_skill_kind_moves_remote_skill_to_user_and_retargets_deployments() {
+    let root = temp_dir("change-kind-remote-to-user");
+    let source = root.join("source").join("json-canvas");
+    let managed_root = root.join("SkillBox");
+    let target_root = root.join("runtime");
+    make_skill(&source, "json-canvas", "Canvas skill");
+    import_skill(&source, SkillKind::Remote, &managed_root).unwrap();
+    let deployment = deploy_skill("json-canvas", &managed_root, &target_root).unwrap();
+
+    let changed = change_skill_kind("json-canvas", SkillKind::User, &managed_root).unwrap();
+    let user_path = managed_root.join("user-skills").join("json-canvas");
+    let current = managed_root
+        .join("remote-skills")
+        .join("json-canvas")
+        .join("current");
+    let state = managed_state(&managed_root).unwrap();
+
+    assert_eq!(changed.kind, SkillKind::User);
+    assert_eq!(changed.managed_path, user_path);
+    assert!(changed.managed_path.join("SKILL.md").exists());
+    assert!(fs::symlink_metadata(&current).is_err());
+    assert_eq!(
+        fs::read_link(&deployment.target_path).unwrap(),
+        changed.managed_path
+    );
+    assert_eq!(state.skills.len(), 1);
+    assert_eq!(state.skills[0].kind, SkillKind::User);
+}
+
+#[test]
 fn managed_state_infers_workspace_symlink_deployments_without_index() {
     let root = temp_dir("managed-state-inferred-deployment");
     let source = root.join("source").join("ui-ux-pro-max");

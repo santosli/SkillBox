@@ -4,11 +4,13 @@ import {
   Gauge,
   History as HistoryIcon,
   MessageCircleQuestionMark,
-  Settings2
+  Settings2,
+  X
 } from 'lucide-react';
 import claudeCodeIcon from '../assets/claude-code-icon.svg';
 import codexAppIcon from '../assets/codex-app-icon.png';
 import codexCliIcon from '../assets/codex-cli-icon.png';
+import { closeOnBackdropClick } from '../modalEvents.js';
 
 export function AgentIconStack({ agents = [], emptyLabel = 'No installed agent target', labelPrefix = 'Installed agents' }) {
   const visibleAgents = agents.slice(0, 4);
@@ -101,6 +103,66 @@ export function PageTitleRow({ actions, count, title }) {
         {hasCount ? <span className="pageTitlePill">{count}</span> : null}
       </div>
       {actions ? <div className="pageTitleActions">{actions}</div> : null}
+    </div>
+  );
+}
+
+export function ConfirmDialog({
+  cancelLabel = 'Cancel',
+  children,
+  className = '',
+  closeLabel = 'Close confirmation',
+  confirmDisabled = false,
+  confirmLabel = 'Confirm',
+  description,
+  error = '',
+  loading = false,
+  loadingLabel = 'Working...',
+  onClose,
+  onConfirm,
+  title,
+  titleId
+}) {
+  const dialogClassName = className ? `confirmDialog ${className}` : 'confirmDialog';
+
+  return (
+    <div
+      className="modalBackdrop"
+      role="presentation"
+      onMouseDown={(event) => closeOnBackdropClick(event, onClose)}
+    >
+      <section className={dialogClassName} role="dialog" aria-modal="true" aria-labelledby={titleId}>
+        <div className="confirmDialogHeader">
+          <div>
+            <h2 id={titleId}>{title}</h2>
+            {description ? <p>{description}</p> : null}
+          </div>
+          <button className="iconButton" disabled={loading} type="button" aria-label={closeLabel} onClick={onClose}>
+            <X aria-hidden="true" />
+          </button>
+        </div>
+
+        <div className="confirmDialogBody">
+          {children}
+          {error ? <div className="formError">{error}</div> : null}
+        </div>
+
+        <div className="confirmDialogFooter">
+          <button className="button secondary" disabled={loading} type="button" onClick={onClose}>
+            {cancelLabel}
+          </button>
+          <button className="button primary" disabled={loading || confirmDisabled} type="button" onClick={onConfirm}>
+            {loading ? (
+              <>
+                <span className="buttonSpinner" aria-hidden="true" />
+                {loadingLabel}
+              </>
+            ) : (
+              confirmLabel
+            )}
+          </button>
+        </div>
+      </section>
     </div>
   );
 }
