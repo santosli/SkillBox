@@ -298,6 +298,29 @@ async fn import_candidates(items: Vec<skillbox_core::ImportRequestItem>) -> Resu
 }
 
 #[tauri::command]
+async fn list_import_records(skill_name: Option<String>) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = skillbox_core::list_import_records(
+            skillbox_core::ImportRecordFilter { skill_name },
+            skillbox_core::default_managed_root(),
+        )?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("List import records task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn revert_import(request: skillbox_core::RevertImportRequest) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = skillbox_core::revert_import(request, skillbox_core::default_managed_root())?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Revert import task failed: {error}"))?
+}
+
+#[tauri::command]
 async fn change_skill_kind(
     skill_name: String,
     skill_type: skillbox_core::SkillKind,
@@ -678,6 +701,8 @@ pub fn run() {
             scan_import_candidates,
             scan_workspace_import_candidates,
             import_candidates,
+            list_import_records,
+            revert_import,
             change_skill_kind,
             deploy_skill,
             undeploy_skill,

@@ -51,6 +51,8 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - remote skill 复制到 `~/.skillbox/remote-skills/<name>/versions/manual-<contentHash12>`，并更新 `current` symlink。
 - 如果用户选择 deploy back to source，先把原 runtime 目录移动到 `~/.skillbox/backups/imports/<name>-<contentHash12>`，再在原位置创建指向 managed target 的 symlink。
 - 写入 SQLite `skills`，必要时写入 `deployments`。
+- deploy back 成功后，为每个 imported skill 写一条 `import_records` active 记录，保存 source path、managed target、backup path 和 content hash，供后续 revert 使用。
+- 扫描 import candidates 时，只有 runtime skill 是指向 SkillBox managed root 的 symlink 时才显示为 imported；仅 content hash 已存在于 managed store 不代表该 runtime 位置仍被 SkillBox 管理。
 
 失败与回滚：
 
@@ -58,6 +60,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 原 runtime 位置是指向其它位置的 symlink 时拒绝。
 - deploy back to source 创建 symlink 失败时，应把 backup rename 回原位置。
 - 不覆盖用户内容，不删除 backup。
+- `import_records` 写入失败时应把失败返回给调用方，不把该 import 显示为可自动 revert。
 
 完成验证：
 
@@ -66,7 +69,41 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 使用临时目录运行 Rust CLI：`cargo run -p skillbox-cli --offline -- import <source-dir> --type user --managed-root <temp-skillbox-root>`
 - UI 路径变更时，手动验证 import review 中冲突、默认选中和备份提示。
 
-## 3. GitHub Install
+## 3. Revert Local Import
+
+触发条件：
+
+- Rust CLI 执行 `import-records [--skill <name>]` 查看可恢复记录。
+- Rust CLI 执行 `revert-import <import-record-id>`。
+- Tauri command：`list_import_records`、`revert_import`。
+- 桌面详情页在 deployment/workspace 区域显示 `Revert import`。
+
+步骤：
+
+- `list_import_records` 读取 active/reverted import records，并按需从旧 `deployments` + `backups/imports` 做保守 legacy reconciliation。
+- 只有证据链唯一且安全的 legacy import 才会写入 `legacy=true` active record；歧义 backup 或同 skill 多 workspace deployment 不自动生成可 revert 记录。
+- `revert_import` 只接受 import record id，不接受 skill name 或 source path。
+- 执行前复验 record 为 active、backup 存在且 `SKILL.md` name/hash 匹配、source path 是指向记录 managed target 的 symlink 或 source path 不存在。
+- 如果同一 managed skill 有多个 workspace deployment 或多个 active import record，拒绝 revert，避免产生多个 source。
+- 删除 source symlink 后，把 backup rename 回 source path；如果 rename 失败，尝试重新创建 source symlink 并保持 record active。
+- 删除对应 deployment 记录，标记 import record 为 `reverted`，并记录 `revert_import` operation。
+- remote skill revert 保留 `remote-skills/<name>/versions`、`current` 和 `source.json`。
+- user skill revert 在无其它引用时删除 `user-skills/<name>` managed copy。
+
+失败与回滚：
+
+- source path 是非 symlink、symlink 指向其它位置、backup 缺失或 backup 内容不匹配时拒绝。
+- 多 workspace deployment 时拒绝，不做 partial revert。
+- 文件系统恢复成功但 SQLite 更新失败时，不反向覆盖已恢复的用户目录；后续 list 应显示状态不一致或错误。
+
+完成验证：
+
+- `cargo test -p skillbox-core --offline import`
+- `cargo run -p skillbox-cli --offline -- import-records --managed-root <temp-skillbox-root>`
+- `cargo run -p skillbox-cli --offline -- revert-import <record-id> --managed-root <temp-skillbox-root>`
+- 桌面 UI 手动验证 warning 入口、danger 确认按钮、blocked reason，以及 revert 后 runtime path 是真实目录。
+
+## 4. GitHub Install
 
 触发条件：
 
@@ -103,7 +140,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - Rust install：`cargo run -p skillbox-cli --offline -- install <github-url> --managed-root <temp-skillbox-root>`
 - `cargo test -p skillbox-core --offline install_github_remote_skill`
 
-## 4. Deploy Managed Skill
+## 5. Deploy Managed Skill
 
 触发条件：
 
@@ -140,7 +177,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 检查 target path 是 symlink，real path 指向 managed store。
 - 检查 undeploy 后 target symlink 消失，非 symlink target 不会被删除。
 
-## 5. Check Remote Updates
+## 6. Check Remote Updates
 
 触发条件：
 
@@ -180,7 +217,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `npm test`
 - 桌面 UI 视觉验证 Dashboard `Refresh` 按钮、Checked 时间、状态 badge、Available updates 计数、notice，以及 Settings 中的自动刷新间隔。
 
-## 6. Bind Remote Source
+## 7. Bind Remote Source
 
 触发条件：
 
@@ -222,7 +259,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `cargo run -p skillbox-cli --offline -- bind-remote-source <skill-name> <github-url> --managed-root <temp-skillbox-root>`
 - 桌面 UI 手动验证 source binding dialog：`exact_match` 可绑定，`same_skill_changed` 明确提示当前版本不会被替换，`mismatch` 禁用绑定。
 
-## 7. Update Remote Skill
+## 8. Update Remote Skill
 
 触发条件：
 
@@ -265,7 +302,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 桌面 UI 手动验证：update review 打开期间显示 loading，完成后展示所有变更文件，文本文件展示 unified diff，二进制或大文件展示 hash/size metadata，no-file-change 更新显示明确说明，确认后刷新版本列表和 operation history。
 - Tauri 验证：`preview_remote_version_change` 这类 Git/diff 预览 command 必须放到 blocking worker，避免点击 `Review update` 时阻塞窗口渲染。
 
-## 8. Rollback Remote Skill
+## 9. Rollback Remote Skill
 
 触发条件：
 
@@ -301,7 +338,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `cargo run -p skillbox-cli --offline -- rollback <skill-name> --to <sha-or-prefix> --managed-root <temp-skillbox-root>`
 - 桌面 UI 手动验证：rollback review 展示回滚后会新增、修改、删除的所有文件，确认后 `current` 和版本列表同步刷新。
 
-## 9. Operation Log
+## 10. Operation Log
 
 触发条件：
 
@@ -333,7 +370,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `cargo run -p skillbox-cli --offline -- operations --entity-type skill --entity-name <skill-name> --managed-root <temp-skillbox-root>`
 - 桌面 UI 手动验证 remote skill detail 中成功和失败 operation 都可见，并验证 History 页能同时显示 skill calls 和 operations。
 
-## 10. Sync User-Skills Git
+## 11. Sync User-Skills Git
 
 触发条件：
 
@@ -374,7 +411,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `cargo run -p skillbox-cli --offline -- sync-user-skills --managed-root <temp-skillbox-root> --remote <bare-repo-path> --message "test sync"`
 - UI 路径变更时，手动验证 commit review dialog、diff preview、默认 commit message、文件选择、shared remote 提示和 push failure 状态。
 
-## 11. Add Agent Adapter
+## 12. Add Agent Adapter
 
 触发条件：
 
@@ -405,7 +442,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 如果 adapter 影响桌面或仓库脚本，也运行 `npm test`。
 - 用临时目录模拟该 agent runtime，不直接修改真实用户 runtime。
 
-## 12. Manage Workspaces
+## 13. Manage Workspaces
 
 触发条件：
 
@@ -441,7 +478,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `npm test`
 - 桌面 UI 验证 sidebar 只保留 Dashboard、Workspaces、Settings，Workspace 页面可 scan、add、forget manual rows，并且点击 workspace 可查看和导入该 workspace 下的 skills。
 
-## 13. Skill Usage Recording
+## 14. Skill Usage Recording
 
 触发条件：
 
@@ -488,7 +525,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 使用相同 `--event-id` 重复上报，确认第二次返回 deduplicated 且计数不增加。
 - `npm test`
 
-## 14. App Updates
+## 15. App Updates
 
 触发条件：
 

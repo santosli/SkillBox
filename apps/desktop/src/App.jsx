@@ -17,6 +17,7 @@ import {
 } from './components/remoteSkills.jsx';
 import { SettingsPage } from './components/settings.jsx';
 import {
+  ImportRevertDialog,
   SkillDetailDialog,
   SkillTypeChangeDialog
 } from './components/skillDetail.jsx';
@@ -131,6 +132,7 @@ const autoRefreshBlockedStatuses = new Set([
   'scanning_workspace_skills',
   'scanning_workspaces',
   'changing_skill_type',
+  'reverting_import',
   'syncing'
 ]);
 
@@ -142,6 +144,32 @@ const closedRemoteSourceCandidateBind = {
   binding: false,
   error: ''
 };
+
+function normalizeImportRecord(record = {}) {
+  const affectedDeploymentCount = Number(
+    record.affectedDeploymentCount ?? record.affected_deployment_count
+  );
+
+  return {
+    ...record,
+    id: record.id || '',
+    skillName: record.skillName || record.skill_name || '',
+    kind: record.kind || record.type || 'user',
+    sourcePath: record.sourcePath || record.source_path || '',
+    sourceRoot: record.sourceRoot || record.source_root || '',
+    managedPath: record.managedPath || record.managed_path || '',
+    contentHash: record.contentHash || record.content_hash || '',
+    backupPath: record.backupPath || record.backup_path || '',
+    deployedPath: record.deployedPath || record.deployed_path || '',
+    status: record.status || 'failed',
+    legacy: Boolean(record.legacy),
+    importedAt: record.importedAt || record.imported_at || '',
+    revertedAt: record.revertedAt || record.reverted_at || '',
+    canRevert: Boolean(record.canRevert ?? record.can_revert),
+    revertBlockReason: record.revertBlockReason || record.revert_block_reason || '',
+    affectedDeploymentCount: Number.isFinite(affectedDeploymentCount) ? affectedDeploymentCount : 0
+  };
+}
 
 export default function App() {
   const [skills, setSkills] = useState([]);
@@ -250,7 +278,15 @@ export default function App() {
   });
   const [remoteVersions, setRemoteVersions] = useState({});
   const [userVersions, setUserVersions] = useState({});
+  const [importRecords, setImportRecords] = useState({});
+  const [importRecordLoading, setImportRecordLoading] = useState({});
   const [operationHistory, setOperationHistory] = useState({});
+  const [importRevertDialog, setImportRevertDialog] = useState({
+    open: false,
+    record: null,
+    loading: false,
+    error: ''
+  });
   const [history, setHistory] = useState(normalizeHistory(null));
   const [remoteContextLoading, setRemoteContextLoading] = useState({});
   const [userContextLoading, setUserContextLoading] = useState({});
@@ -1305,6 +1341,7 @@ export default function App() {
 
   function openSkill(skill) {
     setSelectedName(skill.name);
+    void loadImportRecords(skill.name);
     if (skill.type === 'remote') {
       void loadRemoteSkillContext(skill.name);
     } else if (skill.type === 'user') {
@@ -1314,6 +1351,120 @@ export default function App() {
 
   function closeSkillDetail() {
     setSelectedName('');
+  }
+
+  async function loadImportRecords(skillName) {
+    if (!skillName) return;
+
+    setImportRecordLoading((current) => ({ ...current, [skillName]: true }));
+
+    if (!window.__TAURI_INTERNALS__) {
+      setImportRecords((current) => ({ ...current, [skillName]: [] }));
+      setImportRecordLoading((current) => ({ ...current, [skillName]: false }));
+      return;
+    }
+
+    try {
+      const result = await invoke('list_import_records', { skillName });
+      setImportRecords((current) => ({
+        ...current,
+        [skillName]: (result.records || []).map(normalizeImportRecord)
+      }));
+    } catch (recordError) {
+      setImportRecords((current) => ({ ...current, [skillName]: [] }));
+      setError(recordError.message || String(recordError) || 'Unable to load import records.');
+    } finally {
+      setImportRecordLoading((current) => ({ ...current, [skillName]: false }));
+    }
+  }
+
+  function openImportRevertDialog(record) {
+    if (!record?.canRevert) {
+      return;
+    }
+
+    setImportRevertDialog({
+      open: true,
+      record,
+      loading: false,
+      error: ''
+    });
+    setError('');
+    setNotice('');
+  }
+
+  function closeImportRevertDialog() {
+    if (importRevertDialog.loading) {
+      return;
+    }
+
+    setImportRevertDialog({
+      open: false,
+      record: null,
+      loading: false,
+      error: ''
+    });
+  }
+
+  async function confirmImportRevert() {
+    const record = importRevertDialog.record;
+    if (!record?.id) {
+      return;
+    }
+
+    setStatus('reverting_import');
+    setError('');
+    setNotice('');
+    setImportRevertDialog((current) => ({ ...current, loading: true, error: '' }));
+
+    if (!window.__TAURI_INTERNALS__) {
+      setImportRecords((current) => ({
+        ...current,
+        [record.skillName]: (current[record.skillName] || []).map((item) =>
+          item.id === record.id ? { ...item, status: 'reverted', canRevert: false } : item
+        )
+      }));
+      setImportRevertDialog({ open: false, record: null, loading: false, error: '' });
+      setSelectedName('');
+      setNotice(`Reverted import for ${record.skillName}.`);
+      setStatus('prototype');
+      return;
+    }
+
+    try {
+      await invoke('revert_import', {
+        request: {
+          import_record_id: record.id,
+          actor: 'desktop'
+        }
+      });
+      const [state, workspaceRows, recordRows] = await Promise.all([
+        invoke('managed_state'),
+        invoke('list_workspaces').catch(() => workspaces),
+        invoke('list_import_records', { skillName: record.skillName }).catch(() => ({ records: [] }))
+      ]);
+      const managedSkills = state.skills?.map(normalizeSkill) || [];
+
+      setSkills(managedSkills);
+      setWorkspaces(normalizeWorkspaces(workspaceRows));
+      setPaths(normalizePaths(state.paths));
+      setIsFirstUse(Boolean(state.isFirstUse ?? state.is_first_use));
+      setSelectedName('');
+      setImportRecords((current) => ({
+        ...current,
+        [record.skillName]: (recordRows.records || []).map(normalizeImportRecord)
+      }));
+      setImportRevertDialog({ open: false, record: null, loading: false, error: '' });
+      setNotice(`Reverted import for ${record.skillName}.`);
+      setStatus('ready');
+    } catch (revertError) {
+      setImportRevertDialog((current) => ({
+        ...current,
+        loading: false,
+        error: revertError.message || String(revertError) || 'Unable to revert import.'
+      }));
+      setStatus('ready');
+    }
   }
 
   function openSkillTypeChangeDialog(skill, targetType) {
@@ -2620,6 +2771,8 @@ export default function App() {
           remoteUpdate={selectedRemoteUpdate}
           versions={remoteVersions[selectedSkill.name] || null}
           userVersions={userVersions[selectedSkill.name] || null}
+          importRecords={importRecords[selectedSkill.name] || []}
+          importRecordsLoading={Boolean(importRecordLoading[selectedSkill.name])}
           operations={operationHistory[selectedSkill.name] || []}
           onBindRemoteSource={() => openRemoteSourceDialog(selectedSkill)}
           onCheckUpdates={() => refreshSkillStatuses({ skillName: selectedSkill.name })}
@@ -2628,6 +2781,7 @@ export default function App() {
           onOpenLocalFolder={openLocalSkillFolder}
           onOpenSourceUrl={openRemoteSourceUrl}
           onOpenSyncSetup={openSyncDialog}
+          onRequestImportRevert={openImportRevertDialog}
           onRequestTypeChange={openSkillTypeChangeDialog}
           onReviewRollback={(version) => openRemoteVersionReview(selectedSkill, 'rollback', version.version)}
           onReviewUpdate={() => openRemoteVersionReview(selectedSkill, 'update', selectedRemoteUpdate?.latestSha || '')}
@@ -2642,6 +2796,14 @@ export default function App() {
           dialog={skillTypeChangeDialog}
           onClose={closeSkillTypeChangeDialog}
           onConfirm={confirmSkillTypeChange}
+        />
+      ) : null}
+
+      {importRevertDialog.open ? (
+        <ImportRevertDialog
+          dialog={importRevertDialog}
+          onClose={closeImportRevertDialog}
+          onConfirm={confirmImportRevert}
         />
       ) : null}
 

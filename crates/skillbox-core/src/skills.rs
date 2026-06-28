@@ -171,9 +171,22 @@ pub fn import_skill(
             .join(format!("manual-{}", &skill.content_hash[..12])),
     };
 
-    copy_skill_dir(&skill.path, &managed_path)?;
-    if kind == SkillKind::Remote {
-        update_current_symlink(&paths.remote_skills_root.join(&skill.name), &managed_path)?;
+    match kind {
+        SkillKind::User => copy_skill_dir(&skill.path, &managed_path)?,
+        SkillKind::Remote => {
+            if managed_path.exists() {
+                let existing = read_skill(&managed_path)?;
+                if existing.name != skill.name || existing.content_hash != skill.content_hash {
+                    return Err(format!(
+                        "Existing remote version does not match {}",
+                        skill.name
+                    ));
+                }
+            } else {
+                copy_skill_dir(&skill.path, &managed_path)?;
+            }
+            update_current_symlink(&paths.remote_skills_root.join(&skill.name), &managed_path)?;
+        }
     }
 
     index_skill(&paths.database_path, &skill, kind, &managed_path)?;

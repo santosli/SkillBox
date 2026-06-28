@@ -112,6 +112,7 @@ export function ConfirmDialog({
   children,
   className = '',
   closeLabel = 'Close confirmation',
+  confirmClassName = 'button primary',
   confirmDisabled = false,
   confirmLabel = 'Confirm',
   description,
@@ -151,7 +152,7 @@ export function ConfirmDialog({
           <button className="button secondary" disabled={loading} type="button" onClick={onClose}>
             {cancelLabel}
           </button>
-          <button className="button primary" disabled={loading || confirmDisabled} type="button" onClick={onConfirm}>
+          <button className={confirmClassName} disabled={loading || confirmDisabled} type="button" onClick={onConfirm}>
             {loading ? (
               <>
                 <span className="buttonSpinner" aria-hidden="true" />

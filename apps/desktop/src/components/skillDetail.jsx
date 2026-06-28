@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
+  AlertTriangle,
   ExternalLink,
   FolderOpen,
   Link2,
@@ -13,7 +14,7 @@ import {
   remoteSkillUpdateVersionLabel,
   shouldShowRemoteUpdateSummary
 } from '../remoteSkills.js';
-import { labelize } from '../skills.js';
+import { compactPath, labelize } from '../skills.js';
 import { userSyncAction } from '../userSkillsGitSync.js';
 import { AgentIconStack, Badge, ConfirmDialog, LoadingNotice } from './common.jsx';
 
@@ -269,6 +270,43 @@ function OperationHistoryPanel({ operations }) {
   );
 }
 
+function ImportRevertPanel({ loading, records = [], onRequestRevert }) {
+  const activeRecords = records.filter((record) => record.status === 'active');
+
+  if (!loading && activeRecords.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="importRevertPanel" aria-label="Import revert">
+      <div className="skillDetailSectionHeader">
+        <span>Import source</span>
+        <small>{loading ? 'Loading' : `${activeRecords.length} restorable`}</small>
+      </div>
+      {loading ? <LoadingNotice compact>Loading import records...</LoadingNotice> : null}
+      {activeRecords.map((record) => (
+        <div className="importRevertRow" key={record.id}>
+          <div className="importRevertMeta">
+            <strong>{compactPath(record.sourcePath)}</strong>
+            <small>{record.legacy ? 'Legacy import record' : 'Import record'}</small>
+            {record.canRevert ? null : (
+              <p className="importRevertBlockReason">{record.revertBlockReason || 'This import cannot be reverted.'}</p>
+            )}
+          </div>
+          {record.canRevert ? (
+            <button className="button warning" type="button" onClick={() => onRequestRevert(record)}>
+              <AlertTriangle aria-hidden="true" />
+              Revert import
+            </button>
+          ) : (
+            <Badge tone="amber">Blocked</Badge>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function skillTypeLabel(type = '') {
   return type === 'remote' ? 'Remote' : 'User';
 }
@@ -338,6 +376,48 @@ export function SkillTypeChangeDialog({ dialog, onClose, onConfirm }) {
   );
 }
 
+export function ImportRevertDialog({ dialog, onClose, onConfirm }) {
+  const record = dialog.record || {};
+  const managedCopyText = record.kind === 'remote'
+    ? 'Remote versions and source metadata stay in the managed store.'
+    : 'The managed user copy will be removed when no other references exist.';
+
+  return (
+    <ConfirmDialog
+      className="importRevertDialog"
+      closeLabel="Close import revert confirmation"
+      confirmClassName="button danger"
+      confirmLabel="Revert import"
+      description={`Restore ${record.skillName || 'this skill'} to its pre-import runtime folder.`}
+      error={dialog.error}
+      loading={dialog.loading}
+      loadingLabel="Reverting..."
+      title="Revert import?"
+      titleId="import-revert-title"
+      onClose={onClose}
+      onConfirm={onConfirm}
+    >
+      <div className="importRevertSummary" aria-label="Import revert impact">
+        <div>
+          <span>Remove symlink</span>
+          <code>{compactPath(record.sourcePath || '')}</code>
+        </div>
+        <div>
+          <span>Restore backup</span>
+          <code>{compactPath(record.backupPath || '')}</code>
+        </div>
+        <div>
+          <span>Managed store</span>
+          <p>{managedCopyText}</p>
+        </div>
+      </div>
+      <p className="confirmDialogImpact">
+        This changes runtime files on disk and cannot be batched with other deployment changes.
+      </p>
+    </ConfirmDialog>
+  );
+}
+
 export function SkillDetailDialog({
   skill,
   operations,
@@ -355,10 +435,13 @@ export function SkillDetailDialog({
   onOpenLocalFolder,
   onOpenSourceUrl,
   onOpenSyncSetup,
+  onRequestImportRevert,
   onRequestTypeChange,
   onReviewRollback,
   onReviewUpdate,
   sourceUrl,
+  importRecords = [],
+  importRecordsLoading = false,
   onTagsChange,
   onToggleFavorite
 }) {
@@ -494,6 +577,11 @@ export function SkillDetailDialog({
                     </div>
                   </div>
                 </div>
+                <ImportRevertPanel
+                  loading={importRecordsLoading}
+                  records={importRecords}
+                  onRequestRevert={onRequestImportRevert}
+                />
               </div>
             </section>
 

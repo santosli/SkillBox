@@ -690,6 +690,68 @@ pub struct ImportBatchResult {
     pub errors: Vec<ImportCandidateError>,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportRecordStatus {
+    Active,
+    Reverted,
+    Failed,
+}
+
+impl ImportRecordStatus {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            ImportRecordStatus::Active => "active",
+            ImportRecordStatus::Reverted => "reverted",
+            ImportRecordStatus::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ImportRecordFilter {
+    pub skill_name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ImportRecord {
+    pub id: String,
+    pub skill_name: String,
+    pub kind: SkillKind,
+    pub source_path: PathBuf,
+    pub source_root: Option<PathBuf>,
+    pub managed_path: PathBuf,
+    pub content_hash: String,
+    pub backup_path: PathBuf,
+    pub deployed_path: PathBuf,
+    pub status: ImportRecordStatus,
+    pub legacy: bool,
+    pub imported_at: String,
+    pub reverted_at: Option<String>,
+    pub can_revert: bool,
+    pub revert_block_reason: Option<String>,
+    pub affected_deployment_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ImportRecordList {
+    pub records: Vec<ImportRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RevertImportRequest {
+    pub import_record_id: String,
+    pub actor: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RevertImportResult {
+    pub record: ImportRecord,
+    pub restored_path: PathBuf,
+    pub removed_managed_path: Option<PathBuf>,
+    pub operation_id: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecordSkillUsageRequest {
     pub skill_name: String,

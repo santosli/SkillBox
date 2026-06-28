@@ -154,6 +154,32 @@ pub(crate) fn import_one_candidate(
             &imported.name,
             &imported.content_hash,
         )?;
+        if let Some(backup_path) = backup_path.as_ref() {
+            let source_root = source_path
+                .parent()
+                .ok_or_else(|| format!("Source path has no parent: {}", source_path.display()))?
+                .to_path_buf();
+            index_deployment(
+                &paths.database_path,
+                &imported.name,
+                &source_root,
+                &source_path,
+            )?;
+            insert_import_record(
+                &paths.database_path,
+                &new_import_record(
+                    &imported.name,
+                    imported.kind,
+                    &source_path,
+                    Some(&source_root),
+                    &deployment_target,
+                    &imported.content_hash,
+                    backup_path,
+                    &source_path,
+                    false,
+                ),
+            )?;
+        }
         (backup_path, Some(source_path.clone()))
     } else {
         (None, None)
@@ -168,6 +194,408 @@ pub(crate) fn import_one_candidate(
         backup_path,
         deployed_path,
     })
+}
+
+pub fn list_import_records(
+    filter: ImportRecordFilter,
+    managed_root: impl AsRef<Path>,
+) -> Result<ImportRecordList> {
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    reconcile_legacy_import_records(&paths, &filter)?;
+    let mut records = load_import_records(&paths.database_path, &filter)?
+        .into_iter()
+        .map(|record| hydrate_import_record(&paths, record))
+        .collect::<Result<Vec<_>>>()?;
+
+    records.sort_by(|left, right| {
+        right
+            .imported_at
+            .cmp(&left.imported_at)
+            .then_with(|| right.id.cmp(&left.id))
+    });
+    Ok(ImportRecordList { records })
+}
+
+pub fn revert_import(
+    request: RevertImportRequest,
+    managed_root: impl AsRef<Path>,
+) -> Result<RevertImportResult> {
+    let managed_root = managed_root.as_ref().to_path_buf();
+    let paths = ensure_managed_layout(managed_root.clone())?;
+    let record = hydrate_import_record(
+        &paths,
+        load_import_record(&paths.database_path, &request.import_record_id)?,
+    )?;
+    let operation = start_operation(
+        OperationStart {
+            operation_type: "revert_import".to_string(),
+            actor: request.actor.clone(),
+            entity_type: "import_record".to_string(),
+            entity_name: record.id.clone(),
+            summary: format!("Revert import for {}", record.skill_name),
+            payload: serde_json::json!({
+                "skillName": record.skill_name,
+                "sourcePath": record.source_path,
+                "backupPath": record.backup_path
+            }),
+        },
+        &managed_root,
+    )?;
+
+    match revert_import_inner(&paths, &record, operation.id.clone()) {
+        Ok(result) => {
+            finish_operation(
+                OperationFinish {
+                    id: operation.id,
+                    status: OperationStatus::Succeeded,
+                    summary: format!("Reverted import for {}", result.record.skill_name),
+                    error: None,
+                    payload: serde_json::json!({
+                        "recordId": result.record.id,
+                        "restoredPath": result.restored_path,
+                        "removedManagedPath": result.removed_managed_path
+                    }),
+                },
+                &managed_root,
+            )?;
+            Ok(result)
+        }
+        Err(error) => {
+            let _ = finish_operation(
+                OperationFinish {
+                    id: operation.id,
+                    status: OperationStatus::Failed,
+                    summary: format!("Revert import failed for {}", record.skill_name),
+                    error: Some(error.clone()),
+                    payload: serde_json::json!({"recordId": record.id}),
+                },
+                &managed_root,
+            );
+            Err(error)
+        }
+    }
+}
+
+pub(crate) fn new_import_record(
+    skill_name: &str,
+    kind: SkillKind,
+    source_path: &Path,
+    source_root: Option<&Path>,
+    managed_path: &Path,
+    content_hash: &str,
+    backup_path: &Path,
+    deployed_path: &Path,
+    legacy: bool,
+) -> ImportRecord {
+    ImportRecord {
+        id: import_record_id(),
+        skill_name: skill_name.to_string(),
+        kind,
+        source_path: source_path.to_path_buf(),
+        source_root: source_root.map(Path::to_path_buf),
+        managed_path: managed_path.to_path_buf(),
+        content_hash: content_hash.to_string(),
+        backup_path: backup_path.to_path_buf(),
+        deployed_path: deployed_path.to_path_buf(),
+        status: ImportRecordStatus::Active,
+        legacy,
+        imported_at: current_rfc3339_timestamp(),
+        reverted_at: None,
+        can_revert: false,
+        revert_block_reason: None,
+        affected_deployment_count: 0,
+    }
+}
+
+fn hydrate_import_record(paths: &ManagedPaths, mut record: ImportRecord) -> Result<ImportRecord> {
+    let (affected_deployment_count, block_reason) = import_record_revert_status(paths, &record)?;
+    record.affected_deployment_count = affected_deployment_count;
+    record.can_revert = block_reason.is_none();
+    record.revert_block_reason = block_reason;
+    Ok(record)
+}
+
+fn import_record_revert_status(
+    paths: &ManagedPaths,
+    record: &ImportRecord,
+) -> Result<(usize, Option<String>)> {
+    let deployment_count = load_deployments(&paths.database_path)?
+        .get(&record.skill_name)
+        .map(Vec::len)
+        .unwrap_or_default();
+    let active_record_count = load_import_records(
+        &paths.database_path,
+        &ImportRecordFilter {
+            skill_name: Some(record.skill_name.clone()),
+        },
+    )?
+    .into_iter()
+    .filter(|candidate| candidate.status == ImportRecordStatus::Active)
+    .count();
+    let affected_count = deployment_count
+        .max(active_record_count)
+        .max(usize::from(record.status == ImportRecordStatus::Active));
+
+    if record.status != ImportRecordStatus::Active {
+        return Ok((
+            affected_count,
+            Some("Import record is not active.".to_string()),
+        ));
+    }
+    if deployment_count > 1 || active_record_count > 1 {
+        return Ok((
+            affected_count,
+            Some("Cannot revert while this skill is deployed to multiple workspaces.".to_string()),
+        ));
+    }
+    if let Err(error) = validate_import_backup(record) {
+        return Ok((affected_count, Some(error)));
+    }
+    if let Err(error) = validate_import_source_path(record) {
+        return Ok((affected_count, Some(error)));
+    }
+
+    Ok((affected_count, None))
+}
+
+fn revert_import_inner(
+    paths: &ManagedPaths,
+    record: &ImportRecord,
+    operation_id: String,
+) -> Result<RevertImportResult> {
+    if let Some(reason) = record.revert_block_reason.clone() {
+        return Err(reason);
+    }
+
+    let source_existed = match fs::symlink_metadata(&record.source_path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => true,
+        Ok(_) => {
+            return Err(format!(
+                "Refusing to replace existing non-symlink source: {}",
+                record.source_path.display()
+            ));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => return Err(error.to_string()),
+    };
+    if source_existed {
+        fs::remove_file(&record.source_path).map_err(|error| error.to_string())?;
+    }
+
+    if let Err(error) = fs::rename(&record.backup_path, &record.source_path) {
+        if source_existed {
+            let _ = symlink_dir(&record.managed_path, &record.source_path);
+        }
+        return Err(error.to_string());
+    }
+
+    if let Some(source_root) = record.source_path.parent() {
+        remove_deployment(&paths.database_path, &record.skill_name, source_root)?;
+    }
+    let removed_managed_path = if record.kind == SkillKind::User {
+        remove_reverted_user_managed_copy(paths, record)?
+    } else {
+        None
+    };
+    mark_import_record_reverted(&paths.database_path, &record.id)?;
+    let record =
+        hydrate_import_record(paths, load_import_record(&paths.database_path, &record.id)?)?;
+
+    Ok(RevertImportResult {
+        restored_path: record.source_path.clone(),
+        record,
+        removed_managed_path,
+        operation_id,
+    })
+}
+
+fn remove_reverted_user_managed_copy(
+    paths: &ManagedPaths,
+    record: &ImportRecord,
+) -> Result<Option<PathBuf>> {
+    let managed_path = normalize_lexical_path(&record.managed_path);
+    let user_root = normalize_lexical_path(&paths.user_skills_root);
+    if !managed_path.starts_with(&user_root) {
+        return Err(format!(
+            "Refusing to remove managed path outside user skills root: {}",
+            record.managed_path.display()
+        ));
+    }
+
+    match fs::symlink_metadata(&record.managed_path) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+            fs::remove_dir_all(&record.managed_path).map_err(|error| error.to_string())?;
+            remove_skill_index(&paths.database_path, &record.skill_name)?;
+            Ok(Some(record.managed_path.clone()))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            remove_skill_index(&paths.database_path, &record.skill_name)?;
+            Ok(None)
+        }
+        Ok(_) => Err(format!(
+            "Refusing to remove non-directory managed user skill: {}",
+            record.managed_path.display()
+        )),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn validate_import_backup(record: &ImportRecord) -> Result<()> {
+    let backup_skill = read_skill(&record.backup_path)?;
+    if backup_skill.name != record.skill_name {
+        return Err(format!(
+            "Backup skill name does not match {}",
+            record.skill_name
+        ));
+    }
+    if backup_skill.content_hash != record.content_hash {
+        return Err("Backup content hash does not match import record.".to_string());
+    }
+    Ok(())
+}
+
+fn validate_import_source_path(record: &ImportRecord) -> Result<()> {
+    match fs::symlink_metadata(&record.source_path) {
+        Ok(metadata) => {
+            if !metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "Refusing to replace existing non-symlink source: {}",
+                    record.source_path.display()
+                ));
+            }
+            if !symlink_points_to_import_target(&record.source_path, record)? {
+                return Err(format!(
+                    "Refusing to remove symlink pointing elsewhere: {}",
+                    record.source_path.display()
+                ));
+            }
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn symlink_points_to_import_target(symlink: &Path, record: &ImportRecord) -> Result<bool> {
+    let target = fs::read_link(symlink).map_err(|error| error.to_string())?;
+    let absolute_target = if target.is_absolute() {
+        target
+    } else {
+        symlink
+            .parent()
+            .unwrap_or_else(|| Path::new(""))
+            .join(target)
+    };
+    let normalized_target = normalize_lexical_path(&absolute_target);
+    let normalized_expected = normalize_lexical_path(&record.managed_path);
+    if normalized_target == normalized_expected {
+        return Ok(true);
+    }
+
+    match (
+        fs::canonicalize(&absolute_target),
+        fs::canonicalize(&record.managed_path),
+    ) {
+        (Ok(target), Ok(expected)) => Ok(target == expected),
+        _ => Ok(false),
+    }
+}
+
+fn reconcile_legacy_import_records(
+    paths: &ManagedPaths,
+    filter: &ImportRecordFilter,
+) -> Result<()> {
+    let deployments = load_deployments(&paths.database_path)?;
+    let existing_records = load_import_records(&paths.database_path, filter)?;
+    let existing_sources: HashSet<PathBuf> = existing_records
+        .iter()
+        .map(|record| record.source_path.clone())
+        .collect();
+
+    for (skill_name, skill_deployments) in deployments {
+        if filter
+            .skill_name
+            .as_ref()
+            .map(|filter_name| filter_name != &skill_name)
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        if skill_deployments.len() != 1 {
+            continue;
+        }
+        let deployment = &skill_deployments[0];
+        if existing_sources.contains(&deployment.target_path) {
+            continue;
+        }
+        let Some((kind, managed_path, skill)) = managed_import_record_skill(paths, &skill_name)?
+        else {
+            continue;
+        };
+        let backup_candidates = matching_legacy_import_backups(paths, &skill)?;
+        if backup_candidates.len() != 1 {
+            continue;
+        }
+        let record = new_import_record(
+            &skill.name,
+            kind,
+            &deployment.target_path,
+            Some(&deployment.target_root),
+            &managed_path,
+            &skill.content_hash,
+            &backup_candidates[0],
+            &deployment.target_path,
+            true,
+        );
+        if validate_import_source_path(&record).is_ok() {
+            insert_import_record(&paths.database_path, &record)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn managed_import_record_skill(
+    paths: &ManagedPaths,
+    skill_name: &str,
+) -> Result<Option<(SkillKind, PathBuf, Skill)>> {
+    let user_path = paths.user_skills_root.join(skill_name);
+    if user_path.join("SKILL.md").exists() {
+        let skill = read_skill(&user_path)?;
+        return Ok(Some((SkillKind::User, user_path, skill)));
+    }
+
+    let remote_current = paths.remote_skills_root.join(skill_name).join("current");
+    if remote_current.join("SKILL.md").exists() {
+        let skill = read_skill(&remote_current)?;
+        return Ok(Some((SkillKind::Remote, remote_current, skill)));
+    }
+
+    Ok(None)
+}
+
+fn matching_legacy_import_backups(paths: &ManagedPaths, skill: &Skill) -> Result<Vec<PathBuf>> {
+    let backups_root = paths.root.join("backups").join("imports");
+    let mut backups = Vec::new();
+    let Ok(entries) = fs::read_dir(&backups_root) else {
+        return Ok(backups);
+    };
+
+    for entry in entries {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let Ok(backup_skill) = read_skill(&path) else {
+            continue;
+        };
+        if backup_skill.name == skill.name && backup_skill.content_hash == skill.content_hash {
+            backups.push(path);
+        }
+    }
+    backups.sort();
+    Ok(backups)
 }
 
 pub(crate) fn infer_import_candidate_type(

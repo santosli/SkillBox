@@ -253,6 +253,25 @@ fn run(args: Vec<String>) -> Result<(), String> {
             },
             managed_root(command_args),
         )?),
+        "import-records" => print_json(&skillbox_core::list_import_records(
+            skillbox_core::ImportRecordFilter {
+                skill_name: option(command_args, "--skill"),
+            },
+            managed_root(command_args),
+        )?),
+        "revert-import" => {
+            let import_record_id = positional(command_args)
+                .into_iter()
+                .next()
+                .ok_or_else(|| "Usage: skillbox revert-import <import-record-id>".to_string())?;
+            print_json(&skillbox_core::revert_import(
+                skillbox_core::RevertImportRequest {
+                    import_record_id,
+                    actor: "cli".to_string(),
+                },
+                managed_root(command_args),
+            )?)
+        }
         "workspaces" => print_json(&skillbox_core::list_workspaces(managed_root(command_args))?),
         "workspace-scan" => {
             print_json(&skillbox_core::scan_workspaces(managed_root(command_args))?)
@@ -425,6 +444,8 @@ Commands:
   skillbox usage-hook-status
   skillbox usage-hook-install <target>
   skillbox operations [--entity-type <type>] [--entity-name <name>] [--status started|succeeded|failed|cancelled] [--limit <n>] [--managed-root <path>]
+  skillbox import-records [--skill <name>] [--managed-root <path>]
+  skillbox revert-import <import-record-id> [--managed-root <path>]
   skillbox workspaces [--managed-root <path>]
   skillbox workspace-scan [--managed-root <path>]
   skillbox workspace-add <path> --kind global|user [--managed-root <path>]
@@ -520,6 +541,14 @@ mod tests {
     }
 
     #[test]
+    fn help_lists_import_record_commands() {
+        let help = help_text();
+
+        assert!(help.contains("skillbox import-records [--skill <name>]"));
+        assert!(help.contains("skillbox revert-import <import-record-id>"));
+    }
+
+    #[test]
     fn version_commands_are_supported() {
         assert!(run(vec!["version".to_string()]).is_ok());
         assert!(run(vec!["--version".to_string()]).is_ok());
@@ -563,6 +592,28 @@ mod tests {
             "missing-skill".to_string(),
             "--to".to_string(),
             "1234".to_string(),
+            "--managed-root".to_string(),
+            root.to_string_lossy().to_string(),
+        ])
+        .unwrap_err();
+
+        assert!(!error.contains("Unknown command"));
+    }
+
+    #[test]
+    fn import_record_commands_route_to_core() {
+        let root = temp_dir("cli-import-records").join("SkillBox");
+
+        run(vec![
+            "import-records".to_string(),
+            "--managed-root".to_string(),
+            root.to_string_lossy().to_string(),
+        ])
+        .unwrap();
+
+        let error = run(vec![
+            "revert-import".to_string(),
+            "missing-record".to_string(),
             "--managed-root".to_string(),
             root.to_string_lossy().to_string(),
         ])

@@ -102,6 +102,22 @@ pub(crate) fn init_database(database_path: &Path) -> Result<()> {
               updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               PRIMARY KEY (skill_name, agent_id, runtime_root)
             );
+
+            CREATE TABLE IF NOT EXISTS import_records (
+              id TEXT PRIMARY KEY,
+              skill_name TEXT NOT NULL,
+              type TEXT NOT NULL,
+              source_path TEXT NOT NULL,
+              source_root TEXT,
+              managed_path TEXT NOT NULL,
+              content_hash TEXT NOT NULL,
+              backup_path TEXT NOT NULL,
+              deployed_path TEXT NOT NULL,
+              status TEXT NOT NULL,
+              legacy INTEGER NOT NULL DEFAULT 0,
+              imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              reverted_at TEXT
+            );
             ",
         )
         .map_err(|error| error.to_string())?;
@@ -263,6 +279,14 @@ pub(crate) fn usage_event_row_id() -> String {
         .map(|duration| duration.as_nanos())
         .unwrap_or_default();
     format!("usage-{nanos}")
+}
+
+pub(crate) fn import_record_id() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    format!("import-{nanos}")
 }
 
 pub(crate) fn current_rfc3339_timestamp() -> String {
@@ -490,4 +514,155 @@ pub(crate) fn load_deployments(
     }
 
     Ok(deployments)
+}
+
+pub(crate) fn insert_import_record(database_path: &Path, record: &ImportRecord) -> Result<()> {
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
+    connection
+        .execute(
+            "
+            INSERT INTO import_records (
+              id, skill_name, type, source_path, source_root, managed_path,
+              content_hash, backup_path, deployed_path, status, legacy,
+              imported_at, reverted_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+            ",
+            params![
+                record.id,
+                record.skill_name,
+                record.kind.as_str(),
+                record.source_path.to_string_lossy(),
+                record
+                    .source_root
+                    .as_ref()
+                    .map(|path| path.to_string_lossy().to_string()),
+                record.managed_path.to_string_lossy(),
+                record.content_hash,
+                record.backup_path.to_string_lossy(),
+                record.deployed_path.to_string_lossy(),
+                record.status.as_str(),
+                if record.legacy { 1 } else { 0 },
+                record.imported_at,
+                record.reverted_at
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+pub(crate) fn load_import_records(
+    database_path: &Path,
+    filter: &ImportRecordFilter,
+) -> Result<Vec<ImportRecord>> {
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT id, skill_name, type, source_path, source_root, managed_path,
+                   content_hash, backup_path, deployed_path, status, legacy,
+                   imported_at, reverted_at
+            FROM import_records
+            WHERE (?1 IS NULL OR skill_name = ?1)
+            ORDER BY imported_at DESC, id DESC
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(
+            params![filter.skill_name.as_deref()],
+            import_record_from_row,
+        )
+        .map_err(|error| error.to_string())?;
+    let mut records = Vec::new();
+
+    for row in rows {
+        records.push(row.map_err(|error| error.to_string())?);
+    }
+
+    Ok(records)
+}
+
+pub(crate) fn load_import_record(database_path: &Path, id: &str) -> Result<ImportRecord> {
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
+    connection
+        .query_row(
+            "
+            SELECT id, skill_name, type, source_path, source_root, managed_path,
+                   content_hash, backup_path, deployed_path, status, legacy,
+                   imported_at, reverted_at
+            FROM import_records
+            WHERE id = ?1
+            ",
+            params![id],
+            import_record_from_row,
+        )
+        .map_err(|error| error.to_string())
+}
+
+pub(crate) fn mark_import_record_reverted(database_path: &Path, id: &str) -> Result<()> {
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
+    connection
+        .execute(
+            "
+            UPDATE import_records
+            SET status = ?2,
+                reverted_at = CURRENT_TIMESTAMP
+            WHERE id = ?1
+            ",
+            params![id, ImportRecordStatus::Reverted.as_str()],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+pub(crate) fn remove_skill_index(database_path: &Path, skill_name: &str) -> Result<()> {
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
+    connection
+        .execute("DELETE FROM skills WHERE name = ?1", params![skill_name])
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+pub(crate) fn import_record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImportRecord> {
+    let kind_raw: String = row.get(2)?;
+    let status_raw: String = row.get(9)?;
+    let source_root: Option<String> = row.get(4)?;
+    let legacy_raw: i64 = row.get(10)?;
+
+    Ok(ImportRecord {
+        id: row.get(0)?,
+        skill_name: row.get(1)?,
+        kind: parse_skill_kind(&kind_raw).unwrap_or(SkillKind::User),
+        source_path: PathBuf::from(row.get::<_, String>(3)?),
+        source_root: source_root.map(PathBuf::from),
+        managed_path: PathBuf::from(row.get::<_, String>(5)?),
+        content_hash: row.get(6)?,
+        backup_path: PathBuf::from(row.get::<_, String>(7)?),
+        deployed_path: PathBuf::from(row.get::<_, String>(8)?),
+        status: parse_import_record_status(&status_raw).unwrap_or(ImportRecordStatus::Failed),
+        legacy: legacy_raw != 0,
+        imported_at: row.get(11)?,
+        reverted_at: row.get(12)?,
+        can_revert: false,
+        revert_block_reason: None,
+        affected_deployment_count: 0,
+    })
+}
+
+pub(crate) fn parse_skill_kind(value: &str) -> Option<SkillKind> {
+    match value {
+        "user" => Some(SkillKind::User),
+        "remote" => Some(SkillKind::Remote),
+        _ => None,
+    }
+}
+
+pub(crate) fn parse_import_record_status(value: &str) -> Option<ImportRecordStatus> {
+    match value {
+        "active" => Some(ImportRecordStatus::Active),
+        "reverted" => Some(ImportRecordStatus::Reverted),
+        "failed" => Some(ImportRecordStatus::Failed),
+        _ => None,
+    }
 }

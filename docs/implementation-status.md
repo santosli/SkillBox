@@ -23,6 +23,7 @@
 - Added compatibility coverage for Node MVP SQLite stores, including legacy `operations` migration and explicit timestamp writes for old `skills`/`deployments` tables.
 - Added shared desktop diff rendering and remote skill workflow normalization helpers for source binding and version change previews.
 - Implemented SQLite-backed workspace registry for global and project-local skills roots, including `.codex/skills`, `.agents/skills`, `.claude/skills`, scan-time auto registration, imported skill counts, manual add, manual forget, Rust CLI commands, Tauri commands, and a desktop Workspaces page with per-workspace skill review/import.
+- Implemented import records and import revert in Rust core, Rust CLI, Tauri commands, and Skill Detail UI, including backup restoration, conservative legacy reconciliation, multi-workspace blocking, and warning/danger confirmation states.
 - Added signed macOS app update checks and user-confirmed install/restart through the Tauri updater plugin, plus release workflow assets for updater archives, signatures, and `latest.json`.
 - Added Rust crate scaffolding for the planned Tauri/Rust architecture.
 - Verified the desktop shell in browser preview at `http://127.0.0.1:1420/`.

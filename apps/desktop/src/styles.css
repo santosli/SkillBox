@@ -290,6 +290,28 @@ button {
   background: #f8fafc;
 }
 
+.button.warning {
+  border: 1px solid #fcd34d;
+  background: var(--skillbox-amber-bg);
+  color: var(--skillbox-amber-text);
+}
+
+.button.warning:hover {
+  border-color: #f59e0b;
+  background: #fde68a;
+}
+
+.button.danger {
+  border: 1px solid #fecaca;
+  background: var(--skillbox-red-bg);
+  color: var(--skillbox-red-text);
+}
+
+.button.danger:hover {
+  border-color: #f87171;
+  background: #fecaca;
+}
+
 .linkButton {
   width: max-content;
   border: 0;
@@ -2690,6 +2712,42 @@ dd {
   line-height: 1.5;
 }
 
+.importRevertSummary {
+  display: grid;
+  gap: 12px;
+}
+
+.importRevertSummary > div {
+  display: grid;
+  gap: 5px;
+}
+
+.importRevertSummary span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.importRevertSummary code {
+  overflow-wrap: anywhere;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #111827;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 7px 8px;
+}
+
+.importRevertSummary p {
+  margin: 0;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .confirmDialogFooter {
   display: flex;
   justify-content: flex-end;
@@ -3053,6 +3111,48 @@ dd {
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.importRevertPanel {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid #eef2f7;
+  padding-top: 12px;
+}
+
+.importRevertRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+.importRevertMeta {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.importRevertMeta strong {
+  overflow: hidden;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.importRevertMeta small,
+.importRevertBlockReason {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.importRevertBlockReason {
+  color: var(--skillbox-amber-text);
 }
 
 .compactAction {

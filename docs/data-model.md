@@ -149,6 +149,21 @@ operations
   error TEXT
   payload_json TEXT NOT NULL
 
+import_records
+  id TEXT PRIMARY KEY
+  skill_name TEXT NOT NULL
+  type TEXT NOT NULL
+  source_path TEXT NOT NULL
+  source_root TEXT
+  managed_path TEXT NOT NULL
+  content_hash TEXT NOT NULL
+  backup_path TEXT NOT NULL
+  deployed_path TEXT NOT NULL
+  status TEXT NOT NULL
+  legacy INTEGER NOT NULL DEFAULT 0
+  imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  reverted_at TEXT
+
 skill_usage_events
   id TEXT PRIMARY KEY
   event_id TEXT
@@ -170,9 +185,11 @@ skill_usage_stats
   PRIMARY KEY (skill_name, agent_id, runtime_root)
 ```
 
-`workspaces.display_name` 由 path 推导：home-level global roots 使用 agent 名（例如 `Codex`、`Claude`），项目局部 roots 使用项目目录名（例如 `demo-vault`）。`global` / `user` 不拼进名称，由 `kind` 字段表达。`imported_skill_count` 使用 import candidate 的同一套 imported 判定：内容 hash 已存在于 SkillBox managed store，或 workspace skill 已 symlink 到 managed root。
+`workspaces.display_name` 由 path 推导：home-level global roots 使用 agent 名（例如 `Codex`、`Claude`），项目局部 roots 使用项目目录名（例如 `demo-vault`）。`global` / `user` 不拼进名称，由 `kind` 字段表达。`imported_skill_count` 使用 import candidate 的同一套 imported 判定：workspace skill 必须是指向 SkillBox managed root 的 symlink；仅内容 hash 匹配 managed store 不再表示该 runtime 位置仍被 SkillBox 管理。
 
 `operations` 记录会改变 managed store、runtime、SQLite、Git state 或偏好设置的动作。Rust core 统一写入，UI 只能读取展示或通过结构化命令触发新记录；记录从 UI 视角 append-only，MVP 不做自动清理。`payload_json` 保存操作细节，例如 from/to version、changed paths、backup path、affected deployments、commit SHA 或失败恢复状态。
+
+`import_records` 记录本地 import 且 deploy back 到 source 成功后的可恢复状态。每个 imported skill 一条记录，`source_path` 是被替换成 SkillBox symlink 的 runtime 原路径，`backup_path` 是 import 前移动到 `backups/imports` 的原目录。`status=active` 的记录可以通过 `revert_import` 恢复；`status=reverted` 表示 backup 已恢复回 source path。`legacy=1` 表示记录由旧 deployments/backups 证据链保守 reconcile 得到。
 
 `skill_usage_events` 记录真实 agent 调用事件，不记录 SkillBox 打开详情、部署、更新等管理行为。显式上报入口允许未导入 skill 写入；`event_id` 是可选幂等键，在同一 `agent_id + runtime_root` 下重复上报不会递增统计。`prompt_excerpt` 保存触发 skill 的用户 prompt 摘要，必须剥离 skill XML 注入块、压缩空白并限制长度，不保存完整聊天正文。`metadata_json` 只接受小型 JSON object，不保存 prompt、聊天正文、文件内容或 diff。`skill_usage_stats` 按 `skill_name + agent_id + runtime_root` 聚合，详情页和 skill card 按 skill name 汇总，workspace 页面按 runtime root 汇总。
 

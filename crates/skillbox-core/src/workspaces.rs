@@ -435,10 +435,10 @@ pub(crate) fn imported_skill_hashes(paths: &ManagedPaths) -> Result<HashSet<Stri
 
 pub(crate) fn skill_is_imported(
     skill: &Skill,
-    imported_hashes: &HashSet<String>,
+    _imported_hashes: &HashSet<String>,
     paths: &ManagedPaths,
 ) -> bool {
-    imported_hashes.contains(&skill.content_hash) || is_under_path(&skill.real_path, &paths.root)
+    skill.is_symlink && is_under_path(&skill.real_path, &paths.root)
 }
 
 pub(crate) fn scan_skill_roots_for_import(

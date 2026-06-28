@@ -585,6 +585,8 @@ test('blocking desktop commands run off the command handler', () => {
   for (const commandName of [
     'sync_user_skills_git',
     'import_candidates',
+    'list_import_records',
+    'revert_import',
     'apply_remote_version_change',
     'scan_workspaces',
     'record_skill_usage',
@@ -598,6 +600,21 @@ test('blocking desktop commands run off the command handler', () => {
     assert.ok(commandStart > 0, `${commandName} should be async`);
     assert.match(command, /tauri::async_runtime::spawn_blocking/, `${commandName} should spawn blocking work`);
   }
+});
+
+test('import revert UI exposes warning entry and danger confirmation', () => {
+  const confirmStart = appSource.indexOf('async function confirmImportRevert()');
+  const confirmEnd = appSource.indexOf('function openSkillTypeChangeDialog', confirmStart);
+  const confirmSource = appSource.slice(confirmStart, confirmEnd);
+
+  assert.match(appSource, /invoke\('list_import_records'/);
+  assert.match(appSource, /invoke\('revert_import'/);
+  assert.match(appSource, /className="button warning"/);
+  assert.match(appSource, /confirmClassName="button danger"/);
+  assert.match(appSource, /revertBlockReason/);
+  assert.match(confirmSource, /setSelectedName\(''\);/);
+  assert.match(css, /\.button\.warning\s*\{/);
+  assert.match(css, /\.button\.danger\s*\{/);
 });
 
 test('settings exposes usage hook injection for supported agents', () => {
