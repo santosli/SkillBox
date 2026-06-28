@@ -167,17 +167,17 @@ pub(crate) fn import_one_candidate(
             )?;
             insert_import_record(
                 &paths.database_path,
-                &new_import_record(
-                    &imported.name,
-                    imported.kind,
-                    &source_path,
-                    Some(&source_root),
-                    &deployment_target,
-                    &imported.content_hash,
+                &new_import_record(ImportRecordSeed {
+                    skill_name: &imported.name,
+                    kind: imported.kind,
+                    source_path: &source_path,
+                    source_root: Some(&source_root),
+                    managed_path: &deployment_target,
+                    content_hash: &imported.content_hash,
                     backup_path,
-                    &source_path,
-                    false,
-                ),
+                    deployed_path: &source_path,
+                    legacy: false,
+                }),
             )?;
         }
         (backup_path, Some(source_path.clone()))
@@ -276,29 +276,31 @@ pub fn revert_import(
     }
 }
 
-pub(crate) fn new_import_record(
-    skill_name: &str,
+struct ImportRecordSeed<'a> {
+    skill_name: &'a str,
     kind: SkillKind,
-    source_path: &Path,
-    source_root: Option<&Path>,
-    managed_path: &Path,
-    content_hash: &str,
-    backup_path: &Path,
-    deployed_path: &Path,
+    source_path: &'a Path,
+    source_root: Option<&'a Path>,
+    managed_path: &'a Path,
+    content_hash: &'a str,
+    backup_path: &'a Path,
+    deployed_path: &'a Path,
     legacy: bool,
-) -> ImportRecord {
+}
+
+fn new_import_record(seed: ImportRecordSeed<'_>) -> ImportRecord {
     ImportRecord {
         id: import_record_id(),
-        skill_name: skill_name.to_string(),
-        kind,
-        source_path: source_path.to_path_buf(),
-        source_root: source_root.map(Path::to_path_buf),
-        managed_path: managed_path.to_path_buf(),
-        content_hash: content_hash.to_string(),
-        backup_path: backup_path.to_path_buf(),
-        deployed_path: deployed_path.to_path_buf(),
+        skill_name: seed.skill_name.to_string(),
+        kind: seed.kind,
+        source_path: seed.source_path.to_path_buf(),
+        source_root: seed.source_root.map(Path::to_path_buf),
+        managed_path: seed.managed_path.to_path_buf(),
+        content_hash: seed.content_hash.to_string(),
+        backup_path: seed.backup_path.to_path_buf(),
+        deployed_path: seed.deployed_path.to_path_buf(),
         status: ImportRecordStatus::Active,
-        legacy,
+        legacy: seed.legacy,
         imported_at: current_rfc3339_timestamp(),
         reverted_at: None,
         can_revert: false,
@@ -536,17 +538,17 @@ fn reconcile_legacy_import_records(
         if backup_candidates.len() != 1 {
             continue;
         }
-        let record = new_import_record(
-            &skill.name,
+        let record = new_import_record(ImportRecordSeed {
+            skill_name: &skill.name,
             kind,
-            &deployment.target_path,
-            Some(&deployment.target_root),
-            &managed_path,
-            &skill.content_hash,
-            &backup_candidates[0],
-            &deployment.target_path,
-            true,
-        );
+            source_path: &deployment.target_path,
+            source_root: Some(&deployment.target_root),
+            managed_path: &managed_path,
+            content_hash: &skill.content_hash,
+            backup_path: &backup_candidates[0],
+            deployed_path: &deployment.target_path,
+            legacy: true,
+        });
         if validate_import_source_path(&record).is_ok() {
             insert_import_record(&paths.database_path, &record)?;
         }
