@@ -380,12 +380,23 @@ function gitStatusPorcelain() {
   return capture('git', ['status', '--porcelain']);
 }
 
+export function porcelainStatusPath(line) {
+  const raw = String(line || '');
+  if (raw.length >= 3 && raw[2] === ' ') {
+    return raw.slice(3).trim();
+  }
+  if (raw.length >= 2 && raw[1] === ' ') {
+    return raw.slice(2).trim();
+  }
+  return raw.trim();
+}
+
 function changedFiles() {
   const status = gitStatusPorcelain();
   if (!status) return [];
   return status
     .split('\n')
-    .map((line) => line.slice(3).trim())
+    .map(porcelainStatusPath)
     .filter(Boolean);
 }
 

@@ -8,6 +8,7 @@ import {
   extractChangelogEntry,
   insertChangelogEntry,
   normalizeVersion,
+  porcelainStatusPath,
   releaseAssetName,
   releaseSeries,
   updaterBundleAssetName,
@@ -24,6 +25,13 @@ test('normalizes semantic release versions', () => {
   assert.equal(normalizeVersion('v0.2.1'), '0.2.1');
   assert.equal(normalizeVersion('0.3.0-alpha.1'), '0.3.0-alpha.1');
   assert.throws(() => normalizeVersion('0.2'), /semantic/);
+});
+
+test('parses porcelain status paths after stdout trimming', () => {
+  assert.equal(porcelainStatusPath(' M .github/ISSUE_TEMPLATE/bug_report.yml'), '.github/ISSUE_TEMPLATE/bug_report.yml');
+  assert.equal(porcelainStatusPath('M .github/ISSUE_TEMPLATE/bug_report.yml'), '.github/ISSUE_TEMPLATE/bug_report.yml');
+  assert.equal(porcelainStatusPath('M  README.md'), 'README.md');
+  assert.equal(porcelainStatusPath('?? docs/release.md'), 'docs/release.md');
 });
 
 test('derives release labels and assets', () => {
