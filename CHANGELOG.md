@@ -9,6 +9,13 @@ version tags such as `v0.3.0`.
 
 - No unreleased changes.
 
+## 0.3.8
+
+- Add Import Revert for deploy-back imports so a runtime skill can be restored to its pre-import folder.
+- Preserve remote managed versions during revert and allow the same skill to be imported and reverted again.
+- Block unsafe import reverts when a skill has multiple workspace deployments or the source/backup no longer matches the recorded state.
+- Add CLI, desktop bridge, and Skill Detail controls for reviewing and confirming import reverts.
+
 ## 0.3.7
 
 - Add workspace skill review tabs that separate unimported, imported, and system candidates while preserving symlink-only workspace skills.
