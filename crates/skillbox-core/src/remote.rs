@@ -310,6 +310,7 @@ pub fn install_github_remote_skill(
     managed_root: impl AsRef<Path>,
 ) -> Result<InstallGithubRemoteSkillResult> {
     let managed_root = managed_root.as_ref().to_path_buf();
+    require_github_remote_skill_install_preview_id(&request)?;
     let source = skillbox_github::parse_github_skill_url(&request.source_url)?;
     let source_url = request.source_url.clone();
     let operation = start_operation(
@@ -359,6 +360,59 @@ pub fn install_github_remote_skill(
     }
 }
 
+pub fn preview_github_remote_skill_install(
+    request: PreviewGithubRemoteSkillInstallRequest,
+    _managed_root: impl AsRef<Path>,
+) -> Result<GithubRemoteSkillInstallPreview> {
+    let source = skillbox_github::parse_github_skill_url(&request.source_url)?;
+    let temp = temporary_work_dir("github-install-preview");
+
+    let result = (|| {
+        let checkout = temp.join("checkout");
+        let empty = temp.join("empty");
+        fs::create_dir_all(&empty).map_err(|error| error.to_string())?;
+        let git = skillbox_git::GitService::new();
+        let installed_sha =
+            git.fetch_ref_path(&source.repo_url, &source.reference, &source.path, &checkout)?;
+        let skill_source_path = checkout.join(&source.path);
+        let skill = read_skill(&skill_source_path)?;
+        validate_skill_name(&skill.name)?;
+        let ref_kind = resolve_ref_kind(&source.repo_url, &source.reference)?;
+        let tracking = ref_kind == "branch";
+        let git_files = git.diff_no_index_tree(&empty, &skill_source_path)?;
+        let files = git_files
+            .into_iter()
+            .map(|file| remote_diff_file(&empty, &skill_source_path, file))
+            .collect::<Result<Vec<_>>>()?;
+        let preview_id = github_remote_skill_install_preview_id(
+            &source,
+            &skill.name,
+            &installed_sha,
+            &ref_kind,
+            request.target_root.as_deref(),
+        );
+
+        Ok(GithubRemoteSkillInstallPreview {
+            preview_id,
+            skill_name: skill.name,
+            source_url: source.url,
+            repo_url: source.repo_url,
+            owner: source.owner,
+            repo: source.repo,
+            path: source.path,
+            reference: source.reference,
+            ref_kind: Some(ref_kind),
+            tracking,
+            installed_sha,
+            files,
+            target_root: request.target_root,
+        })
+    })();
+
+    let _ = fs::remove_dir_all(&temp);
+    result
+}
+
 fn install_github_remote_skill_inner(
     request: InstallGithubRemoteSkillRequest,
     source: skillbox_github::GitHubSkillSource,
@@ -379,6 +433,15 @@ fn install_github_remote_skill_inner(
         let skill_source_path = checkout.join(&source.path);
         let skill = read_skill(&skill_source_path)?;
         validate_skill_name(&skill.name)?;
+        let ref_kind = resolve_ref_kind(&source.repo_url, &source.reference)?;
+        let tracking = ref_kind == "branch";
+        validate_github_remote_skill_install_preview_id(
+            &request,
+            &source,
+            &skill.name,
+            &installed_sha,
+            &ref_kind,
+        )?;
         let remote_root = paths.remote_skills_root.join(&skill.name);
         let version_path = remote_root.join("versions").join(&installed_sha);
 
@@ -393,8 +456,6 @@ fn install_github_remote_skill_inner(
             return Err(error);
         }
 
-        let ref_kind = resolve_ref_kind(&source.repo_url, &source.reference)?;
-        let tracking = ref_kind == "branch";
         let preview = RemoteSourceBindingPreview {
             skill_name: skill.name.clone(),
             source_url: source.url.clone(),
@@ -1580,6 +1641,69 @@ pub(crate) fn remote_version_preview_id(
         from_version,
         to_version
     ))
+}
+
+pub(crate) fn github_remote_skill_install_preview_id(
+    source: &skillbox_github::GitHubSkillSource,
+    skill_name: &str,
+    installed_sha: &str,
+    ref_kind: &str,
+    target_root: Option<&Path>,
+) -> String {
+    let target_root = target_root
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_default();
+    content_hash_text(&format!(
+        "github-install:{skill_name}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+        source.url,
+        source.repo_url,
+        source.owner,
+        source.repo,
+        source.path,
+        source.reference,
+        ref_kind,
+        installed_sha,
+        target_root
+    ))
+}
+
+pub(crate) fn require_github_remote_skill_install_preview_id(
+    request: &InstallGithubRemoteSkillRequest,
+) -> Result<()> {
+    if request
+        .preview_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_some()
+    {
+        return Ok(());
+    }
+
+    Err("Remote install preview is required. Run `skillbox install-preview <github-url>` first, then pass --preview-id <id>.".to_string())
+}
+
+pub(crate) fn validate_github_remote_skill_install_preview_id(
+    request: &InstallGithubRemoteSkillRequest,
+    source: &skillbox_github::GitHubSkillSource,
+    skill_name: &str,
+    installed_sha: &str,
+    ref_kind: &str,
+) -> Result<()> {
+    require_github_remote_skill_install_preview_id(request)?;
+    let expected = github_remote_skill_install_preview_id(
+        source,
+        skill_name,
+        installed_sha,
+        ref_kind,
+        request.target_root.as_deref(),
+    );
+    if request.preview_id.as_deref().unwrap_or_default() != expected {
+        return Err(
+            "Remote install preview is stale. Re-open the preview and install again.".to_string(),
+        );
+    }
+    Ok(())
 }
 
 pub(crate) fn validate_remote_version_preview_id(

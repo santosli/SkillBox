@@ -46,13 +46,30 @@ fn run(args: Vec<String>) -> Result<(), String> {
         }
         "install" => {
             let source_url = positional(command_args).into_iter().next().ok_or_else(|| {
-                "Usage: skillbox install <github-url> [--target <path>]".to_string()
+                "Usage: skillbox install <github-url> --preview-id <id> [--target <path>]"
+                    .to_string()
+            })?;
+            let preview_id = option(command_args, "--preview-id").ok_or_else(|| {
+                "Remote install preview is required. Run `skillbox install-preview <github-url>` first, then pass --preview-id <id>.".to_string()
             })?;
             print_json(&skillbox_core::install_github_remote_skill(
                 skillbox_core::InstallGithubRemoteSkillRequest {
                     source_url,
                     target_root: option(command_args, "--target").map(PathBuf::from),
+                    preview_id: Some(preview_id),
                     actor: "cli".to_string(),
+                },
+                managed_root(command_args),
+            )?)
+        }
+        "install-preview" => {
+            let source_url = positional(command_args).into_iter().next().ok_or_else(|| {
+                "Usage: skillbox install-preview <github-url> [--target <path>]".to_string()
+            })?;
+            print_json(&skillbox_core::preview_github_remote_skill_install(
+                skillbox_core::PreviewGithubRemoteSkillInstallRequest {
+                    source_url,
+                    target_root: option(command_args, "--target").map(PathBuf::from),
                 },
                 managed_root(command_args),
             )?)
@@ -425,7 +442,8 @@ Commands:
   skillbox paths [--managed-root <path>]
   skillbox scan [root ...] [--managed-root <path>]
   skillbox parse-github-url <github-url>
-  skillbox install <github-url> [--target <path>] [--managed-root <path>]
+  skillbox install-preview <github-url> [--target <path>] [--managed-root <path>]
+  skillbox install <github-url> --preview-id <id> [--target <path>] [--managed-root <path>]
   skillbox import <source-dir> --type user|remote [--managed-root <path>]
   skillbox deploy <skill-name> --target <path> [--managed-root <path>]
   skillbox undeploy <skill-name> --target <path> [--managed-root <path>]
@@ -534,7 +552,8 @@ mod tests {
         let help = help_text();
 
         assert!(help.contains("skillbox init [--managed-root <path>]"));
-        assert!(help.contains("skillbox install <github-url>"));
+        assert!(help.contains("skillbox install-preview <github-url>"));
+        assert!(help.contains("skillbox install <github-url> --preview-id <id>"));
         assert!(help.contains("skillbox check-updates [skill-name]"));
         assert!(help.contains("skillbox rollback <skill-name> --to <version>"));
         assert!(help.contains("skillbox version"));
@@ -623,7 +642,7 @@ mod tests {
     }
 
     #[test]
-    fn install_legacy_alias_routes_to_github_install() {
+    fn install_requires_preview_id() {
         let root = temp_dir("cli-install").join("SkillBox");
 
         let error = run(vec![
@@ -634,7 +653,57 @@ mod tests {
         ])
         .unwrap_err();
 
-        assert!(!error.contains("Unknown command"));
+        assert!(error.contains("Remote install preview is required"));
+    }
+
+    #[test]
+    fn install_preview_command_routes_to_core_without_writing_store() {
+        let root = temp_dir("cli-install-preview").join("SkillBox");
+        let remote = bare_remote_with_skill_content("cli-install-preview-origin", "demo");
+        let _rewrite = github_repo_rewrite("acme", "cli-install-preview", &remote);
+        let source_url = github_source_url("acme", "cli-install-preview", "demo");
+
+        run(vec![
+            "install-preview".to_string(),
+            source_url,
+            "--managed-root".to_string(),
+            root.to_string_lossy().to_string(),
+        ])
+        .unwrap();
+
+        assert!(!root.join("remote-skills").join("demo").exists());
+    }
+
+    #[test]
+    fn install_accepts_valid_preview_id() {
+        let root = temp_dir("cli-install-valid-preview").join("SkillBox");
+        let remote = bare_remote_with_skill_content("cli-install-valid-preview-origin", "demo");
+        let _rewrite = github_repo_rewrite("acme", "cli-install-valid-preview", &remote);
+        let source_url = github_source_url("acme", "cli-install-valid-preview", "demo");
+        let preview = skillbox_core::preview_github_remote_skill_install(
+            skillbox_core::PreviewGithubRemoteSkillInstallRequest {
+                source_url: source_url.clone(),
+                target_root: None,
+            },
+            &root,
+        )
+        .unwrap();
+
+        run(vec![
+            "install".to_string(),
+            source_url,
+            "--preview-id".to_string(),
+            preview.preview_id,
+            "--managed-root".to_string(),
+            root.to_string_lossy().to_string(),
+        ])
+        .unwrap();
+
+        assert!(root
+            .join("remote-skills")
+            .join("demo")
+            .join("current")
+            .exists());
     }
 
     fn temp_dir(label: &str) -> PathBuf {
@@ -645,5 +714,105 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("skillbox-cli-{label}-{nanos}"));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    fn bare_remote_with_skill_content(label: &str, skill_name: &str) -> PathBuf {
+        let remote = temp_dir(label).join("remote.git");
+        run_git(
+            remote.parent().unwrap(),
+            &["init", "--bare", remote.to_str().unwrap()],
+        );
+        let work = temp_dir(&format!("{label}-work"));
+        run_git(&work, &["init", "-b", "main"]);
+        let skill_dir = work.join("skills").join(skill_name);
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            format!("---\nname: {skill_name}\ndescription: Demo skill\n---\n\n# {skill_name}\n"),
+        )
+        .unwrap();
+        run_git(&work, &["add", "."]);
+        run_git(
+            &work,
+            &[
+                "-c",
+                "user.name=SkillBox",
+                "-c",
+                "user.email=skillbox@example.invalid",
+                "commit",
+                "-m",
+                "Add skill",
+            ],
+        );
+        run_git(
+            &work,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
+        run_git(&work, &["push", "-u", "origin", "main"]);
+        remote
+    }
+
+    fn github_source_url(owner: &str, repo: &str, skill_name: &str) -> String {
+        format!("https://github.com/{owner}/{repo}/tree/main/skills/{skill_name}")
+    }
+
+    fn run_git(repo: &std::path::Path, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    static GIT_CONFIG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct GitConfigRewriteGuard {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        previous: Vec<(&'static str, Option<std::ffi::OsString>)>,
+    }
+
+    impl Drop for GitConfigRewriteGuard {
+        fn drop(&mut self) {
+            for (key, value) in self.previous.drain(..) {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
+
+    fn github_repo_rewrite(
+        owner: &str,
+        repo: &str,
+        remote: &std::path::Path,
+    ) -> GitConfigRewriteGuard {
+        let lock = GIT_CONFIG_LOCK.lock().unwrap();
+        let keys = ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"];
+        let previous = keys
+            .into_iter()
+            .map(|key| (key, std::env::var_os(key)))
+            .collect::<Vec<_>>();
+
+        std::env::set_var("GIT_CONFIG_COUNT", "1");
+        std::env::set_var(
+            "GIT_CONFIG_KEY_0",
+            format!("url.file://{}.insteadOf", remote.display()),
+        );
+        std::env::set_var(
+            "GIT_CONFIG_VALUE_0",
+            format!("https://github.com/{owner}/{repo}.git"),
+        );
+
+        GitConfigRewriteGuard {
+            _lock: lock,
+            previous,
+        }
     }
 }

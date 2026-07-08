@@ -2241,11 +2241,23 @@ fn install_github_remote_skill_writes_version_current_metadata_and_index() {
     );
     let installed_sha = remote_head(&remote);
     let _rewrite = github_repo_rewrite("acme", "install-github-remote", &remote);
+    let source_url = github_source_url("acme", "install-github-remote", "find-skills");
+    let preview = github_install_preview(&source_url, None, &managed_root);
+
+    assert_eq!(preview.skill_name, "find-skills");
+    assert_eq!(preview.installed_sha, installed_sha);
+    assert!(preview.files.iter().any(|file| file.path == "SKILL.md"));
+    assert!(!managed_root.exists());
+    assert!(!managed_root
+        .join("remote-skills")
+        .join("find-skills")
+        .exists());
 
     let result = install_github_remote_skill(
         InstallGithubRemoteSkillRequest {
-            source_url: github_source_url("acme", "install-github-remote", "find-skills"),
+            source_url,
             target_root: None,
+            preview_id: Some(preview.preview_id),
             actor: "cli".to_string(),
         },
         &managed_root,
@@ -2290,6 +2302,59 @@ fn install_github_remote_skill_writes_version_current_metadata_and_index() {
 }
 
 #[test]
+fn install_github_remote_skill_rejects_missing_preview_id() {
+    let root = temp_dir("install-github-missing-preview");
+    let managed_root = root.join("SkillBox");
+
+    let error = install_github_remote_skill(
+        InstallGithubRemoteSkillRequest {
+            source_url: "https://github.com/acme/repo/tree/main/skills/demo".to_string(),
+            target_root: None,
+            preview_id: None,
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+
+    assert!(error.contains("Remote install preview is required"));
+    assert!(!managed_root.exists());
+}
+
+#[test]
+fn install_github_remote_skill_rejects_stale_preview_id() {
+    let root = temp_dir("install-github-stale-preview");
+    let managed_root = root.join("SkillBox");
+    let remote = bare_remote_with_skill_content(
+        "install-github-stale-preview-origin",
+        "find-skills",
+        "Find skills",
+        "",
+    );
+    let _rewrite = github_repo_rewrite("acme", "install-github-stale-preview", &remote);
+    let source_url = github_source_url("acme", "install-github-stale-preview", "find-skills");
+    let preview = github_install_preview(&source_url, None, &managed_root);
+
+    let error = install_github_remote_skill(
+        InstallGithubRemoteSkillRequest {
+            source_url,
+            target_root: None,
+            preview_id: Some(format!("{}-stale", preview.preview_id)),
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+
+    assert!(error.contains("Remote install preview is stale"));
+    assert!(!managed_root
+        .join("remote-skills")
+        .join("find-skills")
+        .join("current")
+        .exists());
+}
+
+#[test]
 fn install_github_remote_skill_deploys_to_target_root() {
     let root = temp_dir("install-github-deploy");
     let managed_root = root.join("SkillBox");
@@ -2301,11 +2366,16 @@ fn install_github_remote_skill_deploys_to_target_root() {
         "",
     );
     let _rewrite = github_repo_rewrite("acme", "install-github-deploy", &remote);
+    let source_url = github_source_url("acme", "install-github-deploy", "find-skills");
+    let preview = github_install_preview(&source_url, Some(target_root.clone()), &managed_root);
+
+    assert!(!target_root.exists());
 
     let result = install_github_remote_skill(
         InstallGithubRemoteSkillRequest {
-            source_url: github_source_url("acme", "install-github-deploy", "find-skills"),
+            source_url,
             target_root: Some(target_root.clone()),
+            preview_id: Some(preview.preview_id),
             actor: "cli".to_string(),
         },
         &managed_root,
@@ -2335,11 +2405,14 @@ fn install_github_remote_skill_reuses_existing_version_snapshot() {
         "",
     );
     let _rewrite = github_repo_rewrite("acme", "install-github-reuse-version", &remote);
+    let source_url = github_source_url("acme", "install-github-reuse-version", "find-skills");
+    let first_preview = github_install_preview(&source_url, None, &managed_root);
 
     let first = install_github_remote_skill(
         InstallGithubRemoteSkillRequest {
-            source_url: github_source_url("acme", "install-github-reuse-version", "find-skills"),
+            source_url: source_url.clone(),
             target_root: None,
+            preview_id: Some(first_preview.preview_id),
             actor: "cli".to_string(),
         },
         &managed_root,
@@ -2347,11 +2420,13 @@ fn install_github_remote_skill_reuses_existing_version_snapshot() {
     .unwrap();
     let marker = first.version_path.join("marker.txt");
     fs::write(&marker, "kept").unwrap();
+    let second_preview = github_install_preview(&source_url, None, &managed_root);
 
     let second = install_github_remote_skill(
         InstallGithubRemoteSkillRequest {
-            source_url: github_source_url("acme", "install-github-reuse-version", "find-skills"),
+            source_url,
             target_root: None,
+            preview_id: Some(second_preview.preview_id),
             actor: "cli".to_string(),
         },
         &managed_root,
@@ -2374,6 +2449,8 @@ fn install_github_remote_skill_cleans_partial_version_on_copy_failure() {
     );
     let installed_sha = remote_head(&remote);
     let _rewrite = github_repo_rewrite("acme", "install-github-copy-failure", &remote);
+    let source_url = github_source_url("acme", "install-github-copy-failure", "find-skills");
+    let preview = github_install_preview(&source_url, None, &managed_root);
     let version_path = managed_root
         .join("remote-skills")
         .join("find-skills")
@@ -2384,8 +2461,9 @@ fn install_github_remote_skill_cleans_partial_version_on_copy_failure() {
 
     let error = install_github_remote_skill(
         InstallGithubRemoteSkillRequest {
-            source_url: github_source_url("acme", "install-github-copy-failure", "find-skills"),
+            source_url,
             target_root: None,
+            preview_id: Some(preview.preview_id),
             actor: "cli".to_string(),
         },
         &managed_root,
@@ -2410,6 +2488,7 @@ fn install_github_remote_skill_rejects_traversal_url_without_creating_store() {
         InstallGithubRemoteSkillRequest {
             source_url: "https://github.com/acme/repo/tree/main/skills/../../secret".to_string(),
             target_root: None,
+            preview_id: Some("stale".to_string()),
             actor: "cli".to_string(),
         },
         &managed_root,
@@ -2429,6 +2508,7 @@ fn install_github_remote_skill_rejects_non_github_url_without_creating_store() {
         InstallGithubRemoteSkillRequest {
             source_url: "https://example.com/acme/repo/tree/main/skills/demo".to_string(),
             target_root: None,
+            preview_id: Some("stale".to_string()),
             actor: "cli".to_string(),
         },
         &managed_root,
@@ -2448,6 +2528,7 @@ fn install_github_remote_skill_rejects_invalid_ref_without_creating_store() {
         InstallGithubRemoteSkillRequest {
             source_url: "https://github.com/acme/repo/tree/-bad/skills/demo".to_string(),
             target_root: None,
+            preview_id: Some("stale".to_string()),
             actor: "cli".to_string(),
         },
         &managed_root,
@@ -2470,6 +2551,8 @@ fn install_github_remote_skill_refuses_non_symlink_current_and_removes_new_versi
     );
     let installed_sha = remote_head(&remote);
     let _rewrite = github_repo_rewrite("acme", "install-github-current-conflict", &remote);
+    let source_url = github_source_url("acme", "install-github-current-conflict", "find-skills");
+    let preview = github_install_preview(&source_url, None, &managed_root);
     let remote_root = managed_root.join("remote-skills").join("find-skills");
     let current_path = remote_root.join("current");
     fs::create_dir_all(&remote_root).unwrap();
@@ -2477,8 +2560,9 @@ fn install_github_remote_skill_refuses_non_symlink_current_and_removes_new_versi
 
     let error = install_github_remote_skill(
         InstallGithubRemoteSkillRequest {
-            source_url: github_source_url("acme", "install-github-current-conflict", "find-skills"),
+            source_url,
             target_root: None,
+            preview_id: Some(preview.preview_id),
             actor: "cli".to_string(),
         },
         &managed_root,
@@ -4825,6 +4909,21 @@ description: \"{description}\"
 
 fn github_source_url(owner: &str, repo: &str, skill_name: &str) -> String {
     format!("https://github.com/{owner}/{repo}/tree/main/skills/{skill_name}")
+}
+
+fn github_install_preview(
+    source_url: &str,
+    target_root: Option<PathBuf>,
+    managed_root: &std::path::Path,
+) -> GithubRemoteSkillInstallPreview {
+    preview_github_remote_skill_install(
+        PreviewGithubRemoteSkillInstallRequest {
+            source_url: source_url.to_string(),
+            target_root,
+        },
+        managed_root,
+    )
+    .unwrap()
 }
 
 static GIT_CONFIG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

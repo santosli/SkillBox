@@ -458,7 +458,31 @@ pub struct BindRemoteSourceResult {
 pub struct InstallGithubRemoteSkillRequest {
     pub source_url: String,
     pub target_root: Option<PathBuf>,
+    pub preview_id: Option<String>,
     pub actor: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreviewGithubRemoteSkillInstallRequest {
+    pub source_url: String,
+    pub target_root: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GithubRemoteSkillInstallPreview {
+    pub preview_id: String,
+    pub skill_name: String,
+    pub source_url: String,
+    pub repo_url: String,
+    pub owner: String,
+    pub repo: String,
+    pub path: String,
+    pub reference: String,
+    pub ref_kind: Option<String>,
+    pub tracking: bool,
+    pub installed_sha: String,
+    pub files: Vec<RemoteDiffFile>,
+    pub target_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
