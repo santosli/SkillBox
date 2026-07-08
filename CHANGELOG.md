@@ -9,6 +9,12 @@ version tags such as `v0.3.0`.
 
 - No unreleased changes.
 
+## 0.3.9
+
+- Add a safety-focused first-run onboarding flow that explains read-only scans, review-before-import, and intentional deploys.
+- Add a public SkillBox homepage with the promo video, install links, and searchable product documentation.
+- Improve homepage metadata and FAQ content so users can discover SkillBox through search.
+
 ## 0.3.8
 
 - Add Import Revert for deploy-back imports so a runtime skill can be restored to its pre-import folder.
