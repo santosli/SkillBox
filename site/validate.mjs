@@ -45,9 +45,9 @@ expect("video embed uses controls and metadata preload", /<video controls preloa
 expect("download CTA uses latest release", /https:\/\/github\.com\/santosli\/SkillBox\/releases\/latest/.test(html));
 expect("Homebrew command present", /brew install --cask skillbox/.test(html));
 
-expect("workflow uses configure-pages", /uses: actions\/configure-pages@v5/.test(workflow));
-expect("workflow uses upload-pages-artifact", /uses: actions\/upload-pages-artifact@v4/.test(workflow));
-expect("workflow uses deploy-pages", /uses: actions\/deploy-pages@v4/.test(workflow));
+expect("workflow uses configure-pages", /uses: actions\/configure-pages@v6/.test(workflow));
+expect("workflow uses upload-pages-artifact", /uses: actions\/upload-pages-artifact@v5/.test(workflow));
+expect("workflow uses deploy-pages", /uses: actions\/deploy-pages@v5/.test(workflow));
 expect("workflow copies promo video through build script", /node site\/build\.mjs/.test(workflow));
 expect("workflow watches site paths", /site\/\*\*/.test(workflow));
 expect("workflow watches promo paths", /docs\/promo\/skillbox-intro\/\*\*/.test(workflow));
