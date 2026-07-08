@@ -96,6 +96,32 @@ export function normalizeRemoteVersionPreview(preview = {}) {
   };
 }
 
+export function normalizeRemoteInstallPreview(preview = {}) {
+  const normalized = normalizeRemoteVersionPreview({
+    preview_id: preview.previewId || preview.preview_id || '',
+    skill_name: preview.skillName || preview.skill_name || '',
+    action: 'install',
+    from_version: 'Not installed',
+    to_version: preview.installedSha || preview.installed_sha || '',
+    files: preview.files || []
+  });
+
+  return {
+    ...normalized,
+    action: 'install',
+    sourceUrl: preview.sourceUrl || preview.source_url || '',
+    repoUrl: preview.repoUrl || preview.repo_url || '',
+    owner: preview.owner || '',
+    repo: preview.repo || '',
+    path: preview.path || '',
+    reference: preview.reference || '',
+    refKind: preview.refKind || preview.ref_kind || '',
+    tracking: Boolean(preview.tracking),
+    installedSha: preview.installedSha || preview.installed_sha || normalized.toVersion,
+    targetRoot: preview.targetRoot || preview.target_root || null
+  };
+}
+
 export function formatRemoteDiffSize(size) {
   if (size === null || size === undefined || Number.isNaN(Number(size))) {
     return 'unknown size';
@@ -203,6 +229,7 @@ export function shouldShowRemoteUpdateSummary(remoteUpdate = {}) {
 }
 
 export function remoteVersionActionLabel(preview = {}) {
+  if (preview.action === 'install') return 'Install';
   return preview.action === 'rollback' ? 'Rollback' : 'Update';
 }
 

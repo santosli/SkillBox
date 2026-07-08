@@ -75,6 +75,7 @@ import {
 import {
   normalizeRemoteSourceCandidates,
   normalizeRemoteSourceBindingPreview,
+  normalizeRemoteInstallPreview,
   normalizeRemoteVersionPreview,
   remoteVersionActionLabel
 } from './remoteSkills.js';
@@ -269,6 +270,14 @@ export default function App() {
     candidateBind: closedRemoteSourceCandidateBind
   });
   const [remoteVersionDialog, setRemoteVersionDialog] = useState({
+    open: false,
+    loading: false,
+    applying: false,
+    preview: null,
+    activePath: '',
+    error: ''
+  });
+  const [remoteInstallDialog, setRemoteInstallDialog] = useState({
     open: false,
     loading: false,
     applying: false,
@@ -761,6 +770,37 @@ export default function App() {
     }
 
     if (!window.__TAURI_INTERNALS__) {
+      if (remoteImport.mode === 'url') {
+        const preview = normalizeRemoteInstallPreview({
+          preview_id: 'browser-preview',
+          skill_name: remoteImportCandidate(remoteImport.mode, value).name || 'remote-skill',
+          source_url: value,
+          installed_sha: '1234567890abcdef',
+          files: [
+            {
+              path: 'SKILL.md',
+              status: 'A',
+              diff: '@@\n+---\n+name: remote-skill\n+description: Preview skill\n+---\n'
+            }
+          ]
+        });
+        setRemoteInstallDialog({
+          open: true,
+          loading: false,
+          applying: false,
+          preview,
+          activePath: preview.activePath,
+          title: `Install ${preview.skillName}`,
+          subtitle: 'Review the GitHub skill before SkillBox copies it into the managed store.',
+          applyLabel: 'Install from GitHub',
+          applyingLabel: 'Installing...',
+          error: ''
+        });
+        setRemoteImport((current) => ({ ...current, open: false, value: '', error: '' }));
+        setNotice('Browser preview is using a provided remote source.');
+        setStatus('prototype');
+        return;
+      }
       setImportReview({
         open: true,
         candidates: [remoteImportCandidate(remoteImport.mode, value)],
@@ -778,16 +818,41 @@ export default function App() {
     try {
       if (remoteImport.mode === 'url') {
         setStatus('importing');
-        const result = await invoke('install_github_remote_skill', {
+        setRemoteImport((current) => ({ ...current, open: false, error: '' }));
+        setRemoteInstallDialog({
+          open: true,
+          loading: true,
+          applying: false,
+          preview: null,
+          activePath: '',
+          title: 'Review GitHub install',
+          subtitle: 'Loading remote skill diff before anything is copied into SkillBox.',
+          applyLabel: 'Install from GitHub',
+          applyingLabel: 'Installing...',
+          error: ''
+        });
+        await waitForNextPaint();
+        const result = await invoke('preview_github_remote_skill_install', {
           request: {
             source_url: value,
-            target_root: null,
-            actor: 'desktop'
+            target_root: null
           }
         });
-        setRemoteImport((current) => ({ ...current, open: false, value: '', error: '' }));
-        await refresh();
-        setNotice(`Installed ${result.skillName || result.skill_name || 'remote skill'} from GitHub.`);
+        const preview = normalizeRemoteInstallPreview(result);
+        setRemoteInstallDialog({
+          open: true,
+          loading: false,
+          applying: false,
+          preview,
+          activePath: preview.activePath,
+          title: `Install ${preview.skillName}`,
+          subtitle: 'Review the GitHub skill before SkillBox copies it into the managed store.',
+          applyLabel: 'Install from GitHub',
+          applyingLabel: 'Installing...',
+          error: ''
+        });
+        setRemoteImport((current) => ({ ...current, value: '', error: '' }));
+        setStatus('ready');
         return;
       } else {
         setNotice('Markdown file import is not wired yet.');
@@ -795,8 +860,10 @@ export default function App() {
     } catch (submitError) {
       setRemoteImport((current) => ({
         ...current,
+        open: remoteImport.mode !== 'url',
         error: submitError.message || String(submitError) || 'Unable to prepare this import.'
       }));
+      setRemoteInstallDialog((current) => ({ ...current, loading: false, error: submitError.message || String(submitError) }));
       setStatus('ready');
       return;
     }
@@ -2393,6 +2460,47 @@ export default function App() {
     }
   }
 
+  function closeRemoteInstallDialog() {
+    if (remoteInstallDialog.applying) return;
+    setRemoteInstallDialog((current) => ({ ...current, open: false, error: '' }));
+  }
+
+  function activateRemoteInstallPath(path) {
+    setRemoteInstallDialog((current) => ({ ...current, activePath: path }));
+  }
+
+  async function applyRemoteInstall() {
+    const preview = remoteInstallDialog.preview;
+    if (!preview) return;
+    setRemoteInstallDialog((current) => ({ ...current, applying: true, error: '' }));
+
+    if (!window.__TAURI_INTERNALS__) {
+      setNotice(`Installed ${preview.skillName} from GitHub.`);
+      setRemoteInstallDialog((current) => ({ ...current, open: false, applying: false }));
+      return;
+    }
+
+    try {
+      const result = await invoke('install_github_remote_skill', {
+        request: {
+          source_url: preview.sourceUrl,
+          target_root: preview.targetRoot || null,
+          preview_id: preview.previewId || null,
+          actor: 'desktop'
+        }
+      });
+      setRemoteInstallDialog((current) => ({ ...current, open: false, applying: false }));
+      await refresh();
+      setNotice(`Installed ${result.skillName || result.skill_name || preview.skillName || 'remote skill'} from GitHub.`);
+    } catch (installError) {
+      setRemoteInstallDialog((current) => ({
+        ...current,
+        applying: false,
+        error: installError.message || String(installError)
+      }));
+    }
+  }
+
   function toggleDashboardFavorite(skillName) {
     setFavoriteNames((current) => {
       const next = current.includes(skillName)
@@ -2894,6 +3002,15 @@ export default function App() {
           onActivatePath={activateRemoteVersionPath}
           onApply={applyRemoteVersionChange}
           onClose={closeRemoteVersionDialog}
+        />
+      ) : null}
+
+      {remoteInstallDialog.open ? (
+        <RemoteVersionReviewDialog
+          dialog={remoteInstallDialog}
+          onActivatePath={activateRemoteInstallPath}
+          onApply={applyRemoteInstall}
+          onClose={closeRemoteInstallDialog}
         />
       ) : null}
 

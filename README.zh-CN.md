@@ -161,8 +161,9 @@ Homebrew uninstall 不会删除 `~/.skillbox`。
 1. 打开 SkillBox。
 2. 点击 `Scan` 发现已知的全局和项目局部 skill workspaces。
 3. 使用 `Import` 先 review 候选项，再让 SkillBox 复制到 `~/.skillbox`。
-4. 把已导入 skills 部署到选定 runtime workspaces。
-5. 可选：在 Settings 启用 usage hook injection，用来记录真实 skill 调用。
+4. 使用 `Install` 先预览 GitHub-backed remote skills，再确认是否复制到 managed store。
+5. 把 managed skills 部署到选定 runtime workspaces。
+6. 可选：在 Settings 启用 usage hook injection，用来记录真实 skill 调用。
 
 ## 权限和本地变更
 
@@ -194,7 +195,7 @@ Workspace 布局：
 ```text
 apps/desktop/              Tauri + React desktop app
 apps/desktop/src-tauri/    Tauri command bridge
-crates/skillbox-core/      scan, import, GitHub install, deploy, SQLite, workspaces, updates, hooks
+crates/skillbox-core/      scan, import, GitHub install preview/apply, deploy, SQLite, workspaces, updates, hooks
 crates/skillbox-github/    GitHub skill URL parsing and normalization
 crates/skillbox-git/       structured Git service boundary
 crates/skillbox-cli/       Rust CLI

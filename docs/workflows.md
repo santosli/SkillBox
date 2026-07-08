@@ -107,18 +107,21 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 触发条件：
 
-- Rust CLI 入口：`skillbox install <github-url> [--target <path>]`。
-- Rust core API：`install_github_remote_skill`。
-- Desktop UI `Install` dialog accepts GitHub tree/blob/raw/API URLs and calls the
-  Rust install API without a deploy target.
+- Rust CLI 入口：`skillbox install-preview <github-url>` 先生成 diff preview，
+  `skillbox install <github-url> --preview-id <id> [--target <path>]` 确认后安装。
+- Rust core API：`preview_github_remote_skill_install` + `install_github_remote_skill`。
+- Desktop UI `Install` dialog accepts GitHub tree/blob/raw/API URLs, opens a diff
+  review first, and only calls the Rust install API after confirmation.
 
 步骤：
 
 - 解析 GitHub tree、blob、raw 或 contents API URL。
 - 标准化 owner、repo、ref、path、repoUrl、url。
-- 用 `skillbox-git::GitService::fetch_ref_path` 通过结构化 Git 参数拉取指定 ref/path。
-- 验证下载目录包含 `SKILL.md`。
-- 读取 skill name 并校验命名。
+- Preview 阶段用 `skillbox-git::GitService::fetch_ref_path` 通过结构化 Git 参数拉取指定 ref/path 到临时目录。
+- Preview 阶段验证下载目录包含 `SKILL.md`，读取 skill name 并校验命名。
+- Preview 阶段生成 empty directory -> remote skill directory 的全文件 diff 和 deterministic `preview_id`。
+- Preview 阶段不得写入 `remote-skills/<name>`、`current`、`source.json`、SQLite，也不得部署到 runtime。
+- Confirm/install 阶段重新解析和拉取 GitHub 来源，并验证 `preview_id` 与 URL、ref、resolved SHA、skill name、target root 匹配。
 - 写入 `remote-skills/<name>/versions/<installedSha>`。
 - 更新 `remote-skills/<name>/current` symlink。
 - 写入 `source.json`，包含 GitHub 来源和 `installedSha`、`latestSha`。
@@ -130,6 +133,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 失败与回滚：
 
 - URL 不指向 skill 目录或 `SKILL.md` 时拒绝。
+- `install` 缺少 `preview_id` 或 preview 身份已过期时拒绝，不写 managed store。
 - Git 命令失败时清理临时目录，不写 managed store。
 - version 已存在时可以复用，但仍需验证 `SKILL.md`。
 - target 部署失败时保留已安装版本，并把 deployment error 返回给调用方。
@@ -137,7 +141,8 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 完成验证：
 
 - URL parse：`cargo run -p skillbox-cli --offline -- parse-github-url <github-url>`
-- Rust install：`cargo run -p skillbox-cli --offline -- install <github-url> --managed-root <temp-skillbox-root>`
+- Rust preview：`cargo run -p skillbox-cli --offline -- install-preview <github-url> --managed-root <temp-skillbox-root>`
+- Rust install：`cargo run -p skillbox-cli --offline -- install <github-url> --preview-id <id> --managed-root <temp-skillbox-root>`
 - `cargo test -p skillbox-core --offline install_github_remote_skill`
 
 ## 5. Deploy Managed Skill

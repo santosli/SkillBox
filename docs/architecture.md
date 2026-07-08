@@ -10,7 +10,7 @@ SkillBox 是一个 Rust core + Tauri desktop monorepo。产品目标是管理跨
   - `src/components/` 按页面/领域聚合展示组件（dashboard、workspaces、history、settings、importReview、skillDetail、remoteSkills、userSkillsSync、common）。
   - `src/*.js` 是可独立测试的纯函数模块（如 `previewData.js`、`historyEntries.js`、`usageHooks.js`、`preferences.js`、`importFlow.js`、`skills.js`）。
 - `apps/desktop/src-tauri` 是 Tauri command 层，负责把 UI 请求转发到 Rust crates。
-- `crates/skillbox-core` 是核心业务 crate，当前实现扫描、导入、候选导入、GitHub install、部署、SQLite 基础索引和偏好设置。
+- `crates/skillbox-core` 是核心业务 crate，当前实现扫描、导入、候选导入、GitHub install preview/apply、部署、SQLite 基础索引和偏好设置。
 - `crates/skillbox-github` 负责 GitHub skill URL 解析和标准化。
 - `crates/skillbox-git` 通过 `GitService` 负责 Rust 产品运行时的结构化 Git 调用和状态读取。
 - `crates/skillbox-cli` 是 Rust CLI，和桌面应用共享同一套 Rust core。
@@ -54,6 +54,8 @@ React UI
 - `find_remote_source_candidates` -> `skillbox_core::find_remote_source_candidates`
 - `preview_remote_source_binding` -> `skillbox_core::preview_remote_source_binding`
 - `bind_remote_source` -> `skillbox_core::bind_remote_source`
+- `preview_github_remote_skill_install` -> `skillbox_core::preview_github_remote_skill_install`
+- `install_github_remote_skill` -> `skillbox_core::install_github_remote_skill`
 - `list_remote_skill_versions` -> `skillbox_core::list_remote_skill_versions`
 - `preview_remote_version_change` -> `skillbox_core::preview_remote_version_change`
 - `apply_remote_version_change` -> `skillbox_core::apply_remote_version_change`
@@ -83,7 +85,7 @@ cargo run -p skillbox-cli --offline -- <command>
 - `import.rs` import candidates 扫描、类型推断、冲突与备份
 - `state.rs` managed state 聚合与用户偏好
 - `workspaces.rs` workspace registry 发现、注册与扫描
-- `remote.rs` GitHub install、remote source 绑定、update check、diff 预览、版本切换
+- `remote.rs` GitHub install preview/apply、remote source 绑定、update check、diff 预览、版本切换
 - `marketplace.rs` Claude marketplace 候选搜索
 - `git_sync.rs` user-skills Git 同步编排
 - `usage.rs` usage 事件规范化与聚合统计
@@ -102,7 +104,7 @@ cargo run -p skillbox-cli --offline -- <command>
 - import candidates 扫描、类型推断、冲突检测。
 - symlink 部署和部署索引。
 - import backup 与 source 替换为 symlink。
-- GitHub install, GitHub-only remote source search, manual binding, update check, version listing, diff preview, update/rollback apply, and operation logging.
+- GitHub install preview/apply, GitHub-only remote source search, manual binding, update check, version listing, diff preview, update/rollback apply, and operation logging.
 - SQLite 基础表初始化和索引写入。
 - 用户偏好读取与写入。
 - skill usage 事件记录、聚合统计和 agent hook 注入配置。
@@ -159,11 +161,11 @@ home-level agent root，`user` workspace 表示项目局部 root；React 只展�
 当前状态：
 
 - Rust core 已经是桌面应用的主要后端。
-- Rust CLI 有 `init`、`version`、`paths`、`scan`、`parse-github-url`、`install`、`import`、`deploy`、`user-skills-status`、`sync-user-skills`、`check-remote-updates`，并保留 `check-updates` 和 `rollback` 兼容别名。
+- Rust CLI 有 `init`、`version`、`paths`、`scan`、`parse-github-url`、`install-preview`、`install`、`import`、`deploy`、`user-skills-status`、`sync-user-skills`、`check-remote-updates`，并保留 `check-updates` 和 `rollback` 兼容别名。
 - Rust CLI 有 `remote-source-candidates`、`remote-source-preview`、`bind-remote-source`、`remote-versions`、`remote-preview-change`、`remote-apply-change`、`usage-record`、`usage-hook`、`usage-hook-status`、`usage-hook-install` 和 `operations`。
 - Rust CLI 有 `workspaces`、`workspace-scan`、`workspace-add`、`workspace-forget` 来管理 workspace registry。
 - Rust core 和 Tauri 已覆盖 `~/.skillbox/user-skills` 的共享 remote Git 同步。
-- Rust core 已覆盖 remote skill 的 GitHub install、GitHub update check、source binding、diff preview、update/rollback apply 和 operation log。
+- Rust core 已覆盖 remote skill 的 GitHub install preview/apply、GitHub update check、source binding、diff preview、update/rollback apply 和 operation log。
 - Rust core 和 Tauri 已覆盖 usage stats 显式上报，以及 Codex App、Codex CLI、Claude Code CLI 的 Stop hook 注入入口。
 - Tauri desktop 已覆盖 macOS app update check 和用户确认后的 install/restart；React 不直接处理 updater asset URL、签名或安装。
 - agent support 当前主要是 `SKILL.md` / Codex-style roots，尚未覆盖 Claude、OpenClaw、Cursor、Claude Code、Copilot 的原生格式。

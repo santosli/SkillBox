@@ -432,16 +432,17 @@ test('remote source bind validation commands run off the command handler', () =>
   }
 });
 
-test('remote skill URL import installs GitHub skills through the desktop bridge', () => {
+test('remote skill URL import previews GitHub skills before install', () => {
   const submitRemoteImport = appSource.match(
     /async function submitRemoteImport\(event\)\s*\{(?<body>[\s\S]*?)\n  \}/
   )?.groups.body || '';
 
-  assert.match(submitRemoteImport, /invoke\('install_github_remote_skill',\s*\{\s*request:\s*\{/);
+  assert.match(submitRemoteImport, /invoke\('preview_github_remote_skill_install',\s*\{\s*request:\s*\{/);
   assert.match(submitRemoteImport, /source_url:\s*value/);
   assert.match(submitRemoteImport, /target_root:\s*null/);
-  assert.match(submitRemoteImport, /actor:\s*'desktop'/);
-  assert.match(submitRemoteImport, /await refresh\(\);/);
+  assert.match(submitRemoteImport, /setRemoteInstallDialog\(/);
+  assert.match(submitRemoteImport, /applyLabel:\s*'Install from GitHub'/);
+  assert.doesNotMatch(submitRemoteImport, /invoke\('install_github_remote_skill'/);
   assert.doesNotMatch(submitRemoteImport, /invoke\('parse_github_url'/);
   assert.doesNotMatch(appSource, /Remote download\/import is not wired yet\./);
 });
@@ -456,14 +457,27 @@ test('remote skill URL import restores ready state when install fails', () => {
   assert.match(catchBlock, /setStatus\('ready'\);/);
 });
 
-test('remote GitHub install command runs off the command handler', () => {
-  const commandStart = tauriSource.indexOf('async fn install_github_remote_skill');
-  const nextCommandStart = tauriSource.indexOf('#[tauri::command]', commandStart + 1);
-  const command = tauriSource.slice(commandStart, nextCommandStart);
+test('remote GitHub install commands run off the command handler', () => {
+  for (const commandName of ['preview_github_remote_skill_install', 'install_github_remote_skill']) {
+    const commandStart = tauriSource.indexOf(`async fn ${commandName}`);
+    const nextCommandStart = tauriSource.indexOf('#[tauri::command]', commandStart + 1);
+    const command = tauriSource.slice(commandStart, nextCommandStart);
 
-  assert.ok(commandStart > 0, 'install_github_remote_skill should be registered as a command');
-  assert.match(command, /tauri::async_runtime::spawn_blocking/);
-  assert.match(tauriSource, /install_github_remote_skill,/);
+    assert.ok(commandStart > 0, `${commandName} should be registered as a command`);
+    assert.match(command, /tauri::async_runtime::spawn_blocking/);
+    assert.match(tauriSource, new RegExp(`${commandName},`));
+  }
+});
+
+test('remote GitHub install confirmation passes the preview id', () => {
+  const applyRemoteInstall = appSource.match(
+    /async function applyRemoteInstall\(\)\s*\{(?<body>[\s\S]*?)\n  \}/
+  )?.groups.body || '';
+
+  assert.match(applyRemoteInstall, /invoke\('install_github_remote_skill'/);
+  assert.match(applyRemoteInstall, /source_url:\s*preview\.sourceUrl/);
+  assert.match(applyRemoteInstall, /preview_id:\s*preview\.previewId \|\| null/);
+  assert.match(applyRemoteInstall, /actor:\s*'desktop'/);
 });
 
 test('dashboard startup loads cached remote update state without refreshing', () => {

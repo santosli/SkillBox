@@ -215,7 +215,12 @@ export function RemoteSourceCandidateBindDialog({ dialog, skillName, onClose, on
 
 export function RemoteVersionReviewDialog({ dialog, onActivatePath, onApply, onClose }) {
   const preview = dialog.preview;
-  const applyLabel = preview?.action === 'rollback' ? 'Apply Rollback' : 'Apply Update';
+  const applyLabel =
+    dialog.applyLabel || (preview?.action === 'rollback' ? 'Apply Rollback' : 'Apply Update');
+  const applyingLabel = dialog.applyingLabel || 'Applying...';
+  const title =
+    dialog.title || (preview ? `${remoteVersionActionLabel(preview)} ${preview.skillName}` : 'Review version change');
+  const subtitle = dialog.subtitle || (preview ? `${preview.fromVersion} -> ${preview.toVersion}` : 'Loading remote version diff.');
   const activeFile =
     preview?.files.find((file) => file.path === dialog.activePath) ||
     preview?.files[0] ||
@@ -239,17 +244,15 @@ export function RemoteVersionReviewDialog({ dialog, onActivatePath, onApply, onC
       <section className="syncDialog gitCommitDialog" role="dialog" aria-modal="true" aria-labelledby="remote-version-title">
         <div className="importSheetHeader">
           <div>
-            <h2 id="remote-version-title">
-              {preview ? `${remoteVersionActionLabel(preview)} ${preview.skillName}` : 'Review version change'}
-            </h2>
-            <p>{preview ? `${preview.fromVersion} -> ${preview.toVersion}` : 'Loading remote version diff.'}</p>
+            <h2 id="remote-version-title">{title}</h2>
+            <p>{subtitle}</p>
           </div>
           <button className="iconButton" disabled={dialog.applying} type="button" aria-label="Close version review" onClick={onClose}>
             <X aria-hidden="true" />
           </button>
         </div>
         <div className="gitCommitDialogBody">
-          {dialog.loading ? <LoadingNotice>Loading diff...</LoadingNotice> : null}
+          {dialog.loading ? <LoadingNotice>{dialog.loadingLabel || 'Loading diff...'}</LoadingNotice> : null}
           {preview ? (
             <div className="gitCommitReview">
               <aside className="gitFilePane">
@@ -309,7 +312,7 @@ export function RemoteVersionReviewDialog({ dialog, onActivatePath, onApply, onC
             {dialog.applying ? (
               <>
                 <span className="buttonSpinner" aria-hidden="true" />
-                Applying...
+                {applyingLabel}
               </>
             ) : (
               applyLabel
