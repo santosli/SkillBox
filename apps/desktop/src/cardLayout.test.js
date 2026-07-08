@@ -233,6 +233,41 @@ test('dashboard actions stay in one equal segmented row', () => {
   assert.match(appSource, /setPreviewAction\(null\);/);
 });
 
+test('first-use dashboard explains safe setup before local changes', () => {
+  const firstUseSource = appSource.match(/function FirstUseDashboard[\s\S]*?\n\}/)?.[0] || '';
+  const panelRule = css.match(/\.firstUsePanel\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const stepRule = css.match(/\.firstUseStep\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(firstUseSource, /Set up SkillBox safely/);
+  assert.match(firstUseSource, /does not change runtime folders until you review and\s+confirm an action/);
+  assert.match(appSource, /ScanSearch/);
+  assert.match(appSource, /ShieldCheck/);
+  assert.match(appSource, /GitBranch/);
+  assert.match(firstUseSource, /className="firstUseWorkflow"/);
+  assert.match(firstUseSource, /className="firstUseFlowItem"/);
+  assert.doesNotMatch(firstUseSource, /emptyGlyph/);
+  assert.match(firstUseSource, /Scan workspaces/);
+  assert.match(firstUseSource, /scan is read-only/);
+  assert.match(firstUseSource, /Review imports/);
+  assert.match(firstUseSource, /copies anything into[\s\S]*~\/\.skillbox/);
+  assert.match(firstUseSource, /Deploy intentionally/);
+  assert.match(firstUseSource, /linked only when you choose a workspace target/);
+  assert.match(firstUseSource, /Read-only scan/);
+  assert.match(firstUseSource, /Review before copy/);
+  assert.match(firstUseSource, /No silent overwrite/);
+  assert.match(firstUseSource, /onClick=\{onScan\}[\s\S]*Scan local skills/);
+  assert.match(firstUseSource, /onClick=\{onInstall\}[\s\S]*Install from GitHub/);
+  assert.doesNotMatch(firstUseSource, /scan writes/i);
+  assert.doesNotMatch(firstUseSource, /scan changes/i);
+  assert.match(css, /\.firstUseChecklist\s*\{/);
+  assert.match(css, /\.firstUseSafetyStrip\s*\{/);
+  assert.match(css, /\.firstUseWorkflow\s*\{/);
+  assert.match(css, /\.firstUseStepIcon\s*\{/);
+  assert.match(panelRule, /min-height:\s*360px;/);
+  assert.match(panelRule, /padding:\s*42px;/);
+  assert.match(stepRule, /border:\s*1px solid #edf2f7;/);
+});
+
 test('dashboard content keeps a compact title offset from the window top', () => {
   const contentRule = css.match(/\.content\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
 

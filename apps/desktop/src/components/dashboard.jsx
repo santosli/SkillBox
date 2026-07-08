@@ -1,11 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import {
   Grid3X3,
+  GitBranch,
   Import as ImportIcon,
   List,
   PackagePlus,
   RefreshCw,
+  ScanSearch,
   Search,
+  ShieldCheck,
   Star,
   X
 } from 'lucide-react';
@@ -15,7 +18,7 @@ import {
   formatStatusNoticeCountdown,
   statusNoticeAutoCloseSeconds
 } from '../skillStatusRefresh.js';
-import { AgentIconStack, Badge, Icon, PageTitleRow } from './common.jsx';
+import { AgentIconStack, Badge, PageTitleRow } from './common.jsx';
 
 export function Dashboard({
   activeTag,
@@ -367,25 +370,78 @@ export function DashboardStatusNotice({ message, onDismiss }) {
 
 function FirstUseDashboard({ status, onInstall, onScan }) {
   return (
-    <section className="firstUseGrid firstUseOnly">
+    <section className="firstUseGrid firstUseOnly" aria-labelledby="first-use-title">
       <div className="panel firstUsePanel">
-        <div className="emptyGlyph">
-          <Icon name="dashboard" />
+        <div className="firstUseHeader">
+          <div>
+            <p className="eyebrow">First run setup</p>
+            <h2 id="first-use-title">Set up SkillBox safely</h2>
+            <p>
+              Start with a scan. SkillBox does not change runtime folders until you review and
+              confirm an action.
+            </p>
+          </div>
+          <div className="firstUseWorkflow" aria-label="Safe setup flow">
+            <span className="firstUseFlowItem">
+              <ScanSearch aria-hidden="true" />
+              Read-only scan
+            </span>
+            <span className="firstUseFlowItem">
+              <ShieldCheck aria-hidden="true" />
+              Review gate
+            </span>
+            <span className="firstUseFlowItem">
+              <GitBranch aria-hidden="true" />
+              Linked deploy
+            </span>
+          </div>
         </div>
-        <div>
-          <p className="eyebrow">First import</p>
-          <h2>No skills imported yet</h2>
-          <p>
-            SkillBox will scan local runtime folders, show the candidates first, and only import the
-            skills you confirm.
-          </p>
+
+        <div className="firstUseChecklist" aria-label="Safe setup checklist">
+          <div className="firstUseStep">
+            <span className="firstUseStepIcon" aria-hidden="true">
+              <ScanSearch />
+            </span>
+            <div>
+              <strong>Scan workspaces</strong>
+              <p>The scan is read-only and checks common Codex, Claude, and project skill roots.</p>
+            </div>
+          </div>
+          <div className="firstUseStep">
+            <span className="firstUseStepIcon" aria-hidden="true">
+              <ShieldCheck />
+            </span>
+            <div>
+              <strong>Review imports</strong>
+              <p>
+                Candidates are reviewed and classified before SkillBox copies anything into{' '}
+                <code>~/.skillbox</code>.
+              </p>
+            </div>
+          </div>
+          <div className="firstUseStep">
+            <span className="firstUseStepIcon" aria-hidden="true">
+              <GitBranch />
+            </span>
+            <div>
+              <strong>Deploy intentionally</strong>
+              <p>Runtime folders are linked only when you choose a workspace target.</p>
+            </div>
+          </div>
         </div>
+
+        <div className="firstUseSafetyStrip" aria-label="Safety boundaries">
+          <span>Read-only scan</span>
+          <span>Review before copy</span>
+          <span>No silent overwrite</span>
+        </div>
+
         <div className="firstUseActions">
           <button className="button primary" type="button" onClick={onScan}>
             {status === 'scanning' ? 'Scanning...' : 'Scan local skills'}
           </button>
           <button className="button secondary" type="button" onClick={onInstall}>
-            Import from remote
+            Install from GitHub
           </button>
         </div>
       </div>
