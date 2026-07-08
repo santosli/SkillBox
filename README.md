@@ -4,6 +4,8 @@
 
 English | [简体中文](README.zh-CN.md)
 
+[Website](https://santosli.github.io/SkillBox/) | [Releases](https://github.com/santosli/SkillBox/releases/latest) | [GitHub](https://github.com/santosli/SkillBox)
+
 ![Status](https://img.shields.io/badge/status-macOS%20release-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-111827)
 ![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB)

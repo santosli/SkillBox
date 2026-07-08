@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SkillBox - Local skill manager for AI agents</title>
+    <meta name="description" content="SkillBox is a local-first macOS app for organizing, reviewing, updating, and deploying AI agent skills from one managed store.">
+    <link rel="canonical" href="https://santosli.github.io/SkillBox/">
+    <meta name="theme-color" content="#08111f">
+    <link rel="icon" href="assets/skillbox-app-icon.png">
+
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="SkillBox">
+    <meta property="og:title" content="SkillBox - Local skill manager for AI agents">
+    <meta property="og:description" content="Manage SKILL.md-based agent skills locally, review GitHub imports, preview updates, and deploy safely to runtime folders.">
+    <meta property="og:url" content="https://santosli.github.io/SkillBox/">
+    <meta property="og:image" content="https://santosli.github.io/SkillBox/assets/skillbox-promo-poster.jpg">
+    <meta property="og:image:alt" content="SkillBox macOS app dashboard">
+
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="SkillBox - Local skill manager for AI agents">
+    <meta name="twitter:description" content="Local-first skill management, safe imports, remote updates, usage history, and GitHub-backed releases.">
+    <meta name="twitter:image" content="https://santosli.github.io/SkillBox/assets/skillbox-promo-poster.jpg">
+
+    <link rel="preload" href="assets/fonts/space-grotesk-700.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="assets/fonts/ibm-plex-sans-400.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="styles.css">
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "SkillBox",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "macOS",
+        "description": "A local-first macOS app and CLI for managing SKILL.md-based AI agent skills from one managed store.",
+        "url": "https://santosli.github.io/SkillBox/",
+        "downloadUrl": "https://github.com/santosli/SkillBox/releases/latest",
+        "license": "https://github.com/santosli/SkillBox/blob/main/LICENSE",
+        "isAccessibleForFree": true,
+        "codeRepository": "https://github.com/santosli/SkillBox"
+      }
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="SkillBox home">
+        <img src="assets/skillbox-app-icon.png" alt="" width="36" height="36">
+        <span>SkillBox</span>
+      </a>
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a href="#demo">Demo</a>
+        <a href="#features">Features</a>
+        <a href="#install">Install</a>
+        <a href="https://github.com/santosli/SkillBox">GitHub</a>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero" id="top" aria-labelledby="hero-title">
+        <img class="hero-image" src="assets/skillbox-dashboard.png" alt="SkillBox dashboard showing skill cards, usage counts, update states, and runtime targets">
+        <div class="hero-copy">
+          <p class="eyebrow">macOS desktop app · open source · local-first</p>
+          <h1 id="hero-title">SkillBox</h1>
+          <p class="hero-value">Local skill manager for AI agents.</p>
+          <p class="hero-support">
+            Keep Codex, Claude, and project skills organized from one local store.
+            Review GitHub-backed imports and updates before they touch your runtime folders.
+          </p>
+          <div class="hero-actions" aria-label="Primary actions">
+            <a class="button primary" href="https://github.com/santosli/SkillBox/releases/latest">Download for macOS</a>
+            <a class="button secondary" href="https://github.com/santosli/SkillBox">View on GitHub</a>
+            <a class="button quiet" href="#demo">Watch demo</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="signal-strip" aria-label="SkillBox product highlights">
+        <div>
+          <span class="metric">~/.skillbox</span>
+          <span class="label">source of truth</span>
+        </div>
+        <div>
+          <span class="metric">Review first</span>
+          <span class="label">imports and remote updates</span>
+        </div>
+        <div>
+          <span class="metric">Symlink deploy</span>
+          <span class="label">runtime targets stay replaceable</span>
+        </div>
+      </section>
+
+      <section class="section demo-section" id="demo" aria-labelledby="demo-title">
+        <div class="section-heading">
+          <p class="eyebrow">30-second overview</p>
+          <h2 id="demo-title">See the workflow before installing.</h2>
+          <p>
+            The demo shows scattered skills becoming one managed library, then walks through review,
+            update, usage history, and the GitHub release flow.
+          </p>
+        </div>
+        <figure class="video-frame">
+          <video controls preload="metadata" poster="assets/skillbox-promo-poster.jpg" aria-label="SkillBox promotional demo video">
+            <source src="assets/skillbox-promo.mp4" type="video/mp4">
+            <a href="assets/skillbox-promo.mp4">Download the SkillBox promo video.</a>
+          </video>
+          <figcaption>SkillBox keeps local skills manageable without turning runtime folders into the only copy.</figcaption>
+        </figure>
+      </section>
+
+      <section class="section feature-grid" id="features" aria-label="Core SkillBox features">
+        <article class="feature-card">
+          <div class="feature-copy">
+            <p class="eyebrow">Library</p>
+            <h2>One library for local and remote skills</h2>
+            <p>
+              User skills and GitHub-backed remote skills live under a managed store, so agent folders
+              are deployment targets instead of hidden state.
+            </p>
+          </div>
+          <img src="assets/skillbox-dashboard.png" alt="SkillBox dashboard with local and remote skill cards">
+        </article>
+
+        <article class="feature-card reversed">
+          <div class="feature-copy">
+            <p class="eyebrow">Review</p>
+            <h2>Review before import. Preview before update.</h2>
+            <p>
+              Scan candidates are classified before copying. Remote updates are inspected as diffs,
+              then applied or left alone.
+            </p>
+          </div>
+          <img src="assets/skillbox-import-review-crop.png" alt="SkillBox import review dialog with selected skill candidates">
+        </article>
+
+        <article class="feature-card runtime-map">
+          <div class="feature-copy">
+            <p class="eyebrow">Deploy</p>
+            <h2>Deploy to agent runtimes without losing your source of truth</h2>
+            <p>
+              SkillBox deploys managed skills into Codex, Claude, and project-local runtime folders
+              through explicit workspace targets.
+            </p>
+          </div>
+          <div class="source-map" aria-label="Managed store deployment map">
+            <div class="hub">~/.skillbox</div>
+            <div class="spoke">~/.codex/skills</div>
+            <div class="spoke">~/.agents/skills</div>
+            <div class="spoke">~/.claude/skills</div>
+            <div class="spoke">project/.codex/skills</div>
+          </div>
+        </article>
+      </section>
+
+      <section class="section trust-section" aria-labelledby="trust-title">
+        <div class="section-heading narrow">
+          <p class="eyebrow">Trust boundaries</p>
+          <h2 id="trust-title">Built for local-first skill management.</h2>
+          <p>Runtime folders, GitHub URLs, downloaded archives, and existing skills are treated as untrusted input.</p>
+        </div>
+        <div class="trust-list">
+          <div>
+            <strong>Local source of truth</strong>
+            <span>`~/.skillbox` holds managed copies, versions, metadata, and backups.</span>
+          </div>
+          <div>
+            <strong>Signed macOS releases</strong>
+            <span>GitHub Releases publish signed and notarized DMGs with updater artifacts.</span>
+          </div>
+          <div>
+            <strong>Version history</strong>
+            <span>GitHub sources stay linked to immutable skill versions for preview and rollback.</span>
+          </div>
+          <div>
+            <strong>No silent overwrite</strong>
+            <span>Existing runtime content is reviewed instead of being replaced behind your back.</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="section install-section" id="install" aria-labelledby="install-title">
+        <div class="section-heading narrow">
+          <p class="eyebrow">Install</p>
+          <h2 id="install-title">Get the current macOS release.</h2>
+          <p>SkillBox currently targets macOS. Download the latest signed DMG or install the cask from the project tap.</p>
+        </div>
+        <div class="install-grid">
+          <a class="download-panel" href="https://github.com/santosli/SkillBox/releases/latest">
+            <span>GitHub Releases</span>
+            <strong>Download for macOS</strong>
+            <em>Latest signed and notarized DMG</em>
+          </a>
+          <div class="terminal-panel" aria-label="Homebrew install command">
+            <div class="terminal-top">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+            <pre><code>brew tap santosli/tap
+brew install --cask skillbox</code></pre>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div>
+        <img src="assets/skillbox-app-icon.png" alt="" width="28" height="28">
+        <span>SkillBox</span>
+      </div>
+      <nav aria-label="Footer navigation">
+        <a href="https://github.com/santosli/SkillBox">GitHub</a>
+        <a href="https://github.com/santosli/SkillBox/releases">Releases</a>
+        <a href="https://github.com/santosli/SkillBox/issues">Issues</a>
+        <a href="https://github.com/santosli/SkillBox/blob/main/SECURITY.md">Security</a>
+        <a href="https://github.com/santosli/SkillBox/blob/main/README.md">README</a>
+      </nav>
+    </footer>
+  </body>
+</html>
