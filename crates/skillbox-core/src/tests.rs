@@ -1,4 +1,5 @@
 use super::*;
+use rusqlite::OptionalExtension;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -2352,6 +2353,82 @@ fn install_github_remote_skill_rejects_stale_preview_id() {
         .join("find-skills")
         .join("current")
         .exists());
+}
+
+#[test]
+fn install_github_remote_skill_rejects_preview_after_branch_advances() {
+    let root = temp_dir("install-github-branch-advanced");
+    let managed_root = root.join("SkillBox");
+    let remote = bare_remote("install-github-branch-advanced-origin");
+    let work = temp_dir("install-github-branch-advanced-work");
+    run_git(&work, &["init", "-b", "main"]);
+    let skill_dir = work.join("skills").join("find-skills");
+    make_skill_with_body(&skill_dir, "find-skills", "Find skills", "Original body\n");
+    run_git(&work, &["add", "."]);
+    run_git(
+        &work,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Add skill",
+        ],
+    );
+    run_git(
+        &work,
+        &["remote", "add", "origin", remote.to_str().unwrap()],
+    );
+    run_git(&work, &["push", "-u", "origin", "main"]);
+    let _rewrite = github_repo_rewrite("acme", "install-github-branch-advanced", &remote);
+    let source_url = github_source_url("acme", "install-github-branch-advanced", "find-skills");
+    let preview = github_install_preview(&source_url, None, &managed_root);
+
+    make_skill_with_body(&skill_dir, "find-skills", "Find skills", "Advanced body\n");
+    run_git(&work, &["add", "."]);
+    run_git(
+        &work,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Advance skill",
+        ],
+    );
+    run_git(&work, &["push", "origin", "main"]);
+
+    let error = install_github_remote_skill(
+        InstallGithubRemoteSkillRequest {
+            source_url,
+            target_root: None,
+            preview_id: Some(preview.preview_id),
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+
+    let paths = managed_paths(&managed_root);
+    let remote_root = paths.remote_skills_root.join("find-skills");
+    assert!(error.contains("Remote install preview is stale"));
+    assert!(!remote_root.join("versions").exists());
+    assert!(!remote_root.join("current").exists());
+    assert!(!remote_root.join("source.json").exists());
+    let connection = open_database(&paths.database_path).unwrap();
+    let indexed = connection
+        .query_row(
+            "SELECT name FROM skills WHERE name = 'find-skills'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .unwrap();
+    assert_eq!(indexed, None);
 }
 
 #[test]
