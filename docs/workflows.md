@@ -399,6 +399,14 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 默认 push 到 `origin main` 并设置 upstream；Rust CLI 可用 `--no-push` 跳过 push。
 - 返回 initialized、remote_updated、branch、dirty、raw_status、committed、commit_sha、pushed、push_attempted、state、message。
 
+冲突策略：
+
+- User-skills sync 是 commit + optional push workflow。SkillBox 不会在同步中执行 `git pull`、`git merge` 或 `git rebase`，也不会创建或解析 merge conflict markers。
+- SkillBox 不对 user skills 使用 last-write-wins。远端和本地同时修改时，必须保留 Git 的显式分叉/冲突语义。
+- 如果另一台设备先 push，导致本地 push 被 rejected 或 non-fast-forward，SkillBox 会保留本地 commit，返回 `push_failed` 状态，并让 GUI 显示 push failure / retry。
+- 用户需要在应用外用标准 Git 工具解决 divergent history，例如 `git fetch` 后 `git pull --rebase`、`git merge` 或其他团队约定流程；解决时应检查相关 `SKILL.md`，并在 Git 产生 conflict markers 时按普通 Git 冲突流程处理。
+- 当前 GUI 不提供内置 merge editor；解决 Git 历史后，再回到 SkillBox 重试 sync。
+
 失败与回滚：
 
 - Git 命令失败时返回结构化错误，不吞掉 stderr。

@@ -27,7 +27,7 @@ SkillBox 是一个 local-first 的 macOS 桌面应用，带 Rust core/CLI，用�
 ## 为什么
 
 - **一个 managed store，面向多个 runtime。** 把持久 skill 状态放在 `~/.skillbox`，再按需部署到各个 agent runtime。
-- **本地 skills 一键同步。** 在桌面应用里直接提交并推送 user skill 变更，不需要离开 SkillBox。
+- **本地 skills 一键同步。** 在桌面应用里直接提交并推送 user skill 变更；如果远端历史分叉，需要在 SkillBox 外用 Git 解决后再重试。
 - **远程 skills 定时检查。** 自动刷新 remote skill 状态，有可用更新时先 review，再应用。
 - **统计真实 skill 调用。** 通过支持的 agent hooks 记录 skill 调用，并在卡片和 History 里展示调用次数。
 - **远程 skill 版本管理。** 预览 diff、应用更新，并能回滚到不可变的 remote skill 版本。

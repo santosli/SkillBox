@@ -27,7 +27,7 @@ A 30-second overview of SkillBox: local-first skill management, review-before-im
 ## Why
 
 - **One managed store for every runtime.** Keep durable skill state in `~/.skillbox`, then deploy into each agent runtime as needed.
-- **One-click local sync.** Commit and push user skill changes from the managed store without leaving the desktop app.
+- **One-click local sync.** Commit and push user skill changes from the managed store without leaving the desktop app; remote divergence is kept as a normal Git conflict to resolve outside SkillBox.
 - **Scheduled remote checks.** Refresh remote skill status automatically and review available updates before applying them.
 - **Usage stats for real skill calls.** Record skill calls from supported agent hooks, then surface call counts in cards and history.
 - **Versioned remote skills.** Preview diffs, apply updates, and roll back to immutable remote skill versions.

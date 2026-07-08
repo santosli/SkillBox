@@ -187,7 +187,9 @@ function parseChangedPaths(rawStatus) {
 }
 
 export function syncNotice(syncStatus) {
-  if (syncStatus?.state === 'push_failed') return 'Push failed. Local commit was kept.';
+  if (syncStatus?.state === 'push_failed') {
+    return 'Push failed. Local commit was kept; the remote may have diverged, so resolve with Git outside SkillBox, then retry sync.';
+  }
   if (syncStatus?.state === 'dirty') return 'Local changes still need sync.';
   if (syncStatus?.state === 'clean') return 'User skills are synced.';
   return 'User skills sync is not configured.';
