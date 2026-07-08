@@ -9,6 +9,13 @@ version tags such as `v0.3.0`.
 
 - No unreleased changes.
 
+## 0.3.10
+
+- Require preview confirmation before installing remote GitHub skills, so users review the incoming `SKILL.md` diff before SkillBox writes managed state or deploys anything.
+- Clarify user-skills Git sync conflict handling: when the remote diverges, SkillBox keeps the local commit and asks the user to resolve with normal Git tooling before retrying.
+- Improve public-facing project copy and search setup, including README/homepage wording and Google Search Console verification support.
+- Refresh safe desktop/runtime dependencies and GitHub Actions release infrastructure, while deferring React 19 to a dedicated migration track.
+
 ## 0.3.9
 
 - Add a safety-focused first-run onboarding flow that explains read-only scans, review-before-import, and intentional deploys.
