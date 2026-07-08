@@ -36,6 +36,7 @@ import {
   normalizeUserSkillsGitChanges,
   normalizeUserSkillsGitStatus,
   suggestUserSkillsCommitMessage,
+  syncNotice,
   waitForNextPaint,
   userSkillsSyncProgressSteps,
   userSkillRowStatus,
@@ -228,6 +229,15 @@ test('user sync action is setup before remote and hidden for remote skills', () 
 test('user sync action retries failed push and syncs configured remotes', () => {
   assert.equal(userSyncAction({ state: 'push_failed' }, 'user'), 'Retry push');
   assert.equal(userSyncAction({ state: 'dirty' }, 'user'), 'Sync now');
+});
+
+test('push failure notice explains manual conflict resolution policy', () => {
+  const notice = syncNotice({ state: 'push_failed' });
+
+  assert.match(notice, /Local commit was kept/);
+  assert.match(notice, /remote may have diverged/);
+  assert.match(notice, /resolve with Git outside SkillBox/);
+  assert.match(notice, /retry sync/);
 });
 
 test('normalizes user skills git status snake case fields', () => {
