@@ -34,3 +34,13 @@ git diff --check
 ```
 
 `site/build.mjs` copies the committed promo assets from `docs/promo/skillbox-intro/` into `site-dist/assets/`. The generated `site-dist/` directory is ignored and should not be committed.
+
+## Search Indexing
+
+After Pages deploys, submit the sitemap URL to search consoles if you want faster discovery:
+
+```text
+https://santosli.github.io/SkillBox/sitemap.xml
+```
+
+Google Search Console and Bing Webmaster Tools can both use that sitemap. Indexing is not immediate; use a query such as `site:santosli.github.io/SkillBox` later to check whether the page has been discovered.

@@ -286,6 +286,7 @@ video:focus-visible {
   max-width: 1220px;
   margin: 0 auto;
   padding: 96px 32px 0;
+  scroll-margin-top: 92px;
 }
 
 .section-heading {
@@ -455,6 +456,44 @@ video:focus-visible {
 .trust-list span {
   color: var(--muted);
   line-height: 1.5;
+}
+
+.faq-section {
+  padding-top: 104px;
+}
+
+.faq-list {
+  display: grid;
+  gap: 12px;
+}
+
+.faq-item {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--white);
+  box-shadow: 0 12px 34px rgba(8, 17, 31, 0.06);
+}
+
+.faq-item h3 {
+  margin: 0;
+  padding: 20px 24px 0;
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.faq-item p {
+  margin: 0;
+  padding: 10px 24px 22px;
+}
+
+.faq-item code {
+  border-radius: 5px;
+  padding: 2px 6px;
+  background: #edf3fb;
+  color: #22314a;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.9em;
 }
 
 .install-section {

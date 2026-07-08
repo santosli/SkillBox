@@ -3,24 +3,28 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>SkillBox - Local skill manager for AI agents</title>
-    <meta name="description" content="SkillBox is a local-first macOS app for organizing, reviewing, updating, and deploying AI agent skills from one managed store.">
+    <title>SkillBox - Local AI Agent Skill Manager for macOS</title>
+    <meta name="description" content="SkillBox is a local-first macOS app for managing Codex, Claude, and other AI agent SKILL.md files, with safe GitHub-backed imports, update previews, and runtime deployment.">
+    <meta name="robots" content="index, follow">
     <link rel="canonical" href="https://santosli.github.io/SkillBox/">
     <meta name="theme-color" content="#08111f">
     <link rel="icon" href="assets/skillbox-app-icon.png">
 
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="SkillBox">
-    <meta property="og:title" content="SkillBox - Local skill manager for AI agents">
-    <meta property="og:description" content="Manage SKILL.md-based agent skills locally, review GitHub imports, preview updates, and deploy safely to runtime folders.">
+    <meta property="og:title" content="SkillBox - Local AI Agent Skill Manager for macOS">
+    <meta property="og:description" content="Manage Codex, Claude, and SKILL.md-based agent skills locally, review GitHub imports, preview updates, and deploy safely to runtime folders.">
     <meta property="og:url" content="https://santosli.github.io/SkillBox/">
     <meta property="og:image" content="https://santosli.github.io/SkillBox/assets/skillbox-promo-poster.jpg">
+    <meta property="og:image:width" content="1920">
+    <meta property="og:image:height" content="1080">
     <meta property="og:image:alt" content="SkillBox macOS app dashboard">
 
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="SkillBox - Local skill manager for AI agents">
-    <meta name="twitter:description" content="Local-first skill management, safe imports, remote updates, usage history, and GitHub-backed releases.">
+    <meta name="twitter:title" content="SkillBox - Local AI Agent Skill Manager for macOS">
+    <meta name="twitter:description" content="Local-first skill management for Codex, Claude, and SKILL.md-based AI agent workflows.">
     <meta name="twitter:image" content="https://santosli.github.io/SkillBox/assets/skillbox-promo-poster.jpg">
+    <meta name="twitter:image:alt" content="SkillBox macOS app dashboard and promo poster">
 
     <link rel="preload" href="assets/fonts/space-grotesk-700.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="preload" href="assets/fonts/ibm-plex-sans-400.woff2" as="font" type="font/woff2" crossorigin>
@@ -29,16 +33,44 @@
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
-        "@type": "SoftwareApplication",
-        "name": "SkillBox",
-        "applicationCategory": "DeveloperApplication",
-        "operatingSystem": "macOS",
-        "description": "A local-first macOS app and CLI for managing SKILL.md-based AI agent skills from one managed store.",
-        "url": "https://santosli.github.io/SkillBox/",
-        "downloadUrl": "https://github.com/santosli/SkillBox/releases/latest",
-        "license": "https://github.com/santosli/SkillBox/blob/main/LICENSE",
-        "isAccessibleForFree": true,
-        "codeRepository": "https://github.com/santosli/SkillBox"
+        "@graph": [
+          {
+            "@type": "WebSite",
+            "name": "SkillBox",
+            "url": "https://santosli.github.io/SkillBox/",
+            "description": "The public homepage for SkillBox, a local-first AI agent skill manager for macOS.",
+            "inLanguage": "en"
+          },
+          {
+            "@type": "SoftwareApplication",
+            "name": "SkillBox",
+            "alternateName": "SkillBox skill manager",
+            "applicationCategory": "DeveloperApplication",
+            "applicationSubCategory": "AI agent skill manager",
+            "operatingSystem": "macOS",
+            "softwareRequirements": "macOS",
+            "description": "A local-first macOS app and CLI for managing Codex, Claude, and SKILL.md-based AI agent skills from one managed store.",
+            "url": "https://santosli.github.io/SkillBox/",
+            "downloadUrl": "https://github.com/santosli/SkillBox/releases/latest",
+            "installUrl": "https://github.com/santosli/SkillBox/releases/latest",
+            "license": "https://github.com/santosli/SkillBox/blob/main/LICENSE",
+            "isAccessibleForFree": true,
+            "codeRepository": "https://github.com/santosli/SkillBox",
+            "sameAs": [
+              "https://github.com/santosli/SkillBox"
+            ],
+            "image": "https://santosli.github.io/SkillBox/assets/skillbox-promo-poster.jpg",
+            "screenshot": [
+              "https://santosli.github.io/SkillBox/assets/skillbox-dashboard.png",
+              "https://santosli.github.io/SkillBox/assets/skillbox-import-review-crop.png"
+            ],
+            "offers": {
+              "@type": "Offer",
+              "price": 0,
+              "priceCurrency": "USD"
+            }
+          }
+        ]
       }
     </script>
   </head>
@@ -53,6 +85,7 @@
       <nav class="site-nav" aria-label="Primary navigation">
         <a href="#demo">Demo</a>
         <a href="#features">Features</a>
+        <a href="#faq">FAQ</a>
         <a href="#install">Install</a>
         <a href="https://github.com/santosli/SkillBox">GitHub</a>
       </nav>
@@ -177,6 +210,53 @@
             <strong>No silent overwrite</strong>
             <span>Existing runtime content is reviewed instead of being replaced behind your back.</span>
           </div>
+        </div>
+      </section>
+
+      <section class="section faq-section" id="faq" aria-labelledby="faq-title">
+        <div class="section-heading narrow">
+          <p class="eyebrow">FAQ</p>
+          <h2 id="faq-title">Questions people search before installing.</h2>
+          <p>Short answers for developers evaluating SkillBox as their local-first skill manager.</p>
+        </div>
+        <div class="faq-list">
+          <article class="faq-item">
+            <h3>What is SkillBox?</h3>
+            <p>
+              SkillBox is a local-first macOS app and CLI for organizing AI agent skills from one managed library.
+              It focuses on Codex skills, Claude skills, and other SKILL.md-based workflows that need safer import,
+              update, and deployment controls.
+            </p>
+          </article>
+          <article class="faq-item">
+            <h3>Where does SkillBox store skills?</h3>
+            <p>
+              SkillBox stores managed user skills and GitHub-backed remote skills under <code>~/.skillbox</code>.
+              Runtime folders are treated as deployment targets instead of the only source of truth.
+            </p>
+          </article>
+          <article class="faq-item">
+            <h3>Which agent runtimes does SkillBox target?</h3>
+            <p>
+              SkillBox targets local agent runtime folders such as Codex, Claude, and project-local skill roots.
+              The product is built around explicit workspace targets so a single skill library can deploy to the
+              runtimes you actually use.
+            </p>
+          </article>
+          <article class="faq-item">
+            <h3>How are GitHub-backed skill updates reviewed?</h3>
+            <p>
+              GitHub-backed remote skills stay linked to their source and version history. SkillBox previews remote
+              diffs before applying changes, so imports and updates can be reviewed before they touch runtime folders.
+            </p>
+          </article>
+          <article class="faq-item">
+            <h3>Is SkillBox available beyond macOS?</h3>
+            <p>
+              macOS is the current release target. SkillBox is open source, but the packaged desktop app and signed
+              releases are currently focused on macOS.
+            </p>
+          </article>
         </div>
       </section>
 

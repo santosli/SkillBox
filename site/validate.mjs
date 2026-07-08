@@ -33,13 +33,40 @@ const html = await readFile(path.join(root, "site", "index.html"), "utf8");
 const workflow = await readFile(path.join(root, ".github", "workflows", "pages.yml"), "utf8");
 const readme = await readFile(path.join(root, "README.md"), "utf8");
 const readmeZh = await readFile(path.join(root, "README.zh-CN.md"), "utf8");
+const jsonLdMatch = html.match(/<script type="application\/ld\+json">\s*([\s\S]*?)\s*<\/script>/);
+let jsonLd = null;
+try {
+  jsonLd = jsonLdMatch ? JSON.parse(jsonLdMatch[1]) : null;
+} catch {
+  jsonLd = null;
+}
+const graph = Array.isArray(jsonLd?.["@graph"]) ? jsonLd["@graph"] : [];
+const softwareApplication = graph.find((entry) => entry?.["@type"] === "SoftwareApplication");
+const website = graph.find((entry) => entry?.["@type"] === "WebSite");
 
-expect("title tag present", /<title>SkillBox - Local skill manager for AI agents<\/title>/.test(html));
-expect("description meta present", /<meta name="description" content="[^"]*SkillBox[^"]*">/.test(html));
+expect("SEO title uses searchable macOS agent intent", /<title>SkillBox - Local AI Agent Skill Manager for macOS<\/title>/.test(html));
+expect("robots meta allows indexing", /<meta name="robots" content="index, follow">/.test(html));
+expect(
+  "description mentions SkillBox, local-first agents, Codex, Claude, SKILL.md, and GitHub updates",
+  /<meta name="description" content="[^"]*SkillBox[^"]*local-first[^"]*Codex[^"]*Claude[^"]*SKILL\.md[^"]*GitHub[^"]*">/.test(html)
+);
 expect("canonical URL present", /<link rel="canonical" href="https:\/\/santosli\.github\.io\/SkillBox\/">/.test(html));
 expect("Open Graph image present", /<meta property="og:image" content="https:\/\/santosli\.github\.io\/SkillBox\/assets\/skillbox-promo-poster\.jpg">/.test(html));
+expect("Open Graph image dimensions present", /<meta property="og:image:width" content="1920">/.test(html) && /<meta property="og:image:height" content="1080">/.test(html));
 expect("Twitter card present", /<meta name="twitter:card" content="summary_large_image">/.test(html));
-expect("JSON-LD SoftwareApplication present", /"@type": "SoftwareApplication"/.test(html));
+expect("Twitter image alt present", /<meta name="twitter:image:alt" content="SkillBox macOS app dashboard and promo poster">/.test(html));
+expect("FAQ section includes at least four question items", /<section class="section faq-section" id="faq"/.test(html) && (html.match(/class="faq-item"/g) ?? []).length >= 4);
+expect("FAQ mentions agent search terms", /Codex skills/.test(html) && /Claude skills/.test(html) && /SKILL\.md/.test(html) && /local-first/.test(html) && /GitHub-backed remote skills/.test(html));
+expect("JSON-LD parses", Boolean(jsonLd));
+expect("JSON-LD SoftwareApplication present", Boolean(softwareApplication));
+expect("JSON-LD WebSite present", Boolean(website));
+expect(
+  "JSON-LD includes stable software SEO fields",
+  softwareApplication?.applicationSubCategory === "AI agent skill manager"
+    && softwareApplication?.softwareRequirements === "macOS"
+    && softwareApplication?.offers?.["@type"] === "Offer"
+    && softwareApplication?.offers?.price === 0
+);
 expect("JSON-LD does not hardcode softwareVersion", !/"softwareVersion"\s*:/.test(html));
 expect("video embed uses controls and metadata preload", /<video controls preload="metadata" poster="assets\/skillbox-promo-poster\.jpg"/.test(html));
 expect("download CTA uses latest release", /https:\/\/github\.com\/santosli\/SkillBox\/releases\/latest/.test(html));
