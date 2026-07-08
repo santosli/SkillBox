@@ -105,7 +105,7 @@ jobs:
         with:
           projectPath: apps/desktop
           tauriScript: npm run tauri
-          includeUpdaterJson: false
+          uploadUpdaterJson: false
           args: --target universal-apple-darwin --bundles app,dmg
 
       - name: Verify signed DMG
