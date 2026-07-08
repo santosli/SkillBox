@@ -1,6 +1,6 @@
 # SkillBox
 
-> 管理本地多个 agent runtime 中的 skills。
+> 管理本地 `SKILL.md` agent runtimes 中的 skills。
 
 [English](README.md) | 简体中文
 
@@ -10,11 +10,11 @@
 ![平台](https://img.shields.io/badge/platform-macOS-111827)
 ![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB)
 ![Rust](https://img.shields.io/badge/Rust-core-B7410E)
-![Node.js](https://img.shields.io/badge/Node.js-legacy%20CLI-43853D)
+![Frontend](https://img.shields.io/badge/Frontend-React%20%2B%20Vite-61DAFB)
 
 ![SkillBox dashboard](docs/screenshots/skillbox-dashboard.png)
 
-SkillBox 是一个 local-first 的 macOS 应用和 CLI，用来管理基于 `SKILL.md` 的 skills、规则、提示词和能力包，同时避免把某一个 agent runtime 当作唯一真相源。
+SkillBox 是一个 local-first 的 macOS 桌面应用，带 Rust core/CLI，用来管理基于 `SKILL.md` 的 skills、规则、提示词和能力包，同时避免把某一个 agent runtime 当作唯一真相源。
 
 当前版本：`v0.3.9`。SkillBox 现在已经可以用于本地 skill 管理，但仍是早期软件。重要 skills 请保留备份，并在应用每一次文件系统变更前先 review。
 
@@ -46,7 +46,7 @@ Skill card 会把调用次数、更新状态、标签、收藏状态和已部署
 
 ![SkillBox workspaces](docs/screenshots/skillbox-workspaces.png)
 
-Workspaces 视图会跟踪全局和项目局部 skill roots，包括 Codex CLI、Claude Code、Codex App 和项目自己的 runtime。
+Workspaces 视图会跟踪全局和项目局部 `SKILL.md` roots，包括 Codex CLI、Codex App、Claude Code skill folders 和项目自己的 runtime。
 
 ![SkillBox history](docs/screenshots/skillbox-history.png)
 
@@ -85,7 +85,7 @@ Runtime 目录只是部署目标：
 - 项目局部 `.agents/skills`
 - 项目局部 `.claude/skills`
 
-后续支持 Claude、OpenClaw、Cursor、Claude Code、Copilot 和其它原生格式时，应通过明确的 agent adapter 表达，而不是把 agent-specific 行为硬编码在 UI 里。
+后续支持 Claude、OpenClaw、Cursor、Claude Code、Copilot 和其它非 `SKILL.md` 原生格式时，应通过明确的 agent adapter 表达，而不是把 agent-specific 行为硬编码在 UI 里。
 
 ## 功能
 

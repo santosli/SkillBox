@@ -71,6 +71,8 @@ expect("JSON-LD does not hardcode softwareVersion", !/"softwareVersion"\s*:/.tes
 expect("video embed uses controls and metadata preload", /<video controls preload="metadata" poster="assets\/skillbox-promo-poster\.jpg"/.test(html));
 expect("download CTA uses latest release", /https:\/\/github\.com\/santosli\/SkillBox\/releases\/latest/.test(html));
 expect("Homebrew command present", /brew install --cask skillbox/.test(html));
+expect("README badges do not advertise legacy Node CLI", !/Node\.js-legacy%20CLI|legacy CLI/.test(readme) && !/Node\.js-legacy%20CLI|legacy CLI/.test(readmeZh));
+expect("README badges describe frontend tooling", /Frontend-React%20%2B%20Vite/.test(readme) && /Frontend-React%20%2B%20Vite/.test(readmeZh));
 
 expect("workflow uses configure-pages", /uses: actions\/configure-pages@v6/.test(workflow));
 expect("workflow uses upload-pages-artifact", /uses: actions\/upload-pages-artifact@v5/.test(workflow));

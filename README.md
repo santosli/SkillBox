@@ -1,6 +1,6 @@
 # SkillBox
 
-> Manage agent skills across local runtimes.
+> Local-first skill management for `SKILL.md` agent runtimes.
 
 English | [简体中文](README.zh-CN.md)
 
@@ -10,11 +10,11 @@ English | [简体中文](README.zh-CN.md)
 ![Platform](https://img.shields.io/badge/platform-macOS-111827)
 ![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB)
 ![Rust](https://img.shields.io/badge/Rust-core-B7410E)
-![Node.js](https://img.shields.io/badge/Node.js-legacy%20CLI-43853D)
+![Frontend](https://img.shields.io/badge/Frontend-React%20%2B%20Vite-61DAFB)
 
 ![SkillBox dashboard](docs/screenshots/skillbox-dashboard.png)
 
-SkillBox is a local-first macOS app and CLI for managing `SKILL.md`-based skills, rules, prompts, and capability packs without treating any one agent runtime as the source of truth.
+SkillBox is a local-first macOS desktop app with a Rust core and CLI for managing `SKILL.md`-based skills, rules, prompts, and capability packs without treating any one agent runtime as the source of truth.
 
 Current release: `v0.3.9`. SkillBox is useful today for local skill management, but it is still early software. Keep backups of important skills, and review each filesystem change before applying it.
 
@@ -46,7 +46,7 @@ The skill detail view collects workspace deployment, usage, version history, sou
 
 ![SkillBox workspaces](docs/screenshots/skillbox-workspaces.png)
 
-The Workspaces view tracks global and project-local skill roots across Codex CLI, Claude Code, Codex App, and project-specific runtimes.
+The Workspaces view tracks global and project-local `SKILL.md` roots across Codex CLI, Codex App, Claude Code skill folders, and project-specific runtimes.
 
 ![SkillBox history](docs/screenshots/skillbox-history.png)
 
@@ -85,7 +85,7 @@ Runtime directories are deployment targets:
 - project-local `.agents/skills`
 - project-local `.claude/skills`
 
-Longer-term support for Claude, OpenClaw, Cursor, Claude Code, Copilot, and other native formats should go through explicit agent adapters rather than hard-coded UI behavior.
+Longer-term support for native Claude, OpenClaw, Cursor, Claude Code, Copilot, and other non-`SKILL.md` formats should go through explicit agent adapters rather than hard-coded UI behavior.
 
 ## Features
 

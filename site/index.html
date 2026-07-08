@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>SkillBox - Local AI Agent Skill Manager for macOS</title>
-    <meta name="description" content="SkillBox is a local-first macOS app for managing Codex, Claude, and other AI agent SKILL.md files, with safe GitHub-backed imports, update previews, and runtime deployment.">
+    <meta name="description" content="SkillBox is a local-first macOS app for managing Codex-style, Claude, and project-local SKILL.md roots, with safe GitHub-backed imports, update previews, and runtime deployment.">
     <meta name="robots" content="index, follow">
     <link rel="canonical" href="https://santosli.github.io/SkillBox/">
     <meta name="theme-color" content="#08111f">
@@ -13,7 +13,7 @@
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="SkillBox">
     <meta property="og:title" content="SkillBox - Local AI Agent Skill Manager for macOS">
-    <meta property="og:description" content="Manage Codex, Claude, and SKILL.md-based agent skills locally, review GitHub imports, preview updates, and deploy safely to runtime folders.">
+    <meta property="og:description" content="Manage Codex-style, Claude, and project-local SKILL.md skills locally, review GitHub imports, preview updates, and deploy safely to runtime folders.">
     <meta property="og:url" content="https://santosli.github.io/SkillBox/">
     <meta property="og:image" content="https://santosli.github.io/SkillBox/assets/skillbox-promo-poster.jpg">
     <meta property="og:image:width" content="1920">
@@ -22,7 +22,7 @@
 
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="SkillBox - Local AI Agent Skill Manager for macOS">
-    <meta name="twitter:description" content="Local-first skill management for Codex, Claude, and SKILL.md-based AI agent workflows.">
+    <meta name="twitter:description" content="Local-first skill management for Codex-style, Claude, and SKILL.md-based AI agent workflows.">
     <meta name="twitter:image" content="https://santosli.github.io/SkillBox/assets/skillbox-promo-poster.jpg">
     <meta name="twitter:image:alt" content="SkillBox macOS app dashboard and promo poster">
 
@@ -49,7 +49,7 @@
             "applicationSubCategory": "AI agent skill manager",
             "operatingSystem": "macOS",
             "softwareRequirements": "macOS",
-            "description": "A local-first macOS app and CLI for managing Codex, Claude, and SKILL.md-based AI agent skills from one managed store.",
+            "description": "A local-first macOS app and Rust CLI for managing Codex-style, Claude, and project-local SKILL.md roots from one managed store.",
             "url": "https://santosli.github.io/SkillBox/",
             "downloadUrl": "https://github.com/santosli/SkillBox/releases/latest",
             "installUrl": "https://github.com/santosli/SkillBox/releases/latest",
@@ -99,7 +99,7 @@
           <h1 id="hero-title">SkillBox</h1>
           <p class="hero-value">Local skill manager for AI agents.</p>
           <p class="hero-support">
-            Keep Codex, Claude, and project skills organized from one local store.
+            Keep Codex-style, Claude, and project-local skills organized from one local store.
             Review GitHub-backed imports and updates before they touch your runtime folders.
           </p>
           <div class="hero-actions" aria-label="Primary actions">
@@ -173,7 +173,7 @@
             <p class="eyebrow">Deploy</p>
             <h2>Deploy to agent runtimes without losing your source of truth</h2>
             <p>
-              SkillBox deploys managed skills into Codex, Claude, and project-local runtime folders
+              SkillBox deploys managed <code>SKILL.md</code> skills into Codex-style, Claude, and project-local runtime folders
               through explicit workspace targets.
             </p>
           </div>
@@ -238,9 +238,9 @@
           <article class="faq-item">
             <h3>Which agent runtimes does SkillBox target?</h3>
             <p>
-              SkillBox targets local agent runtime folders such as Codex, Claude, and project-local skill roots.
-              The product is built around explicit workspace targets so a single skill library can deploy to the
-              runtimes you actually use.
+              SkillBox targets local <code>SKILL.md</code> runtime folders such as <code>.codex/skills</code>,
+              <code>.agents/skills</code>, <code>.claude/skills</code>, and project-local skill roots. The product
+              is built around explicit workspace targets so a single skill library can deploy to the runtimes you use.
             </p>
           </article>
           <article class="faq-item">
