@@ -3,11 +3,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const googleVerificationFile = "googleffb526fcf02488a3.html";
+const googleVerificationToken = `google-site-verification: ${googleVerificationFile}`;
 const requiredFiles = [
   "site/index.html",
   "site/styles.css",
   "site/robots.txt",
   "site/sitemap.xml",
+  `site/${googleVerificationFile}`,
+  `site-dist/${googleVerificationFile}`,
   "site/build.mjs",
   ".github/workflows/pages.yml",
   "docs/promo/skillbox-intro/skillbox-promo.mp4",
@@ -33,6 +37,8 @@ const html = await readFile(path.join(root, "site", "index.html"), "utf8");
 const workflow = await readFile(path.join(root, ".github", "workflows", "pages.yml"), "utf8");
 const readme = await readFile(path.join(root, "README.md"), "utf8");
 const readmeZh = await readFile(path.join(root, "README.zh-CN.md"), "utf8");
+const googleVerificationSource = await readFile(path.join(root, "site", googleVerificationFile), "utf8").catch(() => "");
+const googleVerificationBuilt = await readFile(path.join(root, "site-dist", googleVerificationFile), "utf8").catch(() => "");
 const jsonLdMatch = html.match(/<script type="application\/ld\+json">\s*([\s\S]*?)\s*<\/script>/);
 let jsonLd = null;
 try {
@@ -71,6 +77,8 @@ expect("JSON-LD does not hardcode softwareVersion", !/"softwareVersion"\s*:/.tes
 expect("video embed uses controls and metadata preload", /<video controls preload="metadata" poster="assets\/skillbox-promo-poster\.jpg"/.test(html));
 expect("download CTA uses latest release", /https:\/\/github\.com\/santosli\/SkillBox\/releases\/latest/.test(html));
 expect("Homebrew command present", /brew install --cask skillbox/.test(html));
+expect("Google verification source contains expected token", googleVerificationSource.trim() === googleVerificationToken);
+expect("Google verification build output contains expected token", googleVerificationBuilt.trim() === googleVerificationToken);
 expect("README badges do not advertise legacy Node CLI", !/Node\.js-legacy%20CLI|legacy CLI/.test(readme) && !/Node\.js-legacy%20CLI|legacy CLI/.test(readmeZh));
 expect("README badges describe frontend tooling", /Frontend-React%20%2B%20Vite/.test(readme) && /Frontend-React%20%2B%20Vite/.test(readmeZh));
 
