@@ -29,6 +29,54 @@ The Tauri dev shell loads the Vite dev server at
 `http://127.0.0.1:1420`. Keep that port free because the dev config uses
 `--strictPort`.
 
+## Branch And Agent Workflow
+
+Create complex changes on a `codex/<short-slug>` branch before editing files.
+Do not develop or accumulate a complex change directly on `main`. An existing
+non-`main` branch may be reused when its scope matches the task.
+
+A change is complex when any of the following applies:
+
+- it is a major change under Documentation Expectations;
+- it crosses two or more product layers or module boundaries;
+- it affects persistence or migrations, recovery, trust or security boundaries,
+  destructive filesystem behavior, runtime adapters, signing, release, or
+  distribution;
+- it contains two or more independently verifiable implementation tasks or is
+  expected to require multiple focused commits.
+
+Check `git status --short --branch` first. Create the branch from the latest
+available `main` when the worktree is clean. Never discard or automatically
+stash existing work to satisfy this rule. If current-task changes already exist
+on `main`, create the task branch while preserving them. Stop and report the
+conflict when unrelated changes cannot be isolated safely.
+
+Read-only work and small, single-file changes that do not meet the criteria
+above do not require a task branch. The canonical release automation, which
+explicitly starts from a clean `main`, is the normal exception; feature
+implementation must already have been completed and integrated through a task
+branch. Other exceptions require explicit user authorization.
+
+For agent-assisted complex work, identify independently executable subtasks
+before implementation. Delegate at least one bounded subtask when agent capacity
+is available and file or state ownership does not overlap. The coordinating
+agent owns branch setup, task boundaries, integration, Git operations, full
+verification, and the final report. The main conversation should summarize key
+decisions, progress, and integrated results instead of reproducing every
+subtask's internal process.
+
+Agents share one worktree. Do not assign overlapping files concurrently, and do
+not run concurrent branch switches, staging, commits, merges, releases,
+repository-wide formatting, or bulk generators. Every delegated task must state
+its file scope and acceptance criteria, and the coordinating agent must inspect
+the resulting diff and verification evidence.
+
+Delegation may be skipped when the task is small, strictly sequential, cannot
+be divided without overlapping files or shared mutable state, involves a
+destructive or unique external operation, has no available agent capacity, or
+would cost more to coordinate than to perform directly. Record the reason in
+the task progress update.
+
 ## Test Commands
 
 Run the JavaScript tests:
@@ -72,8 +120,32 @@ For UI changes, also run the app and verify the affected workflow manually.
 
 ## Documentation Expectations
 
-Update docs when a change affects user-visible behavior, workflows, storage,
-schema, release behavior, or long-term architecture. Useful starting points:
+Documentation is part of the definition of done for every major change. Update
+the relevant docs in the same change set as the implementation; do not defer
+them until release preparation.
+
+A change is major when it adds, removes, or materially changes any of the
+following:
+
+- a user-visible workflow, CLI/Tauri contract, or supported runtime;
+- storage layout, SQLite schema, migration, backup, recovery, or compatibility;
+- module boundaries, adapters, source-of-truth rules, trust boundaries, or
+  destructive-operation safeguards;
+- milestone scope, ordering, completion status, or promotion gates;
+- installation, upgrading, signing, release, rollback, or distribution.
+
+Use this mapping to decide which documents must change:
+
+| Change | Required documentation |
+| --- | --- |
+| Milestone scope or status | `docs/roadmap.md` and `docs/implementation-status.md` |
+| Architecture or trust boundary | `docs/architecture.md` and, when the decision is durable, `docs/decisions/*` |
+| Storage, schema, migration, or recovery | `docs/data-model.md` |
+| User workflow or definition of done | `docs/workflows.md` |
+| User-visible feature or release content | `README.md`, `README.zh-CN.md`, and `CHANGELOG.md` as applicable |
+| Development, testing, or release policy | `CONTRIBUTING.md` and the relevant release documentation |
+
+Useful starting points:
 
 - [README.md](README.md)
 - [docs/roadmap.md](docs/roadmap.md)
@@ -86,11 +158,16 @@ schema, release behavior, or long-term architecture. Useful starting points:
 
 The repository installs Git hooks through `npm install`. The pre-commit hook
 checks whether staged implementation or workflow changes need matching docs. If
-you have verified that no docs update is needed, commit with:
+you have verified that a small internal change does not affect any category
+above, commit with:
 
 ```sh
 SKILLBOX_SKIP_DOCS_CHECK=1 git commit -m "type(scope): summary"
 ```
+
+Do not use this escape hatch for a major change. A major change is not complete,
+must not advance a roadmap milestone, and must not be released until its docs
+and verification evidence are current.
 
 ## Commit Messages
 
