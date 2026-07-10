@@ -9,6 +9,13 @@ version tags such as `v0.3.0`.
 
 - No unreleased changes.
 
+## 0.4.0
+
+- Make upgrades safer with ordered SQLite migrations, automatic pre-migration backups, and post-migration integrity checks.
+- Persist Dashboard favorites and tags in SQLite, including automatic migration from existing desktop local storage.
+- Add Managed store health checks in Settings and CLI, with accurate symlink diagnostics and explicit cleanup of stale deployment records without deleting runtime files.
+- Expand operation history across imports, deployments, skill type and workspace changes, Git synchronization, usage hook setup, and Doctor cleanup attempts.
+
 ## 0.3.10
 
 - Require preview confirmation before installing remote GitHub skills, so users review the incoming `SKILL.md` diff before SkillBox writes managed state or deploys anything.
