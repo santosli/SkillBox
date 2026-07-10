@@ -98,6 +98,8 @@ Runtime 目录只是部署目标：
 - 通过共享 Git 仓库同步 user skills，并在桌面端提供 diff review 和 Conventional Commit message 生成。
 - 通过 Codex App、Codex CLI、Claude Code CLI hooks 记录 usage events，但不保存完整聊天正文。
 - 从 SQLite 记录中浏览桌面 operation 和 usage history。
+- 把用户设置的 favorites 和 tags 持久化到 managed SQLite store，而不是只保存在浏览器状态中。
+- 在 Settings 或 Rust CLI 中运行只读健康检查，核对数据库、managed skills、deployments、workspaces 和 import backups。
 - 从 GitHub Releases 检查已签名的 macOS app 更新，并只在用户确认后安装。
 
 ## 依赖

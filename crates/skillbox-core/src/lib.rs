@@ -69,11 +69,13 @@ const USAGE_METADATA_CONTENT_KEYS: &[&str] = &[
 ];
 
 mod db;
+mod doctor;
 mod fsutil;
 mod git_sync;
 mod hooks;
 mod import;
 mod marketplace;
+mod metadata;
 mod operations;
 mod paths;
 mod remote;
@@ -84,11 +86,13 @@ mod usage;
 mod workspaces;
 
 pub(crate) use db::*;
+pub use doctor::*;
 pub(crate) use fsutil::*;
 pub use git_sync::*;
 pub use hooks::*;
 pub use import::*;
 pub(crate) use marketplace::*;
+pub use metadata::*;
 pub use operations::*;
 pub use paths::*;
 pub use remote::*;

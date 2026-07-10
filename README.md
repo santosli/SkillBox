@@ -98,6 +98,8 @@ Longer-term support for native Claude, OpenClaw, Cursor, Claude Code, Copilot, a
 - Sync user skills through a shared Git repository with desktop diff review and Conventional Commit message generation.
 - Record usage events from Codex App, Codex CLI, and Claude Code CLI hooks without storing full chat transcripts.
 - Browse desktop operation and usage history from SQLite-backed records.
+- Persist user favorites and tags in the managed SQLite store instead of browser-only state.
+- Run read-only health checks for the database, managed skills, deployments, workspaces, and import backups from Settings or the Rust CLI.
 - Check signed macOS app updates from GitHub Releases and install them only
   after user confirmation.
 

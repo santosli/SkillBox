@@ -26,7 +26,7 @@ pub(crate) fn usage_hook_statuses_for_home_and_managed_root(
 }
 
 pub fn install_usage_hook(target: UsageHookTarget) -> Result<UsageHookInstallResult> {
-    install_usage_hook_for_home_and_managed_root(target, home_dir(), default_managed_root())
+    install_usage_hook_for_home_with_audit(target, home_dir(), default_managed_root())
 }
 
 pub fn install_usage_hook_for_home(
@@ -87,6 +87,42 @@ pub(crate) fn install_usage_hook_for_home_and_managed_root(
         backup_path,
         status: usage_hook_status_for_home(target, home, &database_path)?,
     })
+}
+
+pub(crate) fn install_usage_hook_for_home_with_audit(
+    target: UsageHookTarget,
+    home: impl AsRef<Path>,
+    managed_root: impl AsRef<Path>,
+) -> Result<UsageHookInstallResult> {
+    let home = home.as_ref().to_path_buf();
+    let managed_root = managed_root.as_ref().to_path_buf();
+    audited_operation(
+        OperationStart {
+            operation_type: "install_usage_hook".to_string(),
+            actor: "core".to_string(),
+            entity_type: "agent_config".to_string(),
+            entity_name: format!("{target:?}"),
+            summary: "Install usage hook".to_string(),
+            payload: serde_json::json!({"target": target}),
+        },
+        &managed_root,
+        || install_usage_hook_for_home_and_managed_root(target, &home, &managed_root),
+        |result| {
+            (
+                if result.installed {
+                    format!("Installed {} usage hook", result.status.label)
+                } else {
+                    format!("{} usage hook already installed", result.status.label)
+                },
+                serde_json::json!({
+                    "target": result.target,
+                    "configPath": result.status.config_path,
+                    "backupPath": result.backup_path,
+                    "installed": result.installed
+                }),
+            )
+        },
+    )
 }
 
 pub fn parse_usage_hook_target(value: &str) -> Result<UsageHookTarget> {

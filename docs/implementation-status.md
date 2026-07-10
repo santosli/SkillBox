@@ -25,12 +25,39 @@
 - Implemented SQLite-backed workspace registry for global and project-local skills roots, including `.codex/skills`, `.agents/skills`, `.claude/skills`, scan-time auto registration, imported skill counts, manual add, manual forget, Rust CLI commands, Tauri commands, and a desktop Workspaces page with per-workspace skill review/import.
 - Implemented import records and import revert in Rust core, Rust CLI, Tauri commands, and Skill Detail UI, including backup restoration, conservative legacy reconciliation, multi-workspace blocking, and warning/danger confirmation states.
 - Added signed macOS app update checks and user-confirmed install/restart through the Tauri updater plugin, plus release workflow assets for updater archives, signatures, and `latest.json`.
+- Added ordered, transactional Rust SQLite migrations, consistent pre-migration backups for existing databases, schema version tracking, and integrity validation.
+- Moved dashboard favorites and user-edited tags from browser-only storage into SQLite, with a one-time desktop migration for existing local metadata.
+- Added a read-only Doctor workflow in Rust core, Rust CLI, Tauri, and desktop Settings for checking schema/integrity, managed skill layouts, remote `current` links, deployments, workspaces, import backups, and stale metadata.
+- Extended operation auditing across direct/reviewed imports, deploy/undeploy, skill type changes, workspace add/forget, user-skills Git remote/sync, and usage hook injection, including failed attempts.
 - Added Rust crate scaffolding for the planned Tauri/Rust architecture.
 - Verified the desktop shell in browser preview at `http://127.0.0.1:1420/`.
 
 ## Next Implementation Targets
 
-- Add SQLite migrations and FTS search in the Rust core.
-- Add import review screens for unknown existing skills.
-- Add copy snapshot deployment mode after symlink mode is stable.
-- Use workspace registry as the deploy target picker when deploy workflows move into the desktop UI.
+The `0.4` implementation scope is complete; release status remains separate
+from implementation status and is tracked in `docs/release.md`. The next milestones follow
+[the versioned evolution path](roadmap.md#versioned-evolution-path):
+
+### 0.5 — Discovery And Source Trust
+
+- Add FTS-backed search across skills, operations, and usage history.
+- Add remote source provenance and trust classification without treating
+  popularity as verification.
+- Keep search and trust results aligned across Rust core, CLI, Tauri, and desktop.
+
+### 0.6 — Runtime Profiles And Portability
+
+- Add Rust-owned runtime profiles for additional `SKILL.md` roots, precedence,
+  and frontmatter dialects.
+- Add portability checks and pre-deployment compatibility reporting.
+
+### 0.7 And Later
+
+- Add safe inbound Git status and reviewed fast-forward updates for the shared
+  user-skills repository.
+- Add copy-snapshot deployment and stronger restore/audit workflows.
+- Complete product hardening, release-candidate qualification, and the explicit
+  1.0 promotion gates defined in the roadmap.
+
+When implementation changes milestone status, scope, or ordering, update this
+file and `docs/roadmap.md` in the same change set.

@@ -35,6 +35,10 @@ import {
 } from './dashboardMetadata.js';
 import { normalizeHistory } from './historyEntries.js';
 import {
+  normalizeDoctorReport,
+  normalizeStaleDeploymentRepairResult
+} from './doctor.js';
+import {
   normalizeImportCandidate,
   visibleImportCandidates
 } from './importCandidates.js';
@@ -52,8 +56,7 @@ import {
   toggleImportCandidateSelection
 } from './importFlow.js';
 import {
-  dashboardFavoriteStorageKey,
-  dashboardTagStorageKey,
+  clearLegacyDashboardMetadata,
   normalizePreferences,
   previewPreferenceStorageKey,
   previewRemoteUpdateTimeoutStorageKey,
@@ -79,6 +82,11 @@ import {
   normalizeRemoteVersionPreview,
   remoteVersionActionLabel
 } from './remoteSkills.js';
+import {
+  legacySkillUserMetadataUpdates,
+  mergeSkillUserMetadataRow,
+  normalizeSkillUserMetadata
+} from './skillUserMetadata.js';
 import {
   compactPath,
   defaultSkillStatus,
@@ -123,6 +131,8 @@ import {
 
 const autoRefreshBlockedStatuses = new Set([
   'checking',
+  'checking_health',
+  'repairing_stale_deployments',
   'importing',
   'loading',
   'preparing_sync',
@@ -218,6 +228,7 @@ export default function App() {
   });
   const [userSkillsGit, setUserSkillsGit] = useState(normalizeUserSkillsGitStatus(null));
   const [usageHooks, setUsageHooks] = useState(normalizeUsageHookStatuses(null));
+  const [doctorReport, setDoctorReport] = useState(normalizeDoctorReport(null));
   const [remoteSkillUpdates, setRemoteSkillUpdates] = useState(normalizeRemoteSkillUpdates(null));
   const [lastStatusCheckedAt, setLastStatusCheckedAt] = useState('');
   const [syncDialog, setSyncDialog] = useState({
@@ -483,17 +494,31 @@ export default function App() {
         gitStatus,
         cachedRemoteUpdatesResult,
         workspaceRows,
-        usageHookRows
+        usageHookRows,
+        storedSkillUserMetadata
       ] = await Promise.all([
         invoke('managed_state'),
         invoke('managed_preferences').catch(() => null),
         invoke('user_skills_git_status').catch(() => null),
         invoke('cached_remote_skill_updates').catch(() => null),
         invoke('list_workspaces').catch(() => []),
-        invoke('usage_hook_statuses').catch(() => [])
+        invoke('usage_hook_statuses').catch(() => []),
+        invoke('list_skill_user_metadata').catch(() => null)
       ]);
       const managedSkills = state.skills?.map(normalizeSkill) || [];
       const cachedRemoteUpdates = normalizeRemoteSkillUpdates(cachedRemoteUpdatesResult);
+      let resolvedSkillUserMetadata = storedSkillUserMetadata;
+      const legacyMetadata = legacySkillUserMetadataUpdates(
+        readDashboardFavorites(),
+        readDashboardTagOverrides()
+      );
+      if (resolvedSkillUserMetadata && legacyMetadata.length > 0) {
+        resolvedSkillUserMetadata = await invoke('migrate_legacy_skill_user_metadata', {
+          items: legacyMetadata
+        });
+        clearLegacyDashboardMetadata();
+      }
+      const skillUserMetadataState = normalizeSkillUserMetadata(resolvedSkillUserMetadata || []);
 
       setSkills(managedSkills);
       setWorkspaces(normalizeWorkspaces(workspaceRows));
@@ -502,6 +527,10 @@ export default function App() {
       setPreferences(normalizePreferences(storedPreferences));
       setUserSkillsGit(normalizeUserSkillsGitStatus(gitStatus));
       setRemoteSkillUpdates(cachedRemoteUpdates);
+      if (resolvedSkillUserMetadata) {
+        setFavoriteNames(skillUserMetadataState.favoriteNames);
+        setDashboardTagOverrides(skillUserMetadataState.tagOverrides);
+      }
       setLastStatusCheckedAt(cachedRemoteUpdates.checkedAt || '');
       setIsFirstUse(Boolean(state.isFirstUse ?? state.is_first_use));
       setSelectedName((currentName) =>
@@ -575,6 +604,57 @@ export default function App() {
       if (!automatic) {
         setError(nextStatus.message);
       }
+    }
+  }
+
+  async function runHealthCheck() {
+    setStatus('checking_health');
+    setError('');
+
+    if (!window.__TAURI_INTERNALS__) {
+      setDoctorReport(
+        normalizeDoctorReport({
+          checked_at: new Date().toISOString(),
+          schema_version: 3,
+          latest_schema_version: 3,
+          healthy: true,
+          repair_preview: true,
+          issues: []
+        })
+      );
+      setStatus('prototype');
+      return;
+    }
+
+    try {
+      const report = await invoke('run_doctor', {
+        request: { repair_preview: true }
+      });
+      setDoctorReport(normalizeDoctorReport(report));
+      setStatus('ready');
+    } catch (doctorError) {
+      setError(doctorError.message || String(doctorError));
+      setStatus('ready');
+    }
+  }
+
+  async function repairStaleDeploymentRecords() {
+    setStatus('repairing_stale_deployments');
+    setError('');
+
+    try {
+      const result = window.__TAURI_INTERNALS__
+        ? await invoke('repair_stale_deployment_records')
+        : { removed_deployment_records: 1 };
+      const { removedDeploymentRecords } = normalizeStaleDeploymentRepairResult(result);
+      const recordLabel = removedDeploymentRecords === 1 ? 'record' : 'records';
+      setNotice(
+        `Cleaned ${removedDeploymentRecords} stale SQLite deployment ${recordLabel}. No runtime files were deleted.`
+      );
+      await runHealthCheck();
+    } catch (repairError) {
+      setError(repairError.message || String(repairError));
+      setStatus(window.__TAURI_INTERNALS__ ? 'ready' : 'prototype');
     }
   }
 
@@ -2501,41 +2581,62 @@ export default function App() {
     }
   }
 
-  function toggleDashboardFavorite(skillName) {
-    setFavoriteNames((current) => {
-      const next = current.includes(skillName)
-        ? current.filter((name) => name !== skillName)
-        : [...current, skillName].sort((left, right) => left.localeCompare(right));
+  async function toggleDashboardFavorite(skillName) {
+    const previous = favoriteNames;
+    const favorite = !favoriteNames.includes(skillName);
+    const next = favorite
+      ? [...favoriteNames, skillName].sort((left, right) => left.localeCompare(right))
+      : favoriteNames.filter((name) => name !== skillName);
+    setFavoriteNames(next);
 
-      try {
-        window.localStorage.setItem(dashboardFavoriteStorageKey, JSON.stringify(next));
-      } catch {
-        // Favorites are a local dashboard preference; if storage is unavailable, keep session state.
-      }
-
-      return next;
-    });
+    if (!window.__TAURI_INTERNALS__) return;
+    try {
+      const persisted = await invoke('set_skill_user_metadata', {
+        request: {
+          skill_name: skillName,
+          favorite,
+          tags: dashboardTagOverrides[skillName] || []
+        }
+      });
+      const authoritative = mergeSkillUserMetadataRow(
+        next,
+        dashboardTagOverrides,
+        persisted
+      );
+      setFavoriteNames(authoritative.favoriteNames);
+      setDashboardTagOverrides(authoritative.tagOverrides);
+    } catch (metadataError) {
+      setFavoriteNames(previous);
+      setError(metadataError.message || String(metadataError));
+    }
   }
 
-  function updateDashboardSkillTags(skillName, tags) {
+  async function updateDashboardSkillTags(skillName, tags) {
     if (!skillName) {
       return;
     }
 
-    setDashboardTagOverrides((current) => {
-      const next = {
-        ...current,
-        [skillName]: normalizeEditableTags(tags)
-      };
+    const previous = dashboardTagOverrides;
+    const normalizedTags = normalizeEditableTags(tags);
+    const next = { ...dashboardTagOverrides, [skillName]: normalizedTags };
+    setDashboardTagOverrides(next);
 
-      try {
-        window.localStorage.setItem(dashboardTagStorageKey, JSON.stringify(next));
-      } catch {
-        // Tags are a local dashboard preference; if storage is unavailable, keep session state.
-      }
-
-      return next;
-    });
+    if (!window.__TAURI_INTERNALS__) return;
+    try {
+      const persisted = await invoke('set_skill_user_metadata', {
+        request: {
+          skill_name: skillName,
+          favorite: favoriteNames.includes(skillName),
+          tags: normalizedTags
+        }
+      });
+      const authoritative = mergeSkillUserMetadataRow(favoriteNames, next, persisted);
+      setFavoriteNames(authoritative.favoriteNames);
+      setDashboardTagOverrides(authoritative.tagOverrides);
+    } catch (metadataError) {
+      setDashboardTagOverrides(previous);
+      setError(metadataError.message || String(metadataError));
+    }
   }
 
   async function saveUserSkillsGitRemote(remoteUrl) {
@@ -2801,12 +2902,15 @@ export default function App() {
         {page === 'settings' ? (
           <SettingsPage
             appUpdate={appUpdate}
+            doctorReport={doctorReport}
             paths={paths}
             preferences={preferences}
             status={status}
             usageHooks={usageHooks}
             userSkillsGit={userSkillsGit}
             onCheckAppUpdate={() => checkAppUpdate()}
+            onRunDoctor={runHealthCheck}
+            onRepairStaleDeployments={repairStaleDeploymentRecords}
             onInstallAppUpdate={installAppUpdate}
             onOpenUsageHookConfig={openUsageHookConfig}
             onInstallUsageHook={installUsageHook}

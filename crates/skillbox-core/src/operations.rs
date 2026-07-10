@@ -1,5 +1,81 @@
 use crate::*;
 
+pub(crate) struct AuditedOperationOutcome {
+    pub status: OperationStatus,
+    pub summary: String,
+    pub error: Option<String>,
+    pub payload: serde_json::Value,
+}
+
+pub(crate) fn audited_operation<T, Action, Success>(
+    request: OperationStart,
+    managed_root: &Path,
+    action: Action,
+    success: Success,
+) -> Result<T>
+where
+    Action: FnOnce() -> Result<T>,
+    Success: FnOnce(&T) -> (String, serde_json::Value),
+{
+    audited_operation_with_outcome(request, managed_root, action, |result| {
+        let (summary, payload) = success(result);
+        AuditedOperationOutcome {
+            status: OperationStatus::Succeeded,
+            summary,
+            error: None,
+            payload,
+        }
+    })
+}
+
+pub(crate) fn audited_operation_with_outcome<T, Action, Outcome>(
+    request: OperationStart,
+    managed_root: &Path,
+    action: Action,
+    outcome: Outcome,
+) -> Result<T>
+where
+    Action: FnOnce() -> Result<T>,
+    Outcome: FnOnce(&T) -> AuditedOperationOutcome,
+{
+    let failure_summary = format!("{} failed", request.summary);
+    let failure_payload = request.payload.clone();
+    let operation = start_operation(request, managed_root)?;
+
+    match action() {
+        Ok(result) => {
+            let outcome = outcome(&result);
+            finish_operation(
+                OperationFinish {
+                    id: operation.id,
+                    status: outcome.status,
+                    summary: outcome.summary,
+                    error: outcome.error,
+                    payload: outcome.payload,
+                },
+                managed_root,
+            )?;
+            Ok(result)
+        }
+        Err(error) => {
+            let log_result = finish_operation(
+                OperationFinish {
+                    id: operation.id,
+                    status: OperationStatus::Failed,
+                    summary: failure_summary,
+                    error: Some(error.clone()),
+                    payload: failure_payload,
+                },
+                managed_root,
+            );
+            match log_result {
+                Ok(_) => Err(error),
+                Err(log_error) => Err(format!("{error} (operation log failed: {log_error})")),
+            }
+        }
+    }
+}
+
 pub fn start_operation(
     request: OperationStart,
     managed_root: impl AsRef<Path>,

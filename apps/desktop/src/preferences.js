@@ -65,3 +65,12 @@ export function readDashboardTagOverrides() {
     return {};
   }
 }
+
+export function clearLegacyDashboardMetadata() {
+  try {
+    window.localStorage.removeItem(dashboardFavoriteStorageKey);
+    window.localStorage.removeItem(dashboardTagStorageKey);
+  } catch {
+    // SQLite is authoritative after migration; unavailable browser storage needs no cleanup.
+  }
+}

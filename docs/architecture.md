@@ -42,6 +42,9 @@ React UI
 - `managed_state` -> `skillbox_core::managed_state`
 - `managed_preferences` -> `skillbox_core::managed_preferences`
 - `set_skip_local_import_confirmation` -> `skillbox_core::set_skip_local_import_confirmation`
+- `list_skill_user_metadata` -> `skillbox_core::list_skill_user_metadata`
+- `set_skill_user_metadata` -> `skillbox_core::set_skill_user_metadata`
+- `migrate_legacy_skill_user_metadata` -> `skillbox_core::migrate_legacy_skill_user_metadata`
 - `scan_skills` -> `skillbox_core::scan_skill_roots`
 - `scan_import_candidates` -> `skillbox_core::scan_import_candidates`
 - `scan_workspace_import_candidates` -> `skillbox_core::scan_import_candidates` scoped to one workspace root
@@ -60,6 +63,7 @@ React UI
 - `preview_remote_version_change` -> `skillbox_core::preview_remote_version_change`
 - `apply_remote_version_change` -> `skillbox_core::apply_remote_version_change`
 - `list_operations` -> `skillbox_core::list_operations`
+- `run_doctor` -> `skillbox_core::run_doctor`
 - `list_history` -> `skillbox_core::list_history`
 - `record_skill_usage` -> `skillbox_core::record_skill_usage`
 - `usage_hook_statuses` -> `skillbox_core::usage_hook_statuses`
@@ -91,6 +95,8 @@ cargo run -p skillbox-cli --offline -- <command>
 - `usage.rs` usage 事件规范化与聚合统计
 - `hooks.rs` agent hook 注入与 transcript 解析
 - `operations.rs` operation 与 history 记录
+- `metadata.rs` 用户 favorites/tags 的 SQLite 持久化和 legacy desktop metadata 迁移
+- `doctor.rs` managed store、SQLite、deployment、workspace 和 backup 的只读健康检查
 - `db.rs` SQLite 打开、初始化、索引与偏好存取
 - `fsutil.rs` 文件复制、symlink、哈希等底层工具
 - `tests.rs` crate 级测试
@@ -105,7 +111,9 @@ cargo run -p skillbox-cli --offline -- <command>
 - symlink 部署和部署索引。
 - import backup 与 source 替换为 symlink。
 - GitHub install preview/apply, GitHub-only remote source search, manual binding, update check, version listing, diff preview, update/rollback apply, and operation logging.
-- SQLite 基础表初始化和索引写入。
+- SQLite schema migration、升级前备份、完整性校验、基础表和索引写入。
+- 用户 favorites/tags 的 SQLite 持久化和桌面 legacy local-storage 迁移。
+- managed store、deployment、workspace、import backup 和 metadata 的只读 Doctor 检查。
 - 用户偏好读取与写入。
 - skill usage 事件记录、聚合统计和 agent hook 注入配置。
 - 未来应承载 agent adapter registry 和跨 agent 的规范化扫描/部署编排。
@@ -162,12 +170,15 @@ home-level agent root，`user` workspace 表示项目局部 root；React 只展�
 
 - Rust core 已经是桌面应用的主要后端。
 - Rust CLI 有 `init`、`version`、`paths`、`scan`、`parse-github-url`、`install-preview`、`install`、`import`、`deploy`、`user-skills-status`、`sync-user-skills`、`check-remote-updates`，并保留 `check-updates` 和 `rollback` 兼容别名。
-- Rust CLI 有 `remote-source-candidates`、`remote-source-preview`、`bind-remote-source`、`remote-versions`、`remote-preview-change`、`remote-apply-change`、`usage-record`、`usage-hook`、`usage-hook-status`、`usage-hook-install` 和 `operations`。
+- Rust CLI 有 `remote-source-candidates`、`remote-source-preview`、`bind-remote-source`、`remote-versions`、`remote-preview-change`、`remote-apply-change`、`usage-record`、`usage-hook`、`usage-hook-status`、`usage-hook-install`、`doctor` 和 `operations`。
 - Rust CLI 有 `workspaces`、`workspace-scan`、`workspace-add`、`workspace-forget` 来管理 workspace registry。
 - Rust core 和 Tauri 已覆盖 `~/.skillbox/user-skills` 的共享 remote Git 同步。
 - Rust core 已覆盖 remote skill 的 GitHub install preview/apply、GitHub update check、source binding、diff preview、update/rollback apply 和 operation log。
 - Rust core 和 Tauri 已覆盖 usage stats 显式上报，以及 Codex App、Codex CLI、Claude Code CLI 的 Stop hook 注入入口。
 - Tauri desktop 已覆盖 macOS app update check 和用户确认后的 install/restart；React 不直接处理 updater asset URL、签名或安装。
+- SQLite schema 已由有序 transaction migrations 管理；已有数据库升级前生成一次一致性 backup，升级后执行 integrity check。
+- Dashboard favorites/tags 已由 SQLite 持久化；桌面只在升级时读取一次 legacy local-storage metadata。
+- Rust core、CLI、Tauri 和 Settings 已提供只读 Doctor workflow，并为主要 managed-store/runtime/Git/workspace/hook mutations 写 operation history。
 - agent support 当前主要是 `SKILL.md` / Codex-style roots，尚未覆盖 Claude、OpenClaw、Cursor、Claude Code、Copilot 的原生格式。
 - legacy Node CLI/core 已移除；旧 Node MVP 写入的 managed store 目录和 `source.json` 字段仍按兼容规则读取。
 
@@ -175,6 +186,5 @@ home-level agent root，`user` workspace 表示项目局部 root；React 只展�
 
 - UI 和 CLI 都只通过 Rust core 执行业务逻辑。
 - 增加 agent adapter registry，让 Claude、Codex、OpenClaw、Cursor、Claude Code、Copilot 等 runtime 通过同一 managed store 管理。
-- SQLite schema 由 Rust migration 管理，并兼容读取旧 MVP 已写入的数据。
 
 本文件不记录逐步操作和字段细节；workflow 看 `docs/workflows.md`，存储字段看 `docs/data-model.md`。

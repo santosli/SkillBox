@@ -348,7 +348,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 触发条件：
 
 - Rust core 执行会改变 managed store、runtime、SQLite、Git state 或偏好设置的动作。
-- 当前 remote source bind、remote update apply、remote rollback apply 必须写 operation log；后续其它 side-effect workflow 接入同一能力。
+- 当前 direct/reviewed import、deploy、undeploy、skill type change、import revert、remote install/source bind/update/rollback、workspace add/forget、user-skills Git remote/sync 和 usage hook injection 必须写 operation log。
 - Rust CLI 入口：`operations`。
 - Tauri command：`list_operations`。
 - Tauri command：`list_history`。
@@ -361,6 +361,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 操作失败、验证拒绝或恢复失败时更新为 `failed`，写入 finished time、error 和恢复相关 payload。
 - 记录由 Rust core append/update；React 只能读取展示，不能编辑、删除或伪造记录。
 - MVP 永久保留 operation log，不自动清理。
+- favorites/tags、自动 cache/index refresh、scan 和纯读取 workflow 不写 operation log，避免 History 被低风险状态刷新淹没。
 
 失败与回滚：
 
@@ -569,3 +570,59 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `npm --workspace apps/desktop run build`
 - Release workflow `workflow_dispatch` dry run 必须验证 DMG、updater archive、signature 和 `latest.json`。
 - 正式发布后，用前一版 DMG 安装包验证能检查到新版本、确认安装并重启。
+
+## 16. Database Migrations And Doctor
+
+触发条件：
+
+- `ensure_managed_layout` 打开或创建 `skillbox.sqlite`。
+- Rust CLI 执行 `doctor [--repair-preview]`。
+- 桌面 Settings -> Health 执行 `Run health check`。
+
+步骤：
+
+- 数据库通过 `schema_migrations` 记录已经应用的 migration version 和名称。
+- 每个待处理 migration 在独立 transaction 中按 version 顺序执行。
+- 已有非空数据库在首次执行待处理 migration 前通过 SQLite 一致性快照生成一次 backup；新数据库不生成 backup。
+- migration decision、backup 和 migration application 由 per-database process-safe lock 串行化；多个 desktop/Tauri/CLI caller 并发初始化时只能生成一份 backup，并按一次顺序迁移完成。
+- migration 完成后运行 SQLite integrity check。
+- Doctor 只读检查 schema/integrity、user/remote managed skill 结构、remote `current` symlink、deployment、workspace、active import backup/source 和 stale skill metadata。
+- Doctor 比较 deployment symlink 时允许 `~/.skillbox` 与其 legacy `~/SkillBox` 目录别名，但 remote deployment 仍必须指向 `current` 入口，不能直接固定到某个 version。
+- managed skill 和 runtime target 都不存在时，将 deployment row 报告为可清理的 warning；如果 runtime target 仍存在，则保留 error 并要求人工检查，不能自动删除目标。
+- `repair_preview=true` 只返回建议动作，不修改文件系统或数据库记录。
+- 用户显式执行 `doctor-clean-stale-deployments` 或桌面 `Clean stale records` 时，只删除 managed skill 与 runtime target 都不存在的 SQLite deployment rows；不删除任何 runtime 文件，并记录 `repair_stale_deployments` operation。
+
+失败与回滚：
+
+- migration transaction 失败时不写入对应 `schema_migrations` row。
+- migration 失败时保留升级前 backup，下一次启动可重试未完成 version。
+- Doctor 无法安全判断修复方式时返回 `repairable=false`，不能猜测或覆盖目标。
+- 清理前会再次确认 managed skill 和 runtime target 仍不存在；任一目标存在时保留记录。
+
+完成验证：
+
+- `cargo test -p skillbox-core --offline database`
+- `cargo test -p skillbox-core --offline doctor`
+- `cargo run -p skillbox-cli --offline -- doctor --repair-preview --managed-root <temp-skillbox-root>`
+- `cargo run -p skillbox-cli --offline -- doctor-clean-stale-deployments --managed-root <temp-skillbox-root>`
+- `npm test`
+
+## 17. Persist Skill User Metadata
+
+触发条件：
+
+- 用户在 Dashboard 或 Skill Detail 切换 favorite 或编辑 tags。
+- 桌面首次升级后仍存在 legacy dashboard metadata local-storage keys。
+
+步骤：
+
+- Rust core 校验 skill name，规范化、去重并限制 tags，然后 upsert `skill_user_metadata`。
+- 桌面启动读取 SQLite metadata，供 Dashboard filters 和 Skill Detail 使用。
+- legacy metadata 通过批量 `INSERT OR IGNORE` 迁移，不能覆盖 SQLite 中已经存在的记录。
+- legacy migration 成功后删除旧 local-storage keys；之后 SQLite 是唯一真相源。
+
+完成验证：
+
+- `cargo test -p skillbox-core --offline skill_user_metadata`
+- `node --test apps/desktop/src/skillUserMetadata.test.js`
+- `npm --workspace apps/desktop run build`

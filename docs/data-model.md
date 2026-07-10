@@ -27,6 +27,7 @@ managed store 是跨 agent 的真相源，不绑定 Codex、Claude、Cursor、Co
   adapters/
     <agent-id>/
   skillbox.sqlite
+  skillbox.sqlite.pre-migration-v<version>-<timestamp>.bak
 ```
 
 规则：
@@ -36,6 +37,7 @@ managed store 是跨 agent 的真相源，不绑定 Codex、Claude、Cursor、Co
 - `remote-skills/<skill-name>/current` 指向当前生效版本。
 - `backups/imports` 保存从 runtime 目录迁移到 SkillBox 前的原始内容。
 - `adapters/<agent-id>` 预留给 agent-specific cache、manifest 或转换产物；当前 Rust schema 尚未实现。
+- 已存在的数据库进入新 schema migration 前，通过 SQLite 一致性快照生成一次 `pre-migration` backup；同一 schema version 不重复备份。初始化会先获取 per-database process-safe migration lock，再判断是否需要 backup/migration，确保并发 desktop/CLI caller 只生成一份 backup 并执行一次有序迁移。
 - 一个有效 skill 目录必须包含 `SKILL.md`。
 - workspace 表记录 skills 所在工程目录或 runtime skills root，用于后续部署目标选择；workspace path 指向
   `.../.agents/skills`、`.../.codex/skills` 或 `.../.claude/skills` 这类 skills root，而不是单个 skill 目录。
@@ -98,6 +100,11 @@ Manual remote 使用这些字段：
 Rust 当前表：
 
 ```text
+schema_migrations
+  version INTEGER PRIMARY KEY
+  name TEXT NOT NULL
+  applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+
 skills
   name TEXT PRIMARY KEY
   type TEXT NOT NULL
@@ -183,11 +190,21 @@ skill_usage_stats
   last_used_at TEXT NOT NULL
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   PRIMARY KEY (skill_name, agent_id, runtime_root)
+
+skill_user_metadata
+  skill_name TEXT PRIMARY KEY
+  favorite INTEGER NOT NULL DEFAULT 0
+  tags_json TEXT NOT NULL DEFAULT '[]'
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 ```
+
+`schema_migrations` 是 Rust schema 的唯一版本历史。migration 按 version 顺序在独立 transaction 中执行；已有数据库在首次执行待处理 migration 前生成一致性 backup，全部 migration 完成后运行 SQLite integrity check。新建空数据库不生成 backup。backup decision 和 migration application 由同一个进程安全文件锁串行化，锁随文件句柄释放，即使进程异常退出也不会留下永久锁状态。
+
+`skill_user_metadata` 保存用户显式设置的 favorite 和 tags。桌面首次读取该表时会把旧 `localStorage` 中仍存在的 metadata 通过 `INSERT OR IGNORE` 迁入，因此 SQLite 中已有值不会被旧浏览器状态覆盖；迁移成功后删除旧 key。
 
 `workspaces.display_name` 由 path 推导：home-level global roots 使用 agent 名（例如 `Codex`、`Claude`），项目局部 roots 使用项目目录名（例如 `demo-vault`）。`global` / `user` 不拼进名称，由 `kind` 字段表达。`imported_skill_count` 使用 import candidate 的同一套 imported 判定：workspace skill 必须是指向 SkillBox managed root 的 symlink；仅内容 hash 匹配 managed store 不再表示该 runtime 位置仍被 SkillBox 管理。
 
-`operations` 记录会改变 managed store、runtime、SQLite、Git state 或偏好设置的动作。Rust core 统一写入，UI 只能读取展示或通过结构化命令触发新记录；记录从 UI 视角 append-only，MVP 不做自动清理。`payload_json` 保存操作细节，例如 from/to version、changed paths、backup path、affected deployments、commit SHA 或失败恢复状态。
+`operations` 记录会改变用户 skill 内容、managed store、runtime、Git state、workspace registry 或 hook 配置的主要动作。Rust core 统一写入，UI 只能读取展示或通过结构化命令触发新记录；记录从 UI 视角 append-only，MVP 不做自动清理。`payload_json` 保存操作细节，例如 from/to version、changed paths、backup path、affected deployments、commit SHA 或失败恢复状态，但不保存 Git credentials 或 hook 配置正文。低风险 UI metadata、自动 cache/index refresh 和纯读取操作不写 operation history。
 
 `import_records` 记录本地 import 且 deploy back 到 source 成功后的可恢复状态。每个 imported skill 一条记录，`source_path` 是被替换成 SkillBox symlink 的 runtime 原路径，`backup_path` 是 import 前移动到 `backups/imports` 的原目录。`status=active` 的记录可以通过 `revert_import` 恢复；`status=reverted` 表示 backup 已恢复回 source path。`legacy=1` 表示记录由旧 deployments/backups 证据链保守 reconcile 得到。
 

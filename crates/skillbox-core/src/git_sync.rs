@@ -115,6 +115,35 @@ pub fn set_user_skills_git_remote(
     request: UserSkillsGitRemoteRequest,
     managed_root: impl AsRef<Path>,
 ) -> Result<UserSkillsGitStatus> {
+    let managed_root = managed_root.as_ref().to_path_buf();
+    audited_operation(
+        OperationStart {
+            operation_type: "set_user_skills_git_remote".to_string(),
+            actor: "core".to_string(),
+            entity_type: "user_skills_repo".to_string(),
+            entity_name: "user-skills".to_string(),
+            summary: "Configure user skills Git remote".to_string(),
+            payload: serde_json::json!({"remoteConfigured": true}),
+        },
+        &managed_root,
+        || set_user_skills_git_remote_unlogged(request, &managed_root),
+        |status| {
+            (
+                "Configured user skills Git remote".to_string(),
+                serde_json::json!({
+                    "repoPath": status.repo_path,
+                    "branch": status.branch,
+                    "initialized": status.initialized
+                }),
+            )
+        },
+    )
+}
+
+fn set_user_skills_git_remote_unlogged(
+    request: UserSkillsGitRemoteRequest,
+    managed_root: &Path,
+) -> Result<UserSkillsGitStatus> {
     let remote_url = request.remote_url.trim();
     if remote_url.is_empty() {
         return Err("Git remote URL cannot be empty.".to_string());
@@ -123,7 +152,7 @@ pub fn set_user_skills_git_remote(
         return Err("Git remote URL cannot contain whitespace.".to_string());
     }
 
-    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let paths = ensure_managed_layout(managed_root.to_path_buf())?;
     let repo = paths.user_skills_root;
     let git = skillbox_git::GitService::new();
     if !git.status(&repo)?.initialized {
@@ -137,7 +166,54 @@ pub fn sync_user_skills_git(
     request: UserSkillsSyncRequest,
     managed_root: impl AsRef<Path>,
 ) -> Result<UserSkillsSyncResult> {
-    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let managed_root = managed_root.as_ref().to_path_buf();
+    let push = request.push;
+    let selected_path_count = request
+        .selected_paths
+        .as_ref()
+        .map(Vec::len)
+        .unwrap_or_default();
+    audited_operation_with_outcome(
+        OperationStart {
+            operation_type: "sync_user_skills_git".to_string(),
+            actor: "core".to_string(),
+            entity_type: "user_skills_repo".to_string(),
+            entity_name: "user-skills".to_string(),
+            summary: "Sync user skills Git repository".to_string(),
+            payload: serde_json::json!({
+                "push": push,
+                "selectedPathCount": selected_path_count,
+                "remoteUpdateRequested": request.remote_url.is_some()
+            }),
+        },
+        &managed_root,
+        || sync_user_skills_git_unlogged(request, &managed_root),
+        |result| AuditedOperationOutcome {
+            status: if result.state == UserSkillsGitState::PushFailed {
+                OperationStatus::Failed
+            } else {
+                OperationStatus::Succeeded
+            },
+            summary: result.message.clone(),
+            error: (result.state == UserSkillsGitState::PushFailed).then(|| result.message.clone()),
+            payload: serde_json::json!({
+                "initialized": result.initialized,
+                "remoteUpdated": result.remote_updated,
+                "committed": result.committed,
+                "commitSha": result.commit_sha,
+                "pushed": result.pushed,
+                "pushAttempted": result.push_attempted,
+                "state": result.state
+            }),
+        },
+    )
+}
+
+fn sync_user_skills_git_unlogged(
+    request: UserSkillsSyncRequest,
+    managed_root: &Path,
+) -> Result<UserSkillsSyncResult> {
+    let paths = ensure_managed_layout(managed_root.to_path_buf())?;
     let repo = paths.user_skills_root;
     let git = skillbox_git::GitService::new();
     let before = git.status(&repo)?;

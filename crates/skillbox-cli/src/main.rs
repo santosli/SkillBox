@@ -257,6 +257,15 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 skillbox_core::parse_usage_hook_target(&target)?,
             )?)
         }
+        "doctor" => print_json(&skillbox_core::run_doctor(
+            skillbox_core::DoctorRequest {
+                repair_preview: has_flag(command_args, "--repair-preview"),
+            },
+            managed_root(command_args),
+        )?),
+        "doctor-clean-stale-deployments" => print_json(
+            &skillbox_core::repair_stale_deployment_records(managed_root(command_args))?,
+        ),
         "operations" => print_json(&skillbox_core::list_operations(
             skillbox_core::OperationFilter {
                 entity_type: option(command_args, "--entity-type"),
@@ -461,6 +470,8 @@ Commands:
   skillbox usage-hook codex|claude-code [--managed-root <path>]
   skillbox usage-hook-status
   skillbox usage-hook-install <target>
+  skillbox doctor [--repair-preview] [--managed-root <path>]
+  skillbox doctor-clean-stale-deployments [--managed-root <path>]
   skillbox operations [--entity-type <type>] [--entity-name <name>] [--status started|succeeded|failed|cancelled] [--limit <n>] [--managed-root <path>]
   skillbox import-records [--skill <name>] [--managed-root <path>]
   skillbox revert-import <import-record-id> [--managed-root <path>]
@@ -565,6 +576,39 @@ mod tests {
 
         assert!(help.contains("skillbox import-records [--skill <name>]"));
         assert!(help.contains("skillbox revert-import <import-record-id>"));
+    }
+
+    #[test]
+    fn doctor_command_routes_to_read_only_health_check() {
+        let root = temp_dir("cli-doctor").join("SkillBox");
+
+        assert!(help_text().contains("skillbox doctor [--repair-preview]"));
+        run(vec![
+            "doctor".to_string(),
+            "--repair-preview".to_string(),
+            "--managed-root".to_string(),
+            root.to_string_lossy().to_string(),
+        ])
+        .unwrap();
+
+        assert!(root.join("skillbox.sqlite").is_file());
+        assert!(root.join("user-skills").is_dir());
+        assert!(root.join("remote-skills").is_dir());
+    }
+
+    #[test]
+    fn doctor_cleanup_command_routes_to_safe_stale_record_repair() {
+        let root = temp_dir("cli-doctor-cleanup").join("SkillBox");
+
+        assert!(help_text().contains("skillbox doctor-clean-stale-deployments"));
+        run(vec![
+            "doctor-clean-stale-deployments".to_string(),
+            "--managed-root".to_string(),
+            root.to_string_lossy().to_string(),
+        ])
+        .unwrap();
+
+        assert!(root.join("skillbox.sqlite").is_file());
     }
 
     #[test]

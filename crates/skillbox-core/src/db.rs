@@ -1,4 +1,8 @@
 use crate::*;
+use fs2::FileExt;
+use std::fs::{File, OpenOptions};
+
+pub(crate) const LATEST_DATABASE_SCHEMA_VERSION: i64 = 3;
 
 pub(crate) fn open_database(database_path: &Path) -> Result<Connection> {
     let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
@@ -17,7 +21,110 @@ pub(crate) fn init_database(database_path: &Path) -> Result<()> {
     if let Some(parent) = database_path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
-    let connection = open_database(database_path)?;
+    let _migration_lock = acquire_database_migration_lock(database_path)?;
+    let existing_database = fs::metadata(database_path)
+        .map(|metadata| metadata.len() > 0)
+        .unwrap_or(false);
+    let mut connection = open_database(database_path)?;
+    let current_version = current_database_schema_version(&connection)?;
+    if existing_database && current_version < LATEST_DATABASE_SCHEMA_VERSION {
+        backup_database_before_migration(&connection, database_path, current_version)?;
+    }
+
+    run_database_migrations(&mut connection)?;
+    validate_database_integrity(&connection)
+}
+
+fn acquire_database_migration_lock(database_path: &Path) -> Result<File> {
+    let file_name = database_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("skillbox.sqlite");
+    let lock_path = database_path.with_file_name(format!("{file_name}.migration.lock"));
+    let lock = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+        .map_err(|error| format!("Unable to open database migration lock: {error}"))?;
+    lock.lock_exclusive()
+        .map_err(|error| format!("Unable to acquire database migration lock: {error}"))?;
+    Ok(lock)
+}
+
+pub(crate) fn current_database_schema_version(connection: &Connection) -> Result<i64> {
+    let migration_table_exists: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if !migration_table_exists {
+        return Ok(0);
+    }
+
+    connection
+        .query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())
+}
+
+pub(crate) fn run_database_migrations(connection: &mut Connection) -> Result<()> {
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+              version INTEGER PRIMARY KEY,
+              name TEXT NOT NULL,
+              applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+
+    for (version, name) in [
+        (1_i64, "baseline"),
+        (2_i64, "legacy_compatibility"),
+        (3_i64, "skill_user_metadata"),
+    ] {
+        let applied: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = ?1)",
+                params![version],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
+        if applied {
+            continue;
+        }
+
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        match version {
+            1 => apply_baseline_migration(&transaction)?,
+            2 => apply_legacy_compatibility_migration(&transaction)?,
+            3 => apply_skill_user_metadata_migration(&transaction)?,
+            _ => return Err(format!("Unknown database migration version: {version}")),
+        }
+        transaction
+            .execute(
+                "INSERT INTO schema_migrations (version, name) VALUES (?1, ?2)",
+                params![version, name],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction.commit().map_err(|error| error.to_string())?;
+    }
+
+    Ok(())
+}
+
+fn apply_baseline_migration(connection: &Connection) -> Result<()> {
     connection
         .execute_batch(
             "
@@ -120,16 +227,70 @@ pub(crate) fn init_database(database_path: &Path) -> Result<()> {
             );
             ",
         )
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| error.to_string())
+}
+
+fn apply_legacy_compatibility_migration(connection: &Connection) -> Result<()> {
     ensure_database_column(
-        &connection,
+        connection,
         "workspaces",
         "imported_skill_count",
         "INTEGER NOT NULL DEFAULT 0",
     )?;
-    ensure_database_column(&connection, "skill_usage_events", "prompt_excerpt", "TEXT")?;
-    migrate_legacy_node_operations_table(&connection)?;
+    ensure_database_column(connection, "skill_usage_events", "prompt_excerpt", "TEXT")?;
+    migrate_legacy_node_operations_table(connection)?;
     Ok(())
+}
+
+fn apply_skill_user_metadata_migration(connection: &Connection) -> Result<()> {
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS skill_user_metadata (
+              skill_name TEXT PRIMARY KEY,
+              favorite INTEGER NOT NULL DEFAULT 0,
+              tags_json TEXT NOT NULL DEFAULT '[]',
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            ",
+        )
+        .map_err(|error| error.to_string())
+}
+
+pub(crate) fn backup_database_before_migration(
+    connection: &Connection,
+    database_path: &Path,
+    current_version: i64,
+) -> Result<PathBuf> {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let file_name = database_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("skillbox.sqlite");
+    let backup_path = database_path.with_file_name(format!(
+        "{file_name}.pre-migration-v{current_version}-{nanos}.bak"
+    ));
+    connection
+        .execute(
+            "VACUUM main INTO ?1",
+            params![backup_path.to_string_lossy()],
+        )
+        .map_err(|error| format!("Unable to back up database before migration: {error}"))?;
+    Ok(backup_path)
+}
+
+pub(crate) fn validate_database_integrity(connection: &Connection) -> Result<()> {
+    let integrity: String = connection
+        .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+        .map_err(|error| error.to_string())?;
+    if integrity == "ok" {
+        Ok(())
+    } else {
+        Err(format!("SQLite integrity check failed: {integrity}"))
+    }
 }
 
 pub(crate) fn migrate_legacy_node_operations_table(connection: &Connection) -> Result<()> {

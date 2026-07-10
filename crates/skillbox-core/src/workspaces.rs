@@ -42,7 +42,37 @@ pub fn add_workspace(
     request: WorkspaceAddRequest,
     managed_root: impl AsRef<Path>,
 ) -> Result<Workspace> {
-    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let managed_root = managed_root.as_ref().to_path_buf();
+    let workspace_path = expand_home(request.path.clone());
+    audited_operation(
+        OperationStart {
+            operation_type: "add_workspace".to_string(),
+            actor: "core".to_string(),
+            entity_type: "workspace".to_string(),
+            entity_name: workspace_path.to_string_lossy().to_string(),
+            summary: "Add workspace".to_string(),
+            payload: serde_json::json!({
+                "path": workspace_path,
+                "kind": request.kind.as_str()
+            }),
+        },
+        &managed_root,
+        || add_workspace_unlogged(request, &managed_root),
+        |workspace| {
+            (
+                format!("Added workspace {}", workspace.display_name),
+                serde_json::json!({
+                    "path": workspace.path,
+                    "kind": workspace.kind.as_str(),
+                    "source": workspace.source.as_str()
+                }),
+            )
+        },
+    )
+}
+
+fn add_workspace_unlogged(request: WorkspaceAddRequest, managed_root: &Path) -> Result<Workspace> {
+    let paths = ensure_managed_layout(managed_root.to_path_buf())?;
     let workspace_path = expand_home(request.path);
 
     if !workspace_path.exists() {
@@ -70,8 +100,31 @@ pub fn forget_workspace(
     path: impl AsRef<Path>,
     managed_root: impl AsRef<Path>,
 ) -> Result<Vec<Workspace>> {
-    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let managed_root = managed_root.as_ref().to_path_buf();
     let workspace_path = expand_home(path.as_ref().to_path_buf());
+    audited_operation(
+        OperationStart {
+            operation_type: "forget_workspace".to_string(),
+            actor: "core".to_string(),
+            entity_type: "workspace".to_string(),
+            entity_name: workspace_path.to_string_lossy().to_string(),
+            summary: "Forget workspace".to_string(),
+            payload: serde_json::json!({"path": workspace_path}),
+        },
+        &managed_root,
+        || forget_workspace_unlogged(&workspace_path, &managed_root),
+        |_| {
+            (
+                "Forgot workspace".to_string(),
+                serde_json::json!({"path": workspace_path}),
+            )
+        },
+    )
+}
+
+fn forget_workspace_unlogged(path: &Path, managed_root: &Path) -> Result<Vec<Workspace>> {
+    let paths = ensure_managed_layout(managed_root.to_path_buf())?;
+    let workspace_path = path.to_path_buf();
     let canonical_path = fs::canonicalize(&workspace_path).map_err(|error| {
         format!(
             "Workspace path cannot be resolved: {} ({error})",

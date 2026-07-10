@@ -137,8 +137,52 @@ pub(crate) fn import_one_candidate(
     paths: &ManagedPaths,
     item: ImportRequestItem,
 ) -> Result<ImportedCandidate> {
+    let source_path = expand_home(item.source_path.clone());
+    let entity_name = read_skill(&source_path)
+        .map(|skill| skill.name)
+        .unwrap_or_else(|_| {
+            source_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("unknown")
+                .to_string()
+        });
+    audited_operation(
+        OperationStart {
+            operation_type: "import_candidate".to_string(),
+            actor: "core".to_string(),
+            entity_type: "skill".to_string(),
+            entity_name,
+            summary: "Import reviewed skill".to_string(),
+            payload: serde_json::json!({
+                "sourcePath": source_path,
+                "skillType": item.skill_type.as_str(),
+                "deployBackToSource": item.deploy_back_to_source
+            }),
+        },
+        &paths.root,
+        || import_one_candidate_unlogged(paths, item),
+        |result| {
+            (
+                format!("Imported reviewed skill {}", result.name),
+                serde_json::json!({
+                    "managedPath": result.managed_path,
+                    "backupPath": result.backup_path,
+                    "deployedPath": result.deployed_path,
+                    "skillType": result.kind.as_str(),
+                    "contentHash": result.content_hash
+                }),
+            )
+        },
+    )
+}
+
+fn import_one_candidate_unlogged(
+    paths: &ManagedPaths,
+    item: ImportRequestItem,
+) -> Result<ImportedCandidate> {
     let source_path = expand_home(item.source_path);
-    let imported = import_skill(&source_path, item.skill_type, &paths.root)?;
+    let imported = import_skill_unlogged(&source_path, item.skill_type, &paths.root)?;
     let deployment_target = match item.skill_type {
         SkillKind::User => imported.managed_path.clone(),
         SkillKind::Remote => paths

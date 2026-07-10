@@ -158,8 +158,47 @@ pub fn import_skill(
     kind: SkillKind,
     managed_root: impl AsRef<Path>,
 ) -> Result<ImportedSkill> {
-    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
-    let skill = read_skill(source_dir.as_ref())?;
+    let source_dir = expand_home(source_dir.as_ref().to_path_buf());
+    let managed_root = managed_root.as_ref().to_path_buf();
+    let entity_name = source_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+    audited_operation(
+        OperationStart {
+            operation_type: "import_skill".to_string(),
+            actor: "core".to_string(),
+            entity_type: "skill".to_string(),
+            entity_name,
+            summary: "Import managed skill".to_string(),
+            payload: serde_json::json!({
+                "sourcePath": source_dir,
+                "skillType": kind.as_str()
+            }),
+        },
+        &managed_root,
+        || import_skill_unlogged(&source_dir, kind, &managed_root),
+        |result| {
+            (
+                format!("Imported {}", result.name),
+                serde_json::json!({
+                    "managedPath": result.managed_path,
+                    "skillType": result.kind.as_str(),
+                    "contentHash": result.content_hash
+                }),
+            )
+        },
+    )
+}
+
+pub(crate) fn import_skill_unlogged(
+    source_dir: &Path,
+    kind: SkillKind,
+    managed_root: &Path,
+) -> Result<ImportedSkill> {
+    let paths = ensure_managed_layout(managed_root.to_path_buf())?;
+    let skill = read_skill(source_dir)?;
     validate_skill_name(&skill.name)?;
 
     let managed_path = match kind {
@@ -203,8 +242,38 @@ pub fn change_skill_kind(
     kind: SkillKind,
     managed_root: impl AsRef<Path>,
 ) -> Result<ImportedSkill> {
+    let managed_root = managed_root.as_ref().to_path_buf();
+    audited_operation(
+        OperationStart {
+            operation_type: "change_skill_kind".to_string(),
+            actor: "core".to_string(),
+            entity_type: "skill".to_string(),
+            entity_name: skill_name.to_string(),
+            summary: format!("Change {skill_name} skill type"),
+            payload: serde_json::json!({"targetType": kind.as_str()}),
+        },
+        &managed_root,
+        || change_skill_kind_unlogged(skill_name, kind, &managed_root),
+        |result| {
+            (
+                format!("Changed {} to {}", result.name, result.kind.as_str()),
+                serde_json::json!({
+                    "skillType": result.kind.as_str(),
+                    "managedPath": result.managed_path,
+                    "contentHash": result.content_hash
+                }),
+            )
+        },
+    )
+}
+
+fn change_skill_kind_unlogged(
+    skill_name: &str,
+    kind: SkillKind,
+    managed_root: &Path,
+) -> Result<ImportedSkill> {
     validate_skill_name(skill_name)?;
-    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let paths = ensure_managed_layout(managed_root.to_path_buf())?;
     let location = resolve_managed_skill_kind_location(&paths, skill_name)?;
     let skill = read_skill(&location.storage_path)?;
 
@@ -439,10 +508,41 @@ pub fn deploy_skill(
     managed_root: impl AsRef<Path>,
     target_root: impl AsRef<Path>,
 ) -> Result<Deployment> {
-    validate_skill_name(skill_name)?;
-    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
-    let managed_path = resolve_managed_skill_path(&paths, skill_name)?;
+    let managed_root = managed_root.as_ref().to_path_buf();
     let target_root = expand_home(target_root.as_ref().to_path_buf());
+    audited_operation(
+        OperationStart {
+            operation_type: "deploy_skill".to_string(),
+            actor: "core".to_string(),
+            entity_type: "skill".to_string(),
+            entity_name: skill_name.to_string(),
+            summary: format!("Deploy {skill_name}"),
+            payload: serde_json::json!({"targetRoot": target_root}),
+        },
+        &managed_root,
+        || deploy_skill_unlogged(skill_name, &managed_root, &target_root),
+        |result| {
+            (
+                format!("Deployed {}", result.skill_name),
+                serde_json::json!({
+                    "targetRoot": result.target_root,
+                    "targetPath": result.target_path,
+                    "mode": result.mode
+                }),
+            )
+        },
+    )
+}
+
+fn deploy_skill_unlogged(
+    skill_name: &str,
+    managed_root: &Path,
+    target_root: &Path,
+) -> Result<Deployment> {
+    validate_skill_name(skill_name)?;
+    let paths = ensure_managed_layout(managed_root.to_path_buf())?;
+    let managed_path = resolve_managed_skill_path(&paths, skill_name)?;
+    let target_root = target_root.to_path_buf();
     let target_path = target_root.join(skill_name);
 
     fs::create_dir_all(&target_root).map_err(|error| error.to_string())?;
@@ -489,10 +589,41 @@ pub fn undeploy_skill(
     managed_root: impl AsRef<Path>,
     target_root: impl AsRef<Path>,
 ) -> Result<Deployment> {
-    validate_skill_name(skill_name)?;
-    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
-    let managed_path = resolve_managed_skill_path(&paths, skill_name)?;
+    let managed_root = managed_root.as_ref().to_path_buf();
     let target_root = expand_home(target_root.as_ref().to_path_buf());
+    audited_operation(
+        OperationStart {
+            operation_type: "undeploy_skill".to_string(),
+            actor: "core".to_string(),
+            entity_type: "skill".to_string(),
+            entity_name: skill_name.to_string(),
+            summary: format!("Undeploy {skill_name}"),
+            payload: serde_json::json!({"targetRoot": target_root}),
+        },
+        &managed_root,
+        || undeploy_skill_unlogged(skill_name, &managed_root, &target_root),
+        |result| {
+            (
+                format!("Undeployed {}", result.skill_name),
+                serde_json::json!({
+                    "targetRoot": result.target_root,
+                    "targetPath": result.target_path,
+                    "mode": result.mode
+                }),
+            )
+        },
+    )
+}
+
+fn undeploy_skill_unlogged(
+    skill_name: &str,
+    managed_root: &Path,
+    target_root: &Path,
+) -> Result<Deployment> {
+    validate_skill_name(skill_name)?;
+    let paths = ensure_managed_layout(managed_root.to_path_buf())?;
+    let managed_path = resolve_managed_skill_path(&paths, skill_name)?;
+    let target_root = target_root.to_path_buf();
     let target_path = target_root.join(skill_name);
     let alias_target_paths = workspace_symlink_paths_to_managed_skill(&target_root, &managed_path);
     let mut target_paths_to_remove = Vec::new();

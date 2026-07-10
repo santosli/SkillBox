@@ -1,6 +1,7 @@
 use super::*;
 use rusqlite::OptionalExtension;
 use std::fs;
+use std::sync::{Arc, Barrier};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
@@ -50,6 +51,505 @@ fn database_initialization_configures_busy_timeout_and_wal() {
 
     assert!(source.contains("PRAGMA busy_timeout = 5000"));
     assert!(source.contains("PRAGMA journal_mode = WAL"));
+}
+
+#[test]
+fn database_initialization_records_ordered_schema_migrations() {
+    let root = temp_dir("database-schema-migrations");
+    let paths = ensure_managed_layout(root.join("SkillBox")).unwrap();
+    let connection = rusqlite::Connection::open(&paths.database_path).unwrap();
+    let versions = connection
+        .prepare("SELECT version, name FROM schema_migrations ORDER BY version")
+        .unwrap()
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })
+        .unwrap()
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .unwrap();
+
+    assert_eq!(
+        versions,
+        vec![
+            (1, "baseline".to_string()),
+            (2, "legacy_compatibility".to_string()),
+            (3, "skill_user_metadata".to_string())
+        ]
+    );
+    assert_eq!(
+        current_database_schema_version(&connection).unwrap(),
+        LATEST_DATABASE_SCHEMA_VERSION
+    );
+    assert!(table_column_names(&connection, "skill_user_metadata")
+        .unwrap()
+        .contains(&"tags_json".to_string()));
+}
+
+#[test]
+fn existing_database_is_backed_up_once_before_migration() {
+    let root = temp_dir("database-migration-backup");
+    let managed_root = root.join("SkillBox");
+    let paths = managed_paths(&managed_root);
+    fs::create_dir_all(paths.database_path.parent().unwrap()).unwrap();
+    let connection = rusqlite::Connection::open(&paths.database_path).unwrap();
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE skills (
+              name TEXT PRIMARY KEY,
+              type TEXT NOT NULL,
+              description TEXT NOT NULL DEFAULT '',
+              version TEXT NOT NULL DEFAULT '',
+              managed_path TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'ok',
+              content_hash TEXT NOT NULL DEFAULT '',
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO skills (name, type, managed_path) VALUES ('demo', 'user', '/tmp/demo');
+            ",
+        )
+        .unwrap();
+    drop(connection);
+
+    ensure_managed_layout(&managed_root).unwrap();
+    let backups = database_migration_backups(&paths.database_path);
+    assert_eq!(backups.len(), 1);
+    let backup = rusqlite::Connection::open(&backups[0]).unwrap();
+    let name: String = backup
+        .query_row("SELECT name FROM skills", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(name, "demo");
+    drop(backup);
+
+    ensure_managed_layout(&managed_root).unwrap();
+    assert_eq!(database_migration_backups(&paths.database_path), backups);
+}
+
+#[test]
+fn concurrent_database_initialization_serializes_backup_and_migrations() {
+    let root = temp_dir("database-concurrent-migrations");
+    let managed_root = root.join("SkillBox");
+    let paths = managed_paths(&managed_root);
+    fs::create_dir_all(paths.database_path.parent().unwrap()).unwrap();
+    let connection = rusqlite::Connection::open(&paths.database_path).unwrap();
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE skills (
+              name TEXT PRIMARY KEY,
+              type TEXT NOT NULL,
+              description TEXT NOT NULL DEFAULT '',
+              version TEXT NOT NULL DEFAULT '',
+              managed_path TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'ok',
+              content_hash TEXT NOT NULL DEFAULT '',
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO skills (name, type, managed_path) VALUES ('demo', 'user', '/tmp/demo');
+            ",
+        )
+        .unwrap();
+    drop(connection);
+
+    let worker_count = 24;
+    let barrier = Arc::new(Barrier::new(worker_count));
+    let workers = (0..worker_count)
+        .map(|_| {
+            let barrier = Arc::clone(&barrier);
+            let managed_root = managed_root.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                ensure_managed_layout(managed_root)
+            })
+        })
+        .collect::<Vec<_>>();
+    let results = workers
+        .into_iter()
+        .map(|worker| worker.join().unwrap())
+        .collect::<Vec<_>>();
+
+    assert!(
+        results.iter().all(Result::is_ok),
+        "concurrent initialization errors: {:?}",
+        results
+            .iter()
+            .filter_map(|result| result.as_ref().err())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(database_migration_backups(&paths.database_path).len(), 1);
+    let connection = rusqlite::Connection::open(&paths.database_path).unwrap();
+    assert_eq!(
+        current_database_schema_version(&connection).unwrap(),
+        LATEST_DATABASE_SCHEMA_VERSION
+    );
+}
+
+#[test]
+fn skill_user_metadata_persists_favorites_and_normalized_tags() {
+    let root = temp_dir("skill-user-metadata");
+    let managed_root = root.join("SkillBox");
+
+    let metadata = set_skill_user_metadata(
+        SkillUserMetadataUpdate {
+            skill_name: "demo".to_string(),
+            favorite: true,
+            tags: vec![
+                " Research Notes ".to_string(),
+                "research-notes".to_string(),
+                "Rust!".to_string(),
+            ],
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    assert!(metadata.favorite);
+    assert_eq!(metadata.tags, vec!["research-notes", "rust"]);
+    assert_eq!(
+        list_skill_user_metadata(&managed_root).unwrap(),
+        vec![metadata]
+    );
+}
+
+#[test]
+fn legacy_skill_user_metadata_does_not_overwrite_database_values() {
+    let root = temp_dir("legacy-skill-user-metadata");
+    let managed_root = root.join("SkillBox");
+    set_skill_user_metadata(
+        SkillUserMetadataUpdate {
+            skill_name: "demo".to_string(),
+            favorite: false,
+            tags: vec!["database".to_string()],
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    let metadata = migrate_legacy_skill_user_metadata(
+        vec![SkillUserMetadataUpdate {
+            skill_name: "demo".to_string(),
+            favorite: true,
+            tags: vec!["local-storage".to_string()],
+        }],
+        &managed_root,
+    )
+    .unwrap();
+
+    assert_eq!(
+        metadata,
+        vec![SkillUserMetadata {
+            skill_name: "demo".to_string(),
+            favorite: false,
+            tags: vec!["database".to_string()]
+        }]
+    );
+}
+
+#[test]
+fn doctor_reports_healthy_fresh_managed_store() {
+    let root = temp_dir("doctor-healthy");
+    let managed_root = root.join("SkillBox");
+
+    let report = run_doctor(DoctorRequest::default(), &managed_root).unwrap();
+
+    assert!(report.healthy);
+    assert_eq!(report.schema_version, LATEST_DATABASE_SCHEMA_VERSION);
+    assert!(report.issues.is_empty());
+}
+
+#[test]
+fn doctor_detects_missing_deployment_and_previews_repair() {
+    let root = temp_dir("doctor-missing-deployment");
+    let managed_root = root.join("SkillBox");
+    let source = root.join("source").join("demo");
+    make_skill(&source, "demo", "Demo skill");
+    import_skill(&source, SkillKind::User, &managed_root).unwrap();
+    let deployment = deploy_skill("demo", &managed_root, root.join("runtime")).unwrap();
+    fs::remove_file(&deployment.target_path).unwrap();
+
+    let report = run_doctor(
+        DoctorRequest {
+            repair_preview: true,
+        },
+        &managed_root,
+    )
+    .unwrap();
+    let issue = report
+        .issues
+        .iter()
+        .find(|issue| issue.code == "deployment_target_missing")
+        .unwrap();
+
+    assert!(!report.healthy);
+    assert_eq!(issue.severity, DoctorIssueSeverity::Warning);
+    assert!(issue.repairable);
+    assert!(issue.suggested_action.is_some());
+}
+
+#[test]
+fn doctor_detects_remote_skill_without_current_version() {
+    let root = temp_dir("doctor-remote-current");
+    let managed_root = root.join("SkillBox");
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    make_skill(
+        &paths
+            .remote_skills_root
+            .join("demo")
+            .join("versions")
+            .join("manual-demo"),
+        "demo",
+        "Demo skill",
+    );
+
+    let report = run_doctor(DoctorRequest::default(), &managed_root).unwrap();
+
+    assert!(report
+        .issues
+        .iter()
+        .any(|issue| issue.code == "remote_current_missing"));
+    assert_eq!(report.error_count, 1);
+}
+
+#[test]
+fn doctor_accepts_deployment_through_managed_root_alias() {
+    let root = temp_dir("doctor-managed-root-alias");
+    let managed_root = root.join("SkillBox");
+    let managed_alias = root.join(".skillbox");
+    let source = root.join("source").join("demo");
+    let runtime = root.join("runtime");
+    make_skill(&source, "demo", "Demo skill");
+    import_skill(&source, SkillKind::Remote, &managed_root).unwrap();
+    deploy_skill("demo", &managed_root, &runtime).unwrap();
+    symlink_dir(&managed_root, &managed_alias).unwrap();
+
+    let report = run_doctor(DoctorRequest::default(), &managed_alias).unwrap();
+
+    assert!(report.healthy, "unexpected issues: {:?}", report.issues);
+}
+
+#[test]
+fn doctor_rejects_deployment_that_bypasses_remote_current() {
+    let root = temp_dir("doctor-remote-version-deployment");
+    let managed_root = root.join("SkillBox");
+    let source = root.join("source").join("demo");
+    let runtime = root.join("runtime");
+    make_skill(&source, "demo", "Demo skill");
+    let imported = import_skill(&source, SkillKind::Remote, &managed_root).unwrap();
+    let deployment = deploy_skill("demo", &managed_root, &runtime).unwrap();
+    let version_path = fs::canonicalize(&imported.managed_path).unwrap();
+    fs::remove_file(&deployment.target_path).unwrap();
+    symlink_dir(&version_path, &deployment.target_path).unwrap();
+
+    let report = run_doctor(DoctorRequest::default(), &managed_root).unwrap();
+
+    assert!(report
+        .issues
+        .iter()
+        .any(|issue| issue.code == "deployment_target_mismatch"));
+}
+
+#[test]
+fn doctor_distinguishes_stale_deployment_record_from_existing_runtime_target() {
+    let root = temp_dir("doctor-stale-deployment-record");
+    let managed_root = root.join("SkillBox");
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    let missing_runtime = root.join("missing-runtime");
+    let existing_runtime = root.join("existing-runtime");
+    let existing_target = existing_runtime.join("existing");
+    fs::create_dir_all(&existing_target).unwrap();
+    index_deployment(
+        &paths.database_path,
+        "stale",
+        &missing_runtime,
+        &missing_runtime.join("stale"),
+    )
+    .unwrap();
+    index_deployment(
+        &paths.database_path,
+        "existing",
+        &existing_runtime,
+        &existing_target,
+    )
+    .unwrap();
+
+    let report = run_doctor(DoctorRequest::default(), &managed_root).unwrap();
+    let stale = report
+        .issues
+        .iter()
+        .find(|issue| issue.entity_name.as_deref() == Some("stale"))
+        .unwrap();
+    let existing = report
+        .issues
+        .iter()
+        .find(|issue| issue.entity_name.as_deref() == Some("existing"))
+        .unwrap();
+
+    assert_eq!(stale.code, "deployment_record_stale");
+    assert_eq!(stale.severity, DoctorIssueSeverity::Warning);
+    assert_eq!(
+        stale.path.as_deref(),
+        Some(missing_runtime.join("stale").as_path())
+    );
+    assert!(stale.repairable);
+    assert_eq!(existing.code, "deployment_managed_skill_missing");
+    assert_eq!(existing.severity, DoctorIssueSeverity::Error);
+    assert_eq!(existing.path.as_deref(), Some(existing_target.as_path()));
+    assert!(!existing.repairable);
+
+    let repair = repair_stale_deployment_records(&managed_root).unwrap();
+    assert_eq!(repair.removed_deployment_records, 1);
+    let deployments = load_deployments(&paths.database_path).unwrap();
+    assert!(!deployments.contains_key("stale"));
+    assert!(deployments.contains_key("existing"));
+    assert!(existing_target.is_dir());
+
+    let operations = list_operations(
+        OperationFilter {
+            entity_name: Some("deployments".to_string()),
+            ..OperationFilter::default()
+        },
+        &managed_root,
+    )
+    .unwrap();
+    assert_eq!(operations.operations.len(), 1);
+    assert_eq!(
+        operations.operations[0].operation_type,
+        "repair_stale_deployments"
+    );
+    assert_eq!(operations.operations[0].status, OperationStatus::Succeeded);
+}
+
+#[test]
+fn major_managed_store_mutations_are_audited() {
+    let root = temp_dir("major-mutation-audit");
+    let managed_root = root.join("SkillBox");
+    let source = root.join("source").join("demo");
+    let runtime = root.join("runtime");
+    let workspace = root.join("workspace").join(".agents").join("skills");
+    make_skill(&source, "demo", "Demo skill");
+    fs::create_dir_all(&workspace).unwrap();
+
+    import_skill(&source, SkillKind::User, &managed_root).unwrap();
+    deploy_skill("demo", &managed_root, &runtime).unwrap();
+    undeploy_skill("demo", &managed_root, &runtime).unwrap();
+    change_skill_kind("demo", SkillKind::Remote, &managed_root).unwrap();
+    add_workspace(
+        WorkspaceAddRequest {
+            path: workspace.clone(),
+            kind: WorkspaceKind::User,
+        },
+        &managed_root,
+    )
+    .unwrap();
+    forget_workspace(&workspace, &managed_root).unwrap();
+
+    let operations = list_operations(
+        OperationFilter {
+            limit: Some(100),
+            ..OperationFilter::default()
+        },
+        &managed_root,
+    )
+    .unwrap();
+    let types = operations
+        .operations
+        .iter()
+        .map(|operation| operation.operation_type.as_str())
+        .collect::<HashSet<_>>();
+
+    for expected in [
+        "import_skill",
+        "deploy_skill",
+        "undeploy_skill",
+        "change_skill_kind",
+        "add_workspace",
+        "forget_workspace",
+    ] {
+        assert!(types.contains(expected), "missing {expected} audit record");
+    }
+    assert!(operations
+        .operations
+        .iter()
+        .all(|operation| operation.status == OperationStatus::Succeeded));
+}
+
+#[test]
+fn failed_managed_store_mutation_is_audited() {
+    let root = temp_dir("failed-mutation-audit");
+    let managed_root = root.join("SkillBox");
+    let source = root.join("source").join("demo");
+    let runtime = root.join("runtime");
+    make_skill(&source, "demo", "Demo skill");
+    import_skill(&source, SkillKind::User, &managed_root).unwrap();
+    make_skill(&runtime.join("demo"), "demo", "Existing unmanaged skill");
+
+    assert!(deploy_skill("demo", &managed_root, &runtime).is_err());
+    let operations = list_operations(
+        OperationFilter {
+            entity_name: Some("demo".to_string()),
+            ..OperationFilter::default()
+        },
+        &managed_root,
+    )
+    .unwrap();
+    let failed = operations
+        .operations
+        .iter()
+        .find(|operation| operation.operation_type == "deploy_skill")
+        .unwrap();
+
+    assert_eq!(failed.status, OperationStatus::Failed);
+    assert!(failed
+        .error
+        .as_deref()
+        .unwrap()
+        .contains("Refusing to overwrite"));
+}
+
+#[test]
+fn usage_hook_install_is_audited_without_exposing_config_contents() {
+    let root = temp_dir("usage-hook-audit");
+    let home = root.join("home");
+    let managed_root = home.join(".skillbox");
+
+    install_usage_hook_for_home_with_audit(UsageHookTarget::ClaudeCodeCli, &home, &managed_root)
+        .unwrap();
+    let operations = list_operations(
+        OperationFilter {
+            entity_type: Some("agent_config".to_string()),
+            ..OperationFilter::default()
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    assert_eq!(operations.operations.len(), 1);
+    assert_eq!(
+        operations.operations[0].operation_type,
+        "install_usage_hook"
+    );
+    assert_eq!(operations.operations[0].status, OperationStatus::Succeeded);
+    assert!(operations.operations[0].payload.get("configPath").is_some());
+    assert!(operations.operations[0].payload.get("config").is_none());
+}
+
+fn database_migration_backups(database_path: &Path) -> Vec<PathBuf> {
+    let prefix = format!(
+        "{}.pre-migration-",
+        database_path.file_name().unwrap().to_string_lossy()
+    );
+    let mut backups = fs::read_dir(database_path.parent().unwrap())
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(&prefix) && name.ends_with(".bak"))
+        })
+        .collect::<Vec<_>>();
+    backups.sort();
+    backups
 }
 
 #[test]
@@ -1982,6 +2482,25 @@ fn sync_user_skills_reports_push_failed_without_losing_commit() {
     assert!(!result.pushed);
     assert_eq!(result.state, UserSkillsGitState::PushFailed);
     assert!(result.message.contains("push"));
+
+    let operations = list_operations(
+        OperationFilter {
+            entity_name: Some("user-skills".to_string()),
+            ..OperationFilter::default()
+        },
+        &managed_root,
+    )
+    .unwrap();
+    let sync_operation = operations
+        .operations
+        .iter()
+        .find(|operation| operation.operation_type == "sync_user_skills_git")
+        .unwrap();
+    assert_eq!(sync_operation.status, OperationStatus::Failed);
+    assert!(sync_operation
+        .error
+        .as_deref()
+        .is_some_and(|error| error.contains("push")));
 }
 
 #[test]

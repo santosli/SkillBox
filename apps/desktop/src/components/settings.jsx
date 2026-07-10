@@ -6,11 +6,13 @@ import {
   usageHookBadgeTone,
   usageHookStatusLabel
 } from '../usageHooks.js';
+import { doctorIssueTone, hasStaleDeploymentRecords } from '../doctor.js';
 import { userSyncLabel } from '../userSkillsGitSync.js';
 import { Badge, PageTitleRow, PathList } from './common.jsx';
 
 const settingsSections = [
   { id: 'storage', label: 'Storage', href: '#settings-storage' },
+  { id: 'health', label: 'Health', href: '#settings-health' },
   { id: 'sync', label: 'Sync', href: '#settings-sync' },
   { id: 'updates', label: 'Updates', href: '#settings-updates' },
   { id: 'hooks', label: 'Hooks', href: '#settings-hooks' }
@@ -18,12 +20,15 @@ const settingsSections = [
 
 export function SettingsPage({
   appUpdate,
+  doctorReport,
   paths,
   preferences,
   status,
   usageHooks,
   userSkillsGit,
   onCheckAppUpdate,
+  onRunDoctor,
+  onRepairStaleDeployments,
   onInstallAppUpdate,
   onInstallUsageHook,
   onOpenUsageHookConfig,
@@ -47,6 +52,12 @@ export function SettingsPage({
         />
         <div className="settingsContent">
           <ManagedRootsPanel paths={paths} />
+          <DoctorSettingsPanel
+            doctorReport={doctorReport}
+            status={status}
+            onRun={onRunDoctor}
+            onRepair={onRepairStaleDeployments}
+          />
           <SyncRefreshSettingsPanel
             preferences={preferences}
             status={status}
@@ -70,6 +81,77 @@ export function SettingsPage({
         </div>
       </section>
     </div>
+  );
+}
+
+function DoctorSettingsPanel({ doctorReport, status, onRun, onRepair }) {
+  const isChecking = status === 'checking_health';
+  const isRepairing = status === 'repairing_stale_deployments';
+  const isBusy = isChecking || isRepairing;
+  const hasReport = Boolean(doctorReport?.checkedAt);
+  const hasStaleRecords = hasStaleDeploymentRecords(doctorReport);
+  const summary = !hasReport
+    ? 'Not checked'
+    : doctorReport.healthy
+      ? 'Healthy'
+      : `${doctorReport.errorCount} errors, ${doctorReport.warningCount} warnings`;
+
+  return (
+    <aside className="panel compactPanel settingsPanel doctorSettingsPanel" id="settings-health">
+      <div className="panelHeader compact">
+        <div>
+          <h2>Managed store health</h2>
+          <p>Check SQLite, managed skills, deployments, workspaces, and import backups.</p>
+        </div>
+      </div>
+      <div className="settingsForm">
+        <PathList
+          items={[
+            ['Status', summary],
+            [
+              'Database schema',
+              doctorReport?.schemaVersion
+                ? `v${doctorReport.schemaVersion} / v${doctorReport.latestSchemaVersion}`
+                : 'Not checked'
+            ],
+            ['Last checked', doctorReport?.checkedAt || 'Not checked']
+          ]}
+        />
+        {doctorReport?.issues?.length > 0 ? (
+          <div className="usageHookList doctorIssueList">
+            {doctorReport.issues.map((issue, index) => (
+              <div className="usageHookRow doctorIssueRow" key={`${issue.code}:${issue.path}:${index}`}>
+                <div className="usageHookMain">
+                  <strong>{issue.entityName || issue.code}</strong>
+                  <small>{issue.message}</small>
+                  {issue.path ? <code>{issue.path}</code> : null}
+                  {issue.suggestedAction ? <small>{issue.suggestedAction}</small> : null}
+                </div>
+                <Badge tone={doctorIssueTone(issue)}>{issue.severity}</Badge>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {hasStaleRecords ? (
+          <small>
+            Cleanup only removes stale SQLite deployment records; runtime files are not deleted.
+          </small>
+        ) : null}
+        <div className="settingsActions">
+          <span>{hasReport ? 'Health check is read-only; no repair was applied.' : ''}</span>
+          <div className="appUpdateActions">
+            {hasStaleRecords ? (
+              <button className="button secondary" disabled={isBusy} type="button" onClick={onRepair}>
+                {isRepairing ? 'Cleaning...' : 'Clean stale records'}
+              </button>
+            ) : null}
+            <button className="button primary" disabled={isBusy} type="button" onClick={onRun}>
+              {isChecking ? 'Checking...' : 'Run health check'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </aside>
   );
 }
 

@@ -115,6 +115,62 @@ pub struct ManagedPreferences {
     pub remote_update_timeout_seconds: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkillUserMetadata {
+    pub skill_name: String,
+    pub favorite: bool,
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkillUserMetadataUpdate {
+    pub skill_name: String,
+    pub favorite: bool,
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DoctorIssueSeverity {
+    Warning,
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct DoctorRequest {
+    #[serde(default)]
+    pub repair_preview: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DoctorIssue {
+    pub code: String,
+    pub severity: DoctorIssueSeverity,
+    pub entity_name: Option<String>,
+    pub path: Option<PathBuf>,
+    pub message: String,
+    pub repairable: bool,
+    pub suggested_action: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DoctorReport {
+    pub checked_at: String,
+    pub schema_version: i64,
+    pub latest_schema_version: i64,
+    pub healthy: bool,
+    pub error_count: usize,
+    pub warning_count: usize,
+    pub repair_preview: bool,
+    pub issues: Vec<DoctorIssue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DoctorRepairResult {
+    pub removed_deployment_records: usize,
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum WorkspaceKind {
