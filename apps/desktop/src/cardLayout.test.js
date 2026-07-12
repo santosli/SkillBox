@@ -152,7 +152,7 @@ test('dashboard and settings use the shared page title row template', () => {
   assert.match(pageRule, /max-width:\s*1220px;/);
   assert.match(pageRule, /gap:\s*18px;/);
   assert.match(pageTitleRowRule, /min-height:\s*60px;/);
-  assert.match(pageTitleRowRule, /border-bottom:\s*1px solid #e5e7eb;/);
+  assert.match(pageTitleRowRule, /border-bottom:\s*1px solid var\(--skillbox-border\);/);
   assert.match(pageTitleRowRule, /padding-bottom:\s*12px;/);
   assert.match(pageTitleGroupRule, /gap:\s*12px;/);
   assert.match(pageTitleHeadingRule, /font-size:\s*28px;/);
@@ -193,7 +193,7 @@ test('settings workbench CSS defines a desktop rail and responsive fallback', ()
   assert.doesNotMatch(css, /\.settingsStatusRow/);
   assert.doesNotMatch(css, /\.settingsStoreHint/);
   assert.match(syncRule, /grid-template-columns:\s*1fr;/);
-  assert.match(subformRule, /border-top:\s*1px solid #eef2f7;/);
+  assert.match(subformRule, /border-top:\s*1px solid var\(--skillbox-slate-bg\);/);
   assert.doesNotMatch(subformRule, /border-left:/);
   assert.match(responsiveRule, /\.settingsWorkbench\s*\{[^}]*grid-template-columns:\s*1fr;/s);
   assert.match(responsiveRule, /\.settingsRail\s*\{[^}]*position:\s*static;/s);
@@ -653,7 +653,7 @@ test('remote diff review footer separates actions from the diff pane edge', () =
 
   assert.match(footerRule, /padding:\s*18px 24px 20px;/);
   assert.match(footerRule, /border-top:\s*1px solid #e5edf6;/);
-  assert.match(footerRule, /background:\s*#ffffff;/);
+  assert.match(footerRule, /background:\s*var\(--skillbox-surface\);/);
 });
 
 test('remote update preview command runs off the command handler', () => {
@@ -811,7 +811,7 @@ test('skill detail modal uses a two-column workbench layout', () => {
   assert.match(css, /\.skillDetailBodyGrid\s*\{[^}]*overflow-y:\s*auto;/s);
   assert.match(css, /\.skillDetailControlRail\s*\{[^}]*min-width:\s*0;/s);
   assert.match(css, /\.skillDetailControlRail\s*\{[^}]*align-self:\s*stretch;/s);
-  assert.match(css, /\.skillDetailControlRail\s*\{[^}]*border-left:\s*1px solid #e2e8f0;/s);
+  assert.match(css, /\.skillDetailControlRail\s*\{[^}]*border-left:\s*1px solid var\(--skillbox-border-soft\);/s);
   assert.match(css, /\.skillDetailControlRail\s*\{[^}]*position:\s*sticky;/s);
   assert.match(css, /\.remoteVersionSummary span\s*\{[^}]*white-space:\s*nowrap;/s);
   assert.match(css, /\.remoteVersionSummary span\s*\{[^}]*text-overflow:\s*ellipsis;/s);
@@ -882,12 +882,16 @@ test('skill card type badges and tags are neutral classifications', () => {
   const typeBadgeStart = appSource.indexOf('function SkillTypeBadge');
   const typeBadgeSource = appSource.slice(typeBadgeStart, typeBadgeStart + 420);
   const tagRule = css.match(/\.tagPill\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const editableTagRule = css.match(/\.editableTagPill\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
 
   assert.match(typeBadgeSource, /<Badge tone="slate">/);
   assert.match(typeBadgeSource, /type === 'user' \? UserRound : Cloud/);
   assert.match(tagRule, /background:\s*var\(--skillbox-slate-bg\);/);
   assert.match(tagRule, /color:\s*var\(--skillbox-slate-text\);/);
+  assert.match(editableTagRule, /background:\s*var\(--skillbox-slate-bg\);/);
+  assert.match(editableTagRule, /color:\s*var\(--skillbox-slate-text\);/);
   assert.doesNotMatch(css, /\.tagPill:nth-child/);
+  assert.doesNotMatch(css, /\.editableTagPill:nth-child/);
 });
 
 test('skill card names wrap to two lines while descriptions use one', () => {
@@ -900,6 +904,34 @@ test('skill card names wrap to two lines while descriptions use one', () => {
   assert.doesNotMatch(titleRule, /white-space:\s*nowrap;/);
   assert.match(descriptionRule, /-webkit-line-clamp:\s*1;/);
   assert.match(titleRowRule, /padding-right:\s*44px;/);
+});
+
+test('skill names share one restrained monospace identity', () => {
+  const cardTitleRule = css.match(/\.skillCardTitleText strong\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const listTitleRule = css.match(/\.skillNameCell strong\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const detailTitleRule = css.match(/\.skillDetailTitleBlock h2\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(colorsCss, /--skillbox-font-skill:\s*ui-monospace,/);
+  for (const rule of [cardTitleRule, listTitleRule, detailTitleRule]) {
+    assert.match(rule, /font-family:\s*var\(--skillbox-font-skill\);/);
+    assert.match(rule, /font-weight:\s*600;/);
+  }
+  assert.match(listTitleRule, /-webkit-line-clamp:\s*2;/);
+  assert.match(listTitleRule, /overflow-wrap:\s*anywhere;/);
+  assert.doesNotMatch(listTitleRule, /white-space:\s*nowrap;/);
+});
+
+test('desktop colors converge on tokens and one primary blue', () => {
+  const remainingHexColors = css.match(/#[0-9a-f]{6}/gi) || [];
+
+  assert.ok(remainingHexColors.length <= 60, `expected at most 60 CSS hex exceptions, found ${remainingHexColors.length}`);
+  assert.match(colorsCss, /--skillbox-blue:\s*#2563eb;/);
+  assert.doesNotMatch(colorsCss, /--skillbox-blue-strong:/);
+  assert.doesNotMatch(css, /#0a84ff|#2563eb/i);
+  assert.doesNotMatch(css, /rgba\(10,\s*132,\s*255|#0a63d8/i);
+  assert.match(css, /rgba\(var\(--skillbox-blue-rgb\),\s*0\.22\)/);
+  assert.doesNotMatch(appSource, /type === 'user' \? 'green' : 'blue'/);
+  assert.doesNotMatch(appSource, /skillType === 'user' \? 'green' : 'blue'/);
 });
 
 test('skill cards use an adaptive compact rhythm with aligned metadata rows', () => {
@@ -941,7 +973,7 @@ test('deploy workspace dialog includes checked rows and removal confirmation war
   assert.match(appSource, /Unchecked skills will be removed from these workspaces/);
   assert.match(appSource, /aria-label=\{`Deploy \$\{skill\.name\} to workspace/);
   assert.match(css, /\.deployWorkspaceDialog\s*\{/);
-  assert.match(css, /\.deployWorkspaceWarning\s*\{[^}]*background:\s*#fff7ed;/s);
+  assert.match(css, /\.deployWorkspaceWarning\s*\{[^}]*background:\s*var\(--skillbox-surface-orange\);/s);
 });
 
 test('installed workspace icons use immediate custom tooltips instead of native title delay', () => {
@@ -958,7 +990,7 @@ test('installed workspace icons use immediate custom tooltips instead of native 
 test('skill detail tags live inside controls rail', () => {
   assert.match(appSource, /<aside className="skillDetailControlRail" aria-label="Skill controls">[\s\S]*aria-label="Skill tags"[\s\S]*<RemoteSkillControlPanel/);
   assert.match(appSource, /<div className="skillDetailRailHeader">[\s\S]*<span>Controls<\/span>[\s\S]*<section className="skillDetailControlSection skillDetailTagsControl"/);
-  assert.match(css, /\.skillDetailTagsControl \+ \.remoteSkillPanel,\s*\.skillDetailTagsControl \+ \.userSkillPanel\s*\{[^}]*border-top:\s*1px solid #eef2f7;/s);
+  assert.match(css, /\.skillDetailTagsControl \+ \.remoteSkillPanel,\s*\.skillDetailTagsControl \+ \.userSkillPanel\s*\{[^}]*border-top:\s*1px solid var\(--skillbox-slate-bg\);/s);
 });
 
 test('skill detail can request a confirmed skill type change', () => {
@@ -979,14 +1011,15 @@ test('skill detail can request a confirmed skill type change', () => {
   assert.doesNotMatch(appSource, /className="candidateTypeToggle skillDetailTypeToggle"/);
   assert.match(appSource, /onRequestTypeChange\(skill,\s*'remote'\)/);
   assert.match(appSource, /onRequestTypeChange\(skill,\s*'user'\)/);
-  assert.match(css, /\.skillDetailTypeSegment\s*\{[^}]*background:\s*#eef2f7;/s);
+  assert.match(css, /\.skillDetailTypeSegment\s*\{[^}]*background:\s*var\(--skillbox-slate-bg\);/s);
   assert.match(css, /\.skillDetailTypeSegment button\.active\s*\{[^}]*background:\s*var\(--skillbox-blue\);/s);
-  assert.match(css, /\.skillDetailTypeSegment button\.active\s*\{[^}]*color:\s*#ffffff;/s);
+  assert.match(css, /\.skillDetailTypeSegment button\.active\s*\{[^}]*color:\s*var\(--skillbox-surface\);/s);
   assert.match(css, /\.skillDetailTypeSegment button:disabled\s*\{[^}]*opacity:\s*1;/s);
   assert.match(css, /\.confirmDialog\s*\{[^}]*width:\s*min\(520px,\s*calc\(100vw - 64px\)\);/s);
-  assert.match(css, /\.confirmDialogHeader\s*\{[^}]*border-bottom:\s*1px solid #eef2f7;/s);
-  assert.match(css, /\.confirmDialogFooter\s*\{[^}]*border-top:\s*1px solid #eef2f7;/s);
-  assert.match(css, /\.skillTypeChangeSummary\s*\{[^}]*background:\s*#f8fbff;/s);
+  assert.match(css, /\.confirmDialogHeader\s*\{[^}]*border-bottom:\s*1px solid var\(--skillbox-slate-bg\);/s);
+  assert.match(css, /\.confirmDialogFooter\s*\{[^}]*border-top:\s*1px solid var\(--skillbox-slate-bg\);/s);
+  assert.match(css, /\.skillTypeChangeSummary\s*\{[^}]*background:\s*var\(--skillbox-surface-blue-subtle\);/s);
+  assert.match(appSource, /<Badge tone="slate">\{currentLabel\} skill<\/Badge>[\s\S]*<Badge tone="slate">\{targetLabel\} skill<\/Badge>/);
 });
 
 test('remote update actions live in the detail control rail', () => {
@@ -1062,7 +1095,7 @@ test('remote version list highlights the current version', () => {
   assert.match(css, /\.remoteVersionRow \.remoteVersionCurrentBadge\s*\{[^}]*display:\s*inline-flex;/s);
   assert.match(css, /\.remoteVersionRow \.remoteVersionCurrentBadge\s*\{[^}]*align-items:\s*center;/s);
   assert.match(css, /\.remoteVersionRow \.remoteVersionCurrentBadge\s*\{[^}]*justify-content:\s*center;/s);
-  assert.match(css, /\.remoteVersionRow \.remoteVersionCurrentBadge\s*\{[^}]*color:\s*#166534;/s);
+  assert.match(css, /\.remoteVersionRow \.remoteVersionCurrentBadge\s*\{[^}]*color:\s*var\(--skillbox-green-text\);/s);
   assert.match(css, /\.remoteVersionRow \.remoteVersionCurrentBadge\s*\{[^}]*pointer-events:\s*none;/s);
 });
 

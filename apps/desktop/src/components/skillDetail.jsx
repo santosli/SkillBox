@@ -314,10 +314,6 @@ function skillTypeLabel(type = '') {
   return type === 'remote' ? 'Remote' : 'User';
 }
 
-function skillTypeTone(type = '') {
-  return type === 'user' ? 'green' : 'blue';
-}
-
 function SkillTypeControl({ skill, onRequestTypeChange }) {
   return (
     <section className="skillDetailControlSection skillDetailTypeControl" aria-label="Skill type">
@@ -368,9 +364,9 @@ export function SkillTypeChangeDialog({ dialog, onClose, onConfirm }) {
       onConfirm={onConfirm}
     >
       <div className="skillTypeChangeSummary" aria-label="Skill type change">
-        <Badge tone={skillTypeTone(dialog.currentType)}>{currentLabel} skill</Badge>
+        <Badge tone="slate">{currentLabel} skill</Badge>
         <span>to</span>
-        <Badge tone={skillTypeTone(dialog.targetType)}>{targetLabel} skill</Badge>
+        <Badge tone="slate">{targetLabel} skill</Badge>
       </div>
       <p className="confirmDialogImpact">
         SkillBox will move the managed folder and retarget existing workspace deployments for this skill.
@@ -577,7 +573,7 @@ export function SkillDetailDialog({
         <header className="skillDetailDialogHeader">
           <div className="skillDetailTitleBlock">
             <div className="skillDetailBadges">
-              <Badge tone={skill.type === 'user' ? 'green' : 'blue'}>{labelize(skill.type)}</Badge>
+              <Badge tone="slate">{labelize(skill.type)}</Badge>
               <Badge tone={skill.statusTone}>{skill.statusLabel}</Badge>
             </div>
             <div className="skillDetailTitleRow">

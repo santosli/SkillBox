@@ -338,7 +338,7 @@ function CandidateRow({ candidate, onToggleSelected, onTypeChange }) {
         <div className="candidateTitle">
           <strong>{candidate.name}</strong>
           <SourceIcon candidate={candidate} />
-          <Badge tone={candidate.skillType === 'user' ? 'green' : 'blue'}>
+          <Badge tone="slate">
             {candidate.skillType === 'user' ? 'User skill' : 'Remote skill'}
           </Badge>
           {candidate.importStatus === 'system' ? <Badge tone="slate">System</Badge> : null}
