@@ -822,20 +822,54 @@ test('active workspace icons sit beside the active workspaces label', () => {
   assert.doesNotMatch(css, /\.skillDetailDeploySurface\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto;/s);
 });
 
-test('skill cards show usage directly under the skill name', () => {
+test('skill cards keep usage in metadata and hide zero calls', () => {
   const skillCardStart = appSource.indexOf('function SkillCard');
   const skillCardEnd = appSource.indexOf('function AgentIconStack', skillCardStart);
   const skillCardSource = appSource.slice(skillCardStart, skillCardEnd);
 
   assert.ok(skillCardStart > 0);
   assert.ok(skillCardEnd > skillCardStart);
-  assert.match(skillCardSource, /className="skillCardTitleText"[\s\S]*<strong>\{skill\.name\}<\/strong>[\s\S]*className="skillCardUsage"[\s\S]*\{skill\.usageCount \|\| 0\} calls/);
-  assert.ok(
-    skillCardSource.indexOf('<strong>{skill.name}</strong>') <
-      skillCardSource.indexOf('className="skillCardUsage"')
-  );
+  assert.match(skillCardSource, /className="skillCardMetaDetails"[\s\S]*\{skill\.usageCount > 0 \? \([\s\S]*className="skillCardUsage"[\s\S]*\{skill\.usageCount\} calls/);
+  assert.doesNotMatch(skillCardSource, /\{skill\.usageCount \|\| 0\} calls/);
   assert.match(css, /\.skillCardTitleText\s*\{/);
   assert.match(css, /\.skillCardUsage\s*\{/);
+});
+
+test('skill cards reserve color for attention states', () => {
+  const skillCardStart = appSource.indexOf('function SkillCard');
+  const skillCardEnd = appSource.indexOf('function SkillTypeBadge', skillCardStart);
+  const skillCardSource = appSource.slice(skillCardStart, skillCardEnd);
+  const defaultStripeRule = css.match(/\.skillCard::before\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(skillCardSource, /`status-\$\{skill\.statusTone\}`/);
+  assert.match(defaultStripeRule, /background:\s*transparent;/);
+  assert.match(css, /\.skillCard\.status-amber::before\s*\{[^}]*background:\s*var\(--skillbox-amber\);/s);
+  assert.match(css, /\.skillCard\.status-red::before\s*\{[^}]*background:\s*var\(--skillbox-red\);/s);
+  assert.doesNotMatch(css, /\.skillCard\.favorite::before/);
+});
+
+test('skill card type badges and tags are neutral classifications', () => {
+  const typeBadgeStart = appSource.indexOf('function SkillTypeBadge');
+  const typeBadgeSource = appSource.slice(typeBadgeStart, typeBadgeStart + 420);
+  const tagRule = css.match(/\.tagPill\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(typeBadgeSource, /<Badge tone="slate">/);
+  assert.match(typeBadgeSource, /type === 'user' \? UserRound : Cloud/);
+  assert.match(tagRule, /background:\s*var\(--skillbox-slate-bg\);/);
+  assert.match(tagRule, /color:\s*var\(--skillbox-slate-text\);/);
+  assert.doesNotMatch(css, /\.tagPill:nth-child/);
+});
+
+test('skill card names wrap to two lines while descriptions use one', () => {
+  const titleRule = css.match(/\.skillCardTitleText strong\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const descriptionRule = css.match(/\.skillCardDescription\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const titleRowRule = css.match(/\.skillCardTitleRow\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(titleRule, /-webkit-line-clamp:\s*2;/);
+  assert.match(titleRule, /overflow-wrap:\s*anywhere;/);
+  assert.doesNotMatch(titleRule, /white-space:\s*nowrap;/);
+  assert.match(descriptionRule, /-webkit-line-clamp:\s*1;/);
+  assert.match(titleRowRule, /padding-right:\s*44px;/);
 });
 
 test('skill cards use a shorter fixed card rhythm with aligned metadata rows', () => {
@@ -850,19 +884,19 @@ test('skill cards use a shorter fixed card rhythm with aligned metadata rows', (
   assert.match(tagRule, /min-height:\s*26px;/);
 });
 
-test('skill card status and favorite action share one aligned header row', () => {
+test('skill card status moves to metadata while favorite remains in the header', () => {
   const skillCardStart = appSource.indexOf('function SkillCard');
   const skillCardEnd = appSource.indexOf('function AgentIconStack', skillCardStart);
   const skillCardSource = appSource.slice(skillCardStart, skillCardEnd);
   const actionsRule = css.match(/\.skillCardHeaderActions\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
-  const actionsBadgeRule = css.match(/\.skillCardHeaderActions \.badge\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const favoriteRule = css.match(/\.skillFavoriteButton\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
 
-  assert.match(skillCardSource, /className="skillCardHeaderActions"[\s\S]*<Badge tone=\{skill\.statusTone\}>\{skill\.statusLabel\}<\/Badge>[\s\S]*className=\{skill\.isFavorite \? 'skillFavoriteButton active' : 'skillFavoriteButton'\}/);
+  assert.match(skillCardSource, /className="skillCardMetaDetails"[\s\S]*<Badge tone=\{skill\.statusTone\}>\{skill\.statusLabel\}<\/Badge>/);
+  assert.match(skillCardSource, /className="skillCardHeaderActions"[\s\S]*className=\{skill\.isFavorite \? 'skillFavoriteButton active' : 'skillFavoriteButton'\}/);
+  assert.doesNotMatch(skillCardSource, /className="skillCardHeaderActions"[\s\S]*<Badge tone=\{skill\.statusTone\}>/);
   assert.match(actionsRule, /display:\s*inline-flex;/);
   assert.match(actionsRule, /align-items:\s*center;/);
   assert.match(actionsRule, /top:\s*20px;/);
-  assert.match(actionsBadgeRule, /height:\s*32px;/);
   assert.match(favoriteRule, /width:\s*32px;/);
   assert.match(favoriteRule, /height:\s*32px;/);
   assert.doesNotMatch(favoriteRule, /position:\s*absolute;/);

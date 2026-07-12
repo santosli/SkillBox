@@ -10,6 +10,8 @@ import {
   Search,
   ShieldCheck,
   Star,
+  Cloud,
+  UserRound,
   X
 } from 'lucide-react';
 import { dashboardTabItems } from '../dashboardFilters.js';
@@ -172,7 +174,7 @@ export function Dashboard({
                     <small>{skill.description || 'No description in SKILL.md'}</small>
                     <span className="tableTagLine">{skill.displayTags.join(', ')}</span>
                   </span>
-                  <Badge tone={skill.type === 'user' ? 'green' : 'blue'}>{labelize(skill.type)}</Badge>
+                  <SkillTypeBadge type={skill.type} />
                   <Badge tone={skill.statusTone}>{skill.statusLabel}</Badge>
                   <span className="checkedText">{lastStatusCheckedLabel}</span>
                 </button>
@@ -290,13 +292,18 @@ function DashboardChipGroup({ active, allLabel, label, options, onSelect }) {
 }
 
 function SkillCard({ skill, onOpen, onToggleFavorite }) {
+  const cardClassName = [
+    'skillCard',
+    `status-${skill.statusTone}`,
+    skill.isFavorite ? 'favorite' : ''
+  ].filter(Boolean).join(' ');
+
   return (
-    <article className={skill.isFavorite ? 'skillCard favorite' : 'skillCard'}>
+    <article className={cardClassName}>
       <button className="skillCardHitArea" type="button" onClick={() => onOpen(skill)}>
         <span className="skillCardTitleRow">
           <span className="skillCardTitleText">
             <strong>{skill.name}</strong>
-            <span className="skillCardUsage">{skill.usageCount || 0} calls</span>
           </span>
         </span>
         <span className="skillCardDescription">
@@ -310,12 +317,17 @@ function SkillCard({ skill, onOpen, onToggleFavorite }) {
           ))}
         </span>
         <span className="skillCardMeta">
-          <Badge tone={skill.type === 'user' ? 'green' : 'blue'}>{labelize(skill.type)}</Badge>
+          <span className="skillCardMetaDetails">
+            <SkillTypeBadge type={skill.type} />
+            <Badge tone={skill.statusTone}>{skill.statusLabel}</Badge>
+            {skill.usageCount > 0 ? (
+              <span className="skillCardUsage">{skill.usageCount} calls</span>
+            ) : null}
+          </span>
           <AgentIconStack agents={skill.installedAgents} />
         </span>
       </button>
       <span className="skillCardHeaderActions">
-        <Badge tone={skill.statusTone}>{skill.statusLabel}</Badge>
         <button
           aria-label={skill.isFavorite ? `Remove ${skill.name} from favorites` : `Add ${skill.name} to favorites`}
           aria-pressed={skill.isFavorite}
@@ -327,6 +339,19 @@ function SkillCard({ skill, onOpen, onToggleFavorite }) {
         </button>
       </span>
     </article>
+  );
+}
+
+function SkillTypeBadge({ type }) {
+  const TypeIcon = type === 'user' ? UserRound : Cloud;
+
+  return (
+    <Badge tone="slate">
+      <span className="skillTypeBadge">
+        <TypeIcon aria-hidden="true" />
+        {labelize(type)}
+      </span>
+    </Badge>
   );
 }
 

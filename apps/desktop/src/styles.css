@@ -778,12 +778,16 @@ button {
   bottom: 0;
   left: 0;
   width: 3px;
-  background: #38a169;
+  background: transparent;
   content: "";
 }
 
-.skillCard.favorite::before {
-  background: #d97706;
+.skillCard.status-amber::before {
+  background: var(--skillbox-amber);
+}
+
+.skillCard.status-red::before {
+  background: var(--skillbox-red);
 }
 
 .skillCard:hover {
@@ -828,7 +832,7 @@ button {
   min-height: 32px;
   align-items: flex-start;
   gap: 10px;
-  padding-right: 176px;
+  padding-right: 44px;
 }
 
 .skillCardTitleText {
@@ -839,15 +843,16 @@ button {
 }
 
 .skillCardTitleText strong {
-  display: block;
+  display: -webkit-box;
   min-width: 0;
   overflow: hidden;
   color: #111827;
   font-size: 17px;
   font-weight: 720;
   line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .skillCardUsage {
@@ -864,13 +869,13 @@ button {
 .skillCardDescription {
   display: -webkit-box;
   min-width: 0;
-  max-height: 40px;
+  max-height: 20px;
   overflow: hidden;
   color: #64748b;
   font-size: 14px;
   line-height: 20px;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
 }
 
 .skillCardTags {
@@ -889,24 +894,14 @@ button {
   align-items: center;
   overflow: hidden;
   border-radius: 999px;
-  background: #e0f2fe;
-  color: #0369a1;
+  background: var(--skillbox-slate-bg);
+  color: var(--skillbox-slate-text);
   font-size: 12px;
   font-weight: 720;
   line-height: 1;
   padding: 0 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.tagPill:nth-child(3n + 2) {
-  background: #fef3c7;
-  color: #b45309;
-}
-
-.tagPill:nth-child(3n) {
-  background: #fce7f3;
-  color: #be185d;
 }
 
 .skillCardMeta {
@@ -924,6 +919,27 @@ button {
 
 .skillCardMeta .badge {
   flex: 0 0 auto;
+}
+
+.skillCardMetaDetails {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.skillTypeBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.skillTypeBadge svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
 }
 
 .skillCardMeta > span {
