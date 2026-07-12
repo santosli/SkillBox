@@ -9,6 +9,12 @@ version tags such as `v0.3.0`.
 
 - No unreleased changes.
 
+## 0.4.2
+
+- Refresh the Dashboard with attention-based status stripes, neutral type and tag treatments, readable skill names, consolidated filters, adaptive cards, clearer agent tooltips, keyboard search, and actionable empty states.
+- Add workspace search and align the Workspaces and History filter tabs with the refreshed Dashboard controls.
+- Restore reliable favorite toggles from skill cards without opening the skill detail view.
+
 ## 0.4.1
 
 - Add reviewed skill deletion across Rust core, CLI, Tauri, and desktop, including removal from every managed workspace and a retained recovery backup.
