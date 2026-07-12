@@ -12,9 +12,9 @@
 ![Rust](https://img.shields.io/badge/Rust-core-B7410E)
 ![Frontend](https://img.shields.io/badge/Frontend-React%20%2B%20Vite-61DAFB)
 
-![SkillBox dashboard](docs/screenshots/skillbox-dashboard.png)
+![SkillBox dashboard](docs/screenshots/skillbox-dashboard-v041.jpg)
 
-SkillBox 是一个 local-first 的 macOS 桌面应用，带 Rust core/CLI，用来管理基于 `SKILL.md` 的 skills、规则、提示词和能力包，同时避免把某一个 agent runtime 当作唯一真相源。
+SkillBox 是一个 local-first 的 macOS 桌面应用，带 Rust core/CLI，用来管理基于 `SKILL.md` 的 skill 与能力包，同时避免把任一受支持的 agent runtime 当作唯一真相源。
 
 当前版本：`v0.4.1`。SkillBox 现在已经可以用于本地 skill 管理，但仍是早期软件。重要 skills 请保留备份，并在应用每一次文件系统变更前先 review。
 
@@ -26,31 +26,31 @@ SkillBox 是一个 local-first 的 macOS 桌面应用，带 Rust core/CLI，用�
 
 ## 为什么
 
-- **一个 managed store，面向多个 runtime。** 把持久 skill 状态放在 `~/.skillbox`，再按需部署到各个 agent runtime。
-- **本地 skills 一键同步。** 在桌面应用里直接提交并推送 user skill 变更；如果远端历史分叉，需要在 SkillBox 外用 Git 解决后再重试。
-- **远程 skills 定时检查。** 自动刷新 remote skill 状态，有可用更新时先 review，再应用。
-- **统计真实 skill 调用。** 通过支持的 agent hooks 记录 skill 调用，并在卡片和 History 里展示调用次数。
-- **远程 skill 版本管理。** 预览 diff、应用更新，并能回滚到不可变的 remote skill 版本。
-- **导入前先审查。** 本地扫描候选会先被分类为 user、remote 或 system，然后 SkillBox 才会复制内容。
-- **安全的默认部署。** 默认用 symlink 部署，并拒绝静默覆盖 runtime 中已有内容。
+- **一个 managed store，面向受支持的 runtime。** 把持久 skill 状态放在 `~/.skillbox`，再部署到受支持的全局或项目局部 `SKILL.md` roots。
+- **完整生命周期都先 review。** 导入、部署、类型迁移、source 绑定、更新、回滚和删除都会先展示影响，再改 managed store 或 runtime 文件。
+- **远程 skill 版本管理。** SkillBox 打开期间检查 GitHub source，预览全文件 diff，应用更新，并回滚到不可变版本。
+- **Git 提交和推送也可审查。** 查看 user-skill diff、创建 Conventional Commit，并可选推送；远端历史分叉仍在 SkillBox 外按正常 Git 冲突处理。
+- **真实调用与操作历史。** 通过支持的 agent hooks 记录 skill 调用，与管理操作统一展示，同时不保存完整聊天 transcript。
+- **安全的存储与部署默认值。** 使用顺序 SQLite migrations、恢复备份、完整性检查和 ownership-checked symlink，不静默覆盖 runtime 内容。
+- **签名的 macOS 分发。** 可安装已公证 DMG 或 Homebrew cask，app 更新也只在用户确认后应用。
 
 ## 截图
 
-![SkillBox skill card detail](docs/screenshots/skillbox-dashboard-card.png)
+![SkillBox skill detail](docs/screenshots/skillbox-skill-detail-v041.jpg)
 
-Skill card 会把调用次数、更新状态、标签、收藏状态和已部署 runtime target 放在同一个卡片里，方便快速判断维护状态。
+Dashboard 支持本地搜索、类型/更新/tag/favorite 过滤以及 grid/list 切换，并用状态优先的卡片展示结果。详情页集中展示 workspace 部署、调用统计、版本历史、source 绑定、rollback、标签、类型迁移和经审查的删除操作。
 
-![SkillBox skill detail](docs/screenshots/skillbox-skill-detail.png)
-
-详情页集中展示 workspace 部署、调用统计、版本历史、source 绑定、更新 review、rollback、标签和 operation history。
-
-![SkillBox workspaces](docs/screenshots/skillbox-workspaces.png)
+![SkillBox workspaces](docs/screenshots/skillbox-workspaces-v041.jpg)
 
 Workspaces 视图会跟踪全局和项目局部 `SKILL.md` roots，包括 Codex CLI、Codex App、Claude Code skill folders 和项目自己的 runtime。可以按 workspace 名称、路径或 agent 搜索，并与 Global/User 类型筛选组合使用。
 
-![SkillBox history](docs/screenshots/skillbox-history.png)
+![SkillBox history](docs/screenshots/skillbox-history-v041.jpg)
 
-History 会把真实 skill 调用和管理操作合并展示，prompt 只保留经过压缩和脱敏的小片段。
+History 会把真实 skill 调用和管理操作合并展示。hook 提供 prompt 文本时，SkillBox 只保存最多 500 字符的截断片段，而不是完整 transcript；这个片段仍可能包含用户输入。
+
+![SkillBox managed store health](docs/screenshots/skillbox-settings-health-v041.jpg)
+
+Doctor 会检查 SQLite schema 与完整性、managed skills、deployments、workspaces 和 import backups。诊断是只读操作，清理 stale deployment records 需要用户显式执行 repair。
 
 ![SkillBox import review](docs/screenshots/skillbox-import-review.jpg)
 
@@ -89,19 +89,17 @@ Runtime 目录只是部署目标：
 
 ## 功能
 
-- 扫描本地 `SKILL.md` roots，返回按名称排序的 skills、frontmatter 元数据、content hash、symlink 状态和扫描错误。
-- 把既有本地 skills 导入到 `~/.skillbox/user-skills` 或 `~/.skillbox/remote-skills`。
-- 通过经过归属校验的 symlink，把 managed skills 部署到单个 runtime workspace，或从指定 workspace 移除。
-- 经预览和名称确认后，从 SkillBox 及全部关联 workspace 删除某个 skill；保留恢复备份，不删除 workspace 注册记录。
-- 解析指向 skill 目录或 `SKILL.md` 的 GitHub tree、blob、raw 和 contents API URL。
-- 跟踪远程 GitHub source，检查更新，预览全文件 diff，应用更新，并回滚到不可变版本。
-- 管理全局和项目局部 runtime 的 workspace roots。
-- 通过共享 Git 仓库同步 user skills，并在桌面端提供 diff review 和 Conventional Commit message 生成。
-- 通过 Codex App、Codex CLI、Claude Code CLI hooks 记录 usage events，但不保存完整聊天正文。
-- 从 SQLite 记录中浏览桌面 operation 和 usage history。
-- 把用户设置的 favorites 和 tags 持久化到 managed SQLite store，而不是只保存在浏览器状态中。
-- 在 Settings 或 Rust CLI 中运行只读健康检查，核对数据库、managed skills、deployments、workspaces 和 import backups。
-- 从 GitHub Releases 检查已签名的 macOS app 更新，并只在用户确认后安装。
+- 扫描并登记受支持的全局或项目局部 `SKILL.md` workspaces；按名称、路径或 agent 搜索，并按 scope 过滤。
+- 在复制前 review user、remote 和 system import candidates；对符合条件的 deploy-back import 执行保守回退。
+- 通过 preview/apply 安装 GitHub-backed skill，并在不替换当前版本的情况下绑定识别到的 remote source candidate。
+- 检查 remote source、预览全文件 diff、应用更新，并回滚到不可变版本。
+- 通过 ownership-checked symlink 在单个 workspace 部署或移除 managed skill；经 review 迁移 User/Remote 类型并重定向 deployments。
+- 名称确认后，从 managed store 和全部关联 workspace 删除 skill，同时保留 recovery backup 和 workspace registrations。
+- Review user-skill Git diff、为选中文件创建 Conventional Commit，并可选推送，不尝试自动合并远端变更。
+- 按类型、更新状态、tag 或 favorite 搜索过滤 Dashboard，在 grid/list 间切换，并把 favorites 与 tags 持久化到 SQLite。
+- 记录受支持的 Codex App、Codex CLI 和 Claude Code CLI hook 调用，与管理操作一同浏览，不保存完整 transcript。
+- 执行顺序 SQLite migrations、迁移前备份和完整性检查；运行 Doctor 诊断并显式清理 stale deployment records。
+- 检查已签名的 GitHub Releases，并只在用户确认后安装 macOS app 更新。
 
 ## 依赖
 
@@ -198,7 +196,7 @@ Workspace 布局：
 ```text
 apps/desktop/              Tauri + React desktop app
 apps/desktop/src-tauri/    Tauri command bridge
-crates/skillbox-core/      scan, import, GitHub install preview/apply, deploy, SQLite, workspaces, updates, hooks
+crates/skillbox-core/      managed skill lifecycle, safety, SQLite, workspaces, history, hooks, and Git sync
 crates/skillbox-github/    GitHub skill URL parsing and normalization
 crates/skillbox-git/       structured Git service boundary
 crates/skillbox-cli/       Rust CLI

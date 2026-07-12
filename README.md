@@ -12,9 +12,9 @@ English | [简体中文](README.zh-CN.md)
 ![Rust](https://img.shields.io/badge/Rust-core-B7410E)
 ![Frontend](https://img.shields.io/badge/Frontend-React%20%2B%20Vite-61DAFB)
 
-![SkillBox dashboard](docs/screenshots/skillbox-dashboard.png)
+![SkillBox dashboard](docs/screenshots/skillbox-dashboard-v041.jpg)
 
-SkillBox is a local-first macOS desktop app with a Rust core and CLI for managing `SKILL.md`-based skills, rules, prompts, and capability packs without treating any one agent runtime as the source of truth.
+SkillBox is a local-first macOS desktop app with a Rust core and CLI for managing `SKILL.md`-based skill and capability packages without treating any supported agent runtime as the source of truth.
 
 Current release: `v0.4.1`. SkillBox is useful today for local skill management, but it is still early software. Keep backups of important skills, and review each filesystem change before applying it.
 
@@ -26,31 +26,31 @@ A 30-second overview of SkillBox: local-first skill management, review-before-im
 
 ## Why
 
-- **One managed store for every runtime.** Keep durable skill state in `~/.skillbox`, then deploy into each agent runtime as needed.
-- **One-click local sync.** Commit and push user skill changes from the managed store without leaving the desktop app; remote divergence is kept as a normal Git conflict to resolve outside SkillBox.
-- **Scheduled remote checks.** Refresh remote skill status automatically and review available updates before applying them.
-- **Usage stats for real skill calls.** Record skill calls from supported agent hooks, then surface call counts in cards and history.
-- **Versioned remote skills.** Preview diffs, apply updates, and roll back to immutable remote skill versions.
-- **Review before import.** Classify local scan candidates as user, remote, or system before SkillBox copies anything.
-- **Safe deployment defaults.** Use symlinks by default and refuse to silently overwrite existing runtime content.
+- **One managed store for supported runtimes.** Keep durable skill state in `~/.skillbox`, then deploy it into supported global or project-local `SKILL.md` roots.
+- **Review the whole lifecycle.** Inspect imports, deployments, type changes, source bindings, updates, rollbacks, and deletion before SkillBox changes managed or runtime files.
+- **Versioned remote skills.** Check GitHub sources while SkillBox is open, preview all-file diffs, apply updates, and roll back to immutable versions.
+- **Reviewed Git commit and push.** Inspect user-skill diffs, create a Conventional Commit, and optionally push it; inbound divergence remains a normal Git conflict to resolve outside SkillBox.
+- **Real usage and operation history.** Record supported agent hook calls and show them beside management operations without storing full chat transcripts.
+- **Safe storage and deployment defaults.** Use ordered SQLite migrations, recovery backups, integrity checks, and ownership-checked symlinks instead of silently overwriting runtime content.
+- **Signed macOS distribution.** Install a notarized DMG or Homebrew cask and apply signed app updates only after confirmation.
 
 ## Screenshots
 
-<img src="docs/screenshots/skillbox-dashboard-card.png" alt="SkillBox skill card detail" width="680">
+![SkillBox skill detail](docs/screenshots/skillbox-skill-detail-v041.jpg)
 
-Skill cards make usage and maintenance state visible at a glance, including call counts, update status, user-edited tags, favorites, and deployed runtime targets.
+The dashboard provides local search, type/update/tag/favorite filters, grid and list views, and status-focused cards. The skill detail view collects workspace deployment, usage, version history, source binding, rollback, tags, type changes, and reviewed deletion in one place.
 
-![SkillBox skill detail](docs/screenshots/skillbox-skill-detail.png)
-
-The skill detail view collects workspace deployment, usage, version history, source binding, update review, rollback, tags, and operation history in one place.
-
-![SkillBox workspaces](docs/screenshots/skillbox-workspaces.png)
+![SkillBox workspaces](docs/screenshots/skillbox-workspaces-v041.jpg)
 
 The Workspaces view tracks global and project-local `SKILL.md` roots across Codex CLI, Codex App, Claude Code skill folders, and project-specific runtimes. Search by workspace name, path, or agent and combine the query with Global/User filters.
 
-![SkillBox history](docs/screenshots/skillbox-history.png)
+![SkillBox history](docs/screenshots/skillbox-history-v041.jpg)
 
-History combines real skill calls and management operations, with prompt excerpts redacted down to small, reviewable snippets.
+History combines real skill calls and management operations. When a hook supplies prompt text, SkillBox stores a bounded excerpt of up to 500 characters rather than the full transcript; the excerpt can still contain user text.
+
+![SkillBox managed store health](docs/screenshots/skillbox-settings-health-v041.jpg)
+
+Doctor checks the SQLite schema and integrity, managed skills, deployments, workspaces, and import backups. Diagnostics are read-only; stale deployment records require an explicit repair action.
 
 ![SkillBox import review](docs/screenshots/skillbox-import-review.jpg)
 
@@ -89,20 +89,17 @@ Longer-term support for native Claude, OpenClaw, Cursor, Claude Code, Copilot, a
 
 ## Features
 
-- Scan local `SKILL.md` roots and return sorted skills with frontmatter metadata, content hashes, symlink status, and scan errors.
-- Import existing local skills into `~/.skillbox/user-skills` or `~/.skillbox/remote-skills`.
-- Deploy or remove managed skills in individual runtime workspaces through ownership-checked symlinks.
-- Delete a skill from SkillBox and all associated workspace deployments after a reviewed, name-confirmed preview; SkillBox retains a recovery backup and preserves workspace registrations.
-- Install remote skills from GitHub tree, blob, raw, and contents API URLs that point to skill directories or `SKILL.md`.
-- Track remote GitHub sources, check for updates, preview all-file diffs, apply updates, and roll back to immutable versions.
-- Manage workspace roots for global and project-local runtimes.
-- Sync user skills through a shared Git repository with desktop diff review and Conventional Commit message generation.
-- Record usage events from Codex App, Codex CLI, and Claude Code CLI hooks without storing full chat transcripts.
-- Browse desktop operation and usage history from SQLite-backed records.
-- Persist user favorites and tags in the managed SQLite store instead of browser-only state.
-- Run read-only health checks for the database, managed skills, deployments, workspaces, and import backups from Settings or the Rust CLI.
-- Check signed macOS app updates from GitHub Releases and install them only
-  after user confirmation.
+- Scan and register supported global or project-local `SKILL.md` workspaces, then search them by name, path, or agent and filter by scope.
+- Review user, remote, and system import candidates before copying anything; conservatively revert eligible deploy-back imports.
+- Install GitHub-backed skills through a preview/apply flow and bind discovered remote source candidates without replacing the active version.
+- Check remote sources, preview all-file diffs, apply updates, and roll back to immutable versions.
+- Deploy or remove managed skills in individual workspaces through ownership-checked symlinks; migrate User/Remote ownership and retarget deployments through a reviewed flow.
+- Delete a skill from the managed store and all associated workspaces after a name-confirmed preview, while retaining a recovery backup and workspace registrations.
+- Review user-skill Git diffs, create selected-file Conventional Commits, and optionally push without attempting an inbound auto-merge.
+- Search and filter the dashboard by type, update status, tag, or favorite; switch between grid and list views, with favorites and tags persisted in SQLite.
+- Record supported Codex App, Codex CLI, and Claude Code CLI hook calls, and browse usage beside management operations without storing full transcripts.
+- Apply ordered SQLite migrations with pre-migration backups and integrity checks; run Doctor diagnostics and explicitly clean up stale deployment records.
+- Check signed GitHub Releases and install macOS app updates only after user confirmation.
 
 ## Requirements
 
@@ -199,7 +196,7 @@ Workspace layout:
 ```text
 apps/desktop/              Tauri + React desktop app
 apps/desktop/src-tauri/    Tauri command bridge
-crates/skillbox-core/      scan, import, GitHub install preview/apply, deploy, SQLite, workspaces, updates, hooks
+crates/skillbox-core/      managed skill lifecycle, safety, SQLite, workspaces, history, hooks, and Git sync
 crates/skillbox-github/    GitHub skill URL parsing and normalization
 crates/skillbox-git/       structured Git service boundary
 crates/skillbox-cli/       Rust CLI
