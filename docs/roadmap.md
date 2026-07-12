@@ -15,6 +15,8 @@ the later search, runtime, synchronization, and stable-release milestones:
 - a read-only Doctor workflow across Rust core, CLI, Tauri, and desktop Settings;
 - broader operation auditing for managed-store, runtime, Git, workspace, and
   hook configuration mutations.
+- reviewed removal from one workspace and full managed-skill deletion with
+  all-workspace cleanup, ownership preflight, and retained recovery backups.
 
 The implementation is complete. The currently shipped version and distribution
 assets are tracked in `docs/release.md`; a version is not considered shipped

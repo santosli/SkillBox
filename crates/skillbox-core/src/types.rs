@@ -75,6 +75,34 @@ pub struct Deployment {
     pub mode: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeleteSkillRequest {
+    pub skill_name: String,
+    pub preview_id: String,
+    pub confirmed_skill_name: String,
+    pub actor: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DeleteSkillPreview {
+    pub preview_id: String,
+    pub skill_name: String,
+    pub kind: SkillKind,
+    pub managed_path: PathBuf,
+    pub deployments: Vec<ManagedSkillDeployment>,
+    pub blockers: Vec<String>,
+    pub can_delete: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DeleteSkillResult {
+    pub skill_name: String,
+    pub kind: SkillKind,
+    pub managed_path: PathBuf,
+    pub backup_path: PathBuf,
+    pub removed_deployments: Vec<ManagedSkillDeployment>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ManagedSkillDeployment {
     pub target_root: PathBuf,

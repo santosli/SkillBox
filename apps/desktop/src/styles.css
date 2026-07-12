@@ -4105,6 +4105,11 @@ dd {
   opacity: 0.58;
 }
 
+.skillDeleteCopyButton svg {
+  width: 14px;
+  height: 14px;
+}
+
 .remoteImportField input {
   width: 100%;
   height: 40px;

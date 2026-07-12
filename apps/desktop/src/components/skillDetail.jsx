@@ -1,10 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import {
   AlertTriangle,
+  Check,
+  Copy,
   ExternalLink,
   FolderOpen,
   Link2,
   Star,
+  Trash2,
   X
 } from 'lucide-react';
 import { normalizeEditableTags } from '../dashboardMetadata.js';
@@ -418,6 +421,84 @@ export function ImportRevertDialog({ dialog, onClose, onConfirm }) {
   );
 }
 
+export function SkillDeleteDialog({ dialog, onClose, onConfirm, onConfirmationChange }) {
+  const [copied, setCopied] = useState(false);
+  const preview = dialog.preview || {};
+  const deployments = preview.deployments || [];
+  const blockers = preview.blockers || [];
+  const confirmationMatches = dialog.confirmation === dialog.skillName;
+
+  useEffect(() => {
+    setCopied(false);
+  }, [dialog.skillName]);
+
+  async function copyConfirmationValue() {
+    try {
+      await navigator.clipboard.writeText(dialog.skillName);
+      setCopied(true);
+    } catch (_error) {
+      const fallback = document.createElement('textarea');
+      fallback.value = dialog.skillName;
+      fallback.setAttribute('readonly', '');
+      fallback.style.position = 'fixed';
+      fallback.style.opacity = '0';
+      document.body.appendChild(fallback);
+      fallback.select();
+      const didCopy = document.execCommand('copy');
+      fallback.remove();
+      if (didCopy) setCopied(true);
+    }
+  }
+
+  return (
+    <ConfirmDialog
+      className="skillDeleteDialog"
+      closeLabel="Close skill deletion confirmation"
+      confirmClassName="button danger"
+      confirmDisabled={!preview.canDelete || !confirmationMatches}
+      confirmLabel="Delete from SkillBox"
+      description={`Delete ${dialog.skillName} from the managed store and remove it from ${deployments.length} workspace${deployments.length === 1 ? '' : 's'}.`}
+      error={dialog.error}
+      loading={dialog.loading}
+      loadingLabel="Deleting..."
+      title="Delete skill?"
+      titleId="skill-delete-title"
+      onClose={onClose}
+      onConfirm={onConfirm}
+    >
+      {dialog.previewLoading ? <LoadingNotice compact>Reviewing managed files and deployments...</LoadingNotice> : null}
+      {blockers.map((blocker) => (
+        <div className="formError" key={blocker}>{blocker}</div>
+      ))}
+      <p className="confirmDialogImpact">
+        Workspace registrations and unrelated skills stay unchanged. A recovery backup will be kept in SkillBox.
+      </p>
+      <div className="fieldLabelRow skillDeleteConfirmationLabel">
+        <label className="fieldLabel" htmlFor="skill-delete-confirmation">
+          Type <strong>{dialog.skillName}</strong> to confirm
+        </label>
+        <button
+          aria-label={`Copy ${dialog.skillName} confirmation text`}
+          className="inlineActionButton skillDeleteCopyButton"
+          disabled={dialog.loading || dialog.previewLoading}
+          type="button"
+          onClick={copyConfirmationValue}
+        >
+          {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      <input
+        id="skill-delete-confirmation"
+        autoComplete="off"
+        disabled={dialog.loading || dialog.previewLoading}
+        value={dialog.confirmation}
+        onChange={(event) => onConfirmationChange(event.target.value)}
+      />
+    </ConfirmDialog>
+  );
+}
+
 export function SkillDetailDialog({
   skill,
   operations,
@@ -436,6 +517,7 @@ export function SkillDetailDialog({
   onOpenSourceUrl,
   onOpenSyncSetup,
   onRequestImportRevert,
+  onRequestDelete,
   onRequestTypeChange,
   onReviewRollback,
   onReviewUpdate,
@@ -662,6 +744,19 @@ export function SkillDetailDialog({
                 onOpenSyncSetup={onOpenSyncSetup}
               />
             )}
+            <section className="skillDetailControlSection" aria-label="Danger zone">
+              <div className="skillDetailSectionHeader">
+                <span>Danger zone</span>
+                <small>Managed skill</small>
+              </div>
+              <p className="skillDetailControlCopy">
+                Remove this skill from every workspace and from the SkillBox managed store.
+              </p>
+              <button className="button danger" type="button" onClick={() => onRequestDelete(skill)}>
+                <Trash2 aria-hidden="true" />
+                Delete from SkillBox
+              </button>
+            </section>
           </aside>
         </div>
 

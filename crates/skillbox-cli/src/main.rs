@@ -110,6 +110,37 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 target,
             )?)
         }
+        "delete-preview" => {
+            let skill_name = positional(command_args)
+                .into_iter()
+                .next()
+                .ok_or_else(|| "Usage: skillbox delete-preview <skill-name>".to_string())?;
+            print_json(&skillbox_core::preview_delete_skill(
+                &skill_name,
+                managed_root(command_args),
+            )?)
+        }
+        "delete" => {
+            let skill_name = positional(command_args).into_iter().next().ok_or_else(|| {
+                "Usage: skillbox delete <skill-name> --preview-id <id> --confirm <skill-name>"
+                    .to_string()
+            })?;
+            let preview_id = option(command_args, "--preview-id").ok_or_else(|| {
+                "Deletion preview is required. Run `skillbox delete-preview <skill-name>` first."
+                    .to_string()
+            })?;
+            let confirmed_skill_name = option(command_args, "--confirm")
+                .ok_or_else(|| "Confirm deletion by passing --confirm <skill-name>.".to_string())?;
+            print_json(&skillbox_core::delete_skill(
+                skillbox_core::DeleteSkillRequest {
+                    skill_name,
+                    preview_id,
+                    confirmed_skill_name,
+                    actor: "cli".to_string(),
+                },
+                managed_root(command_args),
+            )?)
+        }
         "user-skills-status" => print_json(&skillbox_core::user_skills_git_status(managed_root(
             command_args,
         ))?),
@@ -456,6 +487,8 @@ Commands:
   skillbox import <source-dir> --type user|remote [--managed-root <path>]
   skillbox deploy <skill-name> --target <path> [--managed-root <path>]
   skillbox undeploy <skill-name> --target <path> [--managed-root <path>]
+  skillbox delete-preview <skill-name> [--managed-root <path>]
+  skillbox delete <skill-name> --preview-id <id> --confirm <skill-name> [--managed-root <path>]
   skillbox user-skills-status [--managed-root <path>]
   skillbox check-remote-updates [skill-name] [--managed-root <path>]
   skillbox check-updates [skill-name] [--managed-root <path>]
@@ -576,6 +609,45 @@ mod tests {
 
         assert!(help.contains("skillbox import-records [--skill <name>]"));
         assert!(help.contains("skillbox revert-import <import-record-id>"));
+    }
+
+    #[test]
+    fn delete_commands_require_review_and_route_to_core() {
+        let root = temp_dir("cli-delete-skill");
+        let managed_root = root.join("SkillBox");
+        let source = root.join("source").join("demo");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(
+            source.join("SKILL.md"),
+            "---\nname: demo\ndescription: Demo skill\n---\n",
+        )
+        .unwrap();
+        skillbox_core::import_skill(&source, SkillKind::User, &managed_root).unwrap();
+        let preview = skillbox_core::preview_delete_skill("demo", &managed_root).unwrap();
+
+        run(vec![
+            "delete-preview".to_string(),
+            "demo".to_string(),
+            "--managed-root".to_string(),
+            managed_root.to_string_lossy().to_string(),
+        ])
+        .unwrap();
+        run(vec![
+            "delete".to_string(),
+            "demo".to_string(),
+            "--preview-id".to_string(),
+            preview.preview_id,
+            "--confirm".to_string(),
+            "demo".to_string(),
+            "--managed-root".to_string(),
+            managed_root.to_string_lossy().to_string(),
+        ])
+        .unwrap();
+
+        assert!(skillbox_core::managed_state(&managed_root)
+            .unwrap()
+            .skills
+            .is_empty());
     }
 
     #[test]

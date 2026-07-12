@@ -32,6 +32,16 @@ const mainSource = await readFile(new URL('./main.jsx', import.meta.url), 'utf8'
 const tauriSource = await readFile(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8');
 const tauriMainSource = await readFile(new URL('../src-tauri/src/main.rs', import.meta.url), 'utf8');
 
+test('all current and future text fields disable automatic writing assistance', () => {
+  assert.match(mainSource, /node\.matches\('input, textarea'\)/);
+  assert.match(mainSource, /setAttribute\('autocapitalize', 'none'\)/);
+  assert.match(mainSource, /setAttribute\('autocomplete', 'off'\)/);
+  assert.match(mainSource, /setAttribute\('autocorrect', 'off'\)/);
+  assert.match(mainSource, /setAttribute\('spellcheck', 'false'\)/);
+  assert.match(mainSource, /new MutationObserver/);
+  assert.match(mainSource, /observe\(rootElement, \{ childList: true, subtree: true \}\)/);
+});
+
 test('dashboard and workspace cards fill the available row width while auto-wrapping', () => {
   const sharedGridRule = css.match(/\.skillCardGrid,\s*\.workspaceCardGrid\s*\{(?<body>[^}]*)\}/s)
     ?.groups.body || '';
@@ -858,11 +868,11 @@ test('skill card status and favorite action share one aligned header row', () =>
   assert.doesNotMatch(favoriteRule, /position:\s*absolute;/);
 });
 
-test('deploy workspace dialog includes checked rows and unlink confirmation warning', () => {
+test('deploy workspace dialog includes checked rows and removal confirmation warning', () => {
   assert.match(appSource, /function DeployWorkspaceDialog/);
   assert.match(appSource, /workspaceDeployRequiresConfirmation\(changes\)/);
   assert.match(appSource, /confirmUndeploy/);
-  assert.match(appSource, /Unchecked deployed workspaces will be unlinked/);
+  assert.match(appSource, /Unchecked skills will be removed from these workspaces/);
   assert.match(appSource, /aria-label=\{`Deploy \$\{skill\.name\} to workspace/);
   assert.match(css, /\.deployWorkspaceDialog\s*\{/);
   assert.match(css, /\.deployWorkspaceWarning\s*\{[^}]*background:\s*#fff7ed;/s);
@@ -1068,4 +1078,26 @@ test('remote source candidate view opens through the desktop bridge with a brows
   assert.match(appSource, /async function viewRemoteSourceCandidate\(candidate\)/);
   assert.match(appSource, /invoke\('open_external_url'/);
   assert.match(appSource, /window\.open\(sourceUrl,\s*'_blank',\s*'noopener,noreferrer'\)/);
+});
+
+test('skill deletion uses a reviewed danger confirmation and blocking desktop commands', () => {
+  assert.match(appSource, /aria-label="Danger zone"/);
+  assert.match(appSource, /Delete from SkillBox/);
+  assert.match(appSource, /function SkillDeleteDialog/);
+  assert.match(appSource, /confirmClassName="button danger"/);
+  assert.match(appSource, /confirmationMatches/);
+  assert.match(appSource, /navigator\.clipboard\.writeText\(dialog\.skillName\)/);
+  assert.match(appSource, /Copy \$\{dialog\.skillName\} confirmation text/);
+  assert.match(appSource, /\{copied \? 'Copied' : 'Copy'\}/);
+  assert.match(appSource, /invoke\('preview_delete_skill'/);
+  assert.match(appSource, /invoke\('delete_skill'/);
+  assert.match(tauriSource, /async fn preview_delete_skill\(skill_name: String\)/);
+  assert.match(tauriSource, /async fn delete_skill\(request: skillbox_core::DeleteSkillRequest\)/);
+  assert.match(tauriSource, /spawn_blocking\(move \|\|/);
+});
+
+test('workspace deployment removal is explicit about removing only managed symlinks', () => {
+  assert.match(appSource, /Unchecked skills will be removed from these workspaces/);
+  assert.match(appSource, /Confirm removal from \{changes\.undeploy\.length\} workspace/);
+  assert.match(appSource, /existing directories or foreign symlinks are refused/);
 });

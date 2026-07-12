@@ -7,7 +7,11 @@ version tags such as `v0.3.0`.
 
 ## Unreleased
 
-- No unreleased changes.
+- Add reviewed skill deletion across Rust core, CLI, Tauri, and desktop, including removal from every managed workspace and a retained recovery backup.
+- Clarify single-workspace removal in the deployment picker while preserving symlink ownership checks and active-import recovery paths.
+- Harden deletion previews and rollback behavior for complete remote roots, equivalent workspace paths, corrupted caches, broken remote layouts, and concurrent target replacement.
+- Make the typed deletion confirmation value directly copyable from the desktop dialog.
+- Disable automatic capitalization, completion, correction, and spellchecking by default for every desktop input and textarea, including dynamically rendered dialogs.
 
 ## 0.4.0
 

@@ -785,6 +785,68 @@ pub(crate) fn remove_skill_index(database_path: &Path, skill_name: &str) -> Resu
     Ok(())
 }
 
+pub(crate) fn remove_deleted_skill_active_records(
+    database_path: &Path,
+    skill_name: &str,
+) -> Result<()> {
+    let mut connection = open_database(database_path).map_err(|error| error.to_string())?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            "DELETE FROM deployments WHERE skill_name = ?1",
+            params![skill_name],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute("DELETE FROM skills WHERE name = ?1", params![skill_name])
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            "DELETE FROM skill_user_metadata WHERE skill_name = ?1",
+            params![skill_name],
+        )
+        .map_err(|error| error.to_string())?;
+
+    let cached: Option<String> = transaction
+        .query_row(
+            "SELECT value FROM preferences WHERE key = ?1",
+            params!["remote_skill_update_cache"],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    if let Some(raw) = cached {
+        match serde_json::from_str::<RemoteSkillUpdateCheck>(&raw) {
+            Ok(mut cache) => {
+                cache
+                    .statuses
+                    .retain(|status| status.skill_name != skill_name);
+                transaction
+                    .execute(
+                        "UPDATE preferences SET value = ?2, updated_at = CURRENT_TIMESTAMP WHERE key = ?1",
+                        params![
+                            "remote_skill_update_cache",
+                            serde_json::to_string(&cache).map_err(|error| error.to_string())?
+                        ],
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
+            Err(_) => {
+                transaction
+                    .execute(
+                        "DELETE FROM preferences WHERE key = ?1",
+                        params!["remote_skill_update_cache"],
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
+        }
+    }
+
+    transaction.commit().map_err(|error| error.to_string())
+}
+
 pub(crate) fn import_record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImportRecord> {
     let kind_raw: String = row.get(2)?;
     let status_raw: String = row.get(9)?;

@@ -18,6 +18,7 @@ import {
 import { SettingsPage } from './components/settings.jsx';
 import {
   ImportRevertDialog,
+  SkillDeleteDialog,
   SkillDetailDialog,
   SkillTypeChangeDialog
 } from './components/skillDetail.jsx';
@@ -137,6 +138,7 @@ const autoRefreshBlockedStatuses = new Set([
   'loading',
   'preparing_sync',
   'deploying_skill',
+  'deleting_skill',
   'installing_usage_hook',
   'loading_history',
   'scanning',
@@ -304,6 +306,15 @@ export default function App() {
   const [importRevertDialog, setImportRevertDialog] = useState({
     open: false,
     record: null,
+    loading: false,
+    error: ''
+  });
+  const [skillDeleteDialog, setSkillDeleteDialog] = useState({
+    open: false,
+    skillName: '',
+    preview: null,
+    previewLoading: false,
+    confirmation: '',
     loading: false,
     error: ''
   });
@@ -1609,6 +1620,141 @@ export default function App() {
         ...current,
         loading: false,
         error: revertError.message || String(revertError) || 'Unable to revert import.'
+      }));
+      setStatus('ready');
+    }
+  }
+
+  async function openSkillDeleteDialog(skill) {
+    if (!skill?.name) return;
+    setError('');
+    setNotice('');
+    setSkillDeleteDialog({
+      open: true,
+      skillName: skill.name,
+      preview: null,
+      previewLoading: true,
+      confirmation: '',
+      loading: false,
+      error: ''
+    });
+
+    if (!window.__TAURI_INTERNALS__) {
+      setSkillDeleteDialog((current) => ({
+        ...current,
+        previewLoading: false,
+        preview: {
+          previewId: 'browser-preview',
+          canDelete: true,
+          deployments: skill.deployments || [],
+          blockers: []
+        }
+      }));
+      return;
+    }
+
+    try {
+      const raw = await invoke('preview_delete_skill', { skillName: skill.name });
+      setSkillDeleteDialog((current) =>
+        current.open && current.skillName === skill.name
+          ? {
+              ...current,
+              previewLoading: false,
+              preview: {
+                previewId: raw.previewId ?? raw.preview_id,
+                canDelete: Boolean(raw.canDelete ?? raw.can_delete),
+                deployments: raw.deployments || [],
+                blockers: raw.blockers || []
+              }
+            }
+          : current
+      );
+    } catch (deleteError) {
+      setSkillDeleteDialog((current) =>
+        current.open && current.skillName === skill.name
+          ? {
+              ...current,
+              previewLoading: false,
+              error: deleteError.message || String(deleteError) || 'Unable to review skill deletion.'
+            }
+          : current
+      );
+    }
+  }
+
+  function closeSkillDeleteDialog() {
+    if (skillDeleteDialog.loading) return;
+    setSkillDeleteDialog({
+      open: false,
+      skillName: '',
+      preview: null,
+      previewLoading: false,
+      confirmation: '',
+      loading: false,
+      error: ''
+    });
+  }
+
+  async function confirmSkillDelete() {
+    const { skillName, preview, confirmation } = skillDeleteDialog;
+    if (!preview?.canDelete || confirmation !== skillName) return;
+    setStatus('deleting_skill');
+    setSkillDeleteDialog((current) => ({ ...current, loading: true, error: '' }));
+
+    if (!window.__TAURI_INTERNALS__) {
+      setSkills((current) => current.filter((skill) => skill.name !== skillName));
+      setSelectedName('');
+      closeSkillDeleteDialog();
+      setNotice(`Deleted ${skillName} from SkillBox.`);
+      setStatus('prototype');
+      return;
+    }
+
+    try {
+      const result = await invoke('delete_skill', {
+        request: {
+          skill_name: skillName,
+          preview_id: preview.previewId,
+          confirmed_skill_name: confirmation,
+          actor: 'desktop'
+        }
+      });
+      const removedCount = (result.removedDeployments ?? result.removed_deployments ?? []).length;
+      setSkills((current) => current.filter((skill) => skill.name !== skillName));
+      setRemoteSkillUpdates((current) => ({
+        ...current,
+        statuses: current.statuses.filter((item) => item.skillName !== skillName)
+      }));
+      setFavoriteNames((current) => new Set([...current].filter((name) => name !== skillName)));
+      setDashboardTagOverrides((current) =>
+        Object.fromEntries(Object.entries(current).filter(([name]) => name !== skillName))
+      );
+      setSelectedName('');
+      setSkillDeleteDialog({ open: false, skillName: '', preview: null, previewLoading: false, confirmation: '', loading: false, error: '' });
+      setStatus('ready');
+      try {
+        const [state, workspaceRows, gitStatus, metadataRows] = await Promise.all([
+          invoke('managed_state'),
+          invoke('list_workspaces').catch(() => workspaces),
+          invoke('user_skills_git_status').catch(() => userSkillsGit),
+          invoke('list_skill_user_metadata').catch(() => [])
+        ]);
+        setSkills(state.skills?.map(normalizeSkill) || []);
+        setWorkspaces(normalizeWorkspaces(workspaceRows));
+        setPaths(normalizePaths(state.paths));
+        setIsFirstUse(Boolean(state.isFirstUse ?? state.is_first_use));
+        setUserSkillsGit(normalizeUserSkillsGitStatus(gitStatus));
+        setFavoriteNames(new Set((metadataRows || []).filter((item) => item.favorite).map((item) => item.skillName ?? item.skill_name)));
+        setDashboardTagOverrides(Object.fromEntries((metadataRows || []).map((item) => [item.skillName ?? item.skill_name, item.tags || []])));
+        setNotice(`Deleted ${skillName} and removed it from ${removedCount} workspace${removedCount === 1 ? '' : 's'}.`);
+      } catch (_refreshError) {
+        setNotice(`Deleted ${skillName}, but the dashboard refresh failed. Reopen SkillBox to refresh managed state.`);
+      }
+    } catch (deleteError) {
+      setSkillDeleteDialog((current) => ({
+        ...current,
+        loading: false,
+        error: deleteError.message || String(deleteError) || 'Unable to delete skill.'
       }));
       setStatus('ready');
     }
@@ -2994,6 +3140,7 @@ export default function App() {
           onOpenSourceUrl={openRemoteSourceUrl}
           onOpenSyncSetup={openSyncDialog}
           onRequestImportRevert={openImportRevertDialog}
+          onRequestDelete={openSkillDeleteDialog}
           onRequestTypeChange={openSkillTypeChangeDialog}
           onReviewRollback={(version) => openRemoteVersionReview(selectedSkill, 'rollback', version.version)}
           onReviewUpdate={() => openRemoteVersionReview(selectedSkill, 'update', selectedRemoteUpdate?.latestSha || '')}
@@ -3016,6 +3163,17 @@ export default function App() {
           dialog={importRevertDialog}
           onClose={closeImportRevertDialog}
           onConfirm={confirmImportRevert}
+        />
+      ) : null}
+
+      {skillDeleteDialog.open ? (
+        <SkillDeleteDialog
+          dialog={skillDeleteDialog}
+          onClose={closeSkillDeleteDialog}
+          onConfirm={confirmSkillDelete}
+          onConfirmationChange={(confirmation) =>
+            setSkillDeleteDialog((current) => ({ ...current, confirmation }))
+          }
         />
       ) : null}
 

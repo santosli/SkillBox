@@ -91,7 +91,8 @@ Longer-term support for native Claude, OpenClaw, Cursor, Claude Code, Copilot, a
 
 - Scan local `SKILL.md` roots and return sorted skills with frontmatter metadata, content hashes, symlink status, and scan errors.
 - Import existing local skills into `~/.skillbox/user-skills` or `~/.skillbox/remote-skills`.
-- Deploy and undeploy managed skills into runtime folders through symlinks.
+- Deploy or remove managed skills in individual runtime workspaces through ownership-checked symlinks.
+- Delete a skill from SkillBox and all associated workspace deployments after a reviewed, name-confirmed preview; SkillBox retains a recovery backup and preserves workspace registrations.
 - Install remote skills from GitHub tree, blob, raw, and contents API URLs that point to skill directories or `SKILL.md`.
 - Track remote GitHub sources, check for updates, preview all-file diffs, apply updates, and roll back to immutable versions.
 - Manage workspace roots for global and project-local runtimes.

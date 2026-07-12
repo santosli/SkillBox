@@ -91,7 +91,8 @@ Runtime 目录只是部署目标：
 
 - 扫描本地 `SKILL.md` roots，返回按名称排序的 skills、frontmatter 元数据、content hash、symlink 状态和扫描错误。
 - 把既有本地 skills 导入到 `~/.skillbox/user-skills` 或 `~/.skillbox/remote-skills`。
-- 通过 symlink 把 managed skills 部署到 runtime 目录，也支持 undeploy。
+- 通过经过归属校验的 symlink，把 managed skills 部署到单个 runtime workspace，或从指定 workspace 移除。
+- 经预览和名称确认后，从 SkillBox 及全部关联 workspace 删除某个 skill；保留恢复备份，不删除 workspace 注册记录。
 - 解析指向 skill 目录或 `SKILL.md` 的 GitHub tree、blob、raw 和 contents API URL。
 - 跟踪远程 GitHub source，检查更新，预览全文件 diff，应用更新，并回滚到不可变版本。
 - 管理全局和项目局部 runtime 的 workspace roots。

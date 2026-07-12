@@ -29,6 +29,7 @@
 - Moved dashboard favorites and user-edited tags from browser-only storage into SQLite, with a one-time desktop migration for existing local metadata.
 - Added a read-only Doctor workflow in Rust core, Rust CLI, Tauri, and desktop Settings for checking schema/integrity, managed skill layouts, remote `current` links, deployments, workspaces, import backups, and stale metadata.
 - Extended operation auditing across direct/reviewed imports, deploy/undeploy, skill type changes, workspace add/forget, user-skills Git remote/sync, and usage hook injection, including failed attempts.
+- Implemented reviewed skill deletion across Rust core, CLI, Tauri, and Skill Detail UI, including all-workspace symlink removal, active-import and foreign-target blockers, preview identity checks, transactional active-state cleanup, and retained deletion backups. Single-workspace removal continues through the deployment picker and shared `undeploy_skill` core.
 - Added Rust crate scaffolding for the planned Tauri/Rust architecture.
 - Verified the desktop shell in browser preview at `http://127.0.0.1:1420/`.
 
