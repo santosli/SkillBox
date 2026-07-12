@@ -952,22 +952,24 @@ test('skill cards use an adaptive compact rhythm with aligned metadata rows', ()
   assert.match(tagRule, /max-height:\s*26px;/);
 });
 
-test('skill card status moves to metadata while favorite remains in the header', () => {
+test('skill card favorite action stays above the full-card hit area', () => {
   const skillCardStart = appSource.indexOf('function SkillCard');
   const skillCardEnd = appSource.indexOf('function AgentIconStack', skillCardStart);
   const skillCardSource = appSource.slice(skillCardStart, skillCardEnd);
-  const actionsRule = css.match(/\.skillCardHeaderActions\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const favoriteRule = css.match(/\.skillFavoriteButton\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
 
   assert.match(skillCardSource, /className="skillCardMetaDetails"[\s\S]*<Badge tone=\{skill\.statusTone\}>\{skill\.statusLabel\}<\/Badge>/);
-  assert.match(skillCardSource, /className="skillCardHeaderActions"[\s\S]*className=\{skill\.isFavorite \? 'skillFavoriteButton active' : 'skillFavoriteButton'\}/);
-  assert.doesNotMatch(skillCardSource, /className="skillCardHeaderActions"[\s\S]*<Badge tone=\{skill\.statusTone\}>/);
-  assert.match(actionsRule, /display:\s*inline-flex;/);
-  assert.match(actionsRule, /align-items:\s*center;/);
-  assert.match(actionsRule, /top:\s*20px;/);
+  assert.match(skillCardSource, /className=\{skill\.isFavorite \? 'skillFavoriteButton active' : 'skillFavoriteButton'\}/);
+  assert.match(skillCardSource, /onPointerDown=\{\(event\) => event\.stopPropagation\(\)\}/);
+  assert.match(skillCardSource, /onClick=\{\(event\) => \{[\s\S]*event\.stopPropagation\(\);[\s\S]*void onToggleFavorite\(skill\.name\);/);
+  assert.doesNotMatch(skillCardSource, /skillCardHeaderActions/);
+  assert.match(favoriteRule, /position:\s*absolute;/);
+  assert.match(favoriteRule, /top:\s*20px;/);
+  assert.match(favoriteRule, /right:\s*18px;/);
+  assert.match(favoriteRule, /z-index:\s*3;/);
+  assert.match(favoriteRule, /pointer-events:\s*auto;/);
   assert.match(favoriteRule, /width:\s*32px;/);
   assert.match(favoriteRule, /height:\s*32px;/);
-  assert.doesNotMatch(favoriteRule, /position:\s*absolute;/);
 });
 
 test('deploy workspace dialog includes checked rows and removal confirmation warning', () => {

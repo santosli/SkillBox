@@ -365,17 +365,19 @@ function SkillCard({ skill, onOpen, onToggleFavorite }) {
           <AgentIconStack agents={skill.installedAgents} />
         </span>
       </button>
-      <span className="skillCardHeaderActions">
-        <button
-          aria-label={skill.isFavorite ? `Remove ${skill.name} from favorites` : `Add ${skill.name} to favorites`}
-          aria-pressed={skill.isFavorite}
-          className={skill.isFavorite ? 'skillFavoriteButton active' : 'skillFavoriteButton'}
-          type="button"
-          onClick={() => onToggleFavorite(skill.name)}
-        >
-          <Star aria-hidden="true" />
-        </button>
-      </span>
+      <button
+        aria-label={skill.isFavorite ? `Remove ${skill.name} from favorites` : `Add ${skill.name} to favorites`}
+        aria-pressed={skill.isFavorite}
+        className={skill.isFavorite ? 'skillFavoriteButton active' : 'skillFavoriteButton'}
+        type="button"
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          void onToggleFavorite(skill.name);
+        }}
+      >
+        <Star aria-hidden="true" />
+      </button>
     </article>
   );
 }

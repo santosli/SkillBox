@@ -1158,18 +1158,11 @@ button {
   color: var(--skillbox-blue-text);
 }
 
-.skillCardHeaderActions {
+.skillFavoriteButton {
   position: absolute;
   top: 20px;
   right: 18px;
-  z-index: 2;
-  display: inline-flex;
-  height: 32px;
-  align-items: center;
-  gap: 8px;
-}
-
-.skillFavoriteButton {
+  z-index: 3;
   display: inline-grid;
   width: 32px;
   height: 32px;
@@ -1180,6 +1173,7 @@ button {
   background: rgba(255, 255, 255, 0.92);
   color: var(--skillbox-text-subtle);
   cursor: pointer;
+  pointer-events: auto;
 }
 
 .skillFavoriteButton.active {
