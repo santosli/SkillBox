@@ -5,6 +5,7 @@ import {
   Link2,
   Plus,
   RefreshCw,
+  Search,
   Trash2,
   Unlink,
   X
@@ -22,6 +23,7 @@ import { DashboardStatusNotice } from './dashboard.jsx';
 export function WorkspacePage({
   error,
   filter,
+  query,
   notice,
   status,
   tabs,
@@ -29,6 +31,7 @@ export function WorkspacePage({
   onAdd,
   onDismissNotice,
   onFilter,
+  onQuery,
   onForget,
   onOpenSkills,
   onScan
@@ -56,21 +59,34 @@ export function WorkspacePage({
         )}
       />
 
-      <div className="dashboardFilterBar pageTypeFilterBar" aria-label="Workspace filters">
-        <div className="dashboardTypeTabs workspaceTypeTabs" role="tablist" aria-label="Workspace type">
-          {tabs.map((tab) => (
-            <button
-              aria-selected={filter === tab.id}
-              className={filter === tab.id ? 'active' : ''}
-              key={tab.id}
-              role="tab"
-              type="button"
-              onClick={() => onFilter(tab.id)}
-            >
-              <span>{tab.label}</span>
-              <small>{tab.count}</small>
-            </button>
-          ))}
+      <div className="dashboardFilterBar pageTypeFilterBar workspaceFilterBar" aria-label="Workspace filters">
+        <div className="workspaceFilterPrimary">
+          <label className="searchField dashboardSearch workspaceSearch" aria-label="Search workspaces">
+            <Search aria-hidden="true" />
+            <input
+              value={query}
+              onChange={(event) => onQuery(event.target.value)}
+              name="workspace-search"
+              placeholder="Search workspaces..."
+              type="search"
+            />
+          </label>
+
+          <div className="dashboardTypeTabs workspaceTypeTabs" role="tablist" aria-label="Workspace type">
+            {tabs.map((tab) => (
+              <button
+                aria-selected={filter === tab.id}
+                className={filter === tab.id ? 'active' : ''}
+                key={tab.id}
+                role="tab"
+                type="button"
+                onClick={() => onFilter(tab.id)}
+              >
+                <span>{tab.label}</span>
+                <small>{tab.count}</small>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -93,7 +109,7 @@ export function WorkspacePage({
       ) : (
         <div className="emptyState dashboardEmptyState workspaceEmptyState">
           <strong>No workspaces found</strong>
-          <span>Run Scan or add an existing skills root.</span>
+          <span>{query ? 'Try another workspace search.' : 'Run Scan or add an existing skills root.'}</span>
         </div>
       )}
     </section>

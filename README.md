@@ -46,7 +46,7 @@ The skill detail view collects workspace deployment, usage, version history, sou
 
 ![SkillBox workspaces](docs/screenshots/skillbox-workspaces.png)
 
-The Workspaces view tracks global and project-local `SKILL.md` roots across Codex CLI, Codex App, Claude Code skill folders, and project-specific runtimes.
+The Workspaces view tracks global and project-local `SKILL.md` roots across Codex CLI, Codex App, Claude Code skill folders, and project-specific runtimes. Search by workspace name, path, or agent and combine the query with Global/User filters.
 
 ![SkillBox history](docs/screenshots/skillbox-history.png)
 

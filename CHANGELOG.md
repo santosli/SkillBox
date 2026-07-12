@@ -7,7 +7,7 @@ version tags such as `v0.3.0`.
 
 ## Unreleased
 
-- Refresh the desktop management views with attention-based status stripes, neutral type and tag treatments, readable skill names, consolidated Dashboard filters, aligned Workspaces and History tab bars, adaptive cards, clearer agent tooltips, keyboard search, and actionable empty states.
+- Refresh the desktop management views with attention-based status stripes, neutral type and tag treatments, readable skill names, consolidated Dashboard filters, workspace search, aligned Workspaces and History tab bars, adaptive cards, clearer agent tooltips, keyboard search, and actionable empty states.
 
 ## 0.4.1
 

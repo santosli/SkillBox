@@ -11,6 +11,7 @@ const {
   sidebarFooterItems,
   sidebarIconConvention,
   workspaceMatchesTypeFilter,
+  workspaceMatchesFilters,
   workspaceCounts,
   workspaceDeploymentChanges,
   workspaceDeployPickerRows,
@@ -154,6 +155,26 @@ test('filters workspaces by type', () => {
   assert.equal(workspaceMatchesTypeFilter(globalWorkspace, 'global'), true);
   assert.equal(workspaceMatchesTypeFilter(globalWorkspace, 'user'), false);
   assert.equal(workspaceMatchesTypeFilter(userWorkspace, 'user'), true);
+});
+
+test('filters workspaces by query and type together', () => {
+  const codexGlobal = normalizeWorkspace({
+    path: '/Users/example/.codex/skills',
+    kind: 'global',
+    agent_id: 'codex'
+  });
+  const projectWorkspace = normalizeWorkspace({
+    path: '/Users/example/zone/demo-app/.agents/skills',
+    kind: 'user',
+    agent_id: 'agents'
+  });
+
+  assert.equal(workspaceMatchesFilters(codexGlobal, { query: 'codex', type: 'all' }), true);
+  assert.equal(workspaceMatchesFilters(projectWorkspace, { query: 'demo-app', type: 'user' }), true);
+  assert.equal(workspaceMatchesFilters(projectWorkspace, { query: '.agents/skills', type: 'all' }), true);
+  assert.equal(workspaceMatchesFilters(projectWorkspace, { query: 'Codex CLI', type: 'user' }), true);
+  assert.equal(workspaceMatchesFilters(projectWorkspace, { query: 'demo-app', type: 'global' }), false);
+  assert.equal(workspaceMatchesFilters(codexGlobal, { query: 'missing', type: 'all' }), false);
 });
 
 test('builds workspace skill review metadata', () => {

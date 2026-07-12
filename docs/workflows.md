@@ -498,6 +498,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 桌面 UI 打开 Workspaces 页面。
 - 桌面 UI 或 Rust CLI 执行 workspace scan。
 - 用户手动添加或忘记 workspace。
+- 用户按 workspace 名称、路径或 agent 搜索，并可与 Global/User 类型组合过滤。
 - 用户点击 workspace 查看其中 skills，并选择导入。
 - Dashboard scan import candidates 时自动登记已扫描的 workspace。
 
@@ -511,6 +512,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 点击 workspace 时只扫描该 workspace path，复用 import candidate review 行样式展示其中的 skills，并使用现有 `import_candidates` 流程导入选中项。
 - 手动添加 workspace 时必须提供已存在目录，并立即扫描该目录。
 - 忘记 workspace 只允许删除 `source=manual` 的 registry row，不删除或修改磁盘文件。
+- Workspace 搜索只过滤当前已登记的 rows，不触发文件系统扫描；清空 query 后恢复当前类型下的全部 rows。
 
 失败与回滚：
 
@@ -525,7 +527,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `cargo run -p skillbox-cli --offline -- workspace-scan --managed-root <temp-skillbox-root>`
 - `cargo run -p skillbox-cli --offline -- workspace-add <temp-root> --kind user --managed-root <temp-skillbox-root>`
 - `npm test`
-- 桌面 UI 验证 sidebar 只保留 Dashboard、Workspaces、Settings，Workspace 页面可 scan、add、forget manual rows，并且点击 workspace 可查看和导入该 workspace 下的 skills。
+- 桌面 UI 验证 sidebar 只保留 Dashboard、Workspaces、Settings，Workspace 页面可 search、组合类型筛选、scan、add、forget manual rows，并且点击 workspace 可查看和导入该 workspace 下的 skills。
 
 ## 14. Skill Usage Recording
 

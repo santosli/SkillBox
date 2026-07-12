@@ -306,12 +306,16 @@ test('workspace type tabs use three columns without an empty slot', () => {
   const workspacePageSource = appSource.match(/export function WorkspacePage[\s\S]*?function WorkspaceCard/)?.[0] || '';
   const workspaceTypeTabsRule = css.match(/\.workspaceTypeTabs\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const pageTypeFilterRule = css.match(/\.pageTypeFilterBar\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const workspaceFilterRule = css.match(/\.workspaceFilterBar\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const workspaceFilterPrimaryRule = css.match(/\.workspaceFilterPrimary\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
 
   assert.match(workspacePageSource, /<PageTitleRow[\s\S]*actions=\{\([\s\S]*className="workspaceHeaderActions"/);
-  assert.match(workspacePageSource, /className="dashboardFilterBar pageTypeFilterBar" aria-label="Workspace filters"[\s\S]*className="dashboardTypeTabs workspaceTypeTabs"/);
+  assert.match(workspacePageSource, /className="dashboardFilterBar pageTypeFilterBar workspaceFilterBar" aria-label="Workspace filters"[\s\S]*aria-label="Search workspaces"[\s\S]*placeholder="Search workspaces\.\.\."[\s\S]*className="dashboardTypeTabs workspaceTypeTabs"/);
   assert.doesNotMatch(workspacePageSource, /dashboardControlRow workspaceControlRow/);
   assert.match(pageTypeFilterRule, /width:\s*max-content;/);
   assert.match(pageTypeFilterRule, /max-width:\s*100%;/);
+  assert.match(workspaceFilterRule, /width:\s*min\(780px,\s*100%\);/);
+  assert.match(workspaceFilterPrimaryRule, /grid-template-columns:\s*minmax\(240px,\s*1fr\) max-content;/);
   assert.match(workspaceTypeTabsRule, /width:\s*max-content;/);
   assert.match(workspaceTypeTabsRule, /grid-template-columns:\s*repeat\(3,\s*minmax\(112px,\s*max-content\)\);/);
   assert.doesNotMatch(workspaceTypeTabsRule, /repeat\(4,/);

@@ -46,7 +46,7 @@ Skill card 会把调用次数、更新状态、标签、收藏状态和已部署
 
 ![SkillBox workspaces](docs/screenshots/skillbox-workspaces.png)
 
-Workspaces 视图会跟踪全局和项目局部 `SKILL.md` roots，包括 Codex CLI、Codex App、Claude Code skill folders 和项目自己的 runtime。
+Workspaces 视图会跟踪全局和项目局部 `SKILL.md` roots，包括 Codex CLI、Codex App、Claude Code skill folders 和项目自己的 runtime。可以按 workspace 名称、路径或 agent 搜索，并与 Global/User 类型筛选组合使用。
 
 ![SkillBox history](docs/screenshots/skillbox-history.png)
 

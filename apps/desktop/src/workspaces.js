@@ -114,6 +114,26 @@ export function workspaceMatchesTypeFilter(workspace = {}, type = 'all') {
   return normalizedType === 'all' || String(workspace.kind || '').toLowerCase() === normalizedType;
 }
 
+export function workspaceMatchesFilters(workspace = {}, { query = '', type = 'all' } = {}) {
+  if (!workspaceMatchesTypeFilter(workspace, type)) {
+    return false;
+  }
+
+  const normalizedQuery = String(query || '').trim().toLowerCase();
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  return [
+    workspace.displayName,
+    workspace.compactPath,
+    workspace.path,
+    workspace.canonicalPath,
+    workspace.agentLabel,
+    workspace.agentId
+  ].some((value) => String(value || '').toLowerCase().includes(normalizedQuery));
+}
+
 export function workspaceSkillReviewMeta(workspace = {}) {
   const title = `${workspace.displayName || 'Workspace'} skills`;
   const subtitle = workspace.compactPath || workspace.path || 'Not available';

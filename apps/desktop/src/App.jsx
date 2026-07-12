@@ -125,7 +125,7 @@ import {
   workspaceDeploymentChanges,
   workspaceDeployPickerRows,
   workspaceDeployRequiresConfirmation,
-  workspaceMatchesTypeFilter,
+  workspaceMatchesFilters,
   workspaceSkillReviewMeta,
   workspaceTypeTabs
 } from './workspaces.js';
@@ -194,6 +194,7 @@ export default function App() {
   const [dashboardFavoritesOnly, setDashboardFavoritesOnly] = useState(false);
   const [dashboardViewMode, setDashboardViewMode] = useState('grid');
   const [workspaceTypeFilter, setWorkspaceTypeFilter] = useState('all');
+  const [workspaceQuery, setWorkspaceQuery] = useState('');
   const [historyFilter, setHistoryFilter] = useState('all');
   const [favoriteNames, setFavoriteNames] = useState(readDashboardFavorites);
   const [dashboardTagOverrides, setDashboardTagOverrides] = useState(readDashboardTagOverrides);
@@ -399,7 +400,7 @@ export default function App() {
       contentRef.current.scrollTop = 0;
       contentRef.current.scrollLeft = 0;
     }
-  }, [page, filter, workspaceTypeFilter]);
+  }, [page, filter, workspaceTypeFilter, workspaceQuery]);
 
   useEffect(() => {
     if (page === 'settings') {
@@ -429,8 +430,11 @@ export default function App() {
   const workspaceSummary = useMemo(() => workspaceCounts(workspaces), [workspaces]);
   const workspaceTabs = useMemo(() => workspaceTypeTabs(workspaceSummary), [workspaceSummary]);
   const filteredWorkspaces = useMemo(
-    () => workspaces.filter((workspace) => workspaceMatchesTypeFilter(workspace, workspaceTypeFilter)),
-    [workspaceTypeFilter, workspaces]
+    () => workspaces.filter((workspace) => workspaceMatchesFilters(workspace, {
+      query: workspaceQuery,
+      type: workspaceTypeFilter
+    })),
+    [workspaceQuery, workspaceTypeFilter, workspaces]
   );
   const filtered = useMemo(
     () =>
@@ -3076,6 +3080,7 @@ export default function App() {
           <WorkspacePage
             error={error}
             filter={workspaceTypeFilter}
+            query={workspaceQuery}
             notice={notice}
             status={status}
             tabs={workspaceTabs}
@@ -3083,6 +3088,7 @@ export default function App() {
             onAdd={openWorkspaceDialog}
             onDismissNotice={dismissNotice}
             onFilter={setWorkspaceTypeFilter}
+            onQuery={setWorkspaceQuery}
             onForget={forgetWorkspaceRow}
             onOpenSkills={scanWorkspaceSkills}
             onScan={scanWorkspaceRegistry}

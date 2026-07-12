@@ -1457,6 +1457,22 @@ button {
   grid-template-columns: repeat(3, minmax(112px, max-content));
 }
 
+.workspaceFilterBar {
+  width: min(780px, 100%);
+}
+
+.workspaceFilterPrimary {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(240px, 1fr) max-content;
+  align-items: center;
+  gap: 10px;
+}
+
+.workspaceSearch input {
+  padding-right: 14px;
+}
+
 .workspaceHeaderActions {
   display: flex;
   flex: 0 0 auto;
@@ -5360,6 +5376,15 @@ dd {
 
   .dashboardFilterPrimary {
     grid-template-columns: 1fr;
+  }
+
+  .workspaceFilterPrimary {
+    grid-template-columns: 1fr;
+  }
+
+  .workspaceTypeTabs {
+    width: 100%;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .dashboardFilterPrimary .favoriteFilterButton {
