@@ -151,7 +151,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 - Rust CLI 执行 `deploy <skill-name> --target <path>`。
 - Rust CLI 执行 `undeploy <skill-name> --target <path>`。
-- 桌面详情页打开 Deploy workspace 弹窗，勾选 workspace 执行 deploy，取消已勾选 workspace 执行 undeploy。
+- 桌面详情页打开 Deploy workspace 弹窗，勾选 workspace 执行 deploy，取消已勾选 workspace 执行单 workspace remove/undeploy。
 - import workflow 选择 deploy back to source。
 
 步骤：
@@ -171,6 +171,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - target 是 symlink 但指向其它位置时拒绝。
 - 创建 symlink 失败时不写 deployment 记录。
 - undeploy 遇到非 symlink 或指向其它位置的 symlink 时拒绝，不能删除磁盘内容。
+- active import 的 source workspace 必须通过 Revert Import 恢复，不能直接 undeploy；同一 skill 的其它 workspace deployment 仍可单独移除。
 - 不删除非 SkillBox 管理的内容。
 
 完成验证：
@@ -181,6 +182,40 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `cargo run -p skillbox-cli --offline -- undeploy <skill-name> --target <temp-runtime> --managed-root <temp-skillbox-root>`
 - 检查 target path 是 symlink，real path 指向 managed store。
 - 检查 undeploy 后 target symlink 消失，非 symlink target 不会被删除。
+
+## 5.1 Delete Managed Skill
+
+触发条件：
+
+- Rust CLI 先执行 `delete-preview <skill-name>`，再将返回的 `preview_id` 传给 `delete <skill-name> --preview-id <id> --confirm <skill-name>`。
+- 桌面 Skill Detail 的 Danger zone 打开删除预览，输入完整 skill name 后确认。
+
+步骤：
+
+- 预检 managed user 目录或完整 remote skill root、所有 SQLite deployment 与已注册 workspace 中推断出的 symlink。
+- active import、非 symlink runtime target、指向其它位置的 symlink 或不安全 managed path 都会阻断整个操作，预检失败时不修改文件或数据库。
+- apply 时重新生成并校验 preview identity；user skill 绑定完整目录快照，remote skill 绑定完整 remote root（包括全部 versions、`source.json` 和 `current` link），避免确认后状态变化。
+- 将 managed user skill 或完整 remote skill root 原子移动到 `backups/deletions`。
+- 删除所有已确认归 SkillBox 管理的 workspace symlink；workspace 注册本身及其它 skills 保持不变。
+- 在单个 SQLite transaction 中删除 active skill index、deployments、favorites/tags，并从 remote update cache 剔除该 skill。
+- operation、usage history、reverted/failed import history 与 recovery backup 保留。
+- remote root 即使缺少或损坏 `current`/`versions` 仍可通过 core/CLI 预览后整根删除；remote root 本身若是 symlink 或非目录仍会拒绝。
+- remote update cache 是可丢弃的派生状态；损坏时删除 cache row，不阻断 skill 删除。
+
+失败与回滚：
+
+- 文件或 SQLite 清理失败时，将 managed skill 从 deletion backup 恢复，并重建本次已移除的 symlink。
+- preview identity 变化时拒绝 apply，要求重新预览。
+- active import source workspace 使用 canonical/normalized path 判断，不能通过 symlink parent 或相对路径绕过 Revert Import 要求。
+- workspace target 会先原子移动到同目录 quarantine 再校验归属；并发替换出的未知内容优先迁移到 `backups/deletion-conflicts`，无法迁移时保留原 quarantine 并由 Doctor 报告，绝不自动删除。
+- 删除不会自动 commit 或 push user-skills Git repository；user skill 删除会作为普通 Git deletion 留给用户后续 review/sync。
+
+完成验证：
+
+- `cargo test -p skillbox-core --offline delete_skill`
+- `cargo run -p skillbox-cli --offline -- delete-preview <skill-name> --managed-root <temp-skillbox-root>`
+- `cargo run -p skillbox-cli --offline -- delete <skill-name> --preview-id <id> --confirm <skill-name> --managed-root <temp-skillbox-root>`
+- 检查 managed skill 已移入 `backups/deletions`、全部关联 symlink 消失、workspace registry 和历史记录保留。
 
 ## 6. Check Remote Updates
 

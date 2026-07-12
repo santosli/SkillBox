@@ -392,6 +392,29 @@ async fn undeploy_skill(skill_name: String, target_root: String) -> Result<Value
 }
 
 #[tauri::command]
+async fn preview_delete_skill(skill_name: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = skillbox_core::preview_delete_skill(
+            &skill_name,
+            skillbox_core::default_managed_root(),
+        )?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Skill deletion preview task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn delete_skill(request: skillbox_core::DeleteSkillRequest) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = skillbox_core::delete_skill(request, skillbox_core::default_managed_root())?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Skill deletion task failed: {error}"))?
+}
+
+#[tauri::command]
 fn parse_github_url(url: String) -> Result<Value, String> {
     let source = skillbox_github::parse_github_skill_url(&url)?;
     serde_json::to_value(source).map_err(|error| error.to_string())
@@ -771,6 +794,8 @@ pub fn run() {
             change_skill_kind,
             deploy_skill,
             undeploy_skill,
+            preview_delete_skill,
+            delete_skill,
             parse_github_url,
             install_github_remote_skill,
             preview_github_remote_skill_install,

@@ -422,6 +422,24 @@ fn check_workspaces(
                 true,
                 Some("Forget the manual workspace or run a workspace scan to prune stale auto entries."),
             );
+            continue;
+        }
+        for entry in readable_directory_entries(&workspace.path)? {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') && name.contains(".delete-check-") && name.ends_with(".tmp") {
+                push_doctor_issue(
+                    issues,
+                    request,
+                    "deletion_quarantine_preserved",
+                    DoctorIssueSeverity::Error,
+                    Some(workspace.display_name.clone()),
+                    Some(entry.path()),
+                    "A deletion ownership check preserved an unexpected workspace target."
+                        .to_string(),
+                    false,
+                    Some("Review the preserved path manually; SkillBox will not delete unknown content."),
+                );
+            }
         }
     }
     Ok(())

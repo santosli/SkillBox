@@ -311,6 +311,35 @@ fn doctor_detects_remote_skill_without_current_version() {
 }
 
 #[test]
+fn doctor_reports_preserved_deletion_quarantine_for_manual_review() {
+    let root = temp_dir("doctor-deletion-quarantine");
+    let managed_root = root.join("SkillBox");
+    let runtime = root.join("runtime");
+    fs::create_dir_all(&runtime).unwrap();
+    add_workspace(
+        WorkspaceAddRequest {
+            path: runtime.clone(),
+            kind: WorkspaceKind::User,
+        },
+        &managed_root,
+    )
+    .unwrap();
+    let preserved = runtime.join(".demo.delete-check-123.tmp");
+    fs::write(&preserved, "unexpected user content").unwrap();
+
+    let report = run_doctor(DoctorRequest::default(), &managed_root).unwrap();
+    let issue = report
+        .issues
+        .iter()
+        .find(|issue| issue.code == "deletion_quarantine_preserved")
+        .unwrap();
+
+    assert_eq!(issue.path.as_deref(), Some(preserved.as_path()));
+    assert_eq!(issue.severity, DoctorIssueSeverity::Error);
+    assert!(!issue.repairable);
+}
+
+#[test]
 fn doctor_accepts_deployment_through_managed_root_alias() {
     let root = temp_dir("doctor-managed-root-alias");
     let managed_root = root.join("SkillBox");
@@ -1890,6 +1919,569 @@ fn undeploy_refuses_symlink_pointing_elsewhere() {
         .unwrap()
         .file_type()
         .is_symlink());
+}
+
+#[test]
+fn undeploy_refuses_active_import_source_workspace() {
+    let root = temp_dir("undeploy-active-import-source");
+    let source = root.join("source").join("demo");
+    let managed_root = root.join("SkillBox");
+    let runtime = root.join("runtime");
+    make_skill(&source, "demo", "Demo skill");
+    let imported = import_skill(&source, SkillKind::User, &managed_root).unwrap();
+    let deployment = deploy_skill("demo", &managed_root, &runtime).unwrap();
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    let connection = open_database(&paths.database_path).unwrap();
+    connection
+        .execute(
+            "INSERT INTO import_records (
+                id, skill_name, type, source_path, source_root, managed_path,
+                content_hash, backup_path, deployed_path, status, legacy
+             ) VALUES ('active-undeploy-test', 'demo', 'user', ?1, ?2, ?3, ?4, ?5, ?1, 'active', 0)",
+            params![
+                deployment.target_path.to_string_lossy(),
+                runtime.to_string_lossy(),
+                imported.managed_path.to_string_lossy(),
+                imported.content_hash,
+                root.join("backup").to_string_lossy()
+            ],
+        )
+        .unwrap();
+
+    let error = undeploy_skill("demo", &managed_root, &runtime).unwrap_err();
+
+    assert!(error.contains("Revert the import first"));
+    assert!(fs::symlink_metadata(deployment.target_path)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+}
+
+#[test]
+fn undeploy_refuses_active_import_source_through_symlinked_workspace_path() {
+    let root = temp_dir("undeploy-active-import-alias");
+    let source = root.join("source").join("demo");
+    let managed_root = root.join("SkillBox");
+    let runtime = root.join("runtime");
+    let runtime_alias = root.join("runtime-alias");
+    make_skill(&source, "demo", "Demo skill");
+    let imported = import_skill(&source, SkillKind::User, &managed_root).unwrap();
+    let deployment = deploy_skill("demo", &managed_root, &runtime).unwrap();
+    symlink_dir(&runtime, &runtime_alias).unwrap();
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    let connection = open_database(&paths.database_path).unwrap();
+    connection
+        .execute(
+            "INSERT INTO import_records (
+                id, skill_name, type, source_path, source_root, managed_path,
+                content_hash, backup_path, deployed_path, status, legacy
+             ) VALUES ('active-undeploy-alias', 'demo', 'user', ?1, ?2, ?3, ?4, ?5, ?1, 'active', 0)",
+            params![
+                deployment.target_path.to_string_lossy(),
+                runtime.to_string_lossy(),
+                imported.managed_path.to_string_lossy(),
+                imported.content_hash,
+                root.join("backup").to_string_lossy()
+            ],
+        )
+        .unwrap();
+
+    let error = undeploy_skill("demo", &managed_root, &runtime_alias).unwrap_err();
+
+    assert!(error.contains("Revert the import first"));
+    assert!(fs::symlink_metadata(deployment.target_path)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+}
+
+#[test]
+fn deletes_user_skill_from_managed_store_and_all_workspaces() {
+    let root = temp_dir("delete-user-skill");
+    let source = root.join("source").join("demo");
+    let managed_root = root.join("SkillBox");
+    let first_runtime = root.join("runtime-one");
+    let second_runtime = root.join("runtime-two");
+    make_skill(&source, "demo", "Demo skill");
+    let imported = import_skill(&source, SkillKind::User, &managed_root).unwrap();
+    let first = deploy_skill("demo", &managed_root, &first_runtime).unwrap();
+    let second = deploy_skill("demo", &managed_root, &second_runtime).unwrap();
+    set_skill_user_metadata(
+        SkillUserMetadataUpdate {
+            skill_name: "demo".to_string(),
+            favorite: true,
+            tags: vec!["test".to_string()],
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    let preview = preview_delete_skill("demo", &managed_root).unwrap();
+    assert!(preview.can_delete);
+    assert_eq!(preview.deployments.len(), 2);
+    let result = delete_skill(
+        DeleteSkillRequest {
+            skill_name: "demo".to_string(),
+            preview_id: preview.preview_id,
+            confirmed_skill_name: "demo".to_string(),
+            actor: "test".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    assert_eq!(result.kind, SkillKind::User);
+    assert_eq!(result.removed_deployments.len(), 2);
+    assert!(!imported.managed_path.exists());
+    assert!(result.backup_path.join("SKILL.md").exists());
+    assert!(fs::symlink_metadata(first.target_path).is_err());
+    assert!(fs::symlink_metadata(second.target_path).is_err());
+    assert!(managed_state(&managed_root).unwrap().skills.is_empty());
+    assert!(list_skill_user_metadata(&managed_root).unwrap().is_empty());
+}
+
+#[test]
+fn delete_skill_preview_blocks_active_import_without_mutating_files() {
+    let root = temp_dir("delete-active-import");
+    let source = root.join("source").join("demo");
+    let managed_root = root.join("SkillBox");
+    make_skill(&source, "demo", "Demo skill");
+    let imported = import_skill(&source, SkillKind::User, &managed_root).unwrap();
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    let connection = open_database(&paths.database_path).unwrap();
+    connection
+        .execute(
+            "INSERT INTO import_records (
+                id, skill_name, type, source_path, managed_path, content_hash,
+                backup_path, deployed_path, status, legacy
+             ) VALUES ('active-delete-test', 'demo', 'user', ?1, ?2, ?3, ?4, ?5, 'active', 0)",
+            params![
+                source.to_string_lossy(),
+                imported.managed_path.to_string_lossy(),
+                imported.content_hash,
+                root.join("backup").to_string_lossy(),
+                source.to_string_lossy()
+            ],
+        )
+        .unwrap();
+
+    let preview = preview_delete_skill("demo", &managed_root).unwrap();
+
+    assert!(!preview.can_delete);
+    assert!(preview.blockers[0].contains("active import record"));
+    assert!(imported.managed_path.exists());
+}
+
+#[test]
+fn delete_skill_preview_blocks_foreign_indexed_deployment() {
+    let root = temp_dir("delete-foreign-deployment");
+    let source = root.join("source").join("demo");
+    let other = root.join("other").join("demo");
+    let managed_root = root.join("SkillBox");
+    let runtime = root.join("runtime");
+    make_skill(&source, "demo", "Demo skill");
+    make_skill(&other, "demo", "Other skill");
+    let imported = import_skill(&source, SkillKind::User, &managed_root).unwrap();
+    fs::create_dir_all(&runtime).unwrap();
+    let target_path = runtime.join("demo");
+    symlink_dir(&other, &target_path).unwrap();
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    index_deployment(&paths.database_path, "demo", &runtime, &target_path).unwrap();
+
+    let preview = preview_delete_skill("demo", &managed_root).unwrap();
+
+    assert!(!preview.can_delete);
+    assert!(preview.blockers[0].contains("pointing elsewhere"));
+    assert!(imported.managed_path.exists());
+    assert!(fs::symlink_metadata(target_path)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+}
+
+#[test]
+fn deletes_complete_remote_skill_root_to_recovery_backup() {
+    let root = temp_dir("delete-remote-skill");
+    let source = root.join("source").join("demo");
+    let managed_root = root.join("SkillBox");
+    make_skill(&source, "demo", "Remote demo skill");
+    import_skill(&source, SkillKind::Remote, &managed_root).unwrap();
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    let remote_root = paths.remote_skills_root.join("demo");
+    fs::write(remote_root.join("source.json"), "{}").unwrap();
+
+    let preview = preview_delete_skill("demo", &managed_root).unwrap();
+    let result = delete_skill(
+        DeleteSkillRequest {
+            skill_name: "demo".to_string(),
+            preview_id: preview.preview_id,
+            confirmed_skill_name: "demo".to_string(),
+            actor: "test".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    assert_eq!(result.kind, SkillKind::Remote);
+    assert!(!remote_root.exists());
+    assert!(result.backup_path.join("source.json").exists());
+    assert!(result.backup_path.join("versions").is_dir());
+    assert!(fs::symlink_metadata(result.backup_path.join("current"))
+        .unwrap()
+        .file_type()
+        .is_symlink());
+}
+
+#[test]
+fn remote_delete_preview_becomes_stale_when_source_metadata_changes() {
+    let root = temp_dir("delete-remote-stale-source");
+    let source = root.join("source").join("demo");
+    let managed_root = root.join("SkillBox");
+    make_skill(&source, "demo", "Remote demo skill");
+    import_skill(&source, SkillKind::Remote, &managed_root).unwrap();
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    let remote_root = paths.remote_skills_root.join("demo");
+    fs::write(remote_root.join("source.json"), "{\"ref\":\"main\"}").unwrap();
+    let preview = preview_delete_skill("demo", &managed_root).unwrap();
+    fs::write(remote_root.join("source.json"), "{\"ref\":\"other\"}").unwrap();
+
+    let error = delete_skill(
+        DeleteSkillRequest {
+            skill_name: "demo".to_string(),
+            preview_id: preview.preview_id,
+            confirmed_skill_name: "demo".to_string(),
+            actor: "test".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+
+    assert!(error.contains("state changed"));
+    assert!(remote_root.exists());
+}
+
+#[test]
+fn deletes_broken_remote_skill_with_missing_current_link() {
+    let root = temp_dir("delete-broken-remote");
+    let source = root.join("source").join("demo");
+    let managed_root = root.join("SkillBox");
+    make_skill(&source, "demo", "Remote demo skill");
+    import_skill(&source, SkillKind::Remote, &managed_root).unwrap();
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    let remote_root = paths.remote_skills_root.join("demo");
+    fs::remove_file(remote_root.join("current")).unwrap();
+
+    let preview = preview_delete_skill("demo", &managed_root).unwrap();
+    let result = delete_skill(
+        DeleteSkillRequest {
+            skill_name: "demo".to_string(),
+            preview_id: preview.preview_id,
+            confirmed_skill_name: "demo".to_string(),
+            actor: "test".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    assert!(!remote_root.exists());
+    assert!(result.backup_path.join("versions").exists());
+    assert!(!result.backup_path.join("current").exists());
+}
+
+#[test]
+fn deletes_broken_remote_with_legacy_direct_version_deployment() {
+    let root = temp_dir("delete-broken-remote-direct-version");
+    let source = root.join("source").join("demo");
+    let managed_root = root.join("SkillBox");
+    let runtime = root.join("runtime");
+    make_skill(&source, "demo", "Remote demo skill");
+    let imported = import_skill(&source, SkillKind::Remote, &managed_root).unwrap();
+    let deployment = deploy_skill("demo", &managed_root, &runtime).unwrap();
+    fs::remove_file(&deployment.target_path).unwrap();
+    symlink_dir(&imported.managed_path, &deployment.target_path).unwrap();
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    let remote_root = paths.remote_skills_root.join("demo");
+    fs::remove_file(remote_root.join("current")).unwrap();
+
+    let preview = preview_delete_skill("demo", &managed_root).unwrap();
+    assert!(
+        preview.can_delete,
+        "unexpected blockers: {:?}",
+        preview.blockers
+    );
+    let result = delete_skill(
+        DeleteSkillRequest {
+            skill_name: "demo".to_string(),
+            preview_id: preview.preview_id,
+            confirmed_skill_name: "demo".to_string(),
+            actor: "test".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    assert!(!remote_root.exists());
+    assert!(fs::symlink_metadata(deployment.target_path).is_err());
+    assert!(result.backup_path.join("versions").exists());
+}
+
+#[test]
+fn delete_skill_removes_only_its_remote_update_cache_status() {
+    let root = temp_dir("delete-remote-cache-status");
+    let source = root.join("source").join("demo");
+    let managed_root = root.join("SkillBox");
+    make_skill(&source, "demo", "Demo skill");
+    import_skill(&source, SkillKind::User, &managed_root).unwrap();
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    write_remote_update_cache(
+        &paths.database_path,
+        &RemoteSkillUpdateCheck {
+            checked_at: Some("2026-07-12T00:00:00Z".to_string()),
+            statuses: vec![
+                no_source_remote_update_status("demo"),
+                no_source_remote_update_status("other"),
+            ],
+        },
+    )
+    .unwrap();
+    let preview = preview_delete_skill("demo", &managed_root).unwrap();
+
+    delete_skill(
+        DeleteSkillRequest {
+            skill_name: "demo".to_string(),
+            preview_id: preview.preview_id,
+            confirmed_skill_name: "demo".to_string(),
+            actor: "test".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    let cache = read_remote_update_cache(&paths.database_path)
+        .unwrap()
+        .unwrap();
+    assert_eq!(cache.statuses.len(), 1);
+    assert_eq!(cache.statuses[0].skill_name, "other");
+}
+
+#[test]
+fn corrupted_remote_update_cache_does_not_block_skill_deletion() {
+    let root = temp_dir("delete-corrupted-remote-cache");
+    let source = root.join("source").join("demo");
+    let managed_root = root.join("SkillBox");
+    make_skill(&source, "demo", "Demo skill");
+    import_skill(&source, SkillKind::User, &managed_root).unwrap();
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    let connection = open_database(&paths.database_path).unwrap();
+    connection
+        .execute(
+            "INSERT INTO preferences (key, value) VALUES ('remote_skill_update_cache', '{broken')",
+            [],
+        )
+        .unwrap();
+    let preview = preview_delete_skill("demo", &managed_root).unwrap();
+
+    delete_skill(
+        DeleteSkillRequest {
+            skill_name: "demo".to_string(),
+            preview_id: preview.preview_id,
+            confirmed_skill_name: "demo".to_string(),
+            actor: "test".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    let cached: Option<String> = connection
+        .query_row(
+            "SELECT value FROM preferences WHERE key = 'remote_skill_update_cache'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .unwrap();
+    assert!(cached.is_none());
+}
+
+#[test]
+fn database_cleanup_failure_restores_managed_skill_and_deployments() {
+    let root = temp_dir("delete-db-rollback");
+    let source = root.join("source").join("demo");
+    let managed_root = root.join("SkillBox");
+    let first_runtime = root.join("runtime-one");
+    let second_runtime = root.join("runtime-two");
+    make_skill(&source, "demo", "Demo skill");
+    let imported = import_skill(&source, SkillKind::User, &managed_root).unwrap();
+    let first = deploy_skill("demo", &managed_root, &first_runtime).unwrap();
+    let second = deploy_skill("demo", &managed_root, &second_runtime).unwrap();
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    let connection = open_database(&paths.database_path).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TRIGGER fail_delete_deployment
+             BEFORE DELETE ON deployments
+             WHEN OLD.skill_name = 'demo'
+             BEGIN
+               SELECT RAISE(ABORT, 'forced deployment cleanup failure');
+             END;",
+        )
+        .unwrap();
+    let preview = preview_delete_skill("demo", &managed_root).unwrap();
+
+    let error = delete_skill(
+        DeleteSkillRequest {
+            skill_name: "demo".to_string(),
+            preview_id: preview.preview_id,
+            confirmed_skill_name: "demo".to_string(),
+            actor: "test".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+
+    assert!(error.contains("forced deployment cleanup failure"));
+    assert!(imported.managed_path.exists());
+    for target in [first.target_path, second.target_path] {
+        assert!(fs::symlink_metadata(target)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+    assert_eq!(
+        load_deployments(&paths.database_path)
+            .unwrap()
+            .get("demo")
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn midflight_deployment_removal_failure_restores_prior_symlinks() {
+    let root = temp_dir("delete-midflight-rollback");
+    let managed = root.join("managed").join("demo");
+    let first_target = root.join("runtime-one").join("demo");
+    let second_target = root.join("runtime-two").join("demo");
+    fs::create_dir_all(&managed).unwrap();
+    fs::create_dir_all(first_target.parent().unwrap()).unwrap();
+    fs::create_dir_all(second_target.parent().unwrap()).unwrap();
+    symlink_dir(&managed, &first_target).unwrap();
+    symlink_dir(&managed, &second_target).unwrap();
+    let deployments = vec![
+        ManagedSkillDeployment {
+            target_root: first_target.parent().unwrap().to_path_buf(),
+            target_path: first_target.clone(),
+            mode: "symlink".to_string(),
+        },
+        ManagedSkillDeployment {
+            target_root: second_target.parent().unwrap().to_path_buf(),
+            target_path: second_target.clone(),
+            mode: "symlink".to_string(),
+        },
+    ];
+    let mut call_count = 0;
+
+    let error = remove_skill_deployment_symlinks_with(
+        &deployments,
+        std::slice::from_ref(&managed),
+        &root.join("backups/deletion-conflicts"),
+        &managed,
+        |target, references, conflict_root| {
+            call_count += 1;
+            if call_count == 2 {
+                Err("forced second deployment failure".to_string())
+            } else {
+                remove_owned_skill_symlink(target, references, conflict_root)
+            }
+        },
+    )
+    .unwrap_err();
+
+    assert!(error.contains("forced second deployment failure"));
+    for target in [first_target, second_target] {
+        assert!(fs::symlink_metadata(target)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+}
+
+#[test]
+fn delete_skill_rejects_preview_after_managed_content_changes() {
+    let root = temp_dir("delete-stale-preview");
+    let source = root.join("source").join("demo");
+    let managed_root = root.join("SkillBox");
+    make_skill(&source, "demo", "Demo skill");
+    let imported = import_skill(&source, SkillKind::User, &managed_root).unwrap();
+    let preview = preview_delete_skill("demo", &managed_root).unwrap();
+    fs::create_dir_all(imported.managed_path.join("scripts")).unwrap();
+    fs::write(imported.managed_path.join("scripts/tool.sh"), "changed\n").unwrap();
+
+    let error = delete_skill(
+        DeleteSkillRequest {
+            skill_name: "demo".to_string(),
+            preview_id: preview.preview_id,
+            confirmed_skill_name: "demo".to_string(),
+            actor: "test".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+
+    assert!(error.contains("state changed"));
+    assert!(imported.managed_path.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn delete_skill_preview_tracks_special_directory_entries() {
+    let root = temp_dir("delete-stale-special-entry");
+    let source = root.join("source").join("demo");
+    let managed_root = root.join("SkillBox");
+    make_skill(&source, "demo", "Demo skill");
+    let imported = import_skill(&source, SkillKind::User, &managed_root).unwrap();
+    let preview = preview_delete_skill("demo", &managed_root).unwrap();
+    let fifo_path = imported.managed_path.join("events.pipe");
+    let status = std::process::Command::new("mkfifo")
+        .arg(&fifo_path)
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let error = delete_skill(
+        DeleteSkillRequest {
+            skill_name: "demo".to_string(),
+            preview_id: preview.preview_id,
+            confirmed_skill_name: "demo".to_string(),
+            actor: "test".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+
+    assert!(error.contains("state changed"));
+    assert!(fifo_path.exists());
+}
+
+#[test]
+fn quarantined_deployment_check_preserves_non_symlink_target() {
+    let root = temp_dir("delete-quarantine-non-symlink");
+    let target = root.join("runtime").join("demo");
+    let managed = root.join("managed").join("demo");
+    fs::create_dir_all(target.parent().unwrap()).unwrap();
+    fs::create_dir_all(&managed).unwrap();
+    fs::write(&target, "user content").unwrap();
+
+    let error = remove_owned_skill_symlink(
+        &target,
+        &[managed],
+        &root.join("SkillBox/backups/deletion-conflicts"),
+    )
+    .unwrap_err();
+
+    assert!(error.contains("state changed"));
+    assert_eq!(fs::read_to_string(target).unwrap(), "user content");
 }
 
 #[test]

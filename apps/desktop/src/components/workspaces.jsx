@@ -252,7 +252,7 @@ export function DeployWorkspaceDialog({
               </span>
               <span>
                 <Unlink aria-hidden="true" />
-                {changes.undeploy.length} unlink
+                {changes.undeploy.length} remove
               </span>
             </div>
             <button className="button secondary" disabled={isBusy} type="button" onClick={onAddWorkspace}>
@@ -297,7 +297,7 @@ export function DeployWorkspaceDialog({
             <div className="deployWorkspaceWarning">
               <AlertTriangle aria-hidden="true" />
               <div>
-                <strong>Unchecked deployed workspaces will be unlinked.</strong>
+                <strong>Unchecked skills will be removed from these workspaces.</strong>
                 <span>SkillBox will remove only managed symlinks for {skill.name}; existing directories or foreign symlinks are refused.</span>
                 <label>
                   <input
@@ -306,7 +306,7 @@ export function DeployWorkspaceDialog({
                     type="checkbox"
                     onChange={(event) => onConfirmUndeployChange(event.target.checked)}
                   />
-                  Confirm unlinking {changes.undeploy.length} workspace{changes.undeploy.length === 1 ? '' : 's'}
+                  Confirm removal from {changes.undeploy.length} workspace{changes.undeploy.length === 1 ? '' : 's'}
                 </label>
               </div>
             </div>

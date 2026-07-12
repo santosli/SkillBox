@@ -377,6 +377,44 @@ fn resolve_managed_skill_kind_location(
     }
 }
 
+fn resolve_delete_skill_location(
+    paths: &ManagedPaths,
+    skill_name: &str,
+) -> Result<ManagedSkillKindLocation> {
+    let user_path = paths.user_skills_root.join(skill_name);
+    let remote_root = paths.remote_skills_root.join(skill_name);
+    let user_exists = managed_entry_exists(&user_path)?;
+    let remote_exists = managed_entry_exists(&remote_root)?;
+
+    match (user_exists, remote_exists) {
+        (true, true) => Err(format!(
+            "Managed skill exists as both user and remote: {skill_name}"
+        )),
+        (true, false) => Ok(ManagedSkillKindLocation {
+            kind: SkillKind::User,
+            storage_path: user_path.clone(),
+            deployment_target_path: user_path,
+        }),
+        (false, true) => Ok(ManagedSkillKindLocation {
+            kind: SkillKind::Remote,
+            storage_path: remote_root.clone(),
+            deployment_target_path: remote_root.join("current"),
+        }),
+        (false, false) => Err(format!("Managed skill not found: {skill_name}")),
+    }
+}
+
+fn managed_entry_exists(path: &Path) -> Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(format!(
+            "Cannot inspect managed path {}: {error}",
+            path.display()
+        )),
+    }
+}
+
 fn managed_skill_kind_destination(
     paths: &ManagedPaths,
     skill: &Skill,
@@ -408,6 +446,36 @@ fn managed_skill_kind_reference_paths(location: &ManagedSkillKindLocation) -> Ve
     paths.sort();
     paths.dedup();
     paths
+}
+
+fn delete_skill_reference_paths(
+    paths: &ManagedPaths,
+    skill_name: &str,
+    location: &ManagedSkillKindLocation,
+) -> Vec<PathBuf> {
+    let mut references = managed_skill_kind_reference_paths(location);
+    if location.kind == SkillKind::Remote {
+        let versions_root = paths.remote_skills_root.join(skill_name).join("versions");
+        if let Ok(entries) = fs::read_dir(&versions_root) {
+            for entry in entries.filter_map(|entry| entry.ok()) {
+                if !entry
+                    .file_type()
+                    .map(|file_type| file_type.is_dir())
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
+                let path = entry.path();
+                references.push(normalize_lexical_path(&path));
+                if let Ok(canonical) = fs::canonicalize(path) {
+                    references.push(normalize_lexical_path(&canonical));
+                }
+            }
+        }
+    }
+    references.sort();
+    references.dedup();
+    references
 }
 
 fn collect_skill_deployment_target_paths(
@@ -615,6 +683,502 @@ pub fn undeploy_skill(
     )
 }
 
+pub fn preview_delete_skill(
+    skill_name: &str,
+    managed_root: impl AsRef<Path>,
+) -> Result<DeleteSkillPreview> {
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    build_delete_skill_preview(&paths, skill_name)
+}
+
+pub fn delete_skill(
+    request: DeleteSkillRequest,
+    managed_root: impl AsRef<Path>,
+) -> Result<DeleteSkillResult> {
+    let managed_root = managed_root.as_ref().to_path_buf();
+    let skill_name = request.skill_name.clone();
+    let actor = request.actor.clone();
+    audited_operation(
+        OperationStart {
+            operation_type: "delete_skill".to_string(),
+            actor,
+            entity_type: "skill".to_string(),
+            entity_name: skill_name.clone(),
+            summary: format!("Delete {skill_name} from SkillBox"),
+            payload: serde_json::json!({"previewId": request.preview_id}),
+        },
+        &managed_root,
+        || delete_skill_unlogged(&request, &managed_root),
+        |result| {
+            (
+                format!("Deleted {} from SkillBox", result.skill_name),
+                serde_json::json!({
+                    "type": result.kind,
+                    "managedPath": result.managed_path,
+                    "backupPath": result.backup_path,
+                    "removedDeployments": result.removed_deployments
+                }),
+            )
+        },
+    )
+}
+
+fn build_delete_skill_preview(
+    paths: &ManagedPaths,
+    skill_name: &str,
+) -> Result<DeleteSkillPreview> {
+    validate_skill_name(skill_name)?;
+    let location = resolve_delete_skill_location(paths, skill_name)?;
+    validate_delete_managed_location(paths, skill_name, &location)?;
+    let managed_snapshot_hash = directory_snapshot_hash(&location.storage_path)?;
+    let deployments = collect_delete_skill_deployments(paths, skill_name, &location)?;
+    let mut blockers = Vec::new();
+
+    let active_import_count = load_import_records(
+        &paths.database_path,
+        &ImportRecordFilter {
+            skill_name: Some(skill_name.to_string()),
+        },
+    )?
+    .into_iter()
+    .filter(|record| record.status == ImportRecordStatus::Active)
+    .count();
+    if active_import_count > 0 {
+        blockers.push(
+            "Cannot delete while an active import record exists. Revert the import first."
+                .to_string(),
+        );
+    }
+
+    let reference_paths = delete_skill_reference_paths(paths, skill_name, &location);
+    for deployment in &deployments {
+        match fs::symlink_metadata(&deployment.target_path) {
+            Ok(metadata) if !metadata.file_type().is_symlink() => blockers.push(format!(
+                "Refusing to remove existing non-symlink target: {}",
+                deployment.target_path.display()
+            )),
+            Ok(_) => match symlink_targets_any_path(&deployment.target_path, &reference_paths) {
+                Ok(true) => {}
+                Ok(false) => blockers.push(format!(
+                    "Refusing to remove symlink pointing elsewhere: {}",
+                    deployment.target_path.display()
+                )),
+                Err(error) => blockers.push(error),
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => blockers.push(error.to_string()),
+        }
+    }
+
+    blockers.sort();
+    blockers.dedup();
+    let preview_seed = serde_json::json!({
+        "skillName": skill_name,
+        "kind": location.kind,
+        "managedPath": location.storage_path,
+        "managedSnapshotHash": managed_snapshot_hash,
+        "deployments": deployments,
+        "blockers": blockers
+    });
+    let preview_id =
+        sha256(&serde_json::to_string(&preview_seed).map_err(|error| error.to_string())?);
+
+    Ok(DeleteSkillPreview {
+        preview_id,
+        skill_name: skill_name.to_string(),
+        kind: location.kind,
+        managed_path: location.storage_path,
+        deployments,
+        can_delete: blockers.is_empty(),
+        blockers,
+    })
+}
+
+fn validate_delete_managed_location(
+    paths: &ManagedPaths,
+    skill_name: &str,
+    location: &ManagedSkillKindLocation,
+) -> Result<()> {
+    match location.kind {
+        SkillKind::User => {
+            let expected = paths.user_skills_root.join(skill_name);
+            let metadata = fs::symlink_metadata(&expected).map_err(|error| error.to_string())?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(format!(
+                    "Refusing to delete unsafe managed user path: {}",
+                    expected.display()
+                ));
+            }
+        }
+        SkillKind::Remote => {
+            let remote_root = paths.remote_skills_root.join(skill_name);
+            let metadata = fs::symlink_metadata(&remote_root).map_err(|error| error.to_string())?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(format!(
+                    "Refusing to delete unsafe managed remote path: {}",
+                    remote_root.display()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn collect_delete_skill_deployments(
+    paths: &ManagedPaths,
+    skill_name: &str,
+    location: &ManagedSkillKindLocation,
+) -> Result<Vec<ManagedSkillDeployment>> {
+    let mut deployments = load_deployments(&paths.database_path)?
+        .remove(skill_name)
+        .unwrap_or_default();
+    let mut seen = deployments
+        .iter()
+        .map(|deployment| deployment.target_path.clone())
+        .collect::<HashSet<_>>();
+    let reference_paths = delete_skill_reference_paths(paths, skill_name, location);
+    for workspace in load_workspaces(&paths.database_path)? {
+        for target_path in workspace_symlink_paths_to_references(&workspace.path, &reference_paths)
+        {
+            if seen.insert(target_path.clone()) {
+                deployments.push(ManagedSkillDeployment {
+                    target_root: workspace.path.clone(),
+                    target_path,
+                    mode: "symlink".to_string(),
+                });
+            }
+        }
+    }
+    deployments.sort_by(|left, right| left.target_path.cmp(&right.target_path));
+    Ok(deployments)
+}
+
+fn workspace_symlink_paths_to_references(
+    workspace_path: &Path,
+    reference_paths: &[PathBuf],
+) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(workspace_path) else {
+        return Vec::new();
+    };
+    let mut paths = entries
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            fs::symlink_metadata(path)
+                .map(|metadata| metadata.file_type().is_symlink())
+                .unwrap_or(false)
+                && symlink_targets_any_path(path, reference_paths).unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths
+}
+
+fn delete_skill_unlogged(
+    request: &DeleteSkillRequest,
+    managed_root: &Path,
+) -> Result<DeleteSkillResult> {
+    if request.confirmed_skill_name != request.skill_name {
+        return Err("Skill name confirmation does not match.".to_string());
+    }
+    let paths = ensure_managed_layout(managed_root.to_path_buf())?;
+    let preview = build_delete_skill_preview(&paths, &request.skill_name)?;
+    if preview.preview_id != request.preview_id {
+        return Err("Skill deletion state changed. Review the deletion again.".to_string());
+    }
+    if !preview.can_delete {
+        return Err(preview.blockers.join(" "));
+    }
+
+    let location = resolve_delete_skill_location(&paths, &request.skill_name)?;
+    let deletion_root = location.storage_path.clone();
+    let backup_path = unique_skill_deletion_backup_path(&paths, &request.skill_name);
+    if let Some(parent) = backup_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+
+    let reference_paths = delete_skill_reference_paths(&paths, &request.skill_name, &location);
+    let conflict_root = paths.root.join("backups").join("deletion-conflicts");
+    let removed_paths = remove_skill_deployment_symlinks_with(
+        &preview.deployments,
+        &reference_paths,
+        &conflict_root,
+        &location.deployment_target_path,
+        remove_owned_skill_symlink,
+    )
+    .map_err(|error| delete_skill_rollback_error(error, Ok(()), &backup_path))?;
+
+    if let Err(error) = fs::rename(&deletion_root, &backup_path) {
+        let rollback =
+            restore_deleted_skill_symlinks(&location.deployment_target_path, &removed_paths);
+        return Err(delete_skill_rollback_error(
+            error.to_string(),
+            rollback,
+            &backup_path,
+        ));
+    }
+
+    if let Err(error) =
+        remove_deleted_skill_active_records(&paths.database_path, &request.skill_name)
+    {
+        let rollback = rollback_deleted_skill_files(
+            &deletion_root,
+            &backup_path,
+            &location.deployment_target_path,
+            &removed_paths,
+        );
+        return Err(delete_skill_rollback_error(error, rollback, &backup_path));
+    }
+
+    Ok(DeleteSkillResult {
+        skill_name: request.skill_name.clone(),
+        kind: location.kind,
+        managed_path: location.storage_path,
+        backup_path,
+        removed_deployments: preview.deployments,
+    })
+}
+
+pub(crate) fn remove_skill_deployment_symlinks_with<F>(
+    deployments: &[ManagedSkillDeployment],
+    reference_paths: &[PathBuf],
+    conflict_root: &Path,
+    deployment_target_path: &Path,
+    mut remove: F,
+) -> Result<Vec<PathBuf>>
+where
+    F: FnMut(&Path, &[PathBuf], &Path) -> Result<bool>,
+{
+    let mut removed_paths = Vec::new();
+    for deployment in deployments {
+        match remove(&deployment.target_path, reference_paths, conflict_root) {
+            Ok(true) => removed_paths.push(deployment.target_path.clone()),
+            Ok(false) => {}
+            Err(error) => {
+                return match restore_deleted_skill_symlinks(deployment_target_path, &removed_paths)
+                {
+                    Ok(()) => Err(error),
+                    Err(rollback_error) => Err(format!(
+                        "{error} Deployment rollback was incomplete: {rollback_error}"
+                    )),
+                };
+            }
+        }
+    }
+    Ok(removed_paths)
+}
+
+pub(crate) fn remove_owned_skill_symlink(
+    target_path: &Path,
+    reference_paths: &[PathBuf],
+    conflict_root: &Path,
+) -> Result<bool> {
+    match fs::symlink_metadata(target_path) {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.to_string()),
+    }
+
+    let quarantine_path = temporary_sibling_path(target_path, "delete-check")?;
+    fs::rename(target_path, &quarantine_path).map_err(|error| error.to_string())?;
+    let owned = fs::symlink_metadata(&quarantine_path)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+        && symlink_targets_any_path(&quarantine_path, reference_paths).unwrap_or(false);
+
+    if owned {
+        return match fs::remove_file(&quarantine_path) {
+            Ok(()) => Ok(true),
+            Err(remove_error) if fs::symlink_metadata(target_path).is_err() => {
+                match fs::rename(&quarantine_path, target_path) {
+                    Ok(()) => Err(remove_error.to_string()),
+                    Err(restore_error) => Err(format!(
+                        "{remove_error}; failed to restore deployment from {}: {restore_error}",
+                        quarantine_path.display()
+                    )),
+                }
+            }
+            Err(remove_error) => Err(preserve_quarantined_deletion_conflict(
+                &quarantine_path,
+                target_path,
+                conflict_root,
+                &remove_error.to_string(),
+            )),
+        };
+    }
+
+    if fs::symlink_metadata(target_path).is_ok() {
+        return Err(preserve_quarantined_deletion_conflict(
+            &quarantine_path,
+            target_path,
+            conflict_root,
+            "Skill deletion state changed",
+        ));
+    }
+    fs::rename(&quarantine_path, target_path).map_err(|error| {
+        format!(
+            "Skill deletion state changed at {} and the unexpected target could not be restored from {}: {error}",
+            target_path.display(),
+            quarantine_path.display()
+        )
+    })?;
+    Err(format!(
+        "Skill deletion state changed at {}. Review the deletion again.",
+        target_path.display()
+    ))
+}
+
+fn preserve_quarantined_deletion_conflict(
+    quarantine_path: &Path,
+    target_path: &Path,
+    conflict_root: &Path,
+    reason: &str,
+) -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let target_name = target_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("skill");
+    let preserved_path = conflict_root.join(format!("{target_name}-{nanos}"));
+    if let Err(error) = fs::create_dir_all(conflict_root) {
+        return format!(
+            "{reason} at {}. The unexpected target remains at {} because the recovery directory could not be created: {error}",
+            target_path.display(),
+            quarantine_path.display()
+        );
+    }
+    match fs::rename(quarantine_path, &preserved_path) {
+        Ok(()) => format!(
+            "{reason} at {}. The unexpected target was preserved at {}.",
+            target_path.display(),
+            preserved_path.display()
+        ),
+        Err(error) => format!(
+            "{reason} at {}. The unexpected target remains at {} because it could not be moved to {}: {error}",
+            target_path.display(),
+            quarantine_path.display(),
+            preserved_path.display()
+        ),
+    }
+}
+
+fn directory_snapshot_hash(root: &Path) -> Result<String> {
+    fn collect(root: &Path, current: &Path, entries: &mut Vec<serde_json::Value>) -> Result<()> {
+        let mut children = fs::read_dir(current)
+            .map_err(|error| error.to_string())?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+        children.sort_by_key(|entry| entry.file_name());
+
+        for entry in children {
+            let path = entry.path();
+            let relative = path
+                .strip_prefix(root)
+                .map_err(|error| error.to_string())?
+                .to_string_lossy()
+                .to_string();
+            let file_type = entry.file_type().map_err(|error| error.to_string())?;
+            if file_type.is_symlink() {
+                entries.push(serde_json::json!({
+                    "path": relative,
+                    "type": "symlink",
+                    "target": fs::read_link(&path).map_err(|error| error.to_string())?
+                }));
+            } else if file_type.is_dir() {
+                entries.push(serde_json::json!({"path": relative, "type": "directory"}));
+                collect(root, &path, entries)?;
+            } else if file_type.is_file() {
+                entries.push(serde_json::json!({
+                    "path": relative,
+                    "type": "file",
+                    "hash": sha256_bytes(&fs::read(&path).map_err(|error| error.to_string())?)
+                }));
+            } else {
+                entries.push(serde_json::json!({"path": relative, "type": "other"}));
+            }
+        }
+        Ok(())
+    }
+
+    let mut entries = Vec::new();
+    collect(root, root, &mut entries)?;
+    Ok(sha256(
+        &serde_json::to_string(&entries).map_err(|error| error.to_string())?,
+    ))
+}
+
+fn rollback_deleted_skill_files(
+    deletion_root: &Path,
+    backup_path: &Path,
+    deployment_target_path: &Path,
+    removed_paths: &[PathBuf],
+) -> Result<()> {
+    let mut errors = Vec::new();
+    if let Err(error) = fs::rename(backup_path, deletion_root) {
+        errors.push(format!(
+            "failed to restore managed skill from {}: {error}",
+            backup_path.display()
+        ));
+    }
+    if let Err(error) = restore_deleted_skill_symlinks(deployment_target_path, removed_paths) {
+        errors.push(error);
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
+    }
+}
+
+fn restore_deleted_skill_symlinks(
+    deployment_target_path: &Path,
+    removed_paths: &[PathBuf],
+) -> Result<()> {
+    let mut errors = Vec::new();
+    for target_path in removed_paths {
+        if let Err(error) = symlink_dir(deployment_target_path, target_path) {
+            errors.push(format!(
+                "failed to restore {}: {error}",
+                target_path.display()
+            ));
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
+    }
+}
+
+fn delete_skill_rollback_error(
+    primary_error: String,
+    rollback: Result<()>,
+    backup_path: &Path,
+) -> String {
+    match rollback {
+        Ok(()) => primary_error,
+        Err(rollback_error) => format!(
+            "{primary_error} Rollback was incomplete: {rollback_error}. Inspect recovery path: {}",
+            backup_path.display()
+        ),
+    }
+}
+
+fn unique_skill_deletion_backup_path(paths: &ManagedPaths, skill_name: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    paths
+        .root
+        .join("backups")
+        .join("deletions")
+        .join(format!("{skill_name}-{nanos}"))
+}
+
 fn undeploy_skill_unlogged(
     skill_name: &str,
     managed_root: &Path,
@@ -625,6 +1189,30 @@ fn undeploy_skill_unlogged(
     let managed_path = resolve_managed_skill_path(&paths, skill_name)?;
     let target_root = target_root.to_path_buf();
     let target_path = target_root.join(skill_name);
+    let removes_active_import_source = load_import_records(
+        &paths.database_path,
+        &ImportRecordFilter {
+            skill_name: Some(skill_name.to_string()),
+        },
+    )?
+    .into_iter()
+    .any(|record| {
+        record.status == ImportRecordStatus::Active
+            && [
+                record.source_root.as_deref(),
+                record.source_path.parent(),
+                record.deployed_path.parent(),
+            ]
+            .into_iter()
+            .flatten()
+            .any(|candidate| paths_refer_to_same_location(candidate, &target_root))
+    });
+    if removes_active_import_source {
+        return Err(
+            "Cannot remove the active import source deployment. Revert the import first."
+                .to_string(),
+        );
+    }
     let alias_target_paths = workspace_symlink_paths_to_managed_skill(&target_root, &managed_path);
     let mut target_paths_to_remove = Vec::new();
 
@@ -677,4 +1265,23 @@ fn undeploy_skill_unlogged(
         target_path: removed_target_path,
         mode: "symlink".to_string(),
     })
+}
+
+fn paths_refer_to_same_location(left: &Path, right: &Path) -> bool {
+    match (fs::canonicalize(left), fs::canonicalize(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => {
+            let absolute = |path: &Path| {
+                let path = expand_home(path.to_path_buf());
+                if path.is_absolute() {
+                    path
+                } else {
+                    std::env::current_dir()
+                        .map(|current| current.join(&path))
+                        .unwrap_or(path)
+                }
+            };
+            normalize_lexical_path(&absolute(left)) == normalize_lexical_path(&absolute(right))
+        }
+    }
 }

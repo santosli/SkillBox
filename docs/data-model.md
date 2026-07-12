@@ -24,6 +24,10 @@ managed store 是跨 agent 的真相源，不绑定 Codex、Claude、Cursor、Co
   backups/
     imports/
       <skill-name>-<contentHash12>/
+    deletions/
+      <skill-name>-<timestamp>/
+    deletion-conflicts/
+      <skill-name>-<timestamp>
   adapters/
     <agent-id>/
   skillbox.sqlite
@@ -36,11 +40,14 @@ managed store 是跨 agent 的真相源，不绑定 Codex、Claude、Cursor、Co
 - `remote-skills/<skill-name>/versions/<version>` 保存远程或手动远程导入的不可变快照。
 - `remote-skills/<skill-name>/current` 指向当前生效版本。
 - `backups/imports` 保存从 runtime 目录迁移到 SkillBox 前的原始内容。
+- `backups/deletions` 保存从 managed store 删除的 user skill 目录或完整 remote skill root，供误删恢复；删除 workflow 不自动清理这些备份。
+- `backups/deletion-conflicts` 保存删除期间因并发替换而无法放回 workspace 的未知 target；SkillBox 不自动删除这些内容。若跨卷迁移失败，Doctor 会报告仍留在 workspace 的 `.delete-check-*.tmp` 路径，要求人工检查。
 - `adapters/<agent-id>` 预留给 agent-specific cache、manifest 或转换产物；当前 Rust schema 尚未实现。
 - 已存在的数据库进入新 schema migration 前，通过 SQLite 一致性快照生成一次 `pre-migration` backup；同一 schema version 不重复备份。初始化会先获取 per-database process-safe migration lock，再判断是否需要 backup/migration，确保并发 desktop/CLI caller 只生成一份 backup 并执行一次有序迁移。
 - 一个有效 skill 目录必须包含 `SKILL.md`。
 - workspace 表记录 skills 所在工程目录或 runtime skills root，用于后续部署目标选择；workspace path 指向
   `.../.agents/skills`、`.../.codex/skills` 或 `.../.claude/skills` 这类 skills root，而不是单个 skill 目录。
+- 整体删除 skill 时只清理 `skills`、该 skill 的 `deployments`、`skill_user_metadata` 和 remote update cache 中的当前状态；保留 `workspaces`、`operations`、usage history 以及已结束的 import history。存在 active import record 时拒绝删除。
 
 当前实现仍以 `SKILL.md` 目录作为可读写单位。Claude、OpenClaw、Cursor、Claude Code、Copilot 等 agent 可能使用不同的原生文件格式；
 支持这些格式时，应由 adapter 把原生格式映射到 SkillBox 的规范化记录，而不是让 UI 或 workflow 分别维护 schema。
