@@ -13,7 +13,7 @@ import codexCliIcon from '../assets/codex-cli-icon.png';
 import { closeOnBackdropClick } from '../modalEvents.js';
 
 export function AgentIconStack({ agents = [], emptyLabel = 'No installed agent target', labelPrefix = 'Installed agents' }) {
-  const visibleAgents = agents.slice(0, 4);
+  const visibleAgents = agents.slice(0, 3);
   const overflowCount = Math.max(agents.length - visibleAgents.length, 0);
   const overflowLabel = overflowCount
     ? agents

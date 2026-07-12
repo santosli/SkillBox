@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
+  Cloud,
   Grid3X3,
   GitBranch,
   Import as ImportIcon,
@@ -10,7 +11,6 @@ import {
   Search,
   ShieldCheck,
   Star,
-  Cloud,
   UserRound,
   X
 } from 'lucide-react';
@@ -37,6 +37,7 @@ export function Dashboard({
   status,
   viewMode,
   onFavoritesOnly,
+  onClearFilters,
   onFilter,
   onInstall,
   onOpenSkill,
@@ -50,6 +51,27 @@ export function Dashboard({
 }) {
   const isChecking = status === 'checking';
   const tabs = dashboardTabItems(counts);
+  const searchInputRef = useRef(null);
+  const hasActiveFilters = Boolean(
+    query.trim() || filter !== 'all' || activeTag !== 'all' || favoritesOnly
+  );
+
+  useEffect(() => {
+    function focusDashboardSearch(event) {
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        event.key.toLowerCase() === 'f' &&
+        !document.querySelector('[role="dialog"]')
+      ) {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+    }
+
+    window.addEventListener('keydown', focusDashboardSearch);
+    return () => window.removeEventListener('keydown', focusDashboardSearch);
+  }, []);
 
   return (
     <>
@@ -60,70 +82,86 @@ export function Dashboard({
         <FirstUseDashboard status={status} onInstall={onInstall} onScan={onRefresh} />
       ) : (
         <section className="dashboardFrame" aria-label="Skills dashboard">
-          <PageTitleRow title="Skills" count={filtered.length} />
+          <PageTitleRow
+            title="Skills"
+            count={filtered.length}
+            actions={(
+              <div className="dashboardPageActions">
+                <DashboardActionGroup
+                  isChecking={isChecking}
+                  onInstall={onInstall}
+                  onRefresh={onRefresh}
+                  onRefreshStatuses={onRefreshStatuses}
+                />
 
-          <div className="dashboardControlRow">
-            <label className="searchField dashboardSearch" aria-label="Search skills">
-              <Search aria-hidden="true" />
-              <input
-                value={query}
-                onChange={(event) => onQuery(event.target.value)}
-                name="skill-search"
-                placeholder="Search skills in SkillBox..."
-                type="search"
-              />
-            </label>
+                <div className="viewSwitch" role="group" aria-label="Dashboard view">
+                  <button
+                    aria-label="Show card view"
+                    aria-pressed={viewMode === 'grid'}
+                    className={viewMode === 'grid' ? 'active' : ''}
+                    title="Card view"
+                    type="button"
+                    onClick={() => onViewMode('grid')}
+                  >
+                    <Grid3X3 aria-hidden="true" />
+                  </button>
+                  <button
+                    aria-label="Show list view"
+                    aria-pressed={viewMode === 'list'}
+                    className={viewMode === 'list' ? 'active' : ''}
+                    title="List view"
+                    type="button"
+                    onClick={() => onViewMode('list')}
+                  >
+                    <List aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
+            )}
+          />
 
-            <div className="dashboardTypeTabs" role="tablist" aria-label="Skill type">
-              {tabs.map((tab) => (
-                <button
-                  aria-selected={filter === tab.id}
-                  className={filter === tab.id ? 'active' : ''}
-                  key={tab.id}
-                  role="tab"
-                  type="button"
-                  onClick={() => onFilter(tab.id)}
-                >
-                  <span>{tab.label}</span>
-                  <small>{tab.count}</small>
-                </button>
-              ))}
+          <div className="dashboardFilterBar" aria-label="Dashboard filters">
+            <div className="dashboardFilterPrimary">
+              <label className="searchField dashboardSearch" aria-label="Search skills">
+                <Search aria-hidden="true" />
+                <input
+                  ref={searchInputRef}
+                  value={query}
+                  onChange={(event) => onQuery(event.target.value)}
+                  name="skill-search"
+                  placeholder="Search skills in SkillBox..."
+                  type="search"
+                />
+                <span className="searchShortcutHint" aria-hidden="true">⌘F</span>
+              </label>
+
+              <div className="dashboardTypeTabs" role="tablist" aria-label="Skill type">
+                {tabs.map((tab) => (
+                  <button
+                    aria-selected={filter === tab.id}
+                    className={filter === tab.id ? 'active' : ''}
+                    key={tab.id}
+                    role="tab"
+                    type="button"
+                    onClick={() => onFilter(tab.id)}
+                  >
+                    <span>{tab.label}</span>
+                    <small>{tab.count}</small>
+                  </button>
+                ))}
+              </div>
+
+              <button
+                aria-pressed={favoritesOnly}
+                className={favoritesOnly ? 'favoriteFilterButton active' : 'favoriteFilterButton'}
+                type="button"
+                onClick={() => onFavoritesOnly(!favoritesOnly)}
+              >
+                <Star aria-hidden="true" />
+                Favorites
+              </button>
             </div>
 
-            <DashboardActionGroup
-              isChecking={isChecking}
-              onInstall={onInstall}
-              onRefresh={onRefresh}
-              onRefreshStatuses={onRefreshStatuses}
-            />
-
-            <div className="viewSwitch" role="group" aria-label="Dashboard view">
-              <button
-                aria-label="Show card view"
-                aria-pressed={viewMode === 'grid'}
-                className={viewMode === 'grid' ? 'active' : ''}
-                type="button"
-                onClick={() => onViewMode('grid')}
-              >
-                <Grid3X3 aria-hidden="true" />
-              </button>
-              <button
-                aria-label="Show list view"
-                aria-pressed={viewMode === 'list'}
-                className={viewMode === 'list' ? 'active' : ''}
-                type="button"
-                onClick={() => onViewMode('list')}
-              >
-                <List aria-hidden="true" />
-              </button>
-            </div>
-          </div>
-
-          {notice ? (
-            <DashboardStatusNotice message={notice} onDismiss={onDismissNotice} />
-          ) : null}
-
-          <div className="dashboardFilterRow" aria-label="Dashboard filters">
             <DashboardChipGroup
               active={activeTag}
               allLabel="All tags"
@@ -131,16 +169,11 @@ export function Dashboard({
               options={filterOptions.tags}
               onSelect={onTagFilter}
             />
-            <button
-              aria-pressed={favoritesOnly}
-              className={favoritesOnly ? 'favoriteFilterButton active' : 'favoriteFilterButton'}
-              type="button"
-              onClick={() => onFavoritesOnly(!favoritesOnly)}
-            >
-              <Star aria-hidden="true" />
-              Favorites
-            </button>
           </div>
+
+          {notice ? (
+            <DashboardStatusNotice message={notice} onDismiss={onDismissNotice} />
+          ) : null}
 
           {viewMode === 'grid' ? (
             <div className="skillCardGrid" aria-label="Skill cards">
@@ -185,7 +218,12 @@ export function Dashboard({
           {filtered.length === 0 ? (
             <div className="emptyState dashboardEmptyState">
               <strong>No skills found</strong>
-              <span>Try another filter or run a fresh scan.</span>
+              <span>{hasActiveFilters ? 'No skills match the current filters.' : 'Run a fresh scan to find skills.'}</span>
+              {hasActiveFilters ? (
+                <button className="button secondary" type="button" onClick={onClearFilters}>
+                  Clear filters
+                </button>
+              ) : null}
             </div>
           ) : null}
         </section>

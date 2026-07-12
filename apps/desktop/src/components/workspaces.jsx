@@ -39,9 +39,24 @@ export function WorkspacePage({
   return (
     <section className="dashboardFrame workspaceFrame" aria-label="Workspace registry">
       {error ? <div className="notice">{error}</div> : null}
-      <PageTitleRow title="Workspaces" count={workspaces.length} />
+      <PageTitleRow
+        title="Workspaces"
+        count={workspaces.length}
+        actions={(
+          <div className="workspaceHeaderActions">
+            <button className="button secondary" disabled={isScanning} type="button" onClick={onScan}>
+              <RefreshCw aria-hidden="true" />
+              {isScanning ? 'Scanning...' : 'Scan'}
+            </button>
+            <button className="button primary" disabled={isScanning} type="button" onClick={onAdd}>
+              <Plus aria-hidden="true" />
+              Add workspace
+            </button>
+          </div>
+        )}
+      />
 
-      <div className="dashboardControlRow workspaceControlRow">
+      <div className="dashboardFilterBar pageTypeFilterBar" aria-label="Workspace filters">
         <div className="dashboardTypeTabs workspaceTypeTabs" role="tablist" aria-label="Workspace type">
           {tabs.map((tab) => (
             <button
@@ -56,16 +71,6 @@ export function WorkspacePage({
               <small>{tab.count}</small>
             </button>
           ))}
-        </div>
-        <div className="workspaceHeaderActions">
-          <button className="button secondary" disabled={isScanning} type="button" onClick={onScan}>
-            <RefreshCw aria-hidden="true" />
-            {isScanning ? 'Scanning...' : 'Scan'}
-          </button>
-          <button className="button primary" disabled={isScanning} type="button" onClick={onAdd}>
-            <Plus aria-hidden="true" />
-            Add workspace
-          </button>
         </div>
       </div>
 

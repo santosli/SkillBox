@@ -28,9 +28,18 @@ export function HistoryPage({ error, filter, history, status, onFilter, onRefres
   return (
     <section className="dashboardFrame historyFrame" aria-label="History">
       {error ? <div className="notice">{error}</div> : null}
-      <PageTitleRow title="History" count={filteredEntries.length} />
+      <PageTitleRow
+        title="History"
+        count={filteredEntries.length}
+        actions={(
+          <button className="button secondary" disabled={isLoading} type="button" onClick={onRefresh}>
+            <RefreshCw aria-hidden="true" />
+            {isLoading ? 'Loading...' : 'Refresh'}
+          </button>
+        )}
+      />
 
-      <div className="dashboardControlRow historyControlRow">
+      <div className="dashboardFilterBar pageTypeFilterBar" aria-label="History filters">
         <div className="dashboardTypeTabs historyTypeTabs" role="tablist" aria-label="History type">
           {tabs.map((tab) => (
             <button
@@ -46,10 +55,6 @@ export function HistoryPage({ error, filter, history, status, onFilter, onRefres
             </button>
           ))}
         </div>
-        <button className="button secondary" disabled={isLoading} type="button" onClick={onRefresh}>
-          <RefreshCw aria-hidden="true" />
-          {isLoading ? 'Loading...' : 'Refresh'}
-        </button>
       </div>
 
       {filteredEntries.length > 0 ? (

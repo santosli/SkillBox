@@ -410,10 +410,11 @@ button {
 
 .pageTitleRow {
   display: flex;
-  min-height: 48px;
+  min-height: 60px;
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 12px;
 }
 
 .pageTitleGroup {
@@ -455,12 +456,28 @@ button {
   gap: 10px;
 }
 
-.dashboardControlRow {
-  display: grid;
-  grid-template-columns: minmax(260px, 1fr) max-content max-content max-content;
-  min-width: 0;
+.dashboardPageActions {
+  display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.dashboardFilterBar {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+  border: 1px solid var(--skillbox-border-control);
+  border-radius: 10px;
+  background: var(--skillbox-surface);
+  padding: 10px;
+}
+
+.dashboardFilterPrimary {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(220px, 1fr) minmax(320px, 380px) max-content;
+  align-items: center;
+  gap: 10px;
 }
 
 .searchField.dashboardSearch {
@@ -484,7 +501,26 @@ button {
   height: 46px;
   border-color: #dfe4ec;
   background: #ffffff;
-  padding: 0 14px 0 46px;
+  padding: 0 56px 0 46px;
+}
+
+.searchShortcutHint {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  display: inline-flex;
+  height: 24px;
+  align-items: center;
+  border: 1px solid var(--skillbox-border-control);
+  border-radius: 6px;
+  background: var(--skillbox-surface-muted);
+  color: var(--skillbox-text-muted);
+  font-size: 11px;
+  font-weight: 680;
+  line-height: 1;
+  padding: 0 7px;
+  pointer-events: none;
+  transform: translateY(-50%);
 }
 
 .dashboardTypeTabs,
@@ -499,7 +535,7 @@ button {
 
 .dashboardTypeTabs {
   display: grid;
-  width: 380px;
+  width: 100%;
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
@@ -676,14 +712,6 @@ button {
   margin: 0;
 }
 
-.dashboardFilterRow {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-}
-
 .dashboardChipGroup {
   display: flex;
   min-width: 0;
@@ -726,13 +754,21 @@ button {
 
 .dashboardChipGroup button.active,
 .favoriteFilterButton.active {
-  border-color: #9dd6c3;
-  background: #dcfce7;
-  color: #166534;
+  border-color: var(--skillbox-border-strong);
+  background: var(--skillbox-surface-selected);
+  color: var(--skillbox-text-strong);
 }
 
 .favoriteFilterButton {
   flex: 0 0 auto;
+}
+
+.dashboardFilterPrimary .favoriteFilterButton {
+  height: 46px;
+  border-color: var(--skillbox-border-control);
+  border-radius: 8px;
+  background: var(--skillbox-surface-muted);
+  padding: 0 14px;
 }
 
 .favoriteFilterButton svg,
@@ -763,8 +799,7 @@ button {
 .skillCard {
   position: relative;
   min-width: 0;
-  height: 216px;
-  min-height: 216px;
+  min-height: 194px;
   overflow: hidden;
   border: 1px solid #dfe4ec;
   border-radius: 8px;
@@ -799,8 +834,8 @@ button {
   display: grid;
   width: 100%;
   height: 100%;
-  min-height: 216px;
-  grid-template-rows: auto minmax(42px, 1fr) 26px auto;
+  min-height: 194px;
+  grid-template-rows: auto 20px minmax(26px, auto) auto;
   gap: 12px;
   border: 0;
   background: transparent;
@@ -882,6 +917,8 @@ button {
   display: flex;
   min-width: 0;
   min-height: 26px;
+  max-height: 26px;
+  overflow: hidden;
   flex-wrap: wrap;
   gap: 8px;
   align-content: start;
@@ -925,6 +962,7 @@ button {
   display: inline-flex;
   min-width: 0;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -1130,12 +1168,6 @@ button {
   gap: 8px;
 }
 
-.skillCardHeaderActions .badge {
-  height: 32px;
-  min-height: 32px;
-  padding: 0 12px;
-}
-
 .skillFavoriteButton {
   display: inline-grid;
   width: 32px;
@@ -1175,6 +1207,8 @@ button {
 }
 
 .dashboardEmptyState {
+  align-content: center;
+  gap: 8px;
   border: 1px dashed #cbd5e1;
   border-radius: 8px;
   background: #ffffff;
@@ -1411,8 +1445,9 @@ button {
   max-width: none;
 }
 
-.workspaceControlRow {
-  justify-content: space-between;
+.pageTypeFilterBar {
+  width: max-content;
+  max-width: 100%;
 }
 
 .workspaceTypeTabs {
@@ -1431,11 +1466,6 @@ button {
 
 .historyFrame {
   max-width: 1040px;
-}
-
-.historyControlRow {
-  grid-template-columns: minmax(360px, max-content) max-content;
-  justify-content: space-between;
 }
 
 .historyTypeTabs {
@@ -5223,6 +5253,15 @@ dd {
   .dashboardSideStack {
     grid-template-columns: 1fr;
   }
+
+  .dashboardFilterPrimary {
+    grid-template-columns: minmax(220px, 1fr) minmax(300px, 1.35fr);
+  }
+
+  .dashboardFilterPrimary .favoriteFilterButton {
+    width: max-content;
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 1360px) {
@@ -5304,11 +5343,32 @@ dd {
     grid-template-columns: 1fr;
   }
 
-  .workspaceFrame .pageTitleRow {
+  .workspaceFrame .pageTitleRow,
+  .historyFrame .pageTitleRow {
     align-items: flex-start;
     flex-direction: column;
     gap: 14px;
     padding-bottom: 14px;
+  }
+
+  .dashboardFrame .pageTitleRow {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 14px;
+    padding-bottom: 14px;
+  }
+
+  .dashboardPageActions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .dashboardFilterPrimary {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboardFilterPrimary .favoriteFilterButton {
+    grid-column: auto;
   }
 
   .workspaceHeaderActions {

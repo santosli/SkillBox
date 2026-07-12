@@ -1469,6 +1469,13 @@ export default function App() {
     setPage('dashboard');
   }
 
+  function clearDashboardFilters() {
+    setQuery('');
+    setFilter('all');
+    setDashboardTagFilter('all');
+    setDashboardFavoritesOnly(false);
+  }
+
   function openHistory() {
     setSelectedName('');
     setPage('history');
@@ -3105,6 +3112,7 @@ export default function App() {
             status={status}
             viewMode={dashboardViewMode}
             onFavoritesOnly={setDashboardFavoritesOnly}
+            onClearFilters={clearDashboardFilters}
             onFilter={setFilter}
             onOpenSkill={openSkill}
             onQuery={setQuery}

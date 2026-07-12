@@ -138,7 +138,7 @@ test('dashboard and settings use the shared page title row template', () => {
   assert.match(commonSource, /className="pageTitleRow"/);
   assert.match(commonSource, /className="pageTitleGroup"/);
   assert.match(commonSource, /className="pageTitlePill"/);
-  assert.match(dashboardSource, /<PageTitleRow title="Skills" count=\{filtered\.length\} \/>/);
+  assert.match(dashboardSource, /<PageTitleRow[\s\S]*title="Skills"[\s\S]*count=\{filtered\.length\}[\s\S]*actions=/);
   assert.match(settingsPageSource, /<PageTitleRow title="Settings" \/>/);
   assert.doesNotMatch(settingsPageSource, /<PageHeader/);
   assert.doesNotMatch(settingsPageSource, /settingsPageHeader/);
@@ -151,8 +151,9 @@ test('dashboard and settings use the shared page title row template', () => {
   assert.match(pageRule, /display:\s*grid;/);
   assert.match(pageRule, /max-width:\s*1220px;/);
   assert.match(pageRule, /gap:\s*18px;/);
-  assert.match(pageTitleRowRule, /min-height:\s*48px;/);
+  assert.match(pageTitleRowRule, /min-height:\s*60px;/);
   assert.match(pageTitleRowRule, /border-bottom:\s*1px solid #e5e7eb;/);
+  assert.match(pageTitleRowRule, /padding-bottom:\s*12px;/);
   assert.match(pageTitleGroupRule, /gap:\s*12px;/);
   assert.match(pageTitleHeadingRule, /font-size:\s*28px;/);
   assert.match(pageTitleHeadingRule, /font-weight:\s*700;/);
@@ -208,9 +209,10 @@ test('tauri desktop bridge registers app update commands and pending state', () 
   assert.match(tauriSource, /app\.manage\(PendingAppUpdate::default\(\)\)/);
 });
 
-test('dashboard actions stay in one equal segmented row', () => {
+test('dashboard filters share one continuous control surface', () => {
   const contentRule = css.match(/\.content\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
-  const controlRowRule = css.match(/\.dashboardControlRow\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const filterBarRule = css.match(/\.dashboardFilterBar\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const filterPrimaryRule = css.match(/\.dashboardFilterPrimary\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const typeTabsRule = css.match(/\.dashboardTypeTabs\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const activeTypeTabsRule = css.match(
     /\.dashboardTypeTabs button\.active,\s*\.viewSwitch button\.active\s*\{(?<body>[^}]*)\}/s
@@ -220,12 +222,11 @@ test('dashboard actions stay in one equal segmented row', () => {
 
   assert.match(contentRule, /overflow-y:\s*auto;/);
   assert.match(contentRule, /scrollbar-gutter:\s*stable;/);
-  assert.match(controlRowRule, /display:\s*grid;/);
-  assert.match(
-    controlRowRule,
-    /grid-template-columns:\s*minmax\(260px,\s*1fr\)\s+max-content\s+max-content\s+max-content;/
-  );
-  assert.match(typeTabsRule, /width:\s*380px;/);
+  assert.match(appSource, /className="dashboardFilterBar" aria-label="Dashboard filters"[\s\S]*className="searchField dashboardSearch"[\s\S]*className="dashboardTypeTabs"[\s\S]*favoriteFilterButton[\s\S]*<DashboardChipGroup/);
+  assert.match(filterBarRule, /border:\s*1px solid var\(--skillbox-border-control\);/);
+  assert.match(filterBarRule, /background:\s*var\(--skillbox-surface\);/);
+  assert.match(filterPrimaryRule, /grid-template-columns:\s*minmax\(220px,\s*1fr\) minmax\(320px,\s*380px\) max-content;/);
+  assert.match(typeTabsRule, /width:\s*100%;/);
   assert.match(typeTabsRule, /grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\);/);
   assert.match(activeTypeTabsRule, /background:\s*var\(--skillbox-blue-bg\);/);
   assert.match(activeTypeTabsRule, /color:\s*var\(--skillbox-blue-text\);/);
@@ -241,6 +242,23 @@ test('dashboard actions stay in one equal segmented row', () => {
   assert.match(appSource, /onMouseEnter=\{\(\) => setPreviewAction\(action\.id\)\}/);
   assert.match(appSource, /onBlur=\{\(event\) =>/);
   assert.match(appSource, /setPreviewAction\(null\);/);
+});
+
+test('dashboard search shortcut and empty state provide recovery actions', () => {
+  assert.match(appSource, /ref=\{searchInputRef\}/);
+  assert.match(appSource, /\(event\.metaKey \|\| event\.ctrlKey\)/);
+  assert.match(appSource, /event\.key\.toLowerCase\(\) === 'f'/);
+  assert.match(appSource, /event\.preventDefault\(\);[\s\S]*searchInputRef\.current\?\.focus\(\);[\s\S]*searchInputRef\.current\?\.select\(\);/);
+  assert.match(appSource, /window\.addEventListener\('keydown', focusDashboardSearch\)/);
+  assert.match(appSource, /window\.removeEventListener\('keydown', focusDashboardSearch\)/);
+  assert.match(appSource, />⌘F<\/span>/);
+  assert.match(appSource, /hasActiveFilters \? \([\s\S]*Clear filters/);
+  assert.match(appSource, /function clearDashboardFilters\(\)[\s\S]*setQuery\(''\);[\s\S]*setFilter\('all'\);[\s\S]*setDashboardTagFilter\('all'\);[\s\S]*setDashboardFavoritesOnly\(false\);/);
+});
+
+test('dashboard view controls expose labels and tooltips', () => {
+  assert.match(appSource, /aria-label="Show card view"[\s\S]*title="Card view"/);
+  assert.match(appSource, /aria-label="Show list view"[\s\S]*title="List view"/);
 });
 
 test('first-use dashboard explains safe setup before local changes', () => {
@@ -285,8 +303,15 @@ test('dashboard content keeps a compact title offset from the window top', () =>
 });
 
 test('workspace type tabs use three columns without an empty slot', () => {
+  const workspacePageSource = appSource.match(/export function WorkspacePage[\s\S]*?function WorkspaceCard/)?.[0] || '';
   const workspaceTypeTabsRule = css.match(/\.workspaceTypeTabs\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const pageTypeFilterRule = css.match(/\.pageTypeFilterBar\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
 
+  assert.match(workspacePageSource, /<PageTitleRow[\s\S]*actions=\{\([\s\S]*className="workspaceHeaderActions"/);
+  assert.match(workspacePageSource, /className="dashboardFilterBar pageTypeFilterBar" aria-label="Workspace filters"[\s\S]*className="dashboardTypeTabs workspaceTypeTabs"/);
+  assert.doesNotMatch(workspacePageSource, /dashboardControlRow workspaceControlRow/);
+  assert.match(pageTypeFilterRule, /width:\s*max-content;/);
+  assert.match(pageTypeFilterRule, /max-width:\s*100%;/);
   assert.match(workspaceTypeTabsRule, /width:\s*max-content;/);
   assert.match(workspaceTypeTabsRule, /grid-template-columns:\s*repeat\(3,\s*minmax\(112px,\s*max-content\)\);/);
   assert.doesNotMatch(workspaceTypeTabsRule, /repeat\(4,/);
@@ -712,7 +737,12 @@ test('settings exposes usage hook injection for supported agents', () => {
 });
 
 test('history page combines skill usage and operation logs', () => {
+  const historyPageSource = appSource.match(/export function HistoryPage[\s\S]*?function HistoryRow/)?.[0] || '';
+
   assert.match(appSource, /function HistoryPage/);
+  assert.match(historyPageSource, /<PageTitleRow[\s\S]*actions=\{\([\s\S]*onClick=\{onRefresh\}/);
+  assert.match(historyPageSource, /className="dashboardFilterBar pageTypeFilterBar" aria-label="History filters"[\s\S]*className="dashboardTypeTabs historyTypeTabs"/);
+  assert.doesNotMatch(historyPageSource, /dashboardControlRow historyControlRow/);
   assert.match(appSource, /invoke\('list_history',\s*\{ request: \{ limit: 200 \} \}\)/);
   assert.match(appSource, /page === 'history'/);
   assert.match(appSource, /function normalizeHistory/);
@@ -872,16 +902,18 @@ test('skill card names wrap to two lines while descriptions use one', () => {
   assert.match(titleRowRule, /padding-right:\s*44px;/);
 });
 
-test('skill cards use a shorter fixed card rhythm with aligned metadata rows', () => {
+test('skill cards use an adaptive compact rhythm with aligned metadata rows', () => {
   const cardRule = css.match(/\.skillCard\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const hitAreaRule = css.match(/\.skillCardHitArea\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const tagRule = css.match(/\.skillCardTags\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
 
-  assert.match(cardRule, /height:\s*216px;/);
+  assert.match(cardRule, /min-height:\s*194px;/);
+  assert.doesNotMatch(cardRule, /height:\s*216px;/);
   assert.match(hitAreaRule, /height:\s*100%;/);
-  assert.match(hitAreaRule, /min-height:\s*216px;/);
-  assert.match(hitAreaRule, /grid-template-rows:\s*auto minmax\(42px,\s*1fr\) 26px auto;/);
+  assert.match(hitAreaRule, /min-height:\s*194px;/);
+  assert.match(hitAreaRule, /grid-template-rows:\s*auto 20px minmax\(26px,\s*auto\) auto;/);
   assert.match(tagRule, /min-height:\s*26px;/);
+  assert.match(tagRule, /max-height:\s*26px;/);
 });
 
 test('skill card status moves to metadata while favorite remains in the header', () => {
@@ -913,6 +945,8 @@ test('deploy workspace dialog includes checked rows and removal confirmation war
 });
 
 test('installed workspace icons use immediate custom tooltips instead of native title delay', () => {
+  assert.match(appSource, /const visibleAgents = agents\.slice\(0, 3\);/);
+  assert.match(appSource, /\+\{overflowCount\}/);
   assert.match(appSource, /data-tooltip=\{agent\.label\}/);
   assert.match(appSource, /aria-label=\{agent\.label\}/);
   assert.doesNotMatch(appSource, /className="skillAgentIcons" aria-label=\{label\} title=\{label\}/);
