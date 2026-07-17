@@ -1198,6 +1198,9 @@ test('skill deletion uses a reviewed danger confirmation and blocking desktop co
   assert.match(appSource, /\{copied \? 'Copied' : 'Copy'\}/);
   assert.match(appSource, /invoke\('preview_delete_skill'/);
   assert.match(appSource, /invoke\('delete_skill'/);
+  assert.match(appSource, /const metadataState = normalizeSkillUserMetadata\(metadataRows \|\| \[\]\);/);
+  assert.match(appSource, /setFavoriteNames\(metadataState\.favoriteNames\);/);
+  assert.doesNotMatch(appSource, /setFavoriteNames\([^;]*new Set/s);
   assert.match(tauriSource, /async fn preview_delete_skill\(skill_name: String\)/);
   assert.match(tauriSource, /async fn delete_skill\(request: skillbox_core::DeleteSkillRequest\)/);
   assert.match(tauriSource, /spawn_blocking\(move \|\|/);

@@ -1736,7 +1736,7 @@ export default function App() {
         ...current,
         statuses: current.statuses.filter((item) => item.skillName !== skillName)
       }));
-      setFavoriteNames((current) => new Set([...current].filter((name) => name !== skillName)));
+      setFavoriteNames((current) => current.filter((name) => name !== skillName));
       setDashboardTagOverrides((current) =>
         Object.fromEntries(Object.entries(current).filter(([name]) => name !== skillName))
       );
@@ -1755,8 +1755,9 @@ export default function App() {
         setPaths(normalizePaths(state.paths));
         setIsFirstUse(Boolean(state.isFirstUse ?? state.is_first_use));
         setUserSkillsGit(normalizeUserSkillsGitStatus(gitStatus));
-        setFavoriteNames(new Set((metadataRows || []).filter((item) => item.favorite).map((item) => item.skillName ?? item.skill_name)));
-        setDashboardTagOverrides(Object.fromEntries((metadataRows || []).map((item) => [item.skillName ?? item.skill_name, item.tags || []])));
+        const metadataState = normalizeSkillUserMetadata(metadataRows || []);
+        setFavoriteNames(metadataState.favoriteNames);
+        setDashboardTagOverrides(metadataState.tagOverrides);
         setNotice(`Deleted ${skillName} and removed it from ${removedCount} workspace${removedCount === 1 ? '' : 's'}.`);
       } catch (_refreshError) {
         setNotice(`Deleted ${skillName}, but the dashboard refresh failed. Reopen SkillBox to refresh managed state.`);

@@ -7,16 +7,16 @@ import {
 } from './skillUserMetadata.js';
 
 test('normalizes SQLite skill metadata into dashboard favorites and tags', () => {
-  assert.deepEqual(
-    normalizeSkillUserMetadata([
-      { skill_name: 'beta', favorite: true, tags: [' Research Notes ', 'sync'] },
-      { skillName: 'alpha', favorite: false, tags: [] }
-    ]),
-    {
-      favoriteNames: ['beta'],
-      tagOverrides: { alpha: [], beta: ['research-notes', 'sync'] }
-    }
-  );
+  const metadata = normalizeSkillUserMetadata([
+    { skill_name: 'beta', favorite: true, tags: [' Research Notes ', 'sync'] },
+    { skillName: 'alpha', favorite: false, tags: [] }
+  ]);
+
+  assert.ok(Array.isArray(metadata.favoriteNames));
+  assert.deepEqual(metadata, {
+    favoriteNames: ['beta'],
+    tagOverrides: { alpha: [], beta: ['research-notes', 'sync'] }
+  });
 });
 
 test('builds one-time SQLite updates from legacy localStorage metadata', () => {
