@@ -7,7 +7,7 @@ version tags such as `v0.3.0`.
 
 ## Unreleased
 
-- Keep Dashboard and Skill Detail favorite toggles working after deleting a managed skill.
+- No unreleased changes.
 
 ## 0.4.2
 
