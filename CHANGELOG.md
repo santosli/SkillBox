@@ -9,6 +9,10 @@ version tags such as `v0.3.0`.
 
 - No unreleased changes.
 
+## 0.4.3
+
+- Keep Dashboard and Skill Detail favorite toggles responsive after deleting a managed skill.
+
 ## 0.4.2
 
 - Refresh the Dashboard with attention-based status stripes, neutral type and tag treatments, readable skill names, consolidated filters, adaptive cards, clearer agent tooltips, keyboard search, and actionable empty states.
