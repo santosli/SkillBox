@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Website privacy - SkillBox</title>
+    <meta name="description" content="How the public SkillBox website uses VibeLoft page-view telemetry without accessing SkillBox app or CLI data.">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://santosli.github.io/SkillBox/privacy.html">
+    <meta name="theme-color" content="#08111f">
+    <link rel="icon" href="assets/skillbox-app-icon.png">
+    <link rel="preload" href="assets/fonts/space-grotesk-700.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="assets/fonts/ibm-plex-sans-400.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="styles.css">
+    <script defer src="telemetry.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <section class="analytics-consent" data-analytics-consent role="region" aria-live="polite" aria-labelledby="analytics-consent-title" hidden>
+      <div>
+        <strong id="analytics-consent-title">Optional website analytics</strong>
+        <p data-analytics-status>
+          Choose whether this website may load VibeLoft telemetry. Your choice is stored only in this browser.
+        </p>
+      </div>
+      <div class="analytics-consent-actions">
+        <button class="consent-button secondary" type="button" data-analytics-decline>Decline</button>
+        <button class="consent-button primary" type="button" data-analytics-allow>Allow analytics</button>
+      </div>
+    </section>
+
+    <header class="site-header">
+      <a class="brand" href="./" aria-label="SkillBox home">
+        <img src="assets/skillbox-app-icon.png" alt="" width="36" height="36">
+        <span>SkillBox</span>
+      </a>
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a href="./">Home</a>
+        <a href="https://github.com/santosli/SkillBox">GitHub</a>
+      </nav>
+    </header>
+
+    <main class="privacy-page" id="main">
+      <p class="eyebrow">Website privacy</p>
+      <h1>Telemetry on the public SkillBox website</h1>
+      <p class="privacy-lead">
+        With your permission, the public website loads third-party VibeLoft telemetry to count page views and verify
+        the SkillBox product listing. No VibeLoft request is made before you allow analytics. This website telemetry
+        is separate from the SkillBox macOS app and CLI: it cannot access managed skills, runtime folders, prompts,
+        usage history, or any other data stored under <code>~/.skillbox</code>.
+      </p>
+
+      <section aria-labelledby="collected-data">
+        <h2 id="collected-data">What the browser sends</h2>
+        <ul>
+          <li>The page origin and path. URL query parameters and fragments are removed before the event is queued.</li>
+          <li>A random event ID, event timestamp, and the public SkillBox product ID.</li>
+          <li>
+            A random device ID stored in first-party <code>localStorage</code> under
+            <code>vibeloft.telemetry.device.v1</code>.
+          </li>
+          <li>
+            A browser-generated SHA-256 feature digest based on timezone, up to three browser languages, platform,
+            rounded screen dimensions, color depth, hardware concurrency, device memory, and touch-point count.
+          </li>
+        </ul>
+        <p>
+          The current client code does not set or read cookies. It normally sends requests with browser credentials
+          omitted and may use the browser Beacon API when the page becomes hidden. Events go to
+          <code>https://api.vibeloft.ai/api/v1/telemetry/events</code>. The receiving service can also receive network
+          metadata such as an IP address. VibeLoft publishes a
+          <a href="https://vibeloft.ai/en/articles/trusted-telemetry-for-vibecoding-products/">telemetry overview</a>,
+          but its public browser client does not define server-side retention or deletion handling; ask VibeLoft for
+          its current terms before relying on those practices.
+        </p>
+        <p>
+          Allowing analytics loads JavaScript maintained by VibeLoft into this public website. Third-party JavaScript
+          runs in the page context, but this static website contains no SkillBox account, managed-store, or local app data.
+        </p>
+      </section>
+
+      <section aria-labelledby="controls">
+        <h2 id="controls">Your controls</h2>
+        <p>
+          The telemetry client is disabled when the browser exposes Global Privacy Control or an enabled Do Not Track
+          preference. It also disables itself when first-party storage is unavailable. Use
+          <button class="inline-link" type="button" data-manage-analytics>Manage analytics</button> to grant or withdraw
+          consent. Withdrawing stops the active client and removes its random device ID. You can also clear site data for
+          <code>santosli.github.io</code> or block the VibeLoft script with browser controls.
+        </p>
+      </section>
+
+      <p class="privacy-updated">Last updated: July 19, 2026.</p>
+    </main>
+
+    <footer class="site-footer">
+      <div>
+        <img src="assets/skillbox-app-icon.png" alt="" width="28" height="28">
+        <span>SkillBox</span>
+      </div>
+      <nav aria-label="Footer navigation">
+        <a href="./">Home</a>
+        <a href="https://github.com/santosli/SkillBox">GitHub</a>
+        <a href="https://github.com/santosli/SkillBox/blob/main/SECURITY.md">Security</a>
+        <button class="footer-link" type="button" data-manage-analytics>Manage analytics</button>
+      </nav>
+    </footer>
+  </body>
+</html>

@@ -7,7 +7,7 @@ version tags such as `v0.3.0`.
 
 ## Unreleased
 
-- No unreleased changes.
+- Add consent-gated VibeLoft page-view telemetry to the public website, with DNT/GPC support, withdrawal controls, and a detailed website privacy notice that remains separate from SkillBox app and CLI data.
 
 ## 0.4.3
 

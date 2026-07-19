@@ -109,6 +109,10 @@ Runtime 目录只是部署目标：
 
 Windows、Linux 和 Homebrew CLI formula 不属于当前版本范围。
 
+## 官网遥测
+
+SkillBox 官网仅在访客主动同意后使用可选的 VibeLoft 页面访问遥测。该网站接入与 macOS 应用和 CLI 相互独立，无法访问 managed skills、prompt、runtime 目录或本地 SkillBox 数据库。上报字段和退出方式见[官网隐私说明](https://santosli.github.io/SkillBox/privacy.html)。
+
 ## 安装
 
 ### GitHub Releases

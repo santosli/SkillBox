@@ -11,7 +11,7 @@ const assets = path.join(dist, "assets");
 await rm(dist, { recursive: true, force: true });
 await mkdir(assets, { recursive: true });
 
-for (const file of ["index.html", "styles.css", "robots.txt", "sitemap.xml", "404.html", "googleffb526fcf02488a3.html"]) {
+for (const file of ["index.html", "privacy.html", "telemetry.js", "styles.css", "robots.txt", "sitemap.xml", "404.html", "googleffb526fcf02488a3.html"]) {
   await cp(path.join(site, file), path.join(dist, file));
 }
 

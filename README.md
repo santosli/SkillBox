@@ -109,6 +109,10 @@ Longer-term support for native Claude, OpenClaw, Cursor, Claude Code, Copilot, a
 
 Windows, Linux, and a Homebrew CLI formula are not part of the current release.
 
+## Public website telemetry
+
+The public SkillBox website uses optional VibeLoft page-view telemetry only after a visitor opts in. The website integration is separate from the macOS app and CLI: it cannot access managed skills, prompts, runtime folders, or the local SkillBox database. See the [website privacy notice](https://santosli.github.io/SkillBox/privacy.html) for the transmitted fields and opt-out controls.
+
 ## Install
 
 ### GitHub Releases

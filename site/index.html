@@ -73,9 +73,24 @@
         ]
       }
     </script>
+    <script defer src="telemetry.js"></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
+
+    <section class="analytics-consent" data-analytics-consent role="region" aria-live="polite" aria-labelledby="analytics-consent-title" hidden>
+      <div>
+        <strong id="analytics-consent-title">Optional website analytics</strong>
+        <p>
+          <span data-analytics-status>Choose whether this website may load VibeLoft telemetry.</span>
+          Read the <a href="privacy.html">website privacy notice</a>.
+        </p>
+      </div>
+      <div class="analytics-consent-actions">
+        <button class="consent-button secondary" type="button" data-analytics-decline>Decline</button>
+        <button class="consent-button primary" type="button" data-analytics-allow>Allow analytics</button>
+      </div>
+    </section>
 
     <header class="site-header">
       <a class="brand" href="#top" aria-label="SkillBox home">
@@ -295,6 +310,8 @@ brew install --cask skillbox</code></pre>
         <a href="https://github.com/santosli/SkillBox/releases">Releases</a>
         <a href="https://github.com/santosli/SkillBox/issues">Issues</a>
         <a href="https://github.com/santosli/SkillBox/blob/main/SECURITY.md">Security</a>
+        <a href="privacy.html">Website privacy</a>
+        <button class="footer-link" type="button" data-manage-analytics>Manage analytics</button>
         <a href="https://github.com/santosli/SkillBox/blob/main/README.md">README</a>
       </nav>
     </footer>
