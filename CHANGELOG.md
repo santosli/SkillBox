@@ -9,6 +9,12 @@ version tags such as `v0.3.0`.
 
 - No unreleased changes.
 
+## 0.4.4
+
+- Add consent-gated VibeLoft page-view telemetry with DNT/GPC support, withdrawal controls, and a website privacy notice that remains separate from SkillBox app and CLI data.
+- Group import-equivalent candidates across runtime roots into one review row, show untouched copies, and keep imports limited to the deterministic primary source.
+- Validate complete User and Remote skill contents, permissions, and symlink targets before grouping or reuse, and show exact source paths when imports fail.
+
 ## 0.4.3
 
 - Keep Dashboard and Skill Detail favorite toggles responsive after deleting a managed skill.
