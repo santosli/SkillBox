@@ -46,6 +46,41 @@ export function importNotice(prefix, message) {
   return [prefix, message].filter(Boolean).join(' ');
 }
 
+export function candidateImportSourcePaths(candidate) {
+  return [candidate.sourcePath, ...(candidate.additionalSourcePaths || [])].filter(
+    (path, index, paths) => path && paths.indexOf(path) === index
+  );
+}
+
+export function importRequestItems(candidates) {
+  return candidates.map((candidate) => ({
+    source_path: candidate.sourcePath,
+    skill_type: candidate.skillType,
+    deploy_back_to_source: true
+  }));
+}
+
+export function importBatchNotice(result) {
+  const imported = result.imported || [];
+  const errorCount = (result.errors || []).length;
+  const skillCount = new Set(imported.map((item) => item.name).filter(Boolean)).size;
+  const locationCount = imported.length;
+  const skillLabel = `${skillCount} ${skillCount === 1 ? 'skill' : 'skills'}`;
+  const locationSuffix = locationCount > skillCount
+    ? ` across ${locationCount} locations`
+    : '';
+  const shownErrors = (result.errors || []).slice(0, 3).map((item) => {
+    const sourcePath = item.sourcePath || item.source_path || 'unknown source';
+    return `${sourcePath}: ${item.error || 'Import failed'}`;
+  });
+  const hiddenErrorCount = Math.max(errorCount - shownErrors.length, 0);
+  const errorSuffix = errorCount > 0
+    ? ` Failed: ${shownErrors.join('; ')}${hiddenErrorCount > 0 ? `; +${hiddenErrorCount} more` : ''}.`
+    : '';
+
+  return `Imported ${skillLabel}${locationSuffix}.${errorSuffix}`.trim();
+}
+
 export function isImportableCandidate(candidate) {
   return candidate.importStatus === 'importable' && !candidate.conflict;
 }

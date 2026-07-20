@@ -745,6 +745,7 @@ pub struct ImportCandidate {
     pub is_symlink: bool,
     pub symlink_target_path: Option<PathBuf>,
     pub content_hash: String,
+    pub additional_source_paths: Vec<PathBuf>,
     pub suggested_type: SkillKind,
     pub suggestion_reason: String,
     pub import_status: ImportCandidateStatus,

@@ -211,11 +211,25 @@ pub(crate) fn import_skill_unlogged(
     };
 
     match kind {
-        SkillKind::User => copy_skill_dir(&skill.path, &managed_path)?,
+        SkillKind::User => {
+            if managed_path.exists() {
+                if skill_directory_snapshot_hash(&skill.path)?
+                    != skill_directory_snapshot_hash(&managed_path)?
+                {
+                    return Err(format!("Existing user skill does not match {}", skill.name));
+                }
+            } else {
+                copy_skill_dir(&skill.path, &managed_path)?;
+            }
+        }
         SkillKind::Remote => {
             if managed_path.exists() {
                 let existing = read_skill(&managed_path)?;
-                if existing.name != skill.name || existing.content_hash != skill.content_hash {
+                if existing.name != skill.name
+                    || existing.content_hash != skill.content_hash
+                    || skill_directory_snapshot_hash(&skill.path)?
+                        != skill_directory_snapshot_hash(&managed_path)?
+                {
                     return Err(format!(
                         "Existing remote version does not match {}",
                         skill.name
@@ -1066,7 +1080,20 @@ fn preserve_quarantined_deletion_conflict(
 }
 
 fn directory_snapshot_hash(root: &Path) -> Result<String> {
-    fn collect(root: &Path, current: &Path, entries: &mut Vec<serde_json::Value>) -> Result<()> {
+    directory_snapshot_hash_with_options(root, false)
+}
+
+pub(crate) fn skill_directory_snapshot_hash(root: &Path) -> Result<String> {
+    directory_snapshot_hash_with_options(root, true)
+}
+
+fn directory_snapshot_hash_with_options(root: &Path, ignore_git: bool) -> Result<String> {
+    fn collect(
+        root: &Path,
+        current: &Path,
+        ignore_git: bool,
+        entries: &mut Vec<serde_json::Value>,
+    ) -> Result<()> {
         let mut children = fs::read_dir(current)
             .map_err(|error| error.to_string())?
             .collect::<std::result::Result<Vec<_>, _>>()
@@ -1074,6 +1101,9 @@ fn directory_snapshot_hash(root: &Path) -> Result<String> {
         children.sort_by_key(|entry| entry.file_name());
 
         for entry in children {
+            if ignore_git && current == root && entry.file_name() == ".git" {
+                continue;
+            }
             let path = entry.path();
             let relative = path
                 .strip_prefix(root)
@@ -1089,12 +1119,19 @@ fn directory_snapshot_hash(root: &Path) -> Result<String> {
                 }));
             } else if file_type.is_dir() {
                 entries.push(serde_json::json!({"path": relative, "type": "directory"}));
-                collect(root, &path, entries)?;
+                collect(root, &path, ignore_git, entries)?;
             } else if file_type.is_file() {
+                let mode = entry
+                    .metadata()
+                    .map_err(|error| error.to_string())?
+                    .permissions()
+                    .mode()
+                    & 0o777;
                 entries.push(serde_json::json!({
                     "path": relative,
                     "type": "file",
-                    "hash": sha256_bytes(&fs::read(&path).map_err(|error| error.to_string())?)
+                    "hash": sha256_bytes(&fs::read(&path).map_err(|error| error.to_string())?),
+                    "mode": mode
                 }));
             } else {
                 entries.push(serde_json::json!({"path": relative, "type": "other"}));
@@ -1104,7 +1141,7 @@ fn directory_snapshot_hash(root: &Path) -> Result<String> {
     }
 
     let mut entries = Vec::new();
-    collect(root, root, &mut entries)?;
+    collect(root, root, ignore_git, &mut entries)?;
     Ok(sha256(
         &serde_json::to_string(&entries).map_err(|error| error.to_string())?,
     ))

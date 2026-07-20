@@ -54,7 +54,7 @@ Doctor 会检查 SQLite schema 与完整性、managed skills、deployments、wor
 
 ![SkillBox import review](docs/screenshots/skillbox-import-review.jpg)
 
-Import review 让本地扫描结果保持显式可审查：候选项会先完成分类，然后 SkillBox 才会把它们复制进 managed store。
+Import review 让本地扫描结果保持显式可审查：候选项会先完成分类，然后 SkillBox 才会把它们复制进 managed store。多个 runtime root 中导入内容完全一致的副本会合并为一条 review 记录并保留所有来源位置，但本次只导入 primary，其他副本保持不变；脚本或资源不同的 skill 会继续分开显示。
 
 ## SkillBox 管什么
 
@@ -90,7 +90,7 @@ Runtime 目录只是部署目标：
 ## 功能
 
 - 扫描并登记受支持的全局或项目局部 `SKILL.md` workspaces；按名称、路径或 agent 搜索，并按 scope 过滤。
-- 在复制前 review user、remote 和 system import candidates；对符合条件的 deploy-back import 执行保守回退。
+- 在复制前 review user、remote 和 system import candidates；合并导入内容一致的多 root 副本但不丢失来源位置，并对符合条件的 deploy-back import 执行保守回退。
 - 通过 preview/apply 安装 GitHub-backed skill，并在不替换当前版本的情况下绑定识别到的 remote source candidate。
 - 检查 remote source、预览全文件 diff、应用更新，并回滚到不可变版本。
 - 通过 ownership-checked symlink 在单个 workspace 部署或移除 managed skill；经 review 迁移 User/Remote 类型并重定向 deployments。

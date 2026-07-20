@@ -24,6 +24,7 @@
 - Added shared desktop diff rendering and remote skill workflow normalization helpers for source binding and version change previews.
 - Implemented SQLite-backed workspace registry for global and project-local skills roots, including `.codex/skills`, `.agents/skills`, `.claude/skills`, scan-time auto registration, imported skill counts, manual add, manual forget, Rust CLI commands, Tauri commands, and a searchable desktop Workspaces page with type filters and per-workspace skill review/import.
 - Implemented import records and import revert in Rust core, Rust CLI, Tauri commands, and Skill Detail UI, including backup restoration, conservative legacy reconciliation, multi-workspace blocking, and warning/danger confirmation states.
+- Implemented whole-directory duplicate grouping for Import Review, including deterministic primary source selection, retained additional source paths, grouped desktop review/search, explicit untouched-copy messaging, and primary-only backup/symlink deployment that preserves existing revert guarantees.
 - Added signed macOS app update checks and user-confirmed install/restart through the Tauri updater plugin, plus release workflow assets for updater archives, signatures, and `latest.json`.
 - Added ordered, transactional Rust SQLite migrations, consistent pre-migration backups for existing databases, schema version tracking, and integrity validation.
 - Moved dashboard favorites and user-edited tags from browser-only storage into SQLite, with a one-time desktop migration for existing local metadata.

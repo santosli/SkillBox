@@ -54,7 +54,7 @@ Doctor checks the SQLite schema and integrity, managed skills, deployments, work
 
 ![SkillBox import review](docs/screenshots/skillbox-import-review.jpg)
 
-Import review keeps local scans explicit: candidates are classified before SkillBox copies them into the managed store.
+Import review keeps local scans explicit: candidates are classified before SkillBox copies them into the managed store. Copies with identical imported contents across multiple runtime roots are grouped into one review row while retaining every source location for review; only the primary source is imported, other copies remain unchanged, and skills with different scripts or assets remain separate.
 
 ## What SkillBox Manages
 
@@ -90,7 +90,7 @@ Longer-term support for native Claude, OpenClaw, Cursor, Claude Code, Copilot, a
 ## Features
 
 - Scan and register supported global or project-local `SKILL.md` workspaces, then search them by name, path, or agent and filter by scope.
-- Review user, remote, and system import candidates before copying anything; conservatively revert eligible deploy-back imports.
+- Review user, remote, and system import candidates before copying anything; group import-equivalent multi-root copies without losing their source locations, and conservatively revert eligible deploy-back imports.
 - Install GitHub-backed skills through a preview/apply flow and bind discovered remote source candidates without replacing the active version.
 - Check remote sources, preview all-file diffs, apply updates, and roll back to immutable versions.
 - Deploy or remove managed skills in individual workspaces through ownership-checked symlinks; migrate User/Remote ownership and retarget deployments through a reviewed flow.

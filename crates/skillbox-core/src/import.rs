@@ -60,6 +60,7 @@ pub fn scan_import_candidates(
             is_symlink: skill.is_symlink,
             symlink_target_path,
             content_hash: skill.content_hash,
+            additional_source_paths: Vec::new(),
             suggested_type,
             suggestion_reason,
             import_status,
@@ -69,12 +70,37 @@ pub fn scan_import_candidates(
         });
     }
 
+    let root_rank = scan
+        .roots
+        .iter()
+        .enumerate()
+        .map(|(index, root)| (root.clone(), index))
+        .collect::<HashMap<_, _>>();
+    candidates.sort_by(|left, right| {
+        left.name.cmp(&right.name).then_with(|| {
+            let left_rank = left
+                .source_root
+                .as_ref()
+                .and_then(|root| root_rank.get(root))
+                .copied()
+                .unwrap_or(usize::MAX);
+            let right_rank = right
+                .source_root
+                .as_ref()
+                .and_then(|root| root_rank.get(root))
+                .copied()
+                .unwrap_or(usize::MAX);
+            left_rank
+                .cmp(&right_rank)
+                .then_with(|| left.source_path.cmp(&right.source_path))
+        })
+    });
+    dedupe_import_candidates(&mut candidates);
     candidates.sort_by(|left, right| {
         left.name
             .cmp(&right.name)
             .then_with(|| left.source_path.cmp(&right.source_path))
     });
-    dedupe_imported_candidates(&mut candidates);
     Ok(ImportCandidateScan {
         roots: scan.roots,
         candidates,
@@ -82,15 +108,79 @@ pub fn scan_import_candidates(
     })
 }
 
-pub(crate) fn dedupe_imported_candidates(candidates: &mut Vec<ImportCandidate>) {
-    let mut imported_keys = HashSet::new();
-    candidates.retain(|candidate| {
-        if candidate.import_status != ImportCandidateStatus::Imported {
-            return true;
+pub(crate) fn dedupe_import_candidates(candidates: &mut Vec<ImportCandidate>) {
+    let mut deduped: Vec<ImportCandidate> = Vec::new();
+    let mut package_hashes: Vec<Option<String>> = Vec::new();
+
+    for candidate in candidates.drain(..) {
+        if candidate.import_status == ImportCandidateStatus::Imported {
+            if let Some(existing) = deduped.iter_mut().find(|existing| {
+                existing.import_status == ImportCandidateStatus::Imported
+                    && existing.name == candidate.name
+                    && existing.content_hash == candidate.content_hash
+                    && existing.real_path == candidate.real_path
+            }) {
+                merge_duplicate_import_candidate(existing, candidate, false);
+                continue;
+            }
         }
 
-        imported_keys.insert((candidate.name.clone(), candidate.content_hash.clone()))
-    });
+        let package_hash = if candidate.is_symlink {
+            None
+        } else {
+            skill_directory_snapshot_hash(&candidate.real_path).ok()
+        };
+        let duplicate_index = package_hash.as_ref().and_then(|package_hash| {
+            deduped.iter().enumerate().find_map(|(index, existing)| {
+                let existing_hash = package_hashes.get(index).and_then(Option::as_ref)?;
+                (existing.import_status != ImportCandidateStatus::Imported
+                    && !existing.is_symlink
+                    && existing.name == candidate.name
+                    && existing.content_hash == candidate.content_hash
+                    && existing.suggested_type == candidate.suggested_type
+                    && existing.import_status == candidate.import_status
+                    && existing.conflict == candidate.conflict
+                    && existing_hash == package_hash)
+                    .then_some(index)
+            })
+        });
+
+        if let Some(index) = duplicate_index {
+            merge_duplicate_import_candidate(&mut deduped[index], candidate, true);
+        } else {
+            deduped.push(candidate);
+            package_hashes.push(package_hash);
+        }
+    }
+
+    *candidates = deduped;
+}
+
+fn merge_duplicate_import_candidate(
+    existing: &mut ImportCandidate,
+    duplicate: ImportCandidate,
+    aggregate_usage: bool,
+) {
+    if duplicate.source_path != existing.source_path
+        && !existing
+            .additional_source_paths
+            .contains(&duplicate.source_path)
+    {
+        existing.additional_source_paths.push(duplicate.source_path);
+    }
+    for source_path in duplicate.additional_source_paths {
+        if source_path != existing.source_path
+            && !existing.additional_source_paths.contains(&source_path)
+        {
+            existing.additional_source_paths.push(source_path);
+        }
+    }
+    existing.is_selected |= duplicate.is_selected;
+    existing.usage_count = if aggregate_usage {
+        existing.usage_count.saturating_add(duplicate.usage_count)
+    } else {
+        existing.usage_count.max(duplicate.usage_count)
+    };
 }
 
 pub(crate) fn import_candidate_usage_count(
@@ -715,10 +805,12 @@ pub(crate) fn managed_target_conflict(
             if !target.exists() {
                 return Ok(None);
             }
-            if read_skill(&target)
-                .map(|existing| existing.content_hash == skill.content_hash)
-                .unwrap_or(false)
-            {
+            let target_snapshot = skill_directory_snapshot_hash(&target);
+            let source_snapshot = skill_directory_snapshot_hash(&skill.real_path);
+            if matches!(
+                (&target_snapshot, &source_snapshot),
+                (Ok(target_hash), Ok(source_hash)) if target_hash == source_hash
+            ) {
                 return Ok(None);
             }
             Ok(Some(format!("Managed target exists: {}", target.display())))
@@ -729,7 +821,18 @@ pub(crate) fn managed_target_conflict(
                 .join("versions")
                 .join(format!("manual-{}", &skill.content_hash[..12]));
             if version_target.exists() {
-                return Ok(None);
+                let target_snapshot = skill_directory_snapshot_hash(&version_target);
+                let source_snapshot = skill_directory_snapshot_hash(&skill.real_path);
+                if matches!(
+                    (&target_snapshot, &source_snapshot),
+                    (Ok(target_hash), Ok(source_hash)) if target_hash == source_hash
+                ) {
+                    return Ok(None);
+                }
+                return Ok(Some(format!(
+                    "Managed version exists with different contents: {}",
+                    version_target.display()
+                )));
             }
             if remote_root.exists() && !remote_root.is_dir() {
                 return Ok(Some(format!(

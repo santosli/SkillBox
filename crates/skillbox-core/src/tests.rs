@@ -1,6 +1,7 @@
 use super::*;
 use rusqlite::OptionalExtension;
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::sync::{Arc, Barrier};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -5071,6 +5072,152 @@ fn scan_import_candidates_does_not_mark_copied_only_hash_matches_as_imported() {
 }
 
 #[test]
+fn scan_import_candidates_groups_identical_copied_skills_across_roots() {
+    let root = temp_dir("candidate-identical-copies");
+    let global_root = root.join("global").join(".agents").join("skills");
+    let project_root = root.join("project").join(".agents").join("skills");
+    let global_source = global_root.join("demo");
+    let project_source = project_root.join("demo");
+    let managed_root = root.join("SkillBox");
+    make_skill(&global_source, "demo", "Demo skill");
+    make_skill(&project_source, "demo", "Demo skill");
+    fs::create_dir_all(global_source.join("scripts")).unwrap();
+    fs::create_dir_all(project_source.join("scripts")).unwrap();
+    fs::write(global_source.join("scripts/run.sh"), "echo demo\n").unwrap();
+    fs::write(project_source.join("scripts/run.sh"), "echo demo\n").unwrap();
+    fs::create_dir_all(global_source.join(".git")).unwrap();
+    fs::create_dir_all(project_source.join(".git")).unwrap();
+    fs::write(global_source.join(".git/config"), "global\n").unwrap();
+    fs::write(project_source.join(".git/config"), "project\n").unwrap();
+
+    let candidates =
+        scan_import_candidates(&[global_root.clone(), project_root.clone()], &managed_root)
+            .unwrap();
+
+    assert_eq!(candidates.candidates.len(), 1);
+    let demo = candidate(&candidates.candidates, "demo");
+    assert_eq!(demo.source_path, global_source);
+    assert_eq!(demo.additional_source_paths, vec![project_source.clone()]);
+    assert_eq!(demo.import_status, ImportCandidateStatus::Importable);
+    assert!(demo.is_selected);
+
+    let reversed = scan_import_candidates(&[project_root, global_root], &managed_root).unwrap();
+    let reversed_demo = candidate(&reversed.candidates, "demo");
+    assert_eq!(reversed_demo.source_path, project_source);
+    assert_eq!(reversed_demo.additional_source_paths, vec![global_source]);
+}
+
+#[test]
+fn scan_import_candidates_keeps_same_skill_md_with_different_assets_separate() {
+    let root = temp_dir("candidate-different-assets");
+    let first_root = root.join("first").join(".agents").join("skills");
+    let second_root = root.join("second").join(".agents").join("skills");
+    let first_source = first_root.join("demo");
+    let second_source = second_root.join("demo");
+    let managed_root = root.join("SkillBox");
+    make_skill(&first_source, "demo", "Demo skill");
+    make_skill(&second_source, "demo", "Demo skill");
+    fs::write(first_source.join("prompt.md"), "first\n").unwrap();
+    fs::write(second_source.join("prompt.md"), "second\n").unwrap();
+
+    let candidates = scan_import_candidates(&[first_root, second_root], &managed_root).unwrap();
+
+    assert_eq!(candidates.candidates.len(), 2);
+    assert!(candidates
+        .candidates
+        .iter()
+        .all(|candidate| candidate.additional_source_paths.is_empty()));
+}
+
+#[test]
+fn scan_import_candidates_keeps_different_executable_bits_separate() {
+    let root = temp_dir("candidate-different-modes");
+    let first_root = root.join("first").join(".agents").join("skills");
+    let second_root = root.join("second").join(".agents").join("skills");
+    let first_source = first_root.join("demo");
+    let second_source = second_root.join("demo");
+    let managed_root = root.join("SkillBox");
+    make_skill(&first_source, "demo", "Demo skill");
+    make_skill(&second_source, "demo", "Demo skill");
+    fs::write(first_source.join("run.sh"), "echo demo\n").unwrap();
+    fs::write(second_source.join("run.sh"), "echo demo\n").unwrap();
+    fs::set_permissions(
+        first_source.join("run.sh"),
+        fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    fs::set_permissions(
+        second_source.join("run.sh"),
+        fs::Permissions::from_mode(0o644),
+    )
+    .unwrap();
+
+    let candidates = scan_import_candidates(&[first_root, second_root], &managed_root).unwrap();
+
+    assert_eq!(candidates.candidates.len(), 2);
+}
+
+#[test]
+fn scan_import_candidates_keeps_nested_git_contents_in_snapshot() {
+    let root = temp_dir("candidate-nested-git");
+    let first_root = root.join("first").join(".agents").join("skills");
+    let second_root = root.join("second").join(".agents").join("skills");
+    let first_source = first_root.join("demo");
+    let second_source = second_root.join("demo");
+    let managed_root = root.join("SkillBox");
+    make_skill(&first_source, "demo", "Demo skill");
+    make_skill(&second_source, "demo", "Demo skill");
+    fs::create_dir_all(first_source.join("nested/.git")).unwrap();
+    fs::create_dir_all(second_source.join("nested/.git")).unwrap();
+    fs::write(first_source.join("nested/.git/config"), "first\n").unwrap();
+    fs::write(second_source.join("nested/.git/config"), "second\n").unwrap();
+
+    let candidates = scan_import_candidates(&[first_root, second_root], &managed_root).unwrap();
+
+    assert_eq!(candidates.candidates.len(), 2);
+}
+
+#[test]
+fn import_candidates_reuses_identical_user_target_without_deployments() {
+    let root = temp_dir("candidate-import-identical-copies");
+    let first_source = root.join("first").join("demo");
+    let second_source = root.join("second").join("demo");
+    let managed_root = root.join("SkillBox");
+    make_skill(&first_source, "demo", "Demo skill");
+    make_skill(&second_source, "demo", "Demo skill");
+
+    let result = import_candidates(
+        vec![
+            ImportRequestItem {
+                source_path: first_source.clone(),
+                skill_type: SkillKind::User,
+                deploy_back_to_source: false,
+            },
+            ImportRequestItem {
+                source_path: second_source.clone(),
+                skill_type: SkillKind::User,
+                deploy_back_to_source: false,
+            },
+        ],
+        &managed_root,
+    )
+    .unwrap();
+
+    assert!(result.errors.is_empty());
+    assert_eq!(result.imported.len(), 2);
+    assert!(first_source.is_dir());
+    assert!(second_source.is_dir());
+    let records = list_import_records(
+        ImportRecordFilter {
+            skill_name: Some("demo".to_string()),
+        },
+        &managed_root,
+    )
+    .unwrap();
+    assert!(records.records.is_empty());
+}
+
+#[test]
 fn import_candidates_copies_user_skill_backs_up_original_and_symlinks_source() {
     let root = temp_dir("candidate-import-user");
     let source = root.join("runtime").join("demo");
@@ -5790,6 +5937,38 @@ fn scan_import_candidates_dedupes_imported_skill_across_runtime_roots() {
 }
 
 #[test]
+fn scan_import_candidates_keeps_distinct_imported_targets_separate() {
+    let root = temp_dir("candidate-imported-distinct-targets");
+    let agents_root = root.join("global").join(".agents").join("skills");
+    let codex_root = root.join("project").join(".codex").join("skills");
+    let managed_root = root.join("SkillBox");
+    let user_managed = managed_root.join("user-skills/demo");
+    let remote_version = managed_root.join("remote-skills/demo/versions/manual-test");
+    let remote_current = managed_root.join("remote-skills/demo/current");
+    make_skill(&user_managed, "demo", "Demo skill");
+    make_skill(&remote_version, "demo", "Demo skill");
+    fs::write(user_managed.join("prompt.md"), "user\n").unwrap();
+    fs::write(remote_version.join("prompt.md"), "remote\n").unwrap();
+    symlink_dir(&remote_version, &remote_current).unwrap();
+    fs::create_dir_all(&agents_root).unwrap();
+    fs::create_dir_all(&codex_root).unwrap();
+    symlink_dir(&user_managed, &agents_root.join("demo")).unwrap();
+    symlink_dir(&remote_current, &codex_root.join("demo")).unwrap();
+
+    let candidates = scan_import_candidates(&[agents_root, codex_root], &managed_root).unwrap();
+
+    assert_eq!(candidates.candidates.len(), 2);
+    assert!(candidates
+        .candidates
+        .iter()
+        .all(|candidate| candidate.import_status == ImportCandidateStatus::Imported));
+    assert_ne!(
+        candidates.candidates[0].real_path,
+        candidates.candidates[1].real_path
+    );
+}
+
+#[test]
 fn scan_import_candidates_uses_total_usage_for_imported_skills() {
     let root = temp_dir("candidate-imported-usage");
     let first_root = root.join("global").join(".codex").join("skills");
@@ -5901,6 +6080,56 @@ fn import_candidates_copies_remote_skill_updates_current_and_symlinks_source_to_
 }
 
 #[test]
+fn remote_import_rejects_same_skill_md_with_different_assets() {
+    let root = temp_dir("candidate-remote-asset-conflict");
+    let first_source = root.join("first/remote-demo");
+    let second_source = root.join("second/remote-demo");
+    let managed_root = root.join("SkillBox");
+    make_skill(&first_source, "remote-demo", "Remote demo skill");
+    make_skill(&second_source, "remote-demo", "Remote demo skill");
+    fs::write(first_source.join("prompt.md"), "first\n").unwrap();
+    fs::write(second_source.join("prompt.md"), "second\n").unwrap();
+
+    let result = import_candidates(
+        vec![
+            ImportRequestItem {
+                source_path: first_source.clone(),
+                skill_type: SkillKind::Remote,
+                deploy_back_to_source: true,
+            },
+            ImportRequestItem {
+                source_path: second_source.clone(),
+                skill_type: SkillKind::Remote,
+                deploy_back_to_source: true,
+            },
+        ],
+        &managed_root,
+    )
+    .unwrap();
+
+    assert_eq!(result.imported.len(), 1);
+    assert_eq!(result.errors.len(), 1);
+    assert!(fs::symlink_metadata(&first_source)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert!(second_source.is_dir());
+    assert!(!fs::symlink_metadata(&second_source)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(
+        fs::read_to_string(
+            managed_root
+                .join("remote-skills/remote-demo/current")
+                .join("prompt.md")
+        )
+        .unwrap(),
+        "first\n"
+    );
+}
+
+#[test]
 fn scan_import_candidates_reports_conflicting_managed_target() {
     let root = temp_dir("candidate-conflict");
     let source = root.join("runtime").join("demo");
@@ -5921,6 +6150,49 @@ fn scan_import_candidates_reports_conflicting_managed_target() {
         .unwrap()
         .contains("Managed target exists"));
     assert!(!demo.is_selected);
+}
+
+#[test]
+fn same_skill_md_with_different_assets_cannot_reuse_user_target() {
+    let root = temp_dir("candidate-asset-conflict");
+    let source = root.join("runtime").join("demo");
+    let managed_root = root.join("SkillBox");
+    let managed_source = managed_root.join("user-skills").join("demo");
+    make_skill(&source, "demo", "Demo skill");
+    make_skill(&managed_source, "demo", "Demo skill");
+    fs::write(source.join("prompt.md"), "runtime\n").unwrap();
+    fs::write(managed_source.join("prompt.md"), "managed\n").unwrap();
+
+    let candidates = scan_import_candidates(&[root.join("runtime")], &managed_root).unwrap();
+    let demo = candidate(&candidates.candidates, "demo");
+    assert!(demo
+        .conflict
+        .as_ref()
+        .unwrap()
+        .contains("Managed target exists"));
+    assert!(!demo.is_selected);
+
+    let result = import_candidates(
+        vec![ImportRequestItem {
+            source_path: source.clone(),
+            skill_type: SkillKind::User,
+            deploy_back_to_source: true,
+        }],
+        &managed_root,
+    )
+    .unwrap();
+
+    assert!(result.imported.is_empty());
+    assert_eq!(result.errors.len(), 1);
+    assert!(source.is_dir());
+    assert!(!fs::symlink_metadata(&source)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(
+        fs::read_to_string(managed_source.join("prompt.md")).unwrap(),
+        "managed\n"
+    );
 }
 
 fn temp_dir(label: &str) -> PathBuf {

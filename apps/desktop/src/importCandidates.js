@@ -10,6 +10,9 @@ export function normalizeImportCandidate(candidate) {
   const realPath = candidate.realPath || candidate.real_path;
   const symlinkTargetPath =
     candidate.symlinkTargetPath || candidate.symlink_target_path || (isSymlink ? realPath : '');
+  const additionalSourcePaths = [
+    ...(candidate.additionalSourcePaths || candidate.additional_source_paths || [])
+  ].filter((path, index, paths) => path && path !== sourcePath && paths.indexOf(path) === index);
 
   return {
     ...candidate,
@@ -19,6 +22,7 @@ export function normalizeImportCandidate(candidate) {
     isSymlink,
     symlinkTargetPath,
     contentHash: candidate.contentHash || candidate.content_hash,
+    additionalSourcePaths,
     suggestedType,
     skillType: candidate.skillType || candidate.skill_type || suggestedType,
     suggestionReason: candidate.suggestionReason || candidate.suggestion_reason || 'Needs confirm',
@@ -91,6 +95,7 @@ export function filterImportCandidatesByQuery(candidates = [], query = '') {
       candidate.name,
       candidate.description,
       candidate.sourcePath,
+      ...(candidate.additionalSourcePaths || []),
       candidate.realPath,
       candidate.symlinkTargetPath,
       candidate.skillType,

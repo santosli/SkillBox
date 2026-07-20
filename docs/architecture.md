@@ -86,7 +86,7 @@ cargo run -p skillbox-cli --offline -- <command>
 - `types.rs` 公共数据结构与序列化类型
 - `paths.rs` managed store 路径计算、初始化和 legacy 迁移
 - `skills.rs` `SKILL.md` 解析、扫描、导入、symlink 部署
-- `import.rs` import candidates 扫描、类型推断、冲突与备份
+- `import.rs` import candidates 扫描、类型推断、整目录重复候选分组、冲突与备份
 - `state.rs` managed state 聚合与用户偏好
 - `workspaces.rs` workspace registry 发现、注册与扫描
 - `remote.rs` GitHub install preview/apply、remote source 绑定、update check、diff 预览、版本切换
@@ -107,7 +107,7 @@ cargo run -p skillbox-cli --offline -- <command>
 - managed store 路径计算和初始化。
 - workspace registry 的发现、手动添加、扫描统计和 forget 操作。
 - user/remote skill 导入。
-- import candidates 扫描、类型推断、冲突检测。
+- import candidates 扫描、类型推断、整目录快照去重和冲突检测。分组后的候选保留 primary `source_path` 与 `additional_source_paths`；React 展示全部来源，但只把 primary 作为结构化 import item 提交，避免一次 review 隐式创建多个不可单独 revert 的 active imports。
 - symlink 部署和部署索引。
 - import backup 与 source 替换为 symlink。
 - GitHub install preview/apply, GitHub-only remote source search, manual binding, update check, version listing, diff preview, update/rollback apply, and operation logging.
@@ -163,6 +163,8 @@ home-level agent root，`user` workspace 表示项目局部 root；React 只展�
 不要在没有 adapter 语义的情况下猜测某个 agent 的目录布局。新增 agent 支持时，先定义 adapter 的发现路径、原生格式、部署方式和冲突处理。
 
 默认部署方式是从 runtime 目录 symlink 到 managed store。runtime 目录中已有的非 symlink skill 不能被静默覆盖，导入或迁移时必须先备份或拒绝。
+
+重复候选只在名称、`SKILL.md` hash、推断类型、状态、冲突结果和完整导入快照均一致时合并；快照忽略顶层 `.git`，并覆盖其它路径、文件内容、Unix mode 与 symlink target。已 imported 的多个 runtime symlink 仅在解析到同一 managed `real_path` 时作为 alias 合并。primary 来源沿扫描 root 顺序选择；其它实体来源保留在 `additional_source_paths`，仅用于 review/search，不会在本次操作中被修改。导入只备份 primary、替换其 managed symlink 并写入 import record。仅 `SKILL.md` 相同但脚本、权限或资源不同的目录不能合并或复用；User 和 Remote 的已有 managed target 都必须通过完整快照校验。
 
 ## 当前状态与目标状态
 

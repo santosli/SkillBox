@@ -45,9 +45,13 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 - 扫描 import candidates。
 - 根据路径和内容推断类型：当前 `.agents/skills` 倾向 user，`.codex/skills` 倾向 remote，`.system` 默认不选中，包含 GitHub 来源信息的未知目录倾向 remote。
+- 对名称、`SKILL.md` hash、推断类型、状态、冲突结果以及完整导入快照都一致的实体副本进行分组；快照忽略顶层 `.git`，但覆盖其它文件、Unix mode、目录和 symlink。仅 `SKILL.md` 相同而脚本、权限或资源不同的候选保持分离。
+- 已 imported 的多个 runtime symlink 只有解析到同一个 managed `real_path` 时才作为 alias 合并。
+- 分组候选按扫描 root 顺序保留一个 primary `source_path`，并通过 `additional_source_paths` 保留其它实体来源。Import Review 显示来源数量和可展开路径，搜索会匹配任一来源，并明确其它副本在本次操作中不会改变。
 - agent adapter 引入后，候选项还应携带 `agent_id`、原生格式和 target scope。
 - 检查 managed target 是否冲突。
 - user skill 复制到 `~/.skillbox/user-skills/<name>`。
+- 导入分组候选时，只对 primary source 执行备份、symlink 部署和 import-record 写入；additional sources 保持原状，避免隐式创建多个无法单独 revert 的 active imports。
 - remote skill 复制到 `~/.skillbox/remote-skills/<name>/versions/manual-<contentHash12>`，并更新 `current` symlink。
 - 如果用户选择 deploy back to source，先把原 runtime 目录移动到 `~/.skillbox/backups/imports/<name>-<contentHash12>`，再在原位置创建指向 managed target 的 symlink。
 - 写入 SQLite `skills`，必要时写入 `deployments`。
@@ -56,7 +60,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 失败与回滚：
 
-- managed target 已存在且 hash 不一致时拒绝。
+- User 或 Remote managed target 已存在但完整导入快照不一致时拒绝；不能只依赖 `SKILL.md` hash 判断整个 skill 相同。
 - 原 runtime 位置是指向其它位置的 symlink 时拒绝。
 - deploy back to source 创建 symlink 失败时，应把 backup rename 回原位置。
 - 不覆盖用户内容，不删除 backup。
@@ -68,6 +72,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `npm test`
 - 使用临时目录运行 Rust CLI：`cargo run -p skillbox-cli --offline -- import <source-dir> --type user --managed-root <temp-skillbox-root>`
 - UI 路径变更时，手动验证 import review 中冲突、默认选中和备份提示。
+- 使用两个 runtime roots 验证导入内容一致的副本只显示一行、列出两个位置、只为 primary 创建 backup/symlink，并保持 additional source 不变；修改任一附加脚本或 executable bit 后应恢复为两条候选。
 
 ## 3. Revert Local Import
 

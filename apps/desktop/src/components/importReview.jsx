@@ -9,6 +9,7 @@ import {
   workspaceSkillTabs
 } from '../importCandidates.js';
 import {
+  candidateImportSourcePaths,
   candidateRowClass,
   candidateSource,
   candidateStatusNote,
@@ -102,6 +103,10 @@ export function LocalImportConfirmationDialog({
 }) {
   const shownCandidates = candidates.slice(0, 3);
   const remainingCount = Math.max(candidates.length - shownCandidates.length, 0);
+  const untouchedCopyCount = candidates.reduce(
+    (count, candidate) => count + Math.max(candidateImportSourcePaths(candidate).length - 1, 0),
+    0
+  );
 
   return (
     <div
@@ -126,6 +131,9 @@ export function LocalImportConfirmationDialog({
             <p>
               The original folders will be replaced with symlinks to the managed copies, and the
               moved folders will be kept under the SkillBox import backups.
+              {untouchedCopyCount > 0
+                ? ` ${untouchedCopyCount} identical ${untouchedCopyCount === 1 ? 'copy' : 'copies'} shown in review will remain unchanged.`
+                : ''}
             </p>
           </div>
 
@@ -355,6 +363,17 @@ function CandidateRow({ candidate, onToggleSelected, onTypeChange }) {
             <span>Symlink source</span>
             <code>{compactPath(candidate.symlinkTargetPath || candidate.realPath || '')}</code>
           </span>
+        ) : null}
+        {candidate.additionalSourcePaths?.length > 0 ? (
+          <details className="candidateDuplicateSources">
+            <summary>
+              Also found in {candidate.additionalSourcePaths.length}{' '}
+              {candidate.additionalSourcePaths.length === 1 ? 'other location' : 'other locations'} (not changed)
+            </summary>
+            {candidate.additionalSourcePaths.map((sourcePath) => (
+              <code key={sourcePath}>{compactPath(sourcePath)}</code>
+            ))}
+          </details>
         ) : null}
         <span className="candidateUsage">Calls {candidate.usageCount || 0}</span>
         {candidateStatusNote(candidate) ? <p>{candidateStatusNote(candidate)}</p> : null}

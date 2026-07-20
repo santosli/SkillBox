@@ -42,7 +42,11 @@ import {
   userSkillRowStatus,
   userSyncAction
 } from './userSkillsGitSync.js';
-import { toggleImportCandidateSelection } from './importFlow.js';
+import {
+  importBatchNotice,
+  importRequestItems,
+  toggleImportCandidateSelection
+} from './importFlow.js';
 
 test('normalizes backend is_selected false without selecting importable candidate', () => {
   const candidate = normalizeImportCandidate({
@@ -75,6 +79,22 @@ test('normalizes symlink import candidate source metadata', () => {
   assert.equal(candidate.isSymlink, true);
   assert.equal(candidate.symlinkTargetPath, '/Users/example/.agents/skills/lark-mail');
   assert.equal(candidate.usageCount, 2);
+});
+
+test('normalizes grouped import candidate source paths', () => {
+  const candidate = normalizeImportCandidate({
+    name: 'dbs',
+    source_path: '/Users/example/.agents/skills/dbs',
+    additional_source_paths: [
+      '/Users/example/project/.agents/skills/dbs',
+      '/Users/example/project/.agents/skills/dbs',
+      '/Users/example/.agents/skills/dbs'
+    ]
+  });
+
+  assert.deepEqual(candidate.additionalSourcePaths, [
+    '/Users/example/project/.agents/skills/dbs'
+  ]);
 });
 
 test('builds workspace skill tabs and separates unimported, imported, and system skills', () => {
@@ -172,6 +192,7 @@ test('filters import candidates by name, description, path, and symlink source',
       name: 'defuddle',
       description: 'Extract clean markdown content.',
       source_path: '/Users/example/.agents/skills/defuddle',
+      additional_source_paths: ['/Users/example/project/.agents/skills/defuddle'],
       import_status: 'importable'
     }),
     normalizeImportCandidate({
@@ -193,7 +214,50 @@ test('filters import candidates by name, description, path, and symlink source',
     filterImportCandidatesByQuery(candidates, 'agents/skills/json').map((candidate) => candidate.name),
     ['json-canvas']
   );
+  assert.deepEqual(
+    filterImportCandidatesByQuery(candidates, 'project/.agents').map((candidate) => candidate.name),
+    ['defuddle']
+  );
   assert.deepEqual(filterImportCandidatesByQuery(candidates, 'missing'), []);
+});
+
+test('imports only the grouped primary source and leaves duplicate copies unchanged', () => {
+  const candidates = [
+    normalizeImportCandidate({
+      name: 'dbs',
+      source_path: '/Users/example/.agents/skills/dbs',
+      additional_source_paths: ['/Users/example/project/.agents/skills/dbs'],
+      suggested_type: 'user'
+    })
+  ];
+
+  assert.deepEqual(importRequestItems(candidates), [
+    {
+      source_path: '/Users/example/.agents/skills/dbs',
+      skill_type: 'user',
+      deploy_back_to_source: true
+    }
+  ]);
+});
+
+test('reports grouped import results by skill and source location', () => {
+  assert.equal(
+    importBatchNotice({
+      imported: [
+        { name: 'dbs', source_path: '/Users/example/.agents/skills/dbs' },
+        { name: 'dbs', source_path: '/Users/example/project/.agents/skills/dbs' }
+      ],
+      errors: []
+    }),
+    'Imported 1 skill across 2 locations.'
+  );
+  assert.equal(
+    importBatchNotice({
+      imported: [],
+      errors: [{ source_path: '/broken', error: 'Existing remote version does not match demo' }]
+    }),
+    'Imported 0 skills. Failed: /broken: Existing remote version does not match demo.'
+  );
 });
 
 test('toggles selection only for visible import candidates when duplicates are hidden', () => {

@@ -49,7 +49,9 @@ import {
   shouldCheckAppUpdateOnStartup
 } from './appUpdates.js';
 import {
+  importBatchNotice,
   importNotice,
+  importRequestItems,
   isHttpUrl,
   isImportableCandidate,
   remoteImportCandidate,
@@ -1028,24 +1030,12 @@ export default function App() {
 
     try {
       const result = await invoke('import_candidates', {
-        items: selected.map((candidate) => ({
-          source_path: candidate.sourcePath,
-          skill_type: candidate.skillType,
-          deploy_back_to_source: true
-        }))
+        items: importRequestItems(selected)
       });
-      const importErrors = result.errors || [];
 
       setImportReview({ open: false, candidates: [], errors: [], noticePrefix: '' });
       await refresh();
-      setNotice(
-        importNotice(
-          noticePrefix,
-          importErrors.length > 0
-            ? `Imported ${result.imported?.length || 0} skills. ${importErrors.length} item failed.`
-            : `Imported ${result.imported?.length || 0} skills.`
-        )
-      );
+      setNotice(importNotice(noticePrefix, importBatchNotice(result)));
     } catch (importError) {
       setError(importError.message || 'Unable to import selected skills.');
       setStatus('ready');

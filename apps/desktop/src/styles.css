@@ -5062,6 +5062,7 @@ dd {
 .candidateMain p,
 .candidatePath,
 .candidateSymlinkSource,
+.candidateDuplicateSources,
 .candidateUsage {
   display: block;
   min-width: 0;
@@ -5111,6 +5112,24 @@ dd {
 
 .candidateSymlinkSource {
   margin-top: 6px;
+}
+
+.candidateDuplicateSources {
+  margin-top: 6px;
+  overflow: hidden;
+  color: var(--skillbox-text-muted);
+  font-size: 12px;
+}
+
+.candidateDuplicateSources summary {
+  cursor: pointer;
+  color: var(--skillbox-text-secondary);
+  font-weight: 650;
+}
+
+.candidateDuplicateSources code {
+  display: block;
+  margin: 5px 0 0 14px;
 }
 
 .candidatePath span,
