@@ -1,6 +1,6 @@
 cask "skillbox" do
-  version "0.4.3"
-  sha256 "e572bdc6d03c0014a9a795dabb2401084ba554c43ed76da57914b34c14420a3b"
+  version "0.4.4"
+  sha256 "cb407c09b8283e2e5087910ca14ae472a28048491fa66c4de4a23c18cf7064d5"
 
   url "https://github.com/santosli/SkillBox/releases/download/v#{version}/SkillBox_#{version}_universal.dmg"
   name "SkillBox"
