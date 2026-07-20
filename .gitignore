@@ -9,9 +9,3 @@ target/
 *.sqlite-shm
 *.sqlite-wal
 apps/desktop/src-tauri/icons/icon.iconset/
-
-# Local agent skill deployments
-/agent/skills/
-/.agents/skills/dbs*/
-/.claude/skills/dbs*
-/skills-lock.json
