@@ -112,7 +112,12 @@ pub(crate) fn github_tree_source_url(
     reference: &str,
     path: &str,
 ) -> String {
-    format!("https://github.com/{owner}/{repo}/tree/{reference}/{path}")
+    let path = path.trim_matches('/');
+    if path.is_empty() {
+        format!("https://github.com/{owner}/{repo}/tree/{reference}")
+    } else {
+        format!("https://github.com/{owner}/{repo}/tree/{reference}/{path}")
+    }
 }
 
 pub(crate) fn parse_claude_marketplace_skill_candidates(

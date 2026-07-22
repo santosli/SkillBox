@@ -508,6 +508,7 @@ pub struct RemoteSourceBindingPreview {
     pub owner: String,
     pub repo: String,
     pub path: String,
+    pub root: bool,
     pub reference: String,
     pub ref_kind: Option<String>,
     pub tracking: bool,
@@ -561,6 +562,7 @@ pub struct GithubRemoteSkillInstallPreview {
     pub owner: String,
     pub repo: String,
     pub path: String,
+    pub root: bool,
     pub reference: String,
     pub ref_kind: Option<String>,
     pub tracking: bool,
@@ -577,6 +579,7 @@ pub struct InstallGithubRemoteSkillResult {
     pub owner: String,
     pub repo: String,
     pub path: String,
+    pub root: bool,
     pub reference: String,
     pub ref_kind: Option<String>,
     pub tracking: bool,
@@ -720,6 +723,8 @@ pub(crate) struct RemoteSkillSource {
     #[serde(rename = "url", alias = "sourceUrl", alias = "source_url")]
     pub(crate) source_url: Option<String>,
     pub(crate) path: Option<String>,
+    #[serde(default)]
+    pub(crate) root: bool,
     #[serde(rename = "repoUrl", alias = "repo_url")]
     pub(crate) repo_url: Option<String>,
     #[serde(rename = "ref", alias = "reference")]

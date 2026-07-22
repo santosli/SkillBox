@@ -164,6 +164,8 @@ home-level agent root，`user` workspace 表示项目局部 root；React 只展�
 
 默认部署方式是从 runtime 目录 symlink 到 managed store。runtime 目录中已有的非 symlink skill 不能被静默覆盖，导入或迁移时必须先备份或拒绝。
 
+GitHub remote source 可以是仓库中的 skill 子目录，也可以是根目录包含 `SKILL.md` 的 standalone repository。后者在 metadata 中显式记录为 `root: true`，preview、install、update 和 deploy 共用同一份清理后的 repository worktree snapshot；Git checkout 的 `.git` metadata 不进入 managed store，逃逸 source root 的 symlink 在 copy 边界被拒绝。
+
 重复候选只在名称、`SKILL.md` hash、推断类型、状态、冲突结果和完整导入快照均一致时合并；快照忽略顶层 `.git`，并覆盖其它路径、文件内容、Unix mode 与 symlink target。已 imported 的多个 runtime symlink 仅在解析到同一 managed `real_path` 时作为 alias 合并。primary 来源沿扫描 root 顺序选择；其它实体来源保留在 `additional_source_paths`，仅用于 review/search，不会在本次操作中被修改。导入只备份 primary、替换其 managed symlink 并写入 import record。仅 `SKILL.md` 相同但脚本、权限或资源不同的目录不能合并或复用；User 和 Remote 的已有 managed target 都必须通过完整快照校验。
 
 ## 当前状态与目标状态

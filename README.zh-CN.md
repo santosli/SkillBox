@@ -166,7 +166,7 @@ Homebrew uninstall 不会删除 `~/.skillbox`。
 1. 打开 SkillBox。
 2. 点击 `Scan` 发现已知的全局和项目局部 skill workspaces。
 3. 使用 `Import` 先 review 候选项，再让 SkillBox 复制到 `~/.skillbox`。
-4. 使用 `Install` 先预览 GitHub-backed remote skills，再确认是否复制到 managed store。请使用 skill directory URL，或目录内的 `SKILL.md` URL；仓库根目录的 `SKILL.md` 文件 URL 会被明确拒绝。
+4. 使用 `Install` 先预览 GitHub-backed remote skills，再确认是否复制到 managed store。SkillBox 支持根目录包含 `SKILL.md` 的 standalone repository URL、根目录 `SKILL.md` 文件 URL 和 skill directory URL；仓库根 snapshot 不包含 Git metadata。
 5. 把 managed skills 部署到选定 runtime workspaces。
 6. 可选：在 Settings 启用 usage hook injection，用来记录真实 skill 调用。
 

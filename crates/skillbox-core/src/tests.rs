@@ -3415,43 +3415,295 @@ fn install_github_remote_skill_writes_version_current_metadata_and_index() {
 }
 
 #[test]
-fn preview_github_remote_skill_install_rejects_root_skill_md_before_creating_store() {
-    let root = temp_dir("preview-github-root-skill-md");
+fn install_github_root_skill_previews_installs_indexes_and_deploys_sanitized_worktree() {
+    let root = temp_dir("install-github-root-skill");
     let managed_root = root.join("SkillBox");
+    let target_root = root.join("runtime");
+    let (remote, _work) = bare_remote_with_root_skill_content(
+        "install-github-root-skill-origin",
+        "humanizer-zh",
+        "Humanizer zh",
+        "Original body\n",
+    );
+    let installed_sha = remote_head(&remote);
+    let _rewrite = github_repo_rewrite("acme", "install-github-root-skill", &remote);
+    let source_url =
+        "https://github.com/acme/install-github-root-skill/blob/main/SKILL.md".to_string();
+    let preview = github_install_preview(&source_url, Some(target_root.clone()), &managed_root);
 
-    let error = preview_github_remote_skill_install(
-        PreviewGithubRemoteSkillInstallRequest {
-            source_url: "https://github.com/acme/repo/blob/main/SKILL.md".to_string(),
-            target_root: None,
+    assert_eq!(preview.skill_name, "humanizer-zh");
+    assert!(preview.root);
+    assert_eq!(preview.path, "");
+    assert_eq!(
+        preview.source_url,
+        "https://github.com/acme/install-github-root-skill/tree/main"
+    );
+    for expected in ["SKILL.md", "README.md", "assets/prompt.txt"] {
+        assert!(preview.files.iter().any(|file| file.path == expected));
+    }
+    assert!(!preview
+        .files
+        .iter()
+        .any(|file| file.path == ".git" || file.path.starts_with(".git/")));
+    assert!(!managed_root.exists());
+    assert!(!target_root.exists());
+
+    let result = install_github_remote_skill(
+        InstallGithubRemoteSkillRequest {
+            source_url,
+            target_root: Some(target_root.clone()),
+            preview_id: Some(preview.preview_id),
+            actor: "cli".to_string(),
         },
         &managed_root,
     )
-    .unwrap_err();
+    .unwrap();
 
-    assert!(error.contains("Root SKILL.md URLs are not supported"));
-    assert!(error.contains("skill directory URL"));
-    assert!(!error.contains("checkout/SKILL.md"));
-    assert!(!managed_root.exists());
+    let paths = managed_paths(&managed_root);
+    let remote_root = paths.remote_skills_root.join("humanizer-zh");
+    let version_path = remote_root.join("versions").join(&installed_sha);
+    assert!(result.root);
+    assert_eq!(result.path, "");
+    assert_eq!(result.version_path, version_path);
+    assert!(version_path.join("SKILL.md").exists());
+    assert!(version_path.join("README.md").exists());
+    assert!(version_path.join("assets/prompt.txt").exists());
+    assert!(!version_path.join(".git").exists());
+    assert_eq!(
+        fs::canonicalize(remote_root.join("current")).unwrap(),
+        fs::canonicalize(&version_path).unwrap()
+    );
+    let deployment = result.deployment.unwrap();
+    assert_eq!(deployment.target_root, target_root);
+    assert_eq!(
+        fs::canonicalize(deployment.target_path).unwrap(),
+        fs::canonicalize(remote_root.join("current")).unwrap()
+    );
+
+    let source_json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(remote_root.join("source.json")).unwrap())
+            .unwrap();
+    assert_eq!(source_json["root"], true);
+    assert_eq!(source_json["path"], "");
+    assert_eq!(source_json["currentVersion"], installed_sha);
+    let round_trip = read_remote_source(&remote_root).unwrap();
+    assert!(round_trip.root);
+    assert_eq!(round_trip.path.as_deref(), Some(""));
+
+    let connection = open_database(&paths.database_path).unwrap();
+    let indexed_path: String = connection
+        .query_row(
+            "SELECT managed_path FROM skills WHERE name = 'humanizer-zh'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(indexed_path, version_path.to_string_lossy());
 }
 
 #[test]
-fn install_github_remote_skill_rejects_root_skill_md_before_creating_operation() {
-    let root = temp_dir("install-github-root-skill-md");
+fn install_github_root_skill_rejects_preview_after_branch_advances() {
+    let root = temp_dir("install-github-root-skill-stale");
     let managed_root = root.join("SkillBox");
+    let (remote, work) = bare_remote_with_root_skill_content(
+        "install-github-root-skill-stale-origin",
+        "humanizer-zh",
+        "Humanizer zh",
+        "Original body\n",
+    );
+    let _rewrite = github_repo_rewrite("acme", "install-github-root-skill-stale", &remote);
+    let source_url =
+        "https://github.com/acme/install-github-root-skill-stale/blob/main/SKILL.md".to_string();
+    let preview = github_install_preview(&source_url, None, &managed_root);
+
+    make_skill_with_body(&work, "humanizer-zh", "Humanizer zh", "Advanced body\n");
+    run_git(&work, &["add", "."]);
+    run_git(
+        &work,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Advance root skill",
+        ],
+    );
+    run_git(&work, &["push", "origin", "main"]);
 
     let error = install_github_remote_skill(
         InstallGithubRemoteSkillRequest {
-            source_url: "https://github.com/acme/repo/blob/main/SKILL.md".to_string(),
+            source_url,
             target_root: None,
-            preview_id: Some("provided-preview-id".to_string()),
+            preview_id: Some(preview.preview_id),
             actor: "cli".to_string(),
         },
         &managed_root,
     )
     .unwrap_err();
 
-    assert!(error.contains("Root SKILL.md URLs are not supported"));
+    let paths = managed_paths(&managed_root);
+    let remote_root = paths.remote_skills_root.join("humanizer-zh");
+    assert!(error.contains("Remote install preview is stale"));
+    assert!(!remote_root.join("versions").exists());
+    assert!(!remote_root.join("current").exists());
+    assert!(!remote_root.join("source.json").exists());
+    let connection = open_database(&paths.database_path).unwrap();
+    let indexed = connection
+        .query_row(
+            "SELECT name FROM skills WHERE name = 'humanizer-zh'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .unwrap();
+    assert_eq!(indexed, None);
+}
+
+#[test]
+fn preview_github_root_skill_rejects_symlink_escape_without_managed_state() {
+    let root = temp_dir("preview-github-root-symlink-escape");
+    let managed_root = root.join("SkillBox");
+    let outside = root.join("outside.txt");
+    fs::write(&outside, "secret").unwrap();
+    let (remote, work) = bare_remote_with_root_skill_content(
+        "preview-github-root-symlink-escape-origin",
+        "humanizer-zh",
+        "Humanizer zh",
+        "Original body\n",
+    );
+    symlink_any(&outside, &work.join("outside-link")).unwrap();
+    run_git(&work, &["add", "."]);
+    run_git(
+        &work,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Add escaping symlink",
+        ],
+    );
+    run_git(&work, &["push", "origin", "main"]);
+    let _rewrite = github_repo_rewrite("acme", "preview-github-root-symlink-escape", &remote);
+
+    let error = preview_github_remote_skill_install(
+        PreviewGithubRemoteSkillInstallRequest {
+            source_url:
+                "https://github.com/acme/preview-github-root-symlink-escape/blob/main/SKILL.md"
+                    .to_string(),
+            target_root: None,
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+
+    assert!(error.contains("Refusing to copy symlink outside source root"));
     assert!(!managed_root.exists());
+}
+
+#[test]
+fn github_root_skill_update_check_preview_and_apply_preserve_root_metadata() {
+    let root = temp_dir("github-root-skill-update");
+    let managed_root = root.join("SkillBox");
+    let (remote, work) = bare_remote_with_root_skill_content(
+        "github-root-skill-update-origin",
+        "humanizer-zh",
+        "Humanizer zh",
+        "Original body\n",
+    );
+    let _rewrite = github_repo_rewrite("acme", "github-root-skill-update", &remote);
+    let source_url =
+        "https://github.com/acme/github-root-skill-update/blob/main/SKILL.md".to_string();
+    let install_preview = github_install_preview(&source_url, None, &managed_root);
+    let installed = install_github_remote_skill(
+        InstallGithubRemoteSkillRequest {
+            source_url,
+            target_root: None,
+            preview_id: Some(install_preview.preview_id),
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    make_skill_with_body(&work, "humanizer-zh", "Humanizer zh", "Updated body\n");
+    fs::write(work.join("assets/prompt.txt"), "updated prompt\n").unwrap();
+    run_git(&work, &["add", "."]);
+    run_git(
+        &work,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Update root skill",
+        ],
+    );
+    run_git(&work, &["push", "origin", "main"]);
+    let latest_sha = remote_head(&remote);
+
+    let checked = check_remote_skill_update(&managed_root, "humanizer-zh").unwrap();
+    let status = remote_status(&checked.statuses, "humanizer-zh");
+    assert_eq!(status.state, RemoteSkillUpdateState::UpdateAvailable);
+    assert_eq!(status.latest_sha.as_deref(), Some(latest_sha.as_str()));
+
+    let preview = preview_remote_version_change(
+        RemoteVersionChangeRequest {
+            skill_name: "humanizer-zh".to_string(),
+            action: RemoteVersionChangeAction::Update,
+            target_version: Some(latest_sha.clone()),
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+    assert_eq!(preview.from_version, installed.installed_sha);
+    assert_eq!(preview.to_version, latest_sha);
+    assert!(preview.files.iter().any(|file| file.path == "SKILL.md"));
+    assert!(preview
+        .files
+        .iter()
+        .any(|file| file.path == "assets/prompt.txt"));
+    assert!(!preview
+        .files
+        .iter()
+        .any(|file| file.path == ".git" || file.path.starts_with(".git/")));
+
+    let applied = apply_remote_version_change(
+        RemoteVersionChangeApplyRequest {
+            skill_name: "humanizer-zh".to_string(),
+            action: RemoteVersionChangeAction::Update,
+            target_version: preview.to_version.clone(),
+            preview_id: Some(preview.preview_id),
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    let paths = managed_paths(&managed_root);
+    let remote_root = paths.remote_skills_root.join("humanizer-zh");
+    let updated_version = remote_root.join("versions").join(&latest_sha);
+    assert_eq!(applied.to_version, latest_sha);
+    assert_eq!(
+        current_remote_version(&paths, "humanizer-zh").unwrap(),
+        latest_sha
+    );
+    assert_eq!(
+        fs::read_to_string(updated_version.join("assets/prompt.txt")).unwrap(),
+        "updated prompt\n"
+    );
+    assert!(!updated_version.join(".git").exists());
+    let source = read_remote_source(&remote_root).unwrap();
+    assert!(source.root);
+    assert_eq!(source.path.as_deref(), Some(""));
+    assert_eq!(source.current_version.as_deref(), Some(latest_sha.as_str()));
 }
 
 #[test]
@@ -4185,6 +4437,60 @@ fn source_binding_preview_detects_exact_match() {
 }
 
 #[test]
+fn source_binding_supports_repository_root_skill_metadata() {
+    let root = temp_dir("source-binding-root-skill");
+    let managed_root = root.join("SkillBox");
+    let source = root.join("local").join("humanizer-zh");
+    make_skill(&source, "humanizer-zh", "Humanizer zh");
+    import_skill(&source, SkillKind::Remote, &managed_root).unwrap();
+    let (remote, _work) = bare_remote_with_root_skill_content(
+        "source-binding-root-skill-origin",
+        "humanizer-zh",
+        "Humanizer zh",
+        "",
+    );
+    let _rewrite = github_repo_rewrite("acme", "source-binding-root-skill", &remote);
+    let source_url = "https://github.com/acme/source-binding-root-skill".to_string();
+
+    let preview = preview_remote_source_binding(
+        RemoteSourceBindingRequest {
+            skill_name: "humanizer-zh".to_string(),
+            source_url: source_url.clone(),
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    assert!(preview.root);
+    assert_eq!(preview.path, "");
+    assert_eq!(
+        preview.source_url,
+        "https://github.com/acme/source-binding-root-skill/tree/main"
+    );
+    assert_eq!(preview.validation, SourceBindingValidation::ExactMatch);
+
+    bind_remote_source(
+        BindRemoteSourceRequest {
+            skill_name: "humanizer-zh".to_string(),
+            source_url,
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    let paths = managed_paths(&managed_root);
+    let metadata = read_remote_source(&paths.remote_skills_root.join("humanizer-zh")).unwrap();
+    assert!(metadata.root);
+    assert_eq!(metadata.path.as_deref(), Some(""));
+    assert_eq!(
+        remote_source_browser_url(&metadata).as_deref(),
+        Some("https://github.com/acme/source-binding-root-skill/tree/main")
+    );
+}
+
+#[test]
 fn source_binding_preview_resolves_marketplace_skill_path() {
     let root = temp_dir("source-binding-marketplace-path");
     let managed_root = root.join("SkillBox");
@@ -4432,6 +4738,39 @@ fn read_remote_source_rejects_untrusted_github_metadata() {
 
     let error = read_remote_source(&remote_root).unwrap_err();
     assert!(error.contains("path must stay inside the repository"));
+
+    write_remote_source_with_json(
+        &remote_root,
+        r#"{
+              "type":"github",
+              "repoUrl":"https://github.com/acme/repo.git",
+              "ref":"main",
+              "path":"skills/demo",
+              "root":true
+            }"#,
+    );
+
+    let error = read_remote_source(&remote_root).unwrap_err();
+    assert!(error.contains("root source must not include a repository path"));
+}
+
+#[test]
+fn read_remote_source_keeps_path_only_metadata_backward_compatible() {
+    let root = temp_dir("remote-source-path-only-compatibility");
+    let remote_root = root.join("remote-skills").join("demo");
+    write_remote_source_with_json(
+        &remote_root,
+        r#"{
+              "type":"github",
+              "repoUrl":"https://github.com/acme/repo.git",
+              "ref":"main",
+              "path":"skills/demo"
+            }"#,
+    );
+
+    let source = read_remote_source(&remote_root).unwrap();
+    assert!(!source.root);
+    assert_eq!(source.path.as_deref(), Some("skills/demo"));
 }
 
 #[test]
@@ -6407,6 +6746,41 @@ description: \"{description}\"
     remote
 }
 
+fn bare_remote_with_root_skill_content(
+    label: &str,
+    skill_name: &str,
+    description: &str,
+    body: &str,
+) -> (PathBuf, PathBuf) {
+    let remote = bare_remote(label);
+    let work = temp_dir(&format!("{label}-work"));
+    run_git(&work, &["init", "-b", "main"]);
+    make_skill_with_body(&work, skill_name, description, body);
+    fs::write(work.join("README.md"), format!("# {skill_name}\n")).unwrap();
+    fs::write(work.join(".gitignore"), "*.tmp\n").unwrap();
+    fs::create_dir_all(work.join("assets")).unwrap();
+    fs::write(work.join("assets/prompt.txt"), "prompt\n").unwrap();
+    run_git(&work, &["add", "."]);
+    run_git(
+        &work,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Add root skill",
+        ],
+    );
+    run_git(
+        &work,
+        &["remote", "add", "origin", remote.to_str().unwrap()],
+    );
+    run_git(&work, &["push", "-u", "origin", "main"]);
+    (remote, work)
+}
+
 fn github_source_url(owner: &str, repo: &str, skill_name: &str) -> String {
     format!("https://github.com/{owner}/{repo}/tree/main/skills/{skill_name}")
 }
@@ -6435,11 +6809,24 @@ struct GitConfigRewriteGuard {
 
 impl Drop for GitConfigRewriteGuard {
     fn drop(&mut self) {
-        for (key, value) in self.previous.drain(..) {
+        let previous_count = self
+            .previous
+            .iter()
+            .find_map(|(key, value)| (*key == "GIT_CONFIG_COUNT").then(|| value.clone()))
+            .flatten();
+        std::env::remove_var("GIT_CONFIG_COUNT");
+        for (key, value) in self
+            .previous
+            .drain(..)
+            .filter(|(key, _)| *key != "GIT_CONFIG_COUNT")
+        {
             match value {
                 Some(value) => std::env::set_var(key, value),
                 None => std::env::remove_var(key),
             }
+        }
+        if let Some(value) = previous_count {
+            std::env::set_var("GIT_CONFIG_COUNT", value);
         }
     }
 }
@@ -6452,7 +6839,6 @@ fn github_repo_rewrite(owner: &str, repo: &str, remote: &std::path::Path) -> Git
         .map(|key| (key, std::env::var_os(key)))
         .collect::<Vec<_>>();
 
-    std::env::set_var("GIT_CONFIG_COUNT", "1");
     std::env::set_var(
         "GIT_CONFIG_KEY_0",
         format!("url.file://{}.insteadOf", remote.display()),
@@ -6461,6 +6847,7 @@ fn github_repo_rewrite(owner: &str, repo: &str, remote: &std::path::Path) -> Git
         "GIT_CONFIG_VALUE_0",
         format!("https://github.com/{owner}/{repo}.git"),
     );
+    std::env::set_var("GIT_CONFIG_COUNT", "1");
 
     GitConfigRewriteGuard {
         _lock: lock,
