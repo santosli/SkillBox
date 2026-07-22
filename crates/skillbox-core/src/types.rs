@@ -886,6 +886,51 @@ pub struct SkillUsageRecordResult {
     pub deduplicated: bool,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillUsageRankingRange {
+    #[serde(rename = "last_7_days")]
+    Last7Days,
+    #[default]
+    #[serde(rename = "last_30_days")]
+    Last30Days,
+    AllTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct SkillUsageRankingRequest {
+    #[serde(default)]
+    pub range: SkillUsageRankingRange,
+    #[serde(alias = "agentId")]
+    pub agent_id: Option<String>,
+    #[serde(alias = "workspaceRoot")]
+    pub workspace_root: Option<PathBuf>,
+    #[serde(default, alias = "includeUnmanaged")]
+    pub include_unmanaged: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SkillUsageRankingRow {
+    pub rank: usize,
+    pub skill_name: String,
+    pub kind: Option<SkillKind>,
+    pub managed: bool,
+    pub usage_count: usize,
+    pub last_used_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SkillUsageRankingResult {
+    pub generated_at: String,
+    pub range: SkillUsageRankingRange,
+    pub range_start: Option<String>,
+    pub range_end: String,
+    pub agent_id: Option<String>,
+    pub workspace_root: Option<PathBuf>,
+    pub total_observed_calls: usize,
+    pub rows: Vec<SkillUsageRankingRow>,
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UsageHookTarget {

@@ -188,6 +188,10 @@ skill_usage_events
   recorded_at TEXT NOT NULL
   prompt_excerpt TEXT
   metadata_json TEXT NOT NULL DEFAULT '{}'
+  INDEX (used_at, skill_name)
+  INDEX (agent_id, used_at, skill_name)
+  INDEX (runtime_root, used_at, skill_name)
+  INDEX (agent_id, runtime_root, used_at, skill_name)
 
 skill_usage_stats
   skill_name TEXT NOT NULL
@@ -215,7 +219,9 @@ skill_user_metadata
 
 `import_records` 记录本地 import 且 deploy back 到 source 成功后的可恢复状态。每个 imported skill 一条记录，`source_path` 是被替换成 SkillBox symlink 的 runtime 原路径，`backup_path` 是 import 前移动到 `backups/imports` 的原目录。`status=active` 的记录可以通过 `revert_import` 恢复；`status=reverted` 表示 backup 已恢复回 source path。`legacy=1` 表示记录由旧 deployments/backups 证据链保守 reconcile 得到。
 
-`skill_usage_events` 记录真实 agent 调用事件，不记录 SkillBox 打开详情、部署、更新等管理行为。显式上报入口允许未导入 skill 写入；`event_id` 是可选幂等键，在同一 `agent_id + runtime_root` 下重复上报不会递增统计。`prompt_excerpt` 保存触发 skill 的用户 prompt 摘要，必须剥离 skill XML 注入块、压缩空白并限制长度，不保存完整聊天正文。`metadata_json` 只接受小型 JSON object，不保存 prompt、聊天正文、文件内容或 diff。`skill_usage_stats` 按 `skill_name + agent_id + runtime_root` 聚合，详情页和 skill card 按 skill name 汇总，workspace 页面按 runtime root 汇总。
+`skill_usage_events` 记录真实 agent 调用事件，不记录 SkillBox 打开详情、部署、更新等管理行为。显式上报入口允许未导入 skill 写入；`event_id` 是可选幂等键，在同一 `agent_id + runtime_root` 下重复上报不会递增统计。`prompt_excerpt` 保存触发 skill 的用户 prompt 摘要，必须剥离 skill XML 注入块、压缩空白并限制长度，不保存完整聊天正文。`metadata_json` 只接受小型 JSON object，不保存 prompt、聊天正文、文件内容或 diff。schema v4 为按时间、agent 和 runtime root 聚合 ranking 的四种查询形态新增组合索引；不新增 ranking 表，也不复制事件内容。
+
+`skill_usage_stats` 按 `skill_name + agent_id + runtime_root` 保存 all-time 聚合，继续服务详情页、skill card 和 workspace calls。7 天、30 天和带 Agent/Workspace 过滤的 Skill Usage Rankings 必须从 `skill_usage_events` 聚合，不能从 all-time stats 反推。排名只读取 count、`used_at`、`agent_id` 和 `runtime_root`，不读取 `prompt_excerpt` 或 `metadata_json`。
 
 History 是只读聚合视图，不新增表。Rust core 从 `operations` 和 `skill_usage_events` 读取最近记录，按事件时间合并为桌面 History 页的时间线；History 只展示摘要字段，不向 React 暴露 operation payload 或 usage metadata。
 

@@ -264,6 +264,10 @@ fn run(args: Vec<String>) -> Result<(), String> {
             usage_record_request(command_args)?,
             managed_root(command_args),
         )?),
+        "usage-rankings" => print_json(&skillbox_core::list_skill_usage_rankings(
+            usage_ranking_request(command_args)?,
+            managed_root(command_args),
+        )?),
         "usage-hook" => {
             let agent = positional(command_args)
                 .into_iter()
@@ -473,6 +477,27 @@ fn usage_record_request(args: &[String]) -> Result<skillbox_core::RecordSkillUsa
     })
 }
 
+fn usage_ranking_request(
+    args: &[String],
+) -> Result<skillbox_core::SkillUsageRankingRequest, String> {
+    let range = match option(args, "--range").as_deref() {
+        None | Some("30d") => skillbox_core::SkillUsageRankingRange::Last30Days,
+        Some("7d") => skillbox_core::SkillUsageRankingRange::Last7Days,
+        Some("all") => skillbox_core::SkillUsageRankingRange::AllTime,
+        Some(other) => {
+            return Err(format!(
+                "Invalid usage ranking range: {other}. Use 7d, 30d, or all."
+            ))
+        }
+    };
+    Ok(skillbox_core::SkillUsageRankingRequest {
+        range,
+        agent_id: option(args, "--agent"),
+        workspace_root: option(args, "--workspace").map(PathBuf::from),
+        include_unmanaged: has_flag(args, "--include-unmanaged"),
+    })
+}
+
 fn help_text() -> &'static str {
     "SkillBox Rust CLI
 
@@ -500,6 +525,7 @@ Commands:
   skillbox remote-apply-change <skill-name> --action update|rollback --to <version> [--preview-id <id>] [--managed-root <path>]
   skillbox rollback <skill-name> --to <version> [--managed-root <path>]
   skillbox usage-record --skill <name> --agent <id> --runtime-root <path> [--event-id <id>] [--used-at <rfc3339>] [--prompt-excerpt <text>] [--metadata-json <json>] [--managed-root <path>]
+  skillbox usage-rankings [--range 7d|30d|all] [--agent <id>] [--workspace <path>] [--include-unmanaged] [--managed-root <path>]
   skillbox usage-hook codex|claude-code [--managed-root <path>]
   skillbox usage-hook-status
   skillbox usage-hook-install <target>
@@ -575,6 +601,70 @@ mod tests {
         let error = usage_record_request(&args).unwrap_err();
 
         assert!(error.contains("--metadata-json"));
+    }
+
+    #[test]
+    fn usage_ranking_request_defaults_to_managed_last_thirty_days() {
+        let request = usage_ranking_request(&[]).unwrap();
+
+        assert_eq!(
+            request.range,
+            skillbox_core::SkillUsageRankingRange::Last30Days
+        );
+        assert_eq!(request.agent_id, None);
+        assert_eq!(request.workspace_root, None);
+        assert!(!request.include_unmanaged);
+    }
+
+    #[test]
+    fn usage_ranking_request_parses_filters_and_unmanaged_scope() {
+        let args = vec![
+            "--range".to_string(),
+            "7d".to_string(),
+            "--agent".to_string(),
+            "codex".to_string(),
+            "--workspace".to_string(),
+            "/Users/example/.codex/skills".to_string(),
+            "--include-unmanaged".to_string(),
+        ];
+
+        let request = usage_ranking_request(&args).unwrap();
+
+        assert_eq!(
+            request.range,
+            skillbox_core::SkillUsageRankingRange::Last7Days
+        );
+        assert_eq!(request.agent_id.as_deref(), Some("codex"));
+        assert_eq!(
+            request.workspace_root,
+            Some(PathBuf::from("/Users/example/.codex/skills"))
+        );
+        assert!(request.include_unmanaged);
+    }
+
+    #[test]
+    fn usage_ranking_request_rejects_invalid_range() {
+        let error =
+            usage_ranking_request(&["--range".to_string(), "week".to_string()]).unwrap_err();
+
+        assert!(error.contains("7d, 30d, or all"));
+        assert!(help_text().contains("skillbox usage-rankings"));
+    }
+
+    #[test]
+    fn usage_rankings_command_routes_to_core() {
+        let managed_root = temp_dir("cli-usage-rankings").join("SkillBox");
+
+        run(vec![
+            "usage-rankings".to_string(),
+            "--range".to_string(),
+            "all".to_string(),
+            "--managed-root".to_string(),
+            managed_root.to_string_lossy().to_string(),
+        ])
+        .unwrap();
+
+        assert!(managed_root.join("skillbox.sqlite").is_file());
     }
 
     #[test]

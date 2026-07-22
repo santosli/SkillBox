@@ -143,6 +143,202 @@ pub fn record_skill_usage(
     })
 }
 
+pub fn list_skill_usage_rankings(
+    request: SkillUsageRankingRequest,
+    managed_root: impl AsRef<Path>,
+) -> Result<SkillUsageRankingResult> {
+    list_skill_usage_rankings_at(request, managed_root, Utc::now())
+}
+
+pub(crate) fn list_skill_usage_rankings_at(
+    request: SkillUsageRankingRequest,
+    managed_root: impl AsRef<Path>,
+    as_of: DateTime<Utc>,
+) -> Result<SkillUsageRankingResult> {
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let agent_id = request
+        .agent_id
+        .as_deref()
+        .map(normalize_usage_agent_id)
+        .transpose()?;
+    let workspace_root = request
+        .workspace_root
+        .map(normalize_usage_runtime_root)
+        .transpose()?;
+    let workspace_key = workspace_root
+        .as_ref()
+        .map(|path| path.to_string_lossy().to_string());
+    let range_end = as_of.to_rfc3339_opts(SecondsFormat::Secs, false);
+    let range_start = usage_ranking_range_start(request.range, as_of);
+    let query_start = range_start
+        .as_deref()
+        .unwrap_or("0001-01-01T00:00:00+00:00");
+    let connection = open_database(&paths.database_path).map_err(|error| error.to_string())?;
+    let mut observed = load_usage_ranking_aggregates(
+        &connection,
+        query_start,
+        &range_end,
+        agent_id.as_deref(),
+        workspace_key.as_deref(),
+    )?;
+    let managed = load_managed_skill_kinds(&paths)?;
+    let mut rows = managed
+        .iter()
+        .map(|(skill_name, kind)| {
+            let summary = observed.remove(skill_name).unwrap_or_default();
+            SkillUsageRankingRow {
+                rank: 0,
+                skill_name: skill_name.clone(),
+                kind: Some(*kind),
+                managed: true,
+                usage_count: summary.usage_count,
+                last_used_at: summary.last_used_at,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    if request.include_unmanaged {
+        rows.extend(
+            observed
+                .into_iter()
+                .map(|(skill_name, summary)| SkillUsageRankingRow {
+                    rank: 0,
+                    skill_name,
+                    kind: None,
+                    managed: false,
+                    usage_count: summary.usage_count,
+                    last_used_at: summary.last_used_at,
+                }),
+        );
+    }
+
+    rows.sort_by(|left, right| {
+        right
+            .usage_count
+            .cmp(&left.usage_count)
+            .then_with(|| right.last_used_at.cmp(&left.last_used_at))
+            .then_with(|| left.skill_name.cmp(&right.skill_name))
+    });
+    for (index, row) in rows.iter_mut().enumerate() {
+        row.rank = index + 1;
+    }
+    let total_observed_calls = rows.iter().map(|row| row.usage_count).sum();
+
+    Ok(SkillUsageRankingResult {
+        generated_at: range_end.clone(),
+        range: request.range,
+        range_start,
+        range_end,
+        agent_id,
+        workspace_root,
+        total_observed_calls,
+        rows,
+    })
+}
+
+fn usage_ranking_range_start(
+    range: SkillUsageRankingRange,
+    as_of: DateTime<Utc>,
+) -> Option<String> {
+    let days = match range {
+        SkillUsageRankingRange::Last7Days => 7,
+        SkillUsageRankingRange::Last30Days => 30,
+        SkillUsageRankingRange::AllTime => return None,
+    };
+    Some((as_of - chrono::Duration::days(days)).to_rfc3339_opts(SecondsFormat::Secs, false))
+}
+
+fn load_managed_skill_kinds(paths: &ManagedPaths) -> Result<HashMap<String, SkillKind>> {
+    let mut managed = HashMap::new();
+    for skill in scan_skill_roots(std::slice::from_ref(&paths.user_skills_root))?.skills {
+        managed.insert(skill.name, SkillKind::User);
+    }
+    for skill in scan_managed_remote_skills(paths)? {
+        managed.insert(skill.name, SkillKind::Remote);
+    }
+    Ok(managed)
+}
+
+fn load_usage_ranking_aggregates(
+    connection: &Connection,
+    range_start: &str,
+    range_end: &str,
+    agent_id: Option<&str>,
+    workspace_root: Option<&str>,
+) -> Result<HashMap<String, UsageSummary>> {
+    let (sql, values): (&str, Vec<String>) = match (agent_id, workspace_root) {
+        (None, None) => (
+            "
+            SELECT skill_name, COUNT(*), MAX(used_at)
+            FROM skill_usage_events
+            WHERE used_at >= ?1 AND used_at <= ?2
+            GROUP BY skill_name
+            ",
+            vec![range_start.to_string(), range_end.to_string()],
+        ),
+        (Some(agent_id), None) => (
+            "
+            SELECT skill_name, COUNT(*), MAX(used_at)
+            FROM skill_usage_events
+            WHERE agent_id = ?1 AND used_at >= ?2 AND used_at <= ?3
+            GROUP BY skill_name
+            ",
+            vec![
+                agent_id.to_string(),
+                range_start.to_string(),
+                range_end.to_string(),
+            ],
+        ),
+        (None, Some(workspace_root)) => (
+            "
+            SELECT skill_name, COUNT(*), MAX(used_at)
+            FROM skill_usage_events
+            WHERE runtime_root = ?1 AND used_at >= ?2 AND used_at <= ?3
+            GROUP BY skill_name
+            ",
+            vec![
+                workspace_root.to_string(),
+                range_start.to_string(),
+                range_end.to_string(),
+            ],
+        ),
+        (Some(agent_id), Some(workspace_root)) => (
+            "
+            SELECT skill_name, COUNT(*), MAX(used_at)
+            FROM skill_usage_events
+            WHERE agent_id = ?1 AND runtime_root = ?2
+              AND used_at >= ?3 AND used_at <= ?4
+            GROUP BY skill_name
+            ",
+            vec![
+                agent_id.to_string(),
+                workspace_root.to_string(),
+                range_start.to_string(),
+                range_end.to_string(),
+            ],
+        ),
+    };
+    let mut statement = connection.prepare(sql).map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(rusqlite::params_from_iter(values.iter()), |row| {
+            let usage_count: i64 = row.get(1)?;
+            Ok((
+                row.get::<_, String>(0)?,
+                UsageSummary {
+                    usage_count: usize::try_from(usage_count.max(0)).unwrap_or_default(),
+                    last_used_at: row.get(2)?,
+                },
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+    let mut usage = HashMap::new();
+    for row in rows {
+        let (skill_name, summary) = row.map_err(|error| error.to_string())?;
+        usage.insert(skill_name, summary);
+    }
+    Ok(usage)
+}
+
 pub(crate) fn normalize_usage_timestamp(value: Option<&str>) -> Result<String> {
     let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
         return Ok(current_rfc3339_timestamp());

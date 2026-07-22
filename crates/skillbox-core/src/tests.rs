@@ -74,7 +74,8 @@ fn database_initialization_records_ordered_schema_migrations() {
         vec![
             (1, "baseline".to_string()),
             (2, "legacy_compatibility".to_string()),
-            (3, "skill_user_metadata".to_string())
+            (3, "skill_user_metadata".to_string()),
+            (4, "skill_usage_ranking_indexes".to_string())
         ]
     );
     assert_eq!(
@@ -84,6 +85,21 @@ fn database_initialization_records_ordered_schema_migrations() {
     assert!(table_column_names(&connection, "skill_user_metadata")
         .unwrap()
         .contains(&"tags_json".to_string()));
+    for index in [
+        "skill_usage_events_rank_time",
+        "skill_usage_events_rank_agent_time",
+        "skill_usage_events_rank_runtime_time",
+        "skill_usage_events_rank_agent_runtime_time",
+    ] {
+        let exists: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1)",
+                [index],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(exists, "missing ranking index {index}");
+    }
 }
 
 #[test]
@@ -124,6 +140,46 @@ fn existing_database_is_backed_up_once_before_migration() {
 
     ensure_managed_layout(&managed_root).unwrap();
     assert_eq!(database_migration_backups(&paths.database_path), backups);
+}
+
+#[test]
+fn schema_v4_ranking_index_migration_preserves_usage_events() {
+    let root = temp_dir("database-ranking-index-migration");
+    let managed_root = root.join("SkillBox");
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    let connection = rusqlite::Connection::open(&paths.database_path).unwrap();
+    connection
+        .execute_batch(
+            "
+            DELETE FROM schema_migrations WHERE version = 4;
+            DROP INDEX skill_usage_events_rank_time;
+            DROP INDEX skill_usage_events_rank_agent_time;
+            DROP INDEX skill_usage_events_rank_runtime_time;
+            DROP INDEX skill_usage_events_rank_agent_runtime_time;
+            INSERT INTO skill_usage_events (
+              id, skill_name, agent_id, runtime_root, used_at, recorded_at, metadata_json
+            ) VALUES (
+              'usage-before-v4', 'demo', 'codex', '/tmp/runtime',
+              '2026-06-01T00:00:00+00:00', '2026-06-01T00:00:01+00:00', '{}'
+            );
+            ",
+        )
+        .unwrap();
+    drop(connection);
+
+    ensure_managed_layout(&managed_root).unwrap();
+
+    let connection = rusqlite::Connection::open(&paths.database_path).unwrap();
+    assert_eq!(current_database_schema_version(&connection).unwrap(), 4);
+    let event_count: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM skill_usage_events WHERE id = 'usage-before-v4'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(event_count, 1);
+    assert_eq!(database_migration_backups(&paths.database_path).len(), 1);
 }
 
 #[test]
@@ -1053,6 +1109,252 @@ fn managed_state_includes_skill_usage_summary() {
         state.skills[0].last_used_at.as_deref(),
         Some("2026-06-02T11:00:00+00:00")
     );
+}
+
+#[test]
+fn usage_rankings_include_managed_zero_rows_and_apply_time_range_ordering() {
+    let root = temp_dir("usage-rankings-range");
+    let managed_root = root.join("SkillBox");
+    let source_root = root.join("sources");
+    let workspace = root.join("project").join(".codex").join("skills");
+    fs::create_dir_all(&workspace).unwrap();
+    for name in ["alpha", "beta", "gamma"] {
+        let source = source_root.join(name);
+        make_skill(&source, name, "Ranking skill");
+        import_skill(&source, SkillKind::User, &managed_root).unwrap();
+    }
+
+    for (skill_name, used_at) in [
+        ("alpha", "2026-06-29T12:00:00Z"),
+        ("alpha", "2026-06-28T12:00:00Z"),
+        ("beta", "2026-06-23T12:00:00Z"),
+        ("beta", "2026-06-20T12:00:00Z"),
+        ("draft-helper", "2026-06-29T12:00:00Z"),
+        ("alpha", "2026-07-01T12:00:00Z"),
+    ] {
+        record_skill_usage(
+            RecordSkillUsageRequest {
+                skill_name: skill_name.to_string(),
+                agent_id: "codex".to_string(),
+                runtime_root: workspace.clone(),
+                event_id: None,
+                used_at: Some(used_at.to_string()),
+                prompt_excerpt: None,
+                metadata: None,
+            },
+            &managed_root,
+        )
+        .unwrap();
+    }
+
+    let as_of = DateTime::parse_from_rfc3339("2026-06-30T12:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let last_seven = list_skill_usage_rankings_at(
+        SkillUsageRankingRequest {
+            range: SkillUsageRankingRange::Last7Days,
+            ..SkillUsageRankingRequest::default()
+        },
+        &managed_root,
+        as_of,
+    )
+    .unwrap();
+
+    assert_eq!(
+        last_seven.range_start.as_deref(),
+        Some("2026-06-23T12:00:00+00:00")
+    );
+    assert_eq!(last_seven.range_end, "2026-06-30T12:00:00+00:00");
+    assert_eq!(last_seven.total_observed_calls, 3);
+    assert_eq!(
+        last_seven
+            .rows
+            .iter()
+            .map(|row| (row.rank, row.skill_name.as_str(), row.usage_count))
+            .collect::<Vec<_>>(),
+        vec![(1, "alpha", 2), (2, "beta", 1), (3, "gamma", 0)]
+    );
+    assert!(last_seven.rows.iter().all(|row| row.managed));
+    assert!(last_seven
+        .rows
+        .iter()
+        .all(|row| row.kind == Some(SkillKind::User)));
+
+    let last_thirty =
+        list_skill_usage_rankings_at(SkillUsageRankingRequest::default(), &managed_root, as_of)
+            .unwrap();
+    assert_eq!(last_thirty.rows[0].skill_name, "alpha");
+    assert_eq!(last_thirty.rows[0].usage_count, 2);
+    assert_eq!(last_thirty.rows[1].skill_name, "beta");
+    assert_eq!(last_thirty.rows[1].usage_count, 2);
+    assert_eq!(
+        last_thirty.rows[0].last_used_at.as_deref(),
+        Some("2026-06-29T12:00:00+00:00")
+    );
+
+    let all_time = list_skill_usage_rankings_at(
+        SkillUsageRankingRequest {
+            range: SkillUsageRankingRange::AllTime,
+            ..SkillUsageRankingRequest::default()
+        },
+        &managed_root,
+        as_of,
+    )
+    .unwrap();
+    assert_eq!(all_time.range_start, None);
+    assert_eq!(all_time.total_observed_calls, 4);
+    assert_eq!(all_time.rows[0].usage_count, 2);
+}
+
+#[test]
+fn usage_rankings_filter_agent_and_workspace_and_optionally_include_unmanaged() {
+    let root = temp_dir("usage-rankings-filters");
+    let managed_root = root.join("SkillBox");
+    let source = root.join("source").join("alpha");
+    let first_workspace = root.join("one").join(".codex").join("skills");
+    let second_workspace = root.join("two").join(".agents").join("skills");
+    make_skill(&source, "alpha", "Alpha skill");
+    import_skill(&source, SkillKind::User, &managed_root).unwrap();
+    fs::create_dir_all(&first_workspace).unwrap();
+    fs::create_dir_all(&second_workspace).unwrap();
+
+    for (skill_name, agent_id, runtime_root, used_at) in [
+        ("alpha", "codex", &first_workspace, "2026-06-29T10:00:00Z"),
+        (
+            "alpha",
+            "claude-code",
+            &first_workspace,
+            "2026-06-29T11:00:00Z",
+        ),
+        ("alpha", "codex", &second_workspace, "2026-06-29T12:00:00Z"),
+        (
+            "draft-helper",
+            "codex",
+            &first_workspace,
+            "2026-06-29T09:00:00Z",
+        ),
+    ] {
+        record_skill_usage(
+            RecordSkillUsageRequest {
+                skill_name: skill_name.to_string(),
+                agent_id: agent_id.to_string(),
+                runtime_root: runtime_root.clone(),
+                event_id: None,
+                used_at: Some(used_at.to_string()),
+                prompt_excerpt: Some("private excerpt".to_string()),
+                metadata: Some(serde_json::json!({ "source": "test" })),
+            },
+            &managed_root,
+        )
+        .unwrap();
+    }
+
+    let as_of = DateTime::parse_from_rfc3339("2026-06-30T12:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let agent_only = list_skill_usage_rankings_at(
+        SkillUsageRankingRequest {
+            range: SkillUsageRankingRange::Last7Days,
+            agent_id: Some("codex".to_string()),
+            ..SkillUsageRankingRequest::default()
+        },
+        &managed_root,
+        as_of,
+    )
+    .unwrap();
+    assert_eq!(agent_only.rows.len(), 1);
+    assert_eq!(agent_only.rows[0].usage_count, 2);
+
+    let workspace_only = list_skill_usage_rankings_at(
+        SkillUsageRankingRequest {
+            range: SkillUsageRankingRange::Last7Days,
+            workspace_root: Some(first_workspace.clone()),
+            ..SkillUsageRankingRequest::default()
+        },
+        &managed_root,
+        as_of,
+    )
+    .unwrap();
+    assert_eq!(workspace_only.rows.len(), 1);
+    assert_eq!(workspace_only.rows[0].usage_count, 2);
+
+    let result = list_skill_usage_rankings_at(
+        SkillUsageRankingRequest {
+            range: SkillUsageRankingRange::Last7Days,
+            agent_id: Some("CODEX".to_string()),
+            workspace_root: Some(first_workspace.clone()),
+            include_unmanaged: true,
+        },
+        &managed_root,
+        as_of,
+    )
+    .unwrap();
+
+    assert_eq!(result.agent_id.as_deref(), Some("codex"));
+    assert_eq!(
+        result.workspace_root,
+        Some(fs::canonicalize(first_workspace).unwrap())
+    );
+    assert_eq!(result.total_observed_calls, 2);
+    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.rows[0].skill_name, "alpha");
+    assert_eq!(result.rows[0].usage_count, 1);
+    assert!(result.rows[0].managed);
+    assert_eq!(result.rows[1].skill_name, "draft-helper");
+    assert_eq!(result.rows[1].usage_count, 1);
+    assert!(!result.rows[1].managed);
+    assert_eq!(result.rows[1].kind, None);
+
+    let json = serde_json::to_string(&result).unwrap();
+    assert!(!json.contains("private excerpt"));
+    assert!(!json.contains("metadata"));
+}
+
+#[test]
+fn usage_rankings_reject_invalid_filters() {
+    let managed_root = temp_dir("usage-rankings-invalid").join("SkillBox");
+    let as_of = Utc::now();
+
+    let agent_error = list_skill_usage_rankings_at(
+        SkillUsageRankingRequest {
+            agent_id: Some("bad agent".to_string()),
+            ..SkillUsageRankingRequest::default()
+        },
+        &managed_root,
+        as_of,
+    )
+    .unwrap_err();
+    assert!(agent_error.contains("Invalid usage agent id"));
+
+    let workspace_error = list_skill_usage_rankings_at(
+        SkillUsageRankingRequest {
+            workspace_root: Some(PathBuf::from("relative/skills")),
+            ..SkillUsageRankingRequest::default()
+        },
+        &managed_root,
+        as_of,
+    )
+    .unwrap_err();
+    assert!(workspace_error.contains("absolute path"));
+}
+
+#[test]
+fn usage_ranking_request_accepts_desktop_camel_case_fields() {
+    let request: SkillUsageRankingRequest = serde_json::from_value(serde_json::json!({
+        "range": "last_7_days",
+        "agentId": "codex",
+        "workspaceRoot": "/Users/example/.codex/skills",
+        "includeUnmanaged": true
+    }))
+    .unwrap();
+
+    assert_eq!(request.range, SkillUsageRankingRange::Last7Days);
+    assert_eq!(request.agent_id.as_deref(), Some("codex"));
+    assert_eq!(
+        request.workspace_root,
+        Some(PathBuf::from("/Users/example/.codex/skills"))
+    );
+    assert!(request.include_unmanaged);
 }
 
 #[test]

@@ -2,7 +2,7 @@ use crate::*;
 use fs2::FileExt;
 use std::fs::{File, OpenOptions};
 
-pub(crate) const LATEST_DATABASE_SCHEMA_VERSION: i64 = 3;
+pub(crate) const LATEST_DATABASE_SCHEMA_VERSION: i64 = 4;
 
 pub(crate) fn open_database(database_path: &Path) -> Result<Connection> {
     let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
@@ -91,6 +91,7 @@ pub(crate) fn run_database_migrations(connection: &mut Connection) -> Result<()>
         (1_i64, "baseline"),
         (2_i64, "legacy_compatibility"),
         (3_i64, "skill_user_metadata"),
+        (4_i64, "skill_usage_ranking_indexes"),
     ] {
         let applied: bool = connection
             .query_row(
@@ -110,6 +111,7 @@ pub(crate) fn run_database_migrations(connection: &mut Connection) -> Result<()>
             1 => apply_baseline_migration(&transaction)?,
             2 => apply_legacy_compatibility_migration(&transaction)?,
             3 => apply_skill_user_metadata_migration(&transaction)?,
+            4 => apply_skill_usage_ranking_indexes_migration(&transaction)?,
             _ => return Err(format!("Unknown database migration version: {version}")),
         }
         transaction
@@ -252,6 +254,26 @@ fn apply_skill_user_metadata_migration(connection: &Connection) -> Result<()> {
               tags_json TEXT NOT NULL DEFAULT '[]',
               updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+            ",
+        )
+        .map_err(|error| error.to_string())
+}
+
+fn apply_skill_usage_ranking_indexes_migration(connection: &Connection) -> Result<()> {
+    connection
+        .execute_batch(
+            "
+            CREATE INDEX IF NOT EXISTS skill_usage_events_rank_time
+            ON skill_usage_events (used_at, skill_name);
+
+            CREATE INDEX IF NOT EXISTS skill_usage_events_rank_agent_time
+            ON skill_usage_events (agent_id, used_at, skill_name);
+
+            CREATE INDEX IF NOT EXISTS skill_usage_events_rank_runtime_time
+            ON skill_usage_events (runtime_root, used_at, skill_name);
+
+            CREATE INDEX IF NOT EXISTS skill_usage_events_rank_agent_runtime_time
+            ON skill_usage_events (agent_id, runtime_root, used_at, skill_name);
             ",
         )
         .map_err(|error| error.to_string())

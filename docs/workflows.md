@@ -581,6 +581,42 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 使用相同 `--event-id` 重复上报，确认第二次返回 deduplicated 且计数不增加。
 - `npm test`
 
+### 14.1 Local Skill Usage Rankings
+
+触发条件：
+
+- Rust core 入口：`list_skill_usage_rankings`。
+- Rust CLI 入口：`usage-rankings [--range 7d|30d|all] [--agent <id>] [--workspace <runtime-root>] [--include-unmanaged]`。
+- Tauri command：`list_skill_usage_rankings`。
+- 桌面 History 页切换到 Rankings，或修改时间、Agent、Workspace 过滤器。
+
+步骤：
+
+- 默认查询最近 30 天，用户可切换最近 7 天或全部历史；时间窗按 `used_at` 计算，并排除晚于本次查询时间的未来事件。
+- Agent 使用与 usage event 相同的 normalized `agent_id`；Workspace 表示事件写入时的 canonical runtime root，不根据当前 deployment 反推。
+- 默认范围只包含当前 managed store 中实际存在的 User/Remote skills，并为没有观测事件的 skill 返回 `0 calls`；CLI 显式传 `--include-unmanaged` 时才把窗口内的 deleted/unmanaged skill 加入结果。
+- 聚合来源是 `skill_usage_events`，不是只包含 all-time 数据的 `skill_usage_stats`。同一 skill 跨 Agent/Workspace 的事件在未过滤时相加。
+- 排序固定为 calls 降序、last observed time 降序、skill name 升序，随后分配连续 ordinal rank，保证 core、CLI、Tauri 和 desktop 一致。
+- 桌面以可访问的数据表展示精确名次、skill 名称、calls 和 last observed time；Rankings 是 History 的二级 tab，不新增一级导航。
+- UI 必须说明它只统计本机 enabled/trusted hooks 已观测到的事件。`0 calls` 表示没有记录，不表示从未使用；usage frequency 不能改变 source trust、安全性或质量判断。
+- 查询和响应不读取、不返回 `prompt_excerpt` 或 `metadata_json`；usage 数据不上传、不跨设备合并，也不作为社区排行榜。
+
+失败与回滚：
+
+- 非法 range、agent id 或相对 Workspace path 拒绝查询；读取失败只展示错误，不修改 usage events、managed store 或 runtime。
+- schema v4 migration 只增加 ranking 查询索引；已有数据库按通用 migration 规则先备份，失败时 transaction 回滚。
+- 快速连续切换过滤器时，桌面只应用最后一个请求的结果，避免旧响应覆盖新条件。
+
+完成验证：
+
+- `cargo test -p skillbox-core --offline usage_ranking`
+- `cargo test -p skillbox-core --offline database_migration`
+- `cargo test -p skillbox-cli --offline usage_ranking`
+- `cargo run -p skillbox-cli --offline -- usage-rankings --range 30d --managed-root <temp-skillbox-root>`
+- `node --test apps/desktop/src/usageRankings.test.js apps/desktop/src/cardLayout.test.js`
+- `npm test`
+- 桌面手动验证 Rankings 的 7/30/all、Agent/Workspace 组合过滤、空状态、键盘 focus、最后请求获胜和 managed skill detail 跳转。
+
 ## 15. App Updates
 
 触发条件：
