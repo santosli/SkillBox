@@ -138,6 +138,8 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 失败与回滚：
 
 - URL 不指向 skill 目录或 `SKILL.md` 时拒绝。
+- 仓库根目录的 `SKILL.md` 文件 URL 会在联网 checkout 前被明确拒绝；用户应改用 skill
+  directory URL，或目录内的 `SKILL.md` URL，避免把整个仓库误当作 skill snapshot。
 - `install` 缺少 `preview_id` 或 preview 身份已过期时拒绝，不写 managed store。
 - Git 命令失败时清理临时目录，不写 managed store。
 - version 已存在时可以复用，但仍需验证 `SKILL.md`。
@@ -271,7 +273,8 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 桌面 `Bind source` 弹窗打开时会后台调用 `find_remote_source_candidates`，候选只用于预览，仍需用户确认后才绑定。
 - 用户为已有 remote skill 手动添加 GitHub source URL。
 - 用户触发 Claude Marketplace candidate search，为已有 remote skill 自动寻找可能的 source。
-- MVP 只接受 GitHub skill directory 或 `SKILL.md` URL。
+- MVP 只接受 GitHub skill directory URL，或指向目录内 `SKILL.md` 的 URL。仓库根目录的
+  `SKILL.md` 文件 URL 会在联网 checkout 前被明确拒绝，避免把整个仓库误当作 skill snapshot。
 
 步骤：
 

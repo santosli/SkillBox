@@ -57,9 +57,9 @@ pub fn parse_github_skill_url(input: &str) -> Result<GitHubSkillSource, String> 
                 kind = parts[2].to_string();
                 let (parsed_ref, parsed_path) = split_ref_and_skill_path(&parts[3..]);
                 reference = parsed_ref;
-                skill_path = strip_skill_md(&parsed_path);
+                skill_path = strip_skill_md(&parsed_path)?;
             } else {
-                skill_path = strip_skill_md(&parts[2..].join("/"));
+                skill_path = strip_skill_md(&parts[2..].join("/"))?;
             }
         }
         Some("raw.githubusercontent.com") => {
@@ -72,7 +72,7 @@ pub fn parse_github_skill_url(input: &str) -> Result<GitHubSkillSource, String> 
             repo = trim_git_suffix(parts[1]);
             let (parsed_ref, parsed_path) = split_ref_and_skill_path(&parts[2..]);
             reference = parsed_ref;
-            skill_path = strip_skill_md(&parsed_path);
+            skill_path = strip_skill_md(&parsed_path)?;
         }
         Some("api.github.com") => {
             let parts = path_parts(&url);
@@ -87,7 +87,7 @@ pub fn parse_github_skill_url(input: &str) -> Result<GitHubSkillSource, String> 
                 .find(|(key, _)| key == "ref")
                 .map(|(_, value)| value.to_string())
                 .unwrap_or(reference);
-            skill_path = strip_skill_md(&parts[4..].join("/"));
+            skill_path = strip_skill_md(&parts[4..].join("/"))?;
         }
         _ => return Err("Only GitHub URLs are supported".to_string()),
     }
@@ -231,11 +231,19 @@ fn known_skill_path_start(parts: &[&str]) -> Option<usize> {
     })
 }
 
-fn strip_skill_md(path: &str) -> String {
-    path.strip_suffix("/SKILL.md")
+fn strip_skill_md(path: &str) -> Result<String, String> {
+    if path == "SKILL.md" || path == "skill.md" {
+        return Err(
+            "Root SKILL.md URLs are not supported. Use a skill directory URL or a SKILL.md file inside a directory."
+                .to_string(),
+        );
+    }
+
+    Ok(path
+        .strip_suffix("/SKILL.md")
         .or_else(|| path.strip_suffix("/skill.md"))
         .unwrap_or(path)
-        .to_string()
+        .to_string())
 }
 
 fn trim_git_suffix(repo: &str) -> String {
@@ -306,6 +314,24 @@ mod tests {
             .reference,
             "dev"
         );
+    }
+
+    #[test]
+    fn rejects_root_skill_md_file_urls_with_actionable_error() {
+        for url in [
+            "https://github.com/acme/repo/blob/main/SKILL.md",
+            "https://github.com/acme/repo/blob/main/skill.md",
+            "https://github.com/acme/repo/SKILL.md",
+            "https://raw.githubusercontent.com/acme/repo/main/SKILL.md",
+            "https://raw.githubusercontent.com/acme/repo/main/skill.md",
+            "https://api.github.com/repos/acme/repo/contents/SKILL.md?ref=main",
+            "https://api.github.com/repos/acme/repo/contents/skill.md?ref=main",
+        ] {
+            let error = parse_github_skill_url(url).unwrap_err();
+
+            assert!(error.contains("Root SKILL.md URLs are not supported"));
+            assert!(error.contains("skill directory URL"));
+        }
     }
 
     #[test]

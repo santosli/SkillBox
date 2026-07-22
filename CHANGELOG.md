@@ -7,7 +7,7 @@ version tags such as `v0.3.0`.
 
 ## Unreleased
 
-- No unreleased changes.
+- Reject repository-root `SKILL.md` GitHub URLs before checkout with an actionable error instead of treating the file as a directory during install preview.
 
 ## 0.4.4
 

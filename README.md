@@ -166,7 +166,7 @@ Homebrew uninstall does not delete `~/.skillbox`.
 1. Open SkillBox.
 2. Run `Scan` to discover known global and project-local skill workspaces.
 3. Use `Import` to review candidates before SkillBox copies them into `~/.skillbox`.
-4. Use `Install` to preview GitHub-backed remote skills, then confirm before SkillBox copies them into the managed store.
+4. Use `Install` to preview GitHub-backed remote skills, then confirm before SkillBox copies them into the managed store. Use a skill directory URL or a `SKILL.md` URL inside a directory; repository-root `SKILL.md` file URLs are rejected explicitly.
 5. Deploy managed skills to selected runtime workspaces when you want an agent to use them.
 6. Optional: enable usage hook injection in Settings to record real skill calls.
 
