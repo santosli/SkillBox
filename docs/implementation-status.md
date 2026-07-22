@@ -13,7 +13,7 @@
 - Implemented recursive skill scanning.
 - Implemented user and remote import storage.
 - Implemented symlink deployment with overwrite protection.
-- Implemented GitHub URL normalization for tree, blob, raw, and contents API URLs.
+- Implemented GitHub URL normalization for repository, tree, blob, raw, and contents API URLs, including sanitized standalone repository-root skill snapshots.
 - Implemented a first CLI surface for the planned commands.
 - Added a Tauri + React desktop shell with scan and path bridge commands.
 - Implemented Rust/Tauri user-skills Git sync for the shared `~/.skillbox/user-skills` repository, including Settings-managed remote configuration, per-skill dirty status, desktop commit review with diff preview, generated Conventional Commit messages, and selected-file commits.

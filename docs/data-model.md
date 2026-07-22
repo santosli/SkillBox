@@ -64,6 +64,7 @@ GitHub remote 使用这些字段：
   "owner": "openai",
   "repo": "skills",
   "path": "skills/example",
+  "root": false,
   "ref": "main",
   "refKind": "branch",
   "tracking": true,
@@ -79,6 +80,8 @@ GitHub remote 使用这些字段：
 GitHub source 的版本语义：
 
 - `refKind: "branch"` 且 `tracking: true` 表示跟踪分支，update check 会查询远端最新 SHA。
+- 目录 source 使用非空 `path` 和 `root: false`。根目录包含 `SKILL.md` 的 standalone repository 使用空 `path` 和 `root: true`，其 managed version 是移除 `.git` metadata 后的完整 worktree。
+- 旧 `source.json` 没有 `root` 字段时按 `false` 读取，因此现有目录 source 不需要 migration。
 - `refKind: "tag"` 或 `refKind: "commit"` 表示 pinned source，update check 返回 `pinned`，不会自动判断有可用更新。
 - `currentVersion` 是当前 `current` symlink 指向的 managed version 目录名，可以是 `manual-*` 版本，也可以是 GitHub commit SHA。
 - `installedSha` 只在当前版本来自 GitHub commit 时设置；手动绑定远端但尚未替换内容时保留为 `null`。

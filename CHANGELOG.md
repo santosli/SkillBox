@@ -7,7 +7,7 @@ version tags such as `v0.3.0`.
 
 ## Unreleased
 
-- Reject repository-root `SKILL.md` GitHub URLs before checkout with an actionable error instead of treating the file as a directory during install preview.
+- Support standalone GitHub skill repositories and root `SKILL.md` URLs through preview-confirmed installs, sanitized worktree snapshots that exclude `.git`, and root-aware source updates.
 
 ## 0.4.4
 

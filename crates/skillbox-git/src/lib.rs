@@ -325,6 +325,17 @@ impl GitService {
             .trim()
             .to_string();
         self.run(checkout_root, &["checkout", "FETCH_HEAD"])?;
+        let git_metadata = checkout_root.join(".git");
+        match fs::symlink_metadata(&git_metadata) {
+            Ok(metadata) if metadata.is_dir() => {
+                fs::remove_dir_all(&git_metadata).map_err(|error| error.to_string())?;
+            }
+            Ok(_) => {
+                fs::remove_file(&git_metadata).map_err(|error| error.to_string())?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.to_string()),
+        }
         Ok(sha)
     }
 
@@ -845,6 +856,7 @@ mod tests {
         assert!(!sha.is_empty());
         assert!(checkout.join("skills/demo/SKILL.md").exists());
         assert!(checkout.join("README.md").exists());
+        assert!(!checkout.join(".git").exists());
     }
 
     #[test]
