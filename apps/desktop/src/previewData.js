@@ -182,6 +182,46 @@ export function previewHistory() {
   };
 }
 
+export function previewUsageRankings(filters = {}) {
+  const rows = [
+    {
+      rank: 1,
+      skill_name: 'grill-me',
+      kind: 'remote',
+      managed: true,
+      usage_count: 18,
+      last_used_at: '2026-07-21T08:00:00Z'
+    },
+    {
+      rank: 2,
+      skill_name: 'frontend-design',
+      kind: 'remote',
+      managed: true,
+      usage_count: 7,
+      last_used_at: '2026-07-20T14:30:00Z'
+    },
+    {
+      rank: 3,
+      skill_name: 'personal-wiki-updater',
+      kind: 'user',
+      managed: true,
+      usage_count: 3,
+      last_used_at: '2026-07-18T09:15:00Z'
+    }
+  ];
+
+  return {
+    generated_at: '2026-07-22T10:00:00Z',
+    range: filters.range || 'last_30_days',
+    range_start: '2026-06-22T10:00:00Z',
+    range_end: '2026-07-22T10:00:00Z',
+    agent_id: filters.agentId || null,
+    workspace_root: filters.workspaceRoot || null,
+    total_observed_calls: rows.reduce((total, row) => total + row.usage_count, 0),
+    rows
+  };
+}
+
 export function previewCandidatesForWorkspace(workspace) {
   const agentNeedle = workspace.agentId === 'agents' ? '.agents' : `.${workspace.agentId}`;
   const roots = [

@@ -75,6 +75,7 @@ import {
   previewHistory,
   previewImportCandidates,
   previewPaths,
+  previewUsageRankings,
   previewUserSkillsGitChanges,
   previewWorkspaces
 } from './previewData.js';
@@ -108,6 +109,11 @@ import {
   normalizeStatusRefreshIntervalMinutes
 } from './skillStatusRefresh.js';
 import { normalizeUsageHookStatuses } from './usageHooks.js';
+import {
+  defaultUsageRankingFilters,
+  normalizeUsageRankings,
+  usageRankingRequest
+} from './usageRankings.js';
 import {
   defaultSyncCommitMessage,
   normalizeUserSkillsGitChanges,
@@ -198,6 +204,7 @@ export default function App() {
   const [workspaceTypeFilter, setWorkspaceTypeFilter] = useState('all');
   const [workspaceQuery, setWorkspaceQuery] = useState('');
   const [historyFilter, setHistoryFilter] = useState('all');
+  const [usageRankingFilters, setUsageRankingFilters] = useState(defaultUsageRankingFilters);
   const [favoriteNames, setFavoriteNames] = useState(readDashboardFavorites);
   const [dashboardTagOverrides, setDashboardTagOverrides] = useState(readDashboardTagOverrides);
   const [selectedName, setSelectedName] = useState('');
@@ -322,6 +329,8 @@ export default function App() {
     error: ''
   });
   const [history, setHistory] = useState(normalizeHistory(null));
+  const [usageRankings, setUsageRankings] = useState(normalizeUsageRankings(null));
+  const [usageRankingLoading, setUsageRankingLoading] = useState(false);
   const [remoteContextLoading, setRemoteContextLoading] = useState({});
   const [userContextLoading, setUserContextLoading] = useState({});
   const [appUpdate, setAppUpdate] = useState(() =>
@@ -331,6 +340,7 @@ export default function App() {
   const autoRefreshStateRef = useRef({ status: 'idle', isFirstUse: false });
   const refreshSkillStatusesRef = useRef(null);
   const appUpdateAutoCheckedRef = useRef(false);
+  const usageRankingRequestRef = useRef(0);
   const dismissNotice = () => setNotice('');
   const lastStatusCheckedLabel = useMemo(
     () => formatStatusCheckedAt(lastStatusCheckedAt),
@@ -1473,28 +1483,79 @@ export default function App() {
   function openHistory() {
     setSelectedName('');
     setPage('history');
-    if (!history.entries.length) {
-      void loadHistory();
-    }
+    void loadHistory();
   }
 
   async function loadHistory() {
+    const rankingRequestId = usageRankingRequestRef.current + 1;
+    usageRankingRequestRef.current = rankingRequestId;
     setError('');
+    setUsageRankingLoading(true);
 
     if (!window.__TAURI_INTERNALS__) {
       setHistory(normalizeHistory(previewHistory()));
+      setUsageRankings(normalizeUsageRankings(previewUsageRankings(usageRankingFilters)));
+      setUsageRankingLoading(false);
       setStatus('prototype');
       return;
     }
 
     setStatus('loading_history');
     try {
-      const result = await invoke('list_history', { request: { limit: 200 } });
-      setHistory(normalizeHistory(result));
+      const [historyResult, rankingResult] = await Promise.all([
+        invoke('list_history', { request: { limit: 200 } }),
+        invoke('list_skill_usage_rankings', {
+          request: usageRankingRequest(usageRankingFilters)
+        })
+      ]);
+      setHistory(normalizeHistory(historyResult));
+      if (usageRankingRequestRef.current === rankingRequestId) {
+        setUsageRankings(normalizeUsageRankings(rankingResult));
+      }
       setStatus('ready');
     } catch (historyError) {
       setError(historyError.message || String(historyError) || 'Unable to load history.');
       setStatus('ready');
+    } finally {
+      if (usageRankingRequestRef.current === rankingRequestId) {
+        setUsageRankingLoading(false);
+      }
+    }
+  }
+
+  async function loadUsageRankings(nextFilters) {
+    const requestId = usageRankingRequestRef.current + 1;
+    usageRankingRequestRef.current = requestId;
+    setUsageRankingFilters(nextFilters);
+    setUsageRankingLoading(true);
+    setError('');
+
+    try {
+      const result = window.__TAURI_INTERNALS__
+        ? await invoke('list_skill_usage_rankings', {
+            request: usageRankingRequest(nextFilters)
+          })
+        : previewUsageRankings(nextFilters);
+      if (usageRankingRequestRef.current === requestId) {
+        setUsageRankings(normalizeUsageRankings(result));
+      }
+    } catch (rankingError) {
+      if (usageRankingRequestRef.current === requestId) {
+        setError(
+          rankingError.message || String(rankingError) || 'Unable to load skill usage rankings.'
+        );
+      }
+    } finally {
+      if (usageRankingRequestRef.current === requestId) {
+        setUsageRankingLoading(false);
+      }
+    }
+  }
+
+  function openRankedSkill(skillName) {
+    const skill = skills.find((candidate) => candidate.name === skillName);
+    if (skill) {
+      openSkill(skill);
     }
   }
 
@@ -3089,8 +3150,16 @@ export default function App() {
             error={error}
             filter={historyFilter}
             history={history}
+            ranking={usageRankings}
+            rankingFilters={usageRankingFilters}
+            rankingLoading={usageRankingLoading}
             status={status}
+            usageHooks={usageHooks}
+            workspaces={workspaces}
             onFilter={setHistoryFilter}
+            onOpenSettings={() => setPage('settings')}
+            onOpenSkill={openRankedSkill}
+            onRankingFilters={loadUsageRankings}
             onRefresh={loadHistory}
           />
         ) : (

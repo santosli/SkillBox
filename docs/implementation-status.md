@@ -31,6 +31,7 @@
 - Added a read-only Doctor workflow in Rust core, Rust CLI, Tauri, and desktop Settings for checking schema/integrity, managed skill layouts, remote `current` links, deployments, workspaces, import backups, and stale metadata.
 - Extended operation auditing across direct/reviewed imports, deploy/undeploy, skill type changes, workspace add/forget, user-skills Git remote/sync, and usage hook injection, including failed attempts.
 - Implemented reviewed skill deletion across Rust core, CLI, Tauri, and Skill Detail UI, including all-workspace symlink removal, active-import and foreign-target blockers, preview identity checks, transactional active-state cleanup, and retained deletion backups. Single-workspace removal continues through the deployment picker and shared `undeploy_skill` core.
+- Implemented local Skill Usage Rankings in Rust core, CLI, Tauri, and the desktop History page, including 7-day, 30-day, and all-time ranges, Agent and Workspace filters, deterministic ordering, managed-skill zero rows, local coverage messaging, and schema-v4 query indexes.
 - Added Rust crate scaffolding for the planned Tauri/Rust architecture.
 - Verified the desktop shell in browser preview at `http://127.0.0.1:1420/`.
 
@@ -43,23 +44,10 @@ from implementation status and is tracked in `docs/release.md`. The next milesto
 ### 0.5 — Discovery And Source Trust
 
 - Add FTS-backed search across skills, operations, and usage history.
-- Add local Skill Usage Rankings to History, with 7-day, 30-day, and all-time
-  ranges plus agent and workspace filters.
-- Keep ranking aggregation in Rust core and expose consistent results through
-  CLI and Tauri before rendering them in desktop.
-- Default to currently managed skills and use a deterministic order of call
-  count, last observed use, then skill name; keep deleted and unmanaged usage
-  events available in History without placing them in the default ranking.
-- Make usage coverage explicit: rankings include only events observed by
-  enabled and trusted hooks. A zero count means no observed call, not proof
-  that a skill was never used.
-- Keep rankings local to the current SkillBox database, exclude prompt excerpts
-  and event metadata from ranking, and never present usage as global
-  popularity, quality evidence, or proof of skill safety.
 - Add remote source provenance and trust classification without treating
   popularity as verification.
-- Keep search, ranking, and trust results aligned across Rust core, CLI, Tauri,
-  and desktop.
+- Keep search and trust results aligned across Rust core, CLI, Tauri, and
+  desktop, following the contract parity established by Usage Rankings.
 
 ### 0.6 — Runtime Profiles And Portability
 

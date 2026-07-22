@@ -1480,9 +1480,246 @@ button {
 }
 
 .historyTypeTabs {
-  width: 440px;
+  width: 580px;
   flex: 0 0 auto;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.usageRankingPanel {
+  display: grid;
+  gap: 14px;
+}
+
+.usageRankingControls {
+  display: grid;
+  grid-template-columns: max-content minmax(150px, 0.7fr) minmax(240px, 1.3fr);
+  align-items: end;
+  gap: 12px;
+  border: 1px solid var(--skillbox-border-card);
+  border-radius: 8px;
+  background: var(--skillbox-surface);
+  padding: 12px;
+}
+
+.usageRankingRanges {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(80px, 1fr));
+  gap: 4px;
+  border: 1px solid var(--skillbox-border-control);
+  border-radius: 8px;
+  background: var(--skillbox-surface-muted);
+  padding: 4px;
+}
+
+.usageRankingRanges button {
+  min-height: 36px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  color: var(--skillbox-text-secondary);
+  font-size: 12px;
+  font-weight: 720;
+  padding: 0 12px;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.usageRankingRanges button:hover:not(:disabled) {
+  background: var(--skillbox-surface-hover);
+}
+
+.usageRankingRanges button.active {
+  background: var(--skillbox-surface-selected);
+  color: var(--skillbox-blue-text);
+}
+
+.usageRankingRanges button:focus-visible,
+.usageRankingSelect select:focus-visible,
+.usageRankingSkill button:focus-visible {
+  outline: 3px solid rgba(var(--skillbox-blue-rgb), 0.24);
+  outline-offset: 2px;
+}
+
+.usageRankingRanges button:disabled,
+.usageRankingSelect select:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.usageRankingSelect {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.usageRankingSelect > span {
+  color: var(--skillbox-text-muted);
+  font-size: 11px;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.usageRankingSelect select {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  border: 1px solid var(--skillbox-border-control);
+  border-radius: 7px;
+  background: var(--skillbox-surface);
+  color: var(--skillbox-text-body);
+  font: inherit;
+  font-size: 13px;
+  padding: 0 34px 0 11px;
+}
+
+.usageRankingCoverage {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  border-left: 3px solid var(--skillbox-blue);
+  border-radius: 0 7px 7px 0;
+  background: var(--skillbox-surface-blue-subtle);
+  padding: 10px 12px;
+}
+
+.usageRankingCoverage strong {
+  flex: 0 0 auto;
+  color: var(--skillbox-text-strong);
+  font-size: 13px;
+}
+
+.usageRankingCoverage span {
+  color: var(--skillbox-text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.usageRankingLoading {
+  display: flex;
+  min-height: 180px;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  border: 1px solid var(--skillbox-border-card);
+  border-radius: 8px;
+  background: var(--skillbox-surface);
+  color: var(--skillbox-text-secondary);
+  font-size: 13px;
+}
+
+.usageRankingTableWrap {
+  overflow: hidden;
+  border: 1px solid var(--skillbox-border-card);
+  border-radius: 8px;
+  background: var(--skillbox-surface);
+}
+
+.usageRankingTable {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.usageRankingTable th,
+.usageRankingTable td {
+  border-bottom: 1px solid var(--skillbox-border-subtle);
+  padding: 12px 14px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.usageRankingTable th {
+  background: var(--skillbox-surface-muted);
+  color: var(--skillbox-text-muted);
+  font-size: 11px;
+  font-weight: 780;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.usageRankingTable th:first-child,
+.usageRankingTable td:first-child {
+  width: 72px;
+}
+
+.usageRankingTable th:nth-child(3),
+.usageRankingTable td:nth-child(3) {
+  width: 100px;
+  text-align: right;
+}
+
+.usageRankingTable th:last-child,
+.usageRankingTable td:last-child {
+  width: 180px;
+}
+
+.usageRankingTable tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.usageRankingTable tbody tr:hover {
+  background: var(--skillbox-surface-blue-subtle);
+}
+
+.usageRankingPosition,
+.usageRankingCalls {
+  color: var(--skillbox-text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.usageRankingPosition {
+  font-family: var(--skillbox-font-skill);
+  font-size: 13px;
+  font-weight: 680;
+}
+
+.usageRankingCalls {
+  font-size: 15px;
+  font-weight: 780;
+}
+
+.usageRankingSkill {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.usageRankingSkill button,
+.usageRankingSkill > strong {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--skillbox-font-skill);
+  font-size: 13px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usageRankingSkill button {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  color: var(--skillbox-blue-text);
+  padding: 4px 0;
+  text-align: left;
+}
+
+.usageRankingTable time,
+.usageRankingNever {
+  color: var(--skillbox-text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .historyTimeline {
@@ -5398,6 +5635,24 @@ dd {
   .workspaceTypeTabs {
     width: 100%;
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .historyTypeTabs {
+    width: 100%;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .usageRankingControls {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .usageRankingRanges {
+    grid-column: 1 / -1;
+  }
+
+  .usageRankingTable th:last-child,
+  .usageRankingTable td:last-child {
+    width: 140px;
   }
 
   .dashboardFilterPrimary .favoriteFilterButton {

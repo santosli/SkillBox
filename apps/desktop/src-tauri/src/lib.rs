@@ -658,6 +658,21 @@ async fn list_history(request: skillbox_core::HistoryFilter) -> Result<Value, St
 }
 
 #[tauri::command]
+async fn list_skill_usage_rankings(
+    request: skillbox_core::SkillUsageRankingRequest,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = skillbox_core::list_skill_usage_rankings(
+            request,
+            skillbox_core::default_managed_root(),
+        )?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Skill usage ranking task failed: {error}"))?
+}
+
+#[tauri::command]
 async fn record_skill_usage(
     request: skillbox_core::RecordSkillUsageRequest,
 ) -> Result<Value, String> {
@@ -817,6 +832,7 @@ pub fn run() {
             run_doctor,
             repair_stale_deployment_records,
             list_history,
+            list_skill_usage_rankings,
             record_skill_usage,
             usage_hook_statuses,
             install_usage_hook,

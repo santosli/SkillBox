@@ -30,7 +30,7 @@ A 30-second overview of SkillBox: local-first skill management, review-before-im
 - **Review the whole lifecycle.** Inspect imports, deployments, type changes, source bindings, updates, rollbacks, and deletion before SkillBox changes managed or runtime files.
 - **Versioned remote skills.** Check GitHub sources while SkillBox is open, preview all-file diffs, apply updates, and roll back to immutable versions.
 - **Reviewed Git commit and push.** Inspect user-skill diffs, create a Conventional Commit, and optionally push it; inbound divergence remains a normal Git conflict to resolve outside SkillBox.
-- **Real usage and operation history.** Record supported agent hook calls and show them beside management operations without storing full chat transcripts.
+- **Real usage, local rankings, and operation history.** Record supported agent hook calls, rank currently managed skills by locally observed usage, and show calls beside management operations without storing full chat transcripts.
 - **Safe storage and deployment defaults.** Use ordered SQLite migrations, recovery backups, integrity checks, and ownership-checked symlinks instead of silently overwriting runtime content.
 - **Signed macOS distribution.** Install a notarized DMG or Homebrew cask and apply signed app updates only after confirmation.
 
@@ -46,7 +46,7 @@ The Workspaces view tracks global and project-local `SKILL.md` roots across Code
 
 ![SkillBox history](docs/screenshots/skillbox-history-v041.jpg)
 
-History combines real skill calls and management operations. When a hook supplies prompt text, SkillBox stores a bounded excerpt of up to 500 characters rather than the full transcript; the excerpt can still contain user text.
+History combines real skill calls and management operations, with a local Rankings tab for 7-day, 30-day, or all-time calls filtered by Agent or Workspace. Rankings include only calls observed by enabled and trusted hooks; they are not a global popularity or trust score. When a hook supplies prompt text, SkillBox stores a bounded excerpt of up to 500 characters rather than the full transcript; the excerpt can still contain user text.
 
 ![SkillBox managed store health](docs/screenshots/skillbox-settings-health-v041.jpg)
 
@@ -97,7 +97,7 @@ Longer-term support for native Claude, OpenClaw, Cursor, Claude Code, Copilot, a
 - Delete a skill from the managed store and all associated workspaces after a name-confirmed preview, while retaining a recovery backup and workspace registrations.
 - Review user-skill Git diffs, create selected-file Conventional Commits, and optionally push without attempting an inbound auto-merge.
 - Search and filter the dashboard by type, update status, tag, or favorite; switch between grid and list views, with favorites and tags persisted in SQLite.
-- Record supported Codex App, Codex CLI, and Claude Code CLI hook calls, and browse usage beside management operations without storing full transcripts.
+- Record supported Codex App, Codex CLI, and Claude Code CLI hook calls; browse usage beside management operations and rank managed skills locally by time range, Agent, or Workspace without storing full transcripts.
 - Apply ordered SQLite migrations with pre-migration backups and integrity checks; run Doctor diagnostics and explicitly clean up stale deployment records.
 - Check signed GitHub Releases and install macOS app updates only after user confirmation.
 

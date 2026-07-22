@@ -30,7 +30,7 @@ SkillBox 是一个 local-first 的 macOS 桌面应用，带 Rust core/CLI，用�
 - **完整生命周期都先 review。** 导入、部署、类型迁移、source 绑定、更新、回滚和删除都会先展示影响，再改 managed store 或 runtime 文件。
 - **远程 skill 版本管理。** SkillBox 打开期间检查 GitHub source，预览全文件 diff，应用更新，并回滚到不可变版本。
 - **Git 提交和推送也可审查。** 查看 user-skill diff、创建 Conventional Commit，并可选推送；远端历史分叉仍在 SkillBox 外按正常 Git 冲突处理。
-- **真实调用与操作历史。** 通过支持的 agent hooks 记录 skill 调用，与管理操作统一展示，同时不保存完整聊天 transcript。
+- **真实调用、本地排名与操作历史。** 通过支持的 agent hooks 记录 skill 调用，按本机已观测使用情况排列当前 managed skills，并与管理操作统一展示，同时不保存完整聊天 transcript。
 - **安全的存储与部署默认值。** 使用顺序 SQLite migrations、恢复备份、完整性检查和 ownership-checked symlink，不静默覆盖 runtime 内容。
 - **签名的 macOS 分发。** 可安装已公证 DMG 或 Homebrew cask，app 更新也只在用户确认后应用。
 
@@ -46,7 +46,7 @@ Workspaces 视图会跟踪全局和项目局部 `SKILL.md` roots，包括 Codex 
 
 ![SkillBox history](docs/screenshots/skillbox-history-v041.jpg)
 
-History 会把真实 skill 调用和管理操作合并展示。hook 提供 prompt 文本时，SkillBox 只保存最多 500 字符的截断片段，而不是完整 transcript；这个片段仍可能包含用户输入。
+History 会把真实 skill 调用和管理操作合并展示，并提供本地 Rankings tab，可查看 7 天、30 天或全部调用并按 Agent/Workspace 过滤。排名只包含 enabled/trusted hooks 已观测到的调用，不是全局热度或信任评分。hook 提供 prompt 文本时，SkillBox 只保存最多 500 字符的截断片段，而不是完整 transcript；这个片段仍可能包含用户输入。
 
 ![SkillBox managed store health](docs/screenshots/skillbox-settings-health-v041.jpg)
 
@@ -97,7 +97,7 @@ Runtime 目录只是部署目标：
 - 名称确认后，从 managed store 和全部关联 workspace 删除 skill，同时保留 recovery backup 和 workspace registrations。
 - Review user-skill Git diff、为选中文件创建 Conventional Commit，并可选推送，不尝试自动合并远端变更。
 - 按类型、更新状态、tag 或 favorite 搜索过滤 Dashboard，在 grid/list 间切换，并把 favorites 与 tags 持久化到 SQLite。
-- 记录受支持的 Codex App、Codex CLI 和 Claude Code CLI hook 调用，与管理操作一同浏览，不保存完整 transcript。
+- 记录受支持的 Codex App、Codex CLI 和 Claude Code CLI hook 调用；与管理操作一同浏览，并按时间范围、Agent 或 Workspace 对 managed skills 做本地排名，不保存完整 transcript。
 - 执行顺序 SQLite migrations、迁移前备份和完整性检查；运行 Doctor 诊断并显式清理 stale deployment records。
 - 检查已签名的 GitHub Releases，并只在用户确认后安装 macOS app 更新。
 

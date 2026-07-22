@@ -17,6 +17,7 @@ const appSourcePaths = [
   './components/userSkillsSync.jsx',
   './skills.js',
   './historyEntries.js',
+  './usageRankings.js',
   './usageHooks.js',
   './appUpdates.js',
   './preferences.js',
@@ -788,6 +789,32 @@ test('history page combines skill usage and operation logs', () => {
   assert.match(css, /\.historyRowTimestamp strong\s*\{[^}]*line-height:\s*1\.25;/s);
   assert.doesNotMatch(css, /\.historyRowTimestamp span\s*\{/);
   assert.doesNotMatch(css, /\.historyRowMarker\s*\{/);
+});
+
+test('history exposes accessible local skill usage rankings', () => {
+  assert.match(appSource, /\{ id: 'rankings', label: 'Rankings', count: rankingRows\.length \}/);
+  assert.match(appSource, /function UsageRankingPanel/);
+  assert.match(appSource, /aria-label="Local skill usage rankings"/);
+  assert.match(appSource, /role="group" aria-label="Ranking time range"/);
+  assert.match(appSource, /<option value="">All agents<\/option>/);
+  assert.match(appSource, /<option value="">All workspaces<\/option>/);
+  assert.match(appSource, /Local records from enabled and trusted hooks only/);
+  assert.match(appSource, /<table className="usageRankingTable">/);
+  assert.match(appSource, /<th scope="col">Rank<\/th>/);
+  assert.match(appSource, /<th scope="col">Skill<\/th>/);
+  assert.match(appSource, /<th scope="col">Calls<\/th>/);
+  assert.match(appSource, /<th scope="col">Last observed<\/th>/);
+  assert.match(appSource, /Open usage hook settings/);
+  assert.match(appSource, /invoke\('list_skill_usage_rankings'/);
+  assert.match(appSource, /usageRankingRequest\(usageRankingFilters\)/);
+  assert.match(appSource, /usageRankingRequest\(nextFilters\)/);
+  assert.match(appSource, /includeUnmanaged: false/);
+  assert.match(tauriSource, /async fn list_skill_usage_rankings/);
+  assert.match(tauriSource, /skillbox_core::list_skill_usage_rankings/);
+  assert.match(css, /\.historyTypeTabs\s*\{[^}]*repeat\(4,/s);
+  assert.match(css, /\.usageRankingTable\s*\{/);
+  assert.match(css, /\.usageRankingRanges button:focus-visible/);
+  assert.match(css, /font-variant-numeric:\s*tabular-nums/);
 });
 
 test('desktop startup reports run errors without expect panic', () => {
