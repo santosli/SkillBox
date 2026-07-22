@@ -1475,14 +1475,15 @@ button {
   margin-left: auto;
 }
 
-.historyFrame {
+.historyFrame,
+.rankingsFrame {
   max-width: 1040px;
 }
 
 .historyTypeTabs {
   width: 580px;
   flex: 0 0 auto;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .usageRankingPanel {
@@ -5605,7 +5606,8 @@ dd {
   }
 
   .workspaceFrame .pageTitleRow,
-  .historyFrame .pageTitleRow {
+  .historyFrame .pageTitleRow,
+  .rankingsFrame .pageTitleRow {
     align-items: flex-start;
     flex-direction: column;
     gap: 14px;
@@ -5639,7 +5641,7 @@ dd {
 
   .historyTypeTabs {
     width: 100%;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .usageRankingControls {

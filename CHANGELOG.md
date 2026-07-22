@@ -7,7 +7,7 @@ version tags such as `v0.3.0`.
 
 ## Unreleased
 
-- Add local Skill Usage Rankings to History with 7-day, 30-day, all-time, Agent, and Workspace filters while keeping usage data local and separate from source trust.
+- Add a standalone Skill Usage Rankings page with 7-day, 30-day, all-time, Agent, and Workspace filters while keeping usage data local and separate from source trust.
 
 ## 0.4.4
 

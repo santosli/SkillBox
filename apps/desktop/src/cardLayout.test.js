@@ -10,6 +10,7 @@ const appSourcePaths = [
   './components/common.jsx',
   './components/workspaces.jsx',
   './components/history.jsx',
+  './components/rankings.jsx',
   './components/settings.jsx',
   './components/importReview.jsx',
   './components/skillDetail.jsx',
@@ -19,6 +20,7 @@ const appSourcePaths = [
   './historyEntries.js',
   './usageRankings.js',
   './usageHooks.js',
+  './workspaces.js',
   './appUpdates.js',
   './preferences.js',
   './previewData.js',
@@ -29,6 +31,7 @@ const appSource = (
     appSourcePaths.map((path) => readFile(new URL(path, import.meta.url), 'utf8'))
   )
 ).join('\n');
+const appComponentSource = await readFile(new URL('./App.jsx', import.meta.url), 'utf8');
 const mainSource = await readFile(new URL('./main.jsx', import.meta.url), 'utf8');
 const tauriSource = await readFile(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8');
 const tauriMainSource = await readFile(new URL('../src-tauri/src/main.rs', import.meta.url), 'utf8');
@@ -791,9 +794,17 @@ test('history page combines skill usage and operation logs', () => {
   assert.doesNotMatch(css, /\.historyRowMarker\s*\{/);
 });
 
-test('history exposes accessible local skill usage rankings', () => {
-  assert.match(appSource, /\{ id: 'rankings', label: 'Rankings', count: rankingRows\.length \}/);
-  assert.match(appSource, /function UsageRankingPanel/);
+test('rankings is an accessible top-level page separate from history', () => {
+  const historyPageSource = appSource.match(/export function HistoryPage[\s\S]*?function HistoryRow/)?.[0] || '';
+  const rankingsPageSource = appSource.match(/export function UsageRankingsPage[\s\S]*$/)?.[0] || '';
+
+  assert.doesNotMatch(historyPageSource, /Rankings|usageRanking/);
+  assert.match(appSource, /\{ id: 'rankings', label: 'Rankings', icon: 'chart-no-axes-column-increasing' \}/);
+  assert.match(appSource, /item\.id === 'rankings'/);
+  assert.match(appSource, /function openRankings\(\)/);
+  assert.match(appSource, /page === 'rankings'/);
+  assert.match(rankingsPageSource, /<PageTitleRow[\s\S]*title="Rankings"/);
+  assert.match(rankingsPageSource, /onClick=\{onRefresh\}/);
   assert.match(appSource, /aria-label="Local skill usage rankings"/);
   assert.match(appSource, /role="group" aria-label="Ranking time range"/);
   assert.match(appSource, /<option value="">All agents<\/option>/);
@@ -806,12 +817,15 @@ test('history exposes accessible local skill usage rankings', () => {
   assert.match(appSource, /<th scope="col">Last observed<\/th>/);
   assert.match(appSource, /Open usage hook settings/);
   assert.match(appSource, /invoke\('list_skill_usage_rankings'/);
-  assert.match(appSource, /usageRankingRequest\(usageRankingFilters\)/);
+  assert.match(appSource, /void loadUsageRankings\(usageRankingFilters\)/);
   assert.match(appSource, /usageRankingRequest\(nextFilters\)/);
   assert.match(appSource, /includeUnmanaged: false/);
+  const loadHistorySource = appComponentSource.match(/async function loadHistory\(\)[\s\S]*?function openRankings/)?.[0] || '';
+  assert.match(loadHistorySource, /invoke\('list_history'/);
+  assert.doesNotMatch(loadHistorySource, /list_skill_usage_rankings|Promise\.all/);
   assert.match(tauriSource, /async fn list_skill_usage_rankings/);
   assert.match(tauriSource, /skillbox_core::list_skill_usage_rankings/);
-  assert.match(css, /\.historyTypeTabs\s*\{[^}]*repeat\(4,/s);
+  assert.match(css, /\.historyTypeTabs\s*\{[^}]*repeat\(3,/s);
   assert.match(css, /\.usageRankingTable\s*\{/);
   assert.match(css, /\.usageRankingRanges button:focus-visible/);
   assert.match(css, /font-variant-numeric:\s*tabular-nums/);

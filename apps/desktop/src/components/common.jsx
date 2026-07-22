@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  ChartNoAxesColumnIncreasing,
   FolderCode,
   Gauge,
   History as HistoryIcon,
@@ -197,6 +198,10 @@ export function Icon({ name }) {
 
   if (name === 'folder-code') {
     return <FolderCode aria-hidden="true" />;
+  }
+
+  if (name === 'chart-no-axes-column-increasing') {
+    return <ChartNoAxesColumnIncreasing aria-hidden="true" />;
   }
 
   if (name === 'history') {

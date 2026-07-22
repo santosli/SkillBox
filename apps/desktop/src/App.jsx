@@ -5,6 +5,7 @@ import skillBoxAppIcon from '../src-tauri/icons/icon.png';
 import { FooterButton, NavButton } from './components/common.jsx';
 import { Dashboard } from './components/dashboard.jsx';
 import { HistoryPage } from './components/history.jsx';
+import { UsageRankingsPage } from './components/rankings.jsx';
 import {
   ImportReview,
   LocalImportConfirmationDialog,
@@ -1481,46 +1482,42 @@ export default function App() {
   }
 
   function openHistory() {
+    cancelUsageRankingRequest();
     setSelectedName('');
     setPage('history');
     void loadHistory();
   }
 
   async function loadHistory() {
-    const rankingRequestId = usageRankingRequestRef.current + 1;
-    usageRankingRequestRef.current = rankingRequestId;
     setError('');
-    setUsageRankingLoading(true);
 
     if (!window.__TAURI_INTERNALS__) {
       setHistory(normalizeHistory(previewHistory()));
-      setUsageRankings(normalizeUsageRankings(previewUsageRankings(usageRankingFilters)));
-      setUsageRankingLoading(false);
       setStatus('prototype');
       return;
     }
 
     setStatus('loading_history');
     try {
-      const [historyResult, rankingResult] = await Promise.all([
-        invoke('list_history', { request: { limit: 200 } }),
-        invoke('list_skill_usage_rankings', {
-          request: usageRankingRequest(usageRankingFilters)
-        })
-      ]);
+      const historyResult = await invoke('list_history', { request: { limit: 200 } });
       setHistory(normalizeHistory(historyResult));
-      if (usageRankingRequestRef.current === rankingRequestId) {
-        setUsageRankings(normalizeUsageRankings(rankingResult));
-      }
       setStatus('ready');
     } catch (historyError) {
       setError(historyError.message || String(historyError) || 'Unable to load history.');
       setStatus('ready');
-    } finally {
-      if (usageRankingRequestRef.current === rankingRequestId) {
-        setUsageRankingLoading(false);
-      }
     }
+  }
+
+  function openRankings() {
+    setSelectedName('');
+    setPage('rankings');
+    void loadUsageRankings(usageRankingFilters);
+  }
+
+  function cancelUsageRankingRequest() {
+    usageRankingRequestRef.current += 1;
+    setUsageRankingLoading(false);
+    setError('');
   }
 
   async function loadUsageRankings(nextFilters) {
@@ -3078,10 +3075,14 @@ export default function App() {
               label={item.label}
               onClick={() => {
                 if (item.id === 'dashboard') {
+                  cancelUsageRankingRequest();
                   openDashboard('all');
+                } else if (item.id === 'rankings') {
+                  openRankings();
                 } else if (item.id === 'history') {
                   openHistory();
                 } else {
+                  cancelUsageRankingRequest();
                   setSelectedName('');
                   setPage(item.id);
                 }
@@ -3097,7 +3098,10 @@ export default function App() {
               icon={item.icon}
               key={item.id}
               label={item.label}
-              onClick={item.url ? () => openRemoteSourceUrl(item.url) : () => setPage(item.id)}
+              onClick={item.url ? () => openRemoteSourceUrl(item.url) : () => {
+                cancelUsageRankingRequest();
+                setPage(item.id);
+              }}
             />
           ))}
           <div className="sidebarVersion">
@@ -3150,17 +3154,25 @@ export default function App() {
             error={error}
             filter={historyFilter}
             history={history}
-            ranking={usageRankings}
-            rankingFilters={usageRankingFilters}
-            rankingLoading={usageRankingLoading}
             status={status}
+            onFilter={setHistoryFilter}
+            onRefresh={loadHistory}
+          />
+        ) : page === 'rankings' ? (
+          <UsageRankingsPage
+            error={error}
+            filters={usageRankingFilters}
+            loading={usageRankingLoading}
+            ranking={usageRankings}
             usageHooks={usageHooks}
             workspaces={workspaces}
-            onFilter={setHistoryFilter}
-            onOpenSettings={() => setPage('settings')}
+            onFilters={loadUsageRankings}
+            onOpenSettings={() => {
+              cancelUsageRankingRequest();
+              setPage('settings');
+            }}
             onOpenSkill={openRankedSkill}
-            onRankingFilters={loadUsageRankings}
-            onRefresh={loadHistory}
+            onRefresh={() => loadUsageRankings(usageRankingFilters)}
           />
         ) : (
           <Dashboard

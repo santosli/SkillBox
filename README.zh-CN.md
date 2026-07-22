@@ -46,7 +46,7 @@ Workspaces 视图会跟踪全局和项目局部 `SKILL.md` roots，包括 Codex 
 
 ![SkillBox history](docs/screenshots/skillbox-history-v041.jpg)
 
-History 会把真实 skill 调用和管理操作合并展示，并提供本地 Rankings tab，可查看 7 天、30 天或全部调用并按 Agent/Workspace 过滤。排名只包含 enabled/trusted hooks 已观测到的调用，不是全局热度或信任评分。hook 提供 prompt 文本时，SkillBox 只保存最多 500 字符的截断片段，而不是完整 transcript；这个片段仍可能包含用户输入。
+History 会把真实 skill 调用和管理操作合并展示。独立的一级 Rankings 页面可查看 7 天、30 天或全部调用并按 Agent/Workspace 过滤。排名只包含 enabled/trusted hooks 已观测到的调用，不是全局热度或信任评分。hook 提供 prompt 文本时，SkillBox 只保存最多 500 字符的截断片段，而不是完整 transcript；这个片段仍可能包含用户输入。
 
 ![SkillBox managed store health](docs/screenshots/skillbox-settings-health-v041.jpg)
 

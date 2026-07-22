@@ -46,7 +46,7 @@ The Workspaces view tracks global and project-local `SKILL.md` roots across Code
 
 ![SkillBox history](docs/screenshots/skillbox-history-v041.jpg)
 
-History combines real skill calls and management operations, with a local Rankings tab for 7-day, 30-day, or all-time calls filtered by Agent or Workspace. Rankings include only calls observed by enabled and trusted hooks; they are not a global popularity or trust score. When a hook supplies prompt text, SkillBox stores a bounded excerpt of up to 500 characters rather than the full transcript; the excerpt can still contain user text.
+History combines real skill calls and management operations. The standalone Rankings page shows 7-day, 30-day, or all-time calls filtered by Agent or Workspace. Rankings include only calls observed by enabled and trusted hooks; they are not a global popularity or trust score. When a hook supplies prompt text, SkillBox stores a bounded excerpt of up to 500 characters rather than the full transcript; the excerpt can still contain user text.
 
 ![SkillBox managed store health](docs/screenshots/skillbox-settings-health-v041.jpg)
 

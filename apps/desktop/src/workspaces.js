@@ -6,6 +6,7 @@ import {
 export const sidebarItems = [
   { id: 'dashboard', label: 'Dashboard', icon: 'gauge' },
   { id: 'workspaces', label: 'Workspaces', icon: 'folder-code' },
+  { id: 'rankings', label: 'Rankings', icon: 'chart-no-axes-column-increasing' },
   { id: 'history', label: 'History', icon: 'history' }
 ];
 

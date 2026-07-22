@@ -588,7 +588,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - Rust core 入口：`list_skill_usage_rankings`。
 - Rust CLI 入口：`usage-rankings [--range 7d|30d|all] [--agent <id>] [--workspace <runtime-root>] [--include-unmanaged]`。
 - Tauri command：`list_skill_usage_rankings`。
-- 桌面 History 页切换到 Rankings，或修改时间、Agent、Workspace 过滤器。
+- 桌面左侧一级导航进入 Rankings 页面，或修改时间、Agent、Workspace 过滤器。
 
 步骤：
 
@@ -597,7 +597,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 默认范围只包含当前 managed store 中实际存在的 User/Remote skills，并为没有观测事件的 skill 返回 `0 calls`；CLI 显式传 `--include-unmanaged` 时才把窗口内的 deleted/unmanaged skill 加入结果。
 - 聚合来源是 `skill_usage_events`，不是只包含 all-time 数据的 `skill_usage_stats`。同一 skill 跨 Agent/Workspace 的事件在未过滤时相加。
 - 排序固定为 calls 降序、last observed time 降序、skill name 升序，随后分配连续 ordinal rank，保证 core、CLI、Tauri 和 desktop 一致。
-- 桌面以可访问的数据表展示精确名次、skill 名称、calls 和 last observed time；Rankings 是 History 的二级 tab，不新增一级导航。
+- 桌面以可访问的数据表展示精确名次、skill 名称、calls 和 last observed time；Rankings 是与 Dashboard、Workspaces、History 同级的一级页面，History 只承载调用和操作时间线。
 - UI 必须说明它只统计本机 enabled/trusted hooks 已观测到的事件。`0 calls` 表示没有记录，不表示从未使用；usage frequency 不能改变 source trust、安全性或质量判断。
 - 查询和响应不读取、不返回 `prompt_excerpt` 或 `metadata_json`；usage 数据不上传、不跨设备合并，也不作为社区排行榜。
 
