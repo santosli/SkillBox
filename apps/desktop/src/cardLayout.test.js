@@ -484,6 +484,7 @@ test('remote skill URL import previews GitHub skills before install', () => {
   assert.doesNotMatch(submitRemoteImport, /invoke\('install_github_remote_skill'/);
   assert.doesNotMatch(submitRemoteImport, /invoke\('parse_github_url'/);
   assert.doesNotMatch(appSource, /Remote download\/import is not wired yet\./);
+  assert.match(appSource, /Repository-root SKILL\.md files are not supported\./);
 });
 
 test('remote skill URL import restores ready state when install fails', () => {

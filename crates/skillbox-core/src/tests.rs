@@ -3415,6 +3415,46 @@ fn install_github_remote_skill_writes_version_current_metadata_and_index() {
 }
 
 #[test]
+fn preview_github_remote_skill_install_rejects_root_skill_md_before_creating_store() {
+    let root = temp_dir("preview-github-root-skill-md");
+    let managed_root = root.join("SkillBox");
+
+    let error = preview_github_remote_skill_install(
+        PreviewGithubRemoteSkillInstallRequest {
+            source_url: "https://github.com/acme/repo/blob/main/SKILL.md".to_string(),
+            target_root: None,
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+
+    assert!(error.contains("Root SKILL.md URLs are not supported"));
+    assert!(error.contains("skill directory URL"));
+    assert!(!error.contains("checkout/SKILL.md"));
+    assert!(!managed_root.exists());
+}
+
+#[test]
+fn install_github_remote_skill_rejects_root_skill_md_before_creating_operation() {
+    let root = temp_dir("install-github-root-skill-md");
+    let managed_root = root.join("SkillBox");
+
+    let error = install_github_remote_skill(
+        InstallGithubRemoteSkillRequest {
+            source_url: "https://github.com/acme/repo/blob/main/SKILL.md".to_string(),
+            target_root: None,
+            preview_id: Some("provided-preview-id".to_string()),
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+
+    assert!(error.contains("Root SKILL.md URLs are not supported"));
+    assert!(!managed_root.exists());
+}
+
+#[test]
 fn install_github_remote_skill_rejects_missing_preview_id() {
     let root = temp_dir("install-github-missing-preview");
     let managed_root = root.join("SkillBox");
