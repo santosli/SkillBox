@@ -43,9 +43,23 @@ from implementation status and is tracked in `docs/release.md`. The next milesto
 ### 0.5 — Discovery And Source Trust
 
 - Add FTS-backed search across skills, operations, and usage history.
+- Add local Skill Usage Rankings to History, with 7-day, 30-day, and all-time
+  ranges plus agent and workspace filters.
+- Keep ranking aggregation in Rust core and expose consistent results through
+  CLI and Tauri before rendering them in desktop.
+- Default to currently managed skills and use a deterministic order of call
+  count, last observed use, then skill name; keep deleted and unmanaged usage
+  events available in History without placing them in the default ranking.
+- Make usage coverage explicit: rankings include only events observed by
+  enabled and trusted hooks. A zero count means no observed call, not proof
+  that a skill was never used.
+- Keep rankings local to the current SkillBox database, exclude prompt excerpts
+  and event metadata from ranking, and never present usage as global
+  popularity, quality evidence, or proof of skill safety.
 - Add remote source provenance and trust classification without treating
   popularity as verification.
-- Keep search and trust results aligned across Rust core, CLI, Tauri, and desktop.
+- Keep search, ranking, and trust results aligned across Rust core, CLI, Tauri,
+  and desktop.
 
 ### 0.6 — Runtime Profiles And Portability
 

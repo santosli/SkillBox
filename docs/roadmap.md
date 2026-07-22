@@ -29,7 +29,8 @@ These are the next areas where focused contributions are most useful:
 - **Rust CLI and desktop parity.** Keep CLI behavior and desktop Tauri commands
   aligned on the shared Rust core.
 - **Search and navigation.** Add FTS-backed search for skills, operations, and
-  usage history on top of the versioned SQLite schema.
+  usage history on top of the versioned SQLite schema, plus local usage
+  rankings that help users rediscover the skills they actually rely on.
 - **Runtime profiles.** Model additional `SKILL.md` roots, precedence, and
   frontmatter capabilities without hard-coding agent behavior in React.
 - **Remote trust.** Preserve source provenance and show explicit trust state
@@ -51,12 +52,28 @@ verified; completing a feature list alone does not qualify a release.
 | Version | Product outcome | Promotion gates |
 | --- | --- | --- |
 | **0.4 — Reliability foundation** | Versioned database migrations, persisted user metadata, Doctor diagnostics, and durable mutation auditing. | Upgrade and backup tests pass; Doctor is available through core, CLI, Tauri, and desktop; audited workflows record both success and failure; release automation passes. |
-| **0.5 — Discovery and source trust** | FTS-backed search across skills, operations, and usage history; clearer source provenance and trust classification before remote install or update. | CLI and desktop return consistent results; schema upgrades and representative large-library queries are tested; trust state never treats popularity as proof of safety. |
+| **0.5 — Discovery and source trust** | FTS-backed search across skills, operations, and usage history; local skill usage rankings with time-range, agent, and workspace filters; clearer source provenance and trust classification before remote install or update. | CLI and desktop return consistent search and ranking results; ranking coverage is explicit and never presented as global popularity; schema upgrades and representative large-library queries are tested; trust state never treats popularity as proof of safety. |
 | **0.6 — Runtime profiles and portability** | Rust-owned runtime profiles model roots, precedence, frontmatter capabilities, and compatibility without hard-coding agent behavior in React. | Each supported profile has fixtures and compatibility tests; unsupported fields are reported before deployment; runtime-specific behavior remains behind an adapter boundary. |
 | **0.7 — Safe sync, deployment, and recovery** | Reviewed inbound user-skills Git updates, copy-snapshot deployment, and stronger restore/audit workflows complement the existing symlink path. | Ahead/behind/diverged states are explicit; conflicts are never auto-merged; overwrite protection, rollback, and backup restoration have automated coverage. |
 | **0.8 — Product hardening** | Large-library performance, actionable diagnostics, accessibility, onboarding, and recovery behavior are ready for sustained daily use. | Performance budgets and critical UI workflows are verified; no known data-loss path remains; supported upgrade and recovery procedures are documented and exercised. |
 | **0.9 — Release candidate** | Feature scope is frozen while security, migration compatibility, packaging, updater, Homebrew, and real-world beta feedback are closed out. | Threat-model review is complete; upgrades from every supported prior release are tested; blocker defects are closed; signed and notarized distribution rehearsals pass. |
 | **1.0 — Stable local skill management** | SkillBox offers a documented, supportable contract for discovering, importing, managing, deploying, updating, synchronizing, diagnosing, and recovering supported skills. | Core workflows meet their definitions of done; supported runtimes and limitations are explicit; migrations and recovery are proven; release artifacts and docs match; no open blocker or known data-loss issue remains. |
+
+### 0.5 Usage Ranking Boundaries
+
+Skill Usage Rankings are a local discovery signal, not a community leaderboard
+or a trust score. The initial ranking defaults to currently managed skills and
+uses only events observed in the local SkillBox database. It does not upload or
+merge usage across devices. A zero count means that SkillBox has not observed a
+call; disabled, untrusted, or unsupported hooks can make recorded usage
+incomplete.
+
+Ranking order must be deterministic: observed call count descending, most
+recent observed use descending, then skill name ascending. Historical events
+for deleted or unmanaged skills remain available in History but do not enter
+the default managed-skill ranking. Prompt excerpts and event metadata never
+affect ranking, and local usage frequency never changes source trust, safety,
+or quality classification.
 
 Minor-version scope may change with evidence from real usage. When the scope,
 ordering, status, or promotion gate of a milestone changes, the same change set
