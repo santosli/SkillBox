@@ -6,6 +6,7 @@ import * as workspaceModule from './workspaces.js';
 const {
   helpIssueUrl,
   normalizeWorkspace,
+  normalizeWorkspaceSetupPreview,
   sidebarItems,
   workspaceCardMetaLabels,
   sidebarFooterItems,
@@ -19,6 +20,34 @@ const {
   workspaceSkillReviewMeta,
   workspaceTypeTabs,
 } = workspaceModule;
+
+test('normalizes workspace setup preview roots and preserves project scope mapping', () => {
+  const preview = normalizeWorkspaceSetupPreview({
+    preview_id: 'preview-1',
+    selected_path: '/Users/example/project',
+    kind: 'user',
+    mode: 'project_without_roots',
+    roots: [{
+      path: '/Users/example/project/.agents/skills',
+      relative_path: '.agents/skills',
+      agent_id: 'agents',
+      label: 'Agents',
+      exists: false,
+      recommended: true
+    }]
+  });
+
+  assert.equal(preview.kind, 'user');
+  assert.equal(preview.mode, 'project_without_roots');
+  assert.deepEqual(preview.roots[0], {
+    path: '/Users/example/project/.agents/skills',
+    relativePath: '.agents/skills',
+    agentId: 'agents',
+    label: 'Agents',
+    exists: false,
+    recommended: true
+  });
+});
 
 test('normalizes workspace snake case fields and compact labels', () => {
   const workspace = normalizeWorkspace({

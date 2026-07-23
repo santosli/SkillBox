@@ -89,7 +89,7 @@ Runtime 目录只是部署目标：
 
 ## 功能
 
-- 扫描并登记受支持的全局或项目局部 `SKILL.md` workspaces；按名称、路径或 agent 搜索，并按 scope 过滤。
+- 扫描并登记受支持的全局或项目局部 `SKILL.md` workspaces。桌面端也可以先只读检查普通项目目录，再显式创建并登记一个选中的 `.agents/skills`、`.codex/skills` 或 `.claude/skills`；不会一次创建所有 runtime roots。
 - 在复制前 review user、remote 和 system import candidates；合并导入内容一致的多 root 副本但不丢失来源位置，并对符合条件的 deploy-back import 执行保守回退。
 - 通过 preview/apply 安装 GitHub-backed skill，并在不替换当前版本的情况下绑定识别到的 remote source candidate。
 - 检查 remote source、预览全文件 diff、应用更新，并回滚到不可变版本。
@@ -164,7 +164,7 @@ Homebrew uninstall 不会删除 `~/.skillbox`。
 ## 首次使用
 
 1. 打开 SkillBox。
-2. 点击 `Scan` 发现已知的全局和项目局部 skill workspaces。
+2. 点击 `Scan` 发现已知的全局和项目局部 skill workspaces，或通过 `Add workspace` 登记现有 skills folder、显式初始化一个受支持的项目局部 root。
 3. 使用 `Import` 先 review 候选项，再让 SkillBox 复制到 `~/.skillbox`。
 4. 使用 `Install` 先预览 GitHub-backed remote skills，再确认是否复制到 managed store。SkillBox 支持根目录包含 `SKILL.md` 的 standalone repository URL、根目录 `SKILL.md` 文件 URL 和 skill directory URL；仓库根 snapshot 不包含 Git metadata。
 5. 把 managed skills 部署到选定 runtime workspaces。

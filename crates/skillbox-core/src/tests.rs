@@ -907,6 +907,446 @@ fn add_workspace_scans_existing_root_and_dedupes_by_canonical_path() {
 }
 
 #[test]
+fn workspace_setup_existing_skills_root_previews_and_applies_without_creating_paths() {
+    let root = temp_dir("workspace-setup-existing");
+    let managed_root = root.join("SkillBox");
+    let workspace_root = root.join("project").join(".agents").join("skills");
+    make_skill(&workspace_root.join("alpha"), "alpha", "Alpha skill");
+
+    let preview = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: workspace_root.clone(),
+            kind: WorkspaceKind::User,
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    assert_eq!(preview.mode, WorkspaceSetupMode::ExistingRoot);
+    assert_eq!(preview.roots.len(), 1);
+    assert!(preview.roots[0].exists);
+    assert!(!managed_root.exists());
+
+    let result = apply_workspace_setup(
+        WorkspaceSetupApplyRequest {
+            selected_path: workspace_root.clone(),
+            kind: WorkspaceKind::User,
+            selected_root: preview.roots[0].path.clone(),
+            create_missing: false,
+            preview_id: preview.preview_id,
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    assert_eq!(
+        result.workspace.path,
+        fs::canonicalize(workspace_root).unwrap()
+    );
+    assert!(result.created_path.is_none());
+}
+
+#[test]
+fn workspace_setup_preserves_exact_symlinked_skills_root_registration() {
+    let root = temp_dir("workspace-setup-existing-symlink");
+    let managed_root = root.join("SkillBox");
+    let actual_root = root.join("shared").join("skills");
+    let linked_root = root.join("project").join(".agents").join("skills");
+    fs::create_dir_all(&actual_root).unwrap();
+    fs::create_dir_all(linked_root.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&actual_root, &linked_root).unwrap();
+
+    let preview = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: linked_root,
+            kind: WorkspaceKind::User,
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    assert_eq!(preview.mode, WorkspaceSetupMode::ExistingRoot);
+    assert_eq!(
+        preview.roots[0].path,
+        fs::canonicalize(actual_root).unwrap()
+    );
+}
+
+#[test]
+fn workspace_setup_project_preview_discovers_one_and_multiple_roots() {
+    let root = temp_dir("workspace-setup-discover");
+    let project = root.join("project");
+    fs::create_dir_all(project.join(".codex/skills")).unwrap();
+
+    let one = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: project.clone(),
+            kind: WorkspaceKind::User,
+        },
+        root.join("SkillBox"),
+    )
+    .unwrap();
+    assert_eq!(one.mode, WorkspaceSetupMode::ProjectWithRoots);
+    assert_eq!(one.roots.iter().filter(|root| root.exists).count(), 1);
+    assert_eq!(
+        one.roots
+            .iter()
+            .find(|root| root.exists)
+            .unwrap()
+            .relative_path,
+        ".codex/skills"
+    );
+
+    fs::create_dir_all(project.join(".claude/skills")).unwrap();
+    let multiple = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: project,
+            kind: WorkspaceKind::User,
+        },
+        root.join("SkillBox"),
+    )
+    .unwrap();
+    assert_eq!(multiple.roots.iter().filter(|root| root.exists).count(), 2);
+}
+
+#[test]
+fn workspace_setup_missing_project_preview_is_read_only_and_defaults_to_agents() {
+    let root = temp_dir("workspace-setup-missing-preview");
+    let project = root.join("project");
+    fs::create_dir_all(&project).unwrap();
+
+    let preview = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: project.clone(),
+            kind: WorkspaceKind::User,
+        },
+        root.join("SkillBox"),
+    )
+    .unwrap();
+
+    assert_eq!(preview.mode, WorkspaceSetupMode::ProjectWithoutRoots);
+    assert_eq!(preview.roots.len(), 3);
+    assert!(preview.roots.iter().all(|root| !root.exists));
+    assert_eq!(
+        preview
+            .roots
+            .iter()
+            .find(|root| root.recommended)
+            .unwrap()
+            .relative_path,
+        ".agents/skills"
+    );
+    assert!(!project.join(".agents").exists());
+    assert!(!project.join(".codex").exists());
+    assert!(!project.join(".claude").exists());
+}
+
+#[test]
+fn workspace_setup_missing_project_uses_existing_runtime_marker_as_recommendation() {
+    let root = temp_dir("workspace-setup-marker");
+    let project = root.join("project");
+    fs::create_dir_all(project.join(".claude")).unwrap();
+
+    let preview = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: project,
+            kind: WorkspaceKind::User,
+        },
+        root.join("SkillBox"),
+    )
+    .unwrap();
+
+    assert_eq!(
+        preview
+            .roots
+            .iter()
+            .find(|root| root.recommended)
+            .unwrap()
+            .relative_path,
+        ".claude/skills"
+    );
+}
+
+#[test]
+fn workspace_setup_rejects_home_root_and_managed_store_as_projects() {
+    let root = temp_dir("workspace-setup-broad-root");
+    let managed_root = root.join("SkillBox");
+    fs::create_dir_all(&managed_root).unwrap();
+
+    let managed_error = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: managed_root.clone(),
+            kind: WorkspaceKind::User,
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+    assert!(managed_error.contains("managed store"));
+
+    let home = home_dir();
+    let home_error = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: home,
+            kind: WorkspaceKind::User,
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+    assert!(home_error.contains("home directory"));
+}
+
+#[test]
+fn workspace_setup_creates_only_selected_root_and_registers_it() {
+    let root = temp_dir("workspace-setup-create");
+    let project = root.join("project");
+    let managed_root = root.join("SkillBox");
+    fs::create_dir_all(&project).unwrap();
+    let preview = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: project.clone(),
+            kind: WorkspaceKind::User,
+        },
+        &managed_root,
+    )
+    .unwrap();
+    let selected = preview
+        .roots
+        .iter()
+        .find(|root| root.relative_path == ".codex/skills")
+        .unwrap();
+
+    let result = apply_workspace_setup(
+        WorkspaceSetupApplyRequest {
+            selected_path: project.clone(),
+            kind: WorkspaceKind::User,
+            selected_root: selected.path.clone(),
+            create_missing: true,
+            preview_id: preview.preview_id,
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    assert_eq!(
+        result.created_path.as_deref(),
+        Some(selected.path.as_path())
+    );
+    assert!(project.join(".codex/skills").is_dir());
+    assert!(!project.join(".agents").exists());
+    assert!(!project.join(".claude").exists());
+    assert_eq!(result.workspace.agent_id.as_deref(), Some("codex"));
+    assert_eq!(result.workspace.kind, WorkspaceKind::User);
+    let operations = list_operations(OperationFilter::default(), &managed_root).unwrap();
+    assert!(operations.operations.iter().any(|operation| {
+        operation.operation_type == "add_workspace"
+            && operation.status == OperationStatus::Succeeded
+    }));
+}
+
+#[test]
+fn workspace_setup_rejects_stale_and_tampered_preview_selections() {
+    let root = temp_dir("workspace-setup-stale");
+    let project = root.join("project");
+    let managed_root = root.join("SkillBox");
+    fs::create_dir_all(&project).unwrap();
+    let preview = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: project.clone(),
+            kind: WorkspaceKind::User,
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    let stale = apply_workspace_setup(
+        WorkspaceSetupApplyRequest {
+            selected_path: project.clone(),
+            kind: WorkspaceKind::User,
+            selected_root: preview.roots[0].path.clone(),
+            create_missing: true,
+            preview_id: format!("{}-stale", preview.preview_id),
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+    assert!(stale.contains("preview is stale"));
+
+    let tampered = apply_workspace_setup(
+        WorkspaceSetupApplyRequest {
+            selected_path: project.clone(),
+            kind: WorkspaceKind::User,
+            selected_root: project.join("../outside/skills"),
+            create_missing: true,
+            preview_id: preview.preview_id,
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+    assert!(tampered.contains("not part of this workspace preview"));
+    assert!(!project.join(".agents").exists());
+}
+
+#[test]
+fn workspace_setup_rejects_preview_after_project_directory_is_replaced() {
+    let root = temp_dir("workspace-setup-replaced-project");
+    let project = root.join("project");
+    let managed_root = root.join("SkillBox");
+    fs::create_dir_all(&project).unwrap();
+    let preview = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: project.clone(),
+            kind: WorkspaceKind::User,
+        },
+        &managed_root,
+    )
+    .unwrap();
+    let selected = preview.roots[0].clone();
+
+    fs::rename(&project, root.join("old-project")).unwrap();
+    fs::create_dir_all(&project).unwrap();
+    let error = apply_workspace_setup(
+        WorkspaceSetupApplyRequest {
+            selected_path: project.clone(),
+            kind: WorkspaceKind::User,
+            selected_root: selected.path,
+            create_missing: true,
+            preview_id: preview.preview_id,
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+
+    assert!(error.contains("preview is stale"));
+    assert!(!project.join(".agents").exists());
+}
+
+#[test]
+fn workspace_setup_rejects_symlink_escape_and_non_directory_target() {
+    let root = temp_dir("workspace-setup-unsafe");
+    let project = root.join("project");
+    let outside = root.join("outside");
+    fs::create_dir_all(&project).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    std::os::unix::fs::symlink(&outside, project.join(".agents")).unwrap();
+
+    let symlink_error = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: project.clone(),
+            kind: WorkspaceKind::User,
+        },
+        root.join("SkillBox"),
+    )
+    .unwrap_err();
+    assert!(symlink_error.contains("cannot be a symlink"));
+
+    fs::remove_file(project.join(".agents")).unwrap();
+    fs::create_dir_all(project.join(".codex")).unwrap();
+    fs::write(project.join(".codex/skills"), "not a directory").unwrap();
+    let file_error = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: project,
+            kind: WorkspaceKind::User,
+        },
+        root.join("SkillBox"),
+    )
+    .unwrap_err();
+    assert!(file_error.contains("not a directory"));
+}
+
+#[test]
+fn workspace_setup_rejects_unreadable_project_directory() {
+    let root = temp_dir("workspace-setup-unreadable");
+    let project = root.join("project");
+    fs::create_dir_all(&project).unwrap();
+    let mut permissions = fs::metadata(&project).unwrap().permissions();
+    permissions.set_mode(0o000);
+    fs::set_permissions(&project, permissions).unwrap();
+
+    let error = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: project.clone(),
+            kind: WorkspaceKind::User,
+        },
+        root.join("SkillBox"),
+    )
+    .unwrap_err();
+
+    let mut restore = fs::metadata(&project).unwrap().permissions();
+    restore.set_mode(0o700);
+    fs::set_permissions(&project, restore).unwrap();
+    assert!(error.contains("not readable"));
+}
+
+#[test]
+fn workspace_setup_registration_failure_removes_only_new_empty_directories() {
+    let root = temp_dir("workspace-setup-cleanup");
+    let project = root.join("project");
+    let marker = project.join(".agents");
+    fs::create_dir_all(&marker).unwrap();
+    fs::write(marker.join("keep.txt"), "keep").unwrap();
+    let preview = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: project.clone(),
+            kind: WorkspaceKind::User,
+        },
+        root.join("SkillBox"),
+    )
+    .unwrap();
+    let selected = preview
+        .roots
+        .iter()
+        .find(|root| root.relative_path == ".agents/skills")
+        .unwrap();
+
+    let error = apply_workspace_setup_with_register(
+        WorkspaceSetupApplyRequest {
+            selected_path: project.clone(),
+            kind: WorkspaceKind::User,
+            selected_root: selected.path.clone(),
+            create_missing: true,
+            preview_id: preview.preview_id,
+        },
+        &root.join("SkillBox"),
+        |_| Err("registration failed".to_string()),
+    )
+    .unwrap_err();
+
+    assert_eq!(error, "registration failed");
+    assert!(!project.join(".agents/skills").exists());
+    assert_eq!(fs::read_to_string(marker.join("keep.txt")).unwrap(), "keep");
+}
+
+#[test]
+fn workspace_setup_global_scope_requires_an_existing_exact_root() {
+    let root = temp_dir("workspace-setup-global");
+    let global_root = root.join("custom-global-skills");
+    let managed_root = root.join("SkillBox");
+    fs::create_dir_all(&global_root).unwrap();
+    let preview = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: global_root.clone(),
+            kind: WorkspaceKind::Global,
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    assert_eq!(preview.mode, WorkspaceSetupMode::ExistingRoot);
+    let error = apply_workspace_setup(
+        WorkspaceSetupApplyRequest {
+            selected_path: global_root,
+            kind: WorkspaceKind::Global,
+            selected_root: preview.roots[0].path.clone(),
+            create_missing: true,
+            preview_id: preview.preview_id,
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+    assert!(error.contains("selection changed"));
+}
+
+#[test]
 fn add_workspace_does_not_count_copied_only_skills_as_imported() {
     let root = temp_dir("workspace-imported-count");
     let managed_root = root.join("SkillBox");

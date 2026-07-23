@@ -8,6 +8,7 @@ version tags such as `v0.3.0`.
 ## Unreleased
 
 - Support standalone GitHub skill repositories and root `SKILL.md` URLs through preview-confirmed installs, sanitized worktree snapshots that exclude `.git`, and root-aware source updates.
+- Let desktop users preview a project directory and explicitly create and register one supported project-local skills root, with stale-preview, traversal, symlink, and cleanup protections.
 
 ## 0.4.4
 

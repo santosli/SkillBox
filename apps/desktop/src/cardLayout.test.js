@@ -1213,3 +1213,22 @@ test('workspace deployment removal is explicit about removing only managed symli
   assert.match(appSource, /Confirm removal from \{changes\.undeploy\.length\} workspace/);
   assert.match(appSource, /existing directories or foreign symlinks are refused/);
 });
+
+test('workspace setup previews project roots before creating or registering one target', () => {
+  assert.match(appSource, /invoke\('preview_workspace_setup'/);
+  assert.match(appSource, /invoke\('apply_workspace_setup'/);
+  assert.match(appSource, /selected_path:\s*workspacePath/);
+  assert.match(appSource, /selected_root:\s*selectedRoot\.path/);
+  assert.match(appSource, /create_missing:\s*!selectedRoot\.exists/);
+  assert.match(appSource, /preview_id:\s*preview\.previewId/);
+  assert.match(appSource, />\s*Project\s*<\/button>/);
+  assert.match(appSource, />\s*Global\s*<\/button>/);
+  assert.match(appSource, /Project or skills folder/);
+  assert.match(appSource, /No skills folder found/);
+  assert.match(appSource, /Only <code>\{selectedRoot\.path\}<\/code> will be created/);
+  assert.match(appSource, /Existing project files will not be changed/);
+  assert.match(appSource, /'Create & add'/);
+  assert.match(appSource, /onSelectRoot\(root\.path\)/);
+  assert.doesNotMatch(appSource, /invoke\('add_workspace'[\s\S]*submitWorkspaceDialog/);
+  assert.match(css, /\.workspaceSetupRoots\s*\{[^}]*display:\s*grid;/s);
+});
