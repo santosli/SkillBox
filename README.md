@@ -16,7 +16,7 @@ English | [简体中文](README.zh-CN.md)
 
 SkillBox is a local-first macOS desktop app with a Rust core and CLI for managing `SKILL.md`-based skill and capability packages without treating any supported agent runtime as the source of truth.
 
-Current release: `v0.4.4`. SkillBox is useful today for local skill management, but it is still early software. Keep backups of important skills, and review each filesystem change before applying it.
+Current release: `v0.4.5`. SkillBox is useful today for local skill management, but it is still early software. Keep backups of important skills, and review each filesystem change before applying it.
 
 ## Promo Video
 
@@ -89,7 +89,7 @@ Longer-term support for native Claude, OpenClaw, Cursor, Claude Code, Copilot, a
 
 ## Features
 
-- Scan and register supported global or project-local `SKILL.md` workspaces, then search them by name, path, or agent and filter by scope.
+- Scan and register supported global or project-local `SKILL.md` workspaces. In the packaged macOS app, use the native single-directory picker or enter a path manually to choose a project or existing skills folder; SkillBox immediately runs a read-only preview, and can explicitly create exactly one selected `.agents/skills`, `.codex/skills`, or `.claude/skills` root before registration. Cancelling the picker changes nothing, and SkillBox never creates all runtime roots automatically.
 - Review user, remote, and system import candidates before copying anything; group import-equivalent multi-root copies without losing their source locations, and conservatively revert eligible deploy-back imports.
 - Install GitHub-backed skills through a preview/apply flow and bind discovered remote source candidates without replacing the active version.
 - Check remote sources, preview all-file diffs, apply updates, and roll back to immutable versions.
@@ -124,13 +124,13 @@ https://github.com/santosli/SkillBox/releases
 For this release, use the asset named:
 
 ```text
-SkillBox_0.4.4_universal.dmg
+SkillBox_0.4.5_universal.dmg
 ```
 
 The matching checksum is published as:
 
 ```text
-SkillBox_0.4.4_universal.dmg.sha256
+SkillBox_0.4.5_universal.dmg.sha256
 ```
 
 Open the DMG and drag `SkillBox.app` into `/Applications`.
@@ -164,9 +164,9 @@ Homebrew uninstall does not delete `~/.skillbox`.
 ## First Run
 
 1. Open SkillBox.
-2. Run `Scan` to discover known global and project-local skill workspaces.
+2. Run `Scan` to discover known global and project-local skill workspaces, or use `Add workspace` to choose one local project or skills folder with the packaged app's native directory picker. You can still enter an absolute path manually. A selection immediately opens the read-only setup preview; cancelling the picker has no effect. Confirm only if you want to register an existing root or create the one selected supported project-local root.
 3. Use `Import` to review candidates before SkillBox copies them into `~/.skillbox`.
-4. Use `Install` to preview GitHub-backed remote skills, then confirm before SkillBox copies them into the managed store.
+4. Use `Install` to preview GitHub-backed remote skills, then confirm before SkillBox copies them into the managed store. SkillBox accepts standalone repository URLs with a root `SKILL.md`, root `SKILL.md` file URLs, and skill directory URLs. Repository-root snapshots exclude Git metadata.
 5. Deploy managed skills to selected runtime workspaces when you want an agent to use them.
 6. Optional: enable usage hook injection in Settings to record real skill calls.
 

@@ -75,7 +75,7 @@ export function RemoteImportDialog({ error, mode, status, value, onClose, onMode
           <p className="remoteImportHint">
             {isMarkdown
               ? 'Use a local .md file path. SkillBox will turn it into a reviewable import candidate.'
-              : 'Use a GitHub tree, blob, raw, or API URL that points to a skill directory or SKILL.md.'}
+              : 'Use a GitHub repository, tree, blob, raw, or API URL. Standalone repositories with a root SKILL.md and skill directories are supported.'}
           </p>
           {error ? <div className="formError">{error}</div> : null}
 

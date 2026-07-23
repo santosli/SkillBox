@@ -154,20 +154,32 @@ pub fn preview_remote_source_binding(
 
     let result = (|| {
         let checkout = temp.join("checkout");
-        let (latest_sha, resolved_path) = fetch_remote_source_skill_path(
-            &source.repo_url,
-            &source.reference,
-            &source.path,
-            &request.skill_name,
-            &checkout,
-        )?;
+        let (latest_sha, resolved_path, root, remote_skill_path) = if source.is_root {
+            let snapshot = temp.join("skill");
+            let (latest_sha, remote_skill_path) = fetch_github_skill_source_snapshot(
+                &skillbox_git::GitService::new(),
+                &source,
+                &checkout,
+                &snapshot,
+            )?;
+            (latest_sha, String::new(), true, remote_skill_path)
+        } else {
+            let (latest_sha, resolved_path) = fetch_remote_source_skill_path(
+                &source.repo_url,
+                &source.reference,
+                &source.path,
+                &request.skill_name,
+                &checkout,
+            )?;
+            let remote_skill_path = checkout.join(&resolved_path);
+            (latest_sha, resolved_path, false, remote_skill_path)
+        };
         let resolved_source_url = github_tree_source_url(
             &source.owner,
             &source.repo,
             &source.reference,
             &resolved_path,
         );
-        let remote_skill_path = checkout.join(&resolved_path);
         let remote_skill = read_skill(&remote_skill_path)?;
         let ref_kind = resolve_ref_kind(&source.repo_url, &source.reference)?;
         let tracking = ref_kind == "branch";
@@ -187,6 +199,7 @@ pub fn preview_remote_source_binding(
             owner: source.owner,
             repo: source.repo,
             path: resolved_path,
+            root,
             reference: source.reference,
             ref_kind: Some(ref_kind),
             tracking,
@@ -370,11 +383,11 @@ pub fn preview_github_remote_skill_install(
     let result = (|| {
         let checkout = temp.join("checkout");
         let empty = temp.join("empty");
+        let snapshot = temp.join("skill");
         fs::create_dir_all(&empty).map_err(|error| error.to_string())?;
         let git = skillbox_git::GitService::new();
-        let installed_sha =
-            git.fetch_ref_path(&source.repo_url, &source.reference, &source.path, &checkout)?;
-        let skill_source_path = checkout.join(&source.path);
+        let (installed_sha, skill_source_path) =
+            fetch_github_skill_source_snapshot(&git, &source, &checkout, &snapshot)?;
         let skill = read_skill(&skill_source_path)?;
         validate_skill_name(&skill.name)?;
         let ref_kind = resolve_ref_kind(&source.repo_url, &source.reference)?;
@@ -400,6 +413,7 @@ pub fn preview_github_remote_skill_install(
             owner: source.owner,
             repo: source.repo,
             path: source.path,
+            root: source.is_root,
             reference: source.reference,
             ref_kind: Some(ref_kind),
             tracking,
@@ -424,13 +438,10 @@ fn install_github_remote_skill_inner(
 
     let result = (|| {
         let checkout = temp.join("checkout");
-        let installed_sha = skillbox_git::GitService::new().fetch_ref_path(
-            &source.repo_url,
-            &source.reference,
-            &source.path,
-            &checkout,
-        )?;
-        let skill_source_path = checkout.join(&source.path);
+        let snapshot = temp.join("skill");
+        let git = skillbox_git::GitService::new();
+        let (installed_sha, skill_source_path) =
+            fetch_github_skill_source_snapshot(&git, &source, &checkout, &snapshot)?;
         let skill = read_skill(&skill_source_path)?;
         validate_skill_name(&skill.name)?;
         let ref_kind = resolve_ref_kind(&source.repo_url, &source.reference)?;
@@ -463,6 +474,7 @@ fn install_github_remote_skill_inner(
             owner: source.owner.clone(),
             repo: source.repo.clone(),
             path: source.path.clone(),
+            root: source.is_root,
             reference: source.reference.clone(),
             ref_kind: Some(ref_kind.clone()),
             tracking,
@@ -502,6 +514,7 @@ fn install_github_remote_skill_inner(
             owner: source.owner,
             repo: source.repo,
             path: source.path,
+            root: source.is_root,
             reference: source.reference,
             ref_kind: Some(ref_kind),
             tracking,
@@ -516,6 +529,23 @@ fn install_github_remote_skill_inner(
 
     let _ = fs::remove_dir_all(&temp);
     result
+}
+
+fn fetch_github_skill_source_snapshot(
+    git: &skillbox_git::GitService,
+    source: &skillbox_github::GitHubSkillSource,
+    checkout: &Path,
+    root_snapshot: &Path,
+) -> Result<(String, PathBuf)> {
+    if source.is_root {
+        let sha = git.fetch_ref_tree(&source.repo_url, &source.reference, checkout)?;
+        copy_skill_dir_from_checkout(checkout, root_snapshot, checkout)?;
+        Ok((sha, root_snapshot.to_path_buf()))
+    } else {
+        let sha =
+            git.fetch_ref_path(&source.repo_url, &source.reference, &source.path, checkout)?;
+        Ok((sha, checkout.join(&source.path)))
+    }
 }
 
 fn install_github_version_snapshot(
@@ -861,8 +891,7 @@ pub(crate) fn remote_source_browser_url(source: &RemoteSkillSource) -> Option<St
         .strip_prefix("https://github.com/")?
         .trim_end_matches(".git")
         .trim_end_matches('/');
-    let path = source.path.as_deref()?.trim().trim_matches('/');
-    if repo.is_empty() || path.is_empty() {
+    if repo.is_empty() {
         return None;
     }
 
@@ -872,6 +901,13 @@ pub(crate) fn remote_source_browser_url(source: &RemoteSkillSource) -> Option<St
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("main");
+    if source.root {
+        return Some(format!("https://github.com/{repo}/tree/{reference}"));
+    }
+    let path = source.path.as_deref()?.trim().trim_matches('/');
+    if path.is_empty() {
+        return None;
+    }
     Some(format!("https://github.com/{repo}/tree/{reference}/{path}"))
 }
 
@@ -992,6 +1028,7 @@ pub(crate) fn check_one_remote_skill_update(
     let ref_kind = source.ref_kind.clone();
     let source_url = remote_source_browser_url(&source);
     let source_repo_path = source.path.clone();
+    let source_is_root = source.root;
 
     if source.source_type != "github" {
         return RemoteSkillUpdateStatus {
@@ -1069,13 +1106,14 @@ pub(crate) fn check_one_remote_skill_update(
             let active_version = current_version.as_deref().or(installed_sha.as_deref());
             let update_available = if active_version == Some(latest_sha.as_str()) {
                 false
-            } else if let Some(source_repo_path) = source_repo_path.as_deref() {
+            } else if source_is_root || source_repo_path.is_some() {
                 match remote_skill_path_changed(
                     &git,
                     remote_root,
                     repo_url,
                     &latest_sha,
-                    source_repo_path,
+                    source_repo_path.as_deref().unwrap_or_default(),
+                    source_is_root,
                     timeout,
                 ) {
                     Ok(Some(changed)) => changed,
@@ -1152,6 +1190,7 @@ pub(crate) fn remote_skill_path_changed(
     repo_url: &str,
     latest_sha: &str,
     source_repo_path: &str,
+    source_is_root: bool,
     timeout: Duration,
 ) -> Result<Option<bool>> {
     if !is_full_git_sha(latest_sha) {
@@ -1164,14 +1203,19 @@ pub(crate) fn remote_skill_path_changed(
             return Ok(None);
         };
         let checkout = temp.join("checkout");
-        git.fetch_ref_path_with_timeout(
-            repo_url,
-            latest_sha,
-            source_repo_path,
-            &checkout,
-            timeout,
-        )?;
-        let latest_path = checkout.join(source_repo_path);
+        let latest_path = if source_is_root {
+            git.fetch_ref_tree_with_timeout(repo_url, latest_sha, &checkout, timeout)?;
+            checkout
+        } else {
+            git.fetch_ref_path_with_timeout(
+                repo_url,
+                latest_sha,
+                source_repo_path,
+                &checkout,
+                timeout,
+            )?;
+            checkout.join(source_repo_path)
+        };
         let files = git.diff_no_index_tree(current_path, latest_path)?;
         Ok(Some(!files.is_empty()))
     })();
@@ -1295,6 +1339,7 @@ pub(crate) fn write_github_source_metadata(
         "owner": preview.owner,
         "repo": preview.repo,
         "path": preview.path,
+        "root": preview.root,
         "ref": preview.reference,
         "refKind": preview.ref_kind,
         "tracking": preview.tracking,
@@ -1330,7 +1375,16 @@ pub(crate) fn validate_remote_source(source: &RemoteSkillSource) -> Result<()> {
     if let Some(repo_url) = source.repo_url.as_deref() {
         validate_remote_source_repo_url(repo_url)?;
     }
-    if let Some(path) = source.path.as_deref() {
+    if source.root {
+        if source
+            .path
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|path| !path.is_empty())
+        {
+            return Err("GitHub root source must not include a repository path.".to_string());
+        }
+    } else if let Some(path) = source.path.as_deref() {
         skillbox_github::validate_repo_relative_path(path)?;
     }
     if let Some(reference) = source.reference.as_deref() {
@@ -1428,13 +1482,20 @@ pub(crate) fn remote_version_preview_target(
     let repo_url = source
         .repo_url
         .ok_or_else(|| "GitHub source is missing repoUrl.".to_string())?;
-    let source_path = source
-        .path
-        .ok_or_else(|| "GitHub source is missing path.".to_string())?;
+    let source_is_root = source.root;
+    let source_path = source.path.unwrap_or_default();
+    if !source_is_root && source_path.trim().is_empty() {
+        return Err("GitHub source is missing path.".to_string());
+    }
     let checkout = temp.join("checkout");
     let git = skillbox_git::GitService::new();
-    git.fetch_ref_path(&repo_url, to_version, &source_path, &checkout)?;
-    Ok(checkout.join(source_path))
+    if source_is_root {
+        git.fetch_ref_tree(&repo_url, to_version, &checkout)?;
+        Ok(checkout)
+    } else {
+        git.fetch_ref_path(&repo_url, to_version, &source_path, &checkout)?;
+        Ok(checkout.join(source_path))
+    }
 }
 
 pub(crate) fn short_version_label(version: &str) -> String {
@@ -1653,6 +1714,19 @@ pub(crate) fn github_remote_skill_install_preview_id(
     let target_root = target_root
         .map(|path| path.to_string_lossy().to_string())
         .unwrap_or_default();
+    if source.is_root {
+        return content_hash_text(&format!(
+            "github-install:{skill_name}:{}:{}:{}:{}:repository-root:{}:{}:{}:{}",
+            source.url,
+            source.repo_url,
+            source.owner,
+            source.repo,
+            source.reference,
+            ref_kind,
+            installed_sha,
+            target_root
+        ));
+    }
     content_hash_text(&format!(
         "github-install:{skill_name}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
         source.url,
@@ -1761,16 +1835,23 @@ pub(crate) fn ensure_github_version_snapshot(
     let repo_url = source
         .repo_url
         .ok_or_else(|| "GitHub source is missing repoUrl.".to_string())?;
-    let source_path = source
-        .path
-        .ok_or_else(|| "GitHub source is missing path.".to_string())?;
+    let source_is_root = source.root;
+    let source_path = source.path.unwrap_or_default();
+    if !source_is_root && source_path.trim().is_empty() {
+        return Err("GitHub source is missing path.".to_string());
+    }
     let temp = temporary_work_dir("remote-update");
 
     let result = (|| {
         let checkout = temp.join("checkout");
         let git = skillbox_git::GitService::new();
         git.fetch_ref_tree(&repo_url, target_sha, &checkout)?;
-        copy_skill_dir_from_checkout(&checkout.join(source_path), &version_path, &checkout)?;
+        let fetched_skill_path = if source_is_root {
+            checkout.clone()
+        } else {
+            checkout.join(&source_path)
+        };
+        copy_skill_dir_from_checkout(&fetched_skill_path, &version_path, &checkout)?;
         read_skill(&version_path)?;
         Ok(version_path.clone())
     })();

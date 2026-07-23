@@ -725,6 +725,32 @@ fn add_workspace(request: skillbox_core::WorkspaceAddRequest) -> Result<Value, S
 }
 
 #[tauri::command]
+async fn preview_workspace_setup(
+    request: skillbox_core::WorkspaceSetupPreviewRequest,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result =
+            skillbox_core::preview_workspace_setup(request, skillbox_core::default_managed_root())?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Workspace setup preview task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn apply_workspace_setup(
+    request: skillbox_core::WorkspaceSetupApplyRequest,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result =
+            skillbox_core::apply_workspace_setup(request, skillbox_core::default_managed_root())?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Workspace setup task failed: {error}"))?
+}
+
+#[tauri::command]
 fn forget_workspace(path: String) -> Result<Value, String> {
     let result = skillbox_core::forget_workspace(path, skillbox_core::default_managed_root())?;
     serde_json::to_value(result).map_err(|error| error.to_string())
@@ -781,6 +807,7 @@ async fn install_app_update(
 
 pub fn run() {
     let result = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
@@ -839,6 +866,8 @@ pub fn run() {
             list_workspaces,
             scan_workspaces,
             add_workspace,
+            preview_workspace_setup,
+            apply_workspace_setup,
             forget_workspace,
             check_app_update,
             install_app_update

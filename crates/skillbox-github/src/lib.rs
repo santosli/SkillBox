@@ -8,6 +8,7 @@ pub struct GitHubSkillSource {
     pub repo: String,
     pub reference: String,
     pub path: String,
+    pub is_root: bool,
     pub url: String,
     pub repo_url: String,
     pub kind: String,
@@ -43,6 +44,7 @@ pub fn parse_github_skill_url(input: &str) -> Result<GitHubSkillSource, String> 
     let owner;
     let repo;
     let skill_path;
+    let is_root;
 
     match url.host_str() {
         Some("github.com") => {
@@ -57,9 +59,12 @@ pub fn parse_github_skill_url(input: &str) -> Result<GitHubSkillSource, String> 
                 kind = parts[2].to_string();
                 let (parsed_ref, parsed_path) = split_ref_and_skill_path(&parts[3..]);
                 reference = parsed_ref;
-                skill_path = strip_skill_md(&parsed_path);
+                if kind == "blob" && parsed_path.is_empty() {
+                    return Err("GitHub blob URL must point to a SKILL.md file".to_string());
+                }
+                (skill_path, is_root) = normalize_skill_path(&parsed_path);
             } else {
-                skill_path = strip_skill_md(&parts[2..].join("/"));
+                (skill_path, is_root) = normalize_skill_path(&parts[2..].join("/"));
             }
         }
         Some("raw.githubusercontent.com") => {
@@ -72,7 +77,7 @@ pub fn parse_github_skill_url(input: &str) -> Result<GitHubSkillSource, String> 
             repo = trim_git_suffix(parts[1]);
             let (parsed_ref, parsed_path) = split_ref_and_skill_path(&parts[2..]);
             reference = parsed_ref;
-            skill_path = strip_skill_md(&parsed_path);
+            (skill_path, is_root) = normalize_skill_path(&parsed_path);
         }
         Some("api.github.com") => {
             let parts = path_parts(&url);
@@ -87,24 +92,33 @@ pub fn parse_github_skill_url(input: &str) -> Result<GitHubSkillSource, String> 
                 .find(|(key, _)| key == "ref")
                 .map(|(_, value)| value.to_string())
                 .unwrap_or(reference);
-            skill_path = strip_skill_md(&parts[4..].join("/"));
+            (skill_path, is_root) = normalize_skill_path(&parts[4..].join("/"));
         }
         _ => return Err("Only GitHub URLs are supported".to_string()),
     }
 
-    if owner.is_empty() || repo.is_empty() || skill_path.is_empty() {
+    if owner.is_empty() || repo.is_empty() || (!is_root && skill_path.is_empty()) {
         return Err("GitHub URL must point to a skill directory or SKILL.md file".to_string());
     }
-    validate_repo_relative_path(&skill_path)?;
+    if !is_root {
+        validate_repo_relative_path(&skill_path)?;
+    }
     validate_git_reference(&reference)?;
 
+    let normalized_url = if is_root {
+        format!("https://github.com/{owner}/{repo}/tree/{reference}")
+    } else {
+        format!("https://github.com/{owner}/{repo}/tree/{reference}/{skill_path}")
+    };
+
     Ok(GitHubSkillSource {
-        url: format!("https://github.com/{owner}/{repo}/tree/{reference}/{skill_path}"),
+        url: normalized_url,
         repo_url: format!("https://github.com/{owner}/{repo}.git"),
         owner,
         repo,
         reference,
         path: skill_path,
+        is_root,
         kind,
     })
 }
@@ -231,11 +245,22 @@ fn known_skill_path_start(parts: &[&str]) -> Option<usize> {
     })
 }
 
-fn strip_skill_md(path: &str) -> String {
-    path.strip_suffix("/SKILL.md")
-        .or_else(|| path.strip_suffix("/skill.md"))
-        .unwrap_or(path)
-        .to_string()
+fn normalize_skill_path(path: &str) -> (String, bool) {
+    if path == "SKILL.md" || path == "skill.md" {
+        return (String::new(), true);
+    }
+
+    if path.is_empty() {
+        return (String::new(), true);
+    }
+
+    (
+        path.strip_suffix("/SKILL.md")
+            .or_else(|| path.strip_suffix("/skill.md"))
+            .unwrap_or(path)
+            .to_string(),
+        false,
+    )
 }
 
 fn trim_git_suffix(repo: &str) -> String {
@@ -257,6 +282,7 @@ mod tests {
         assert_eq!(source.repo, "skills");
         assert_eq!(source.reference, "main");
         assert_eq!(source.path, "skills/.curated/example");
+        assert!(!source.is_root);
     }
 
     #[test]
@@ -306,6 +332,57 @@ mod tests {
             .reference,
             "dev"
         );
+    }
+
+    #[test]
+    fn normalizes_root_skill_md_file_urls_to_repository_root() {
+        for url in [
+            "https://github.com/acme/repo/blob/main/SKILL.md",
+            "https://github.com/acme/repo/blob/main/skill.md",
+            "https://github.com/acme/repo/SKILL.md",
+            "https://raw.githubusercontent.com/acme/repo/main/SKILL.md",
+            "https://raw.githubusercontent.com/acme/repo/main/skill.md",
+            "https://api.github.com/repos/acme/repo/contents/SKILL.md?ref=main",
+            "https://api.github.com/repos/acme/repo/contents/skill.md?ref=main",
+        ] {
+            let source = parse_github_skill_url(url).unwrap();
+
+            assert!(source.is_root, "{url}");
+            assert_eq!(source.path, "", "{url}");
+            assert_eq!(
+                source.url, "https://github.com/acme/repo/tree/main",
+                "{url}"
+            );
+        }
+
+        let humanizer =
+            parse_github_skill_url("https://github.com/op7418/Humanizer-zh/blob/main/SKILL.md")
+                .unwrap();
+        assert_eq!(humanizer.owner, "op7418");
+        assert_eq!(humanizer.repo, "Humanizer-zh");
+        assert_eq!(humanizer.reference, "main");
+        assert_eq!(humanizer.path, "");
+        assert!(humanizer.is_root);
+    }
+
+    #[test]
+    fn normalizes_repository_urls_to_root_skill_sources() {
+        for url in [
+            "https://github.com/acme/repo",
+            "https://github.com/acme/repo/",
+            "https://github.com/acme/repo.git",
+            "https://github.com/acme/repo/tree/main",
+        ] {
+            let source = parse_github_skill_url(url).unwrap();
+
+            assert!(source.is_root, "{url}");
+            assert_eq!(source.path, "", "{url}");
+            assert_eq!(source.repo, "repo", "{url}");
+            assert_eq!(
+                source.url, "https://github.com/acme/repo/tree/main",
+                "{url}"
+            );
+        }
     }
 
     #[test]

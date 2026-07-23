@@ -2996,12 +2996,205 @@ dd {
 
 .workspaceDialog {
   display: grid;
-  width: min(620px, calc(100vw - 64px));
+  width: min(680px, calc(100vw - 64px));
+  max-height: min(780px, calc(100vh - 64px));
+  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid var(--skillbox-border-control);
   border-radius: 12px;
   background: var(--skillbox-surface);
   box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
+}
+
+.workspaceSetupHint {
+  color: var(--skillbox-text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.workspacePathPickerRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.workspaceFolderPickerButton {
+  min-width: 132px;
+  white-space: nowrap;
+}
+
+.workspaceFolderPickerButton svg {
+  width: 16px;
+  height: 16px;
+}
+
+.workspaceSetupLoading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--skillbox-text-secondary);
+  font-size: 13px;
+}
+
+.workspaceSetupLoading svg {
+  width: 16px;
+  height: 16px;
+  animation: syncSpin 0.8s linear infinite;
+  color: var(--skillbox-blue);
+}
+
+.workspaceSetupPreview {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid var(--skillbox-border);
+  padding-top: 16px;
+}
+
+.workspaceSetupPreviewHeader {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.workspaceSetupPreviewHeader > svg {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  color: var(--skillbox-blue);
+}
+
+.workspaceSetupPreviewHeader > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.workspaceSetupPreviewHeader strong {
+  color: var(--skillbox-text);
+  font-size: 14px;
+}
+
+.workspaceSetupPreviewHeader span {
+  color: var(--skillbox-text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.workspaceSetupRoots {
+  display: grid;
+  gap: 8px;
+}
+
+.workspaceSetupRoot {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 58px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--skillbox-border-control);
+  border-radius: 8px;
+  background: var(--skillbox-surface);
+  color: var(--skillbox-text);
+  cursor: pointer;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.workspaceSetupRoot:hover,
+.workspaceSetupRoot.active {
+  border-color: var(--skillbox-blue-border);
+  background: var(--skillbox-surface-blue-subtle);
+}
+
+.workspaceSetupRootChoice {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.workspaceSetupRootChoice > span:last-child {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.workspaceSetupRootChoice strong,
+.workspaceSetupRootChoice small {
+  overflow-wrap: anywhere;
+}
+
+.workspaceSetupRootChoice strong {
+  font-family: var(--skillbox-font-mono);
+  font-size: 13px;
+}
+
+.workspaceSetupRootChoice small {
+  color: var(--skillbox-text-muted);
+  font-size: 11px;
+}
+
+.workspaceSetupRadio {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  border: 1px solid var(--skillbox-border-control);
+  border-radius: 50%;
+  background: var(--skillbox-surface);
+  box-shadow: inset 0 0 0 4px var(--skillbox-surface);
+}
+
+.workspaceSetupRoot.active .workspaceSetupRadio {
+  border-color: var(--skillbox-blue);
+  background: var(--skillbox-blue);
+}
+
+.workspaceSetupBoundary {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 8px;
+  border-radius: 8px;
+  background: var(--skillbox-green-bg);
+  color: var(--skillbox-green-text);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 10px 12px;
+}
+
+.workspaceSetupBoundary svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.workspaceSetupBoundary code {
+  overflow-wrap: anywhere;
+  color: inherit;
+}
+
+@media (max-width: 640px) {
+  .workspaceDialog {
+    width: calc(100vw - 32px);
+    max-height: calc(100vh - 32px);
+  }
+
+  .workspaceSetupRoot {
+    align-items: flex-start;
+  }
+
+  .workspacePathPickerRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workspaceFolderPickerButton {
+    width: 100%;
+  }
 }
 
 .deployWorkspaceDialog {
@@ -4355,6 +4548,7 @@ dd {
 }
 
 .remoteImportField > span,
+.remoteImportField > label,
 .fieldLabelRow > span {
   color: var(--skillbox-text-secondary);
   font-size: 13px;

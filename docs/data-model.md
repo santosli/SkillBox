@@ -64,6 +64,7 @@ GitHub remote 使用这些字段：
   "owner": "openai",
   "repo": "skills",
   "path": "skills/example",
+  "root": false,
   "ref": "main",
   "refKind": "branch",
   "tracking": true,
@@ -79,6 +80,8 @@ GitHub remote 使用这些字段：
 GitHub source 的版本语义：
 
 - `refKind: "branch"` 且 `tracking: true` 表示跟踪分支，update check 会查询远端最新 SHA。
+- 目录 source 使用非空 `path` 和 `root: false`。根目录包含 `SKILL.md` 的 standalone repository 使用空 `path` 和 `root: true`，其 managed version 是移除 `.git` metadata 后的完整 worktree。
+- 旧 `source.json` 没有 `root` 字段时按 `false` 读取，因此现有目录 source 不需要 migration。
 - `refKind: "tag"` 或 `refKind: "commit"` 表示 pinned source，update check 返回 `pinned`，不会自动判断有可用更新。
 - `currentVersion` 是当前 `current` symlink 指向的 managed version 目录名，可以是 `manual-*` 版本，也可以是 GitHub commit SHA。
 - `installedSha` 只在当前版本来自 GitHub commit 时设置；手动绑定远端但尚未替换内容时保留为 `null`。
@@ -265,7 +268,8 @@ deployments
 - `kind=global` 表示 agent 自带或 home-level skills root，例如 `~/.codex/skills`、`~/.agents/skills`、`~/.claude/skills`。
 - `kind=user` 表示用户项目局部 skills root，例如 `<project>/.agents/skills`。
 - `source=auto` 表示由 scan 自动发现；`source=manual` 表示用户显式添加。
-- 手动添加要求目录已存在；删除 manual workspace 只删除 registry 记录，不删除文件。
+- `source=manual` 可以来自现有 skills-root 注册，也可以来自 desktop workspace setup 的 preview-confirmed project-local root 初始化。UI 的 `Project` 仍写入 `kind=user`，因此不改变现有 enum 或 schema。
+- 初始化只允许 `<project>/.agents/skills`、`<project>/.codex/skills`、`<project>/.claude/skills`；preview 不写磁盘，apply 每次最多创建一个选中的 root。删除 manual workspace 只删除 registry 记录，不删除文件。
 - `canonical_path` 用于去重，`path` 保留展示路径。
 
 Node MVP 旧表差异：

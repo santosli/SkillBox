@@ -77,6 +77,24 @@ export function normalizeWorkspaces(value) {
   return value.map(normalizeWorkspace);
 }
 
+export function normalizeWorkspaceSetupPreview(value = {}) {
+  const roots = Array.isArray(value.roots) ? value.roots : [];
+  return {
+    previewId: String(value.preview_id || value.previewId || ''),
+    selectedPath: String(value.selected_path || value.selectedPath || ''),
+    kind: value.kind === 'global' ? 'global' : 'user',
+    mode: String(value.mode || ''),
+    roots: roots.map((root) => ({
+      path: String(root.path || ''),
+      relativePath: String(root.relative_path || root.relativePath || ''),
+      agentId: String(root.agent_id || root.agentId || ''),
+      label: String(root.label || 'Skills folder'),
+      exists: Boolean(root.exists),
+      recommended: Boolean(root.recommended)
+    }))
+  };
+}
+
 export function workspaceCounts(workspaces = []) {
   return workspaces.reduce(
     (counts, workspace) => {

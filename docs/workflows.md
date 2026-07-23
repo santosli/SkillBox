@@ -120,9 +120,9 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 步骤：
 
-- 解析 GitHub tree、blob、raw 或 contents API URL。
-- 标准化 owner、repo、ref、path、repoUrl、url。
-- Preview 阶段用 `skillbox-git::GitService::fetch_ref_path` 通过结构化 Git 参数拉取指定 ref/path 到临时目录。
+- 解析 GitHub repository、tree、blob、raw 或 contents API URL；standalone repository URL 和仓库根 `SKILL.md` URL 会显式标准化为 repository-root source。
+- 标准化 owner、repo、ref、path、root、repoUrl、url。目录 source 使用非空 `path`；repository-root source 使用空 `path` 和 `root: true`。
+- Preview 阶段对目录 source 使用 `skillbox-git::GitService::fetch_ref_path` 拉取指定 ref/path；对 repository-root source 使用 `fetch_ref_tree` 拉取完整 worktree，并在生成 diff 前移除 `.git` checkout metadata。
 - Preview 阶段验证下载目录包含 `SKILL.md`，读取 skill name 并校验命名。
 - Preview 阶段生成 empty directory -> remote skill directory 的全文件 diff 和 deterministic `preview_id`。
 - Preview 阶段不得写入 `remote-skills/<name>`、`current`、`source.json`、SQLite，也不得部署到 runtime。
@@ -137,7 +137,9 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 失败与回滚：
 
-- URL 不指向 skill 目录或 `SKILL.md` 时拒绝。
+- URL 不指向含 `SKILL.md` 的 skill 目录或 standalone repository root 时拒绝。
+- repository-root source 的 preview、version snapshot 和 runtime deployment 只使用清理后的 worktree；`.git` 和其它 checkout metadata 不进入 managed store。
+- repository-root worktree 中逃逸 source root 的 symlink 会在 copy 前拒绝，不写 managed store。
 - `install` 缺少 `preview_id` 或 preview 身份已过期时拒绝，不写 managed store。
 - Git 命令失败时清理临时目录，不写 managed store。
 - version 已存在时可以复用，但仍需验证 `SKILL.md`。
@@ -271,7 +273,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 桌面 `Bind source` 弹窗打开时会后台调用 `find_remote_source_candidates`，候选只用于预览，仍需用户确认后才绑定。
 - 用户为已有 remote skill 手动添加 GitHub source URL。
 - 用户触发 Claude Marketplace candidate search，为已有 remote skill 自动寻找可能的 source。
-- MVP 只接受 GitHub skill directory 或 `SKILL.md` URL。
+- 接受 GitHub skill directory URL、目录内 `SKILL.md` URL，以及根目录含 `SKILL.md` 的 standalone repository URL / root `SKILL.md` URL。repository-root source 使用清理后的完整 worktree，且不保存 `.git` metadata。
 
 步骤：
 
@@ -282,7 +284,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 绑定前校验会先尝试候选 URL 的原始 path；若 marketplace path 是逻辑 skill 名称而不是仓库真实目录，继续尝试 `skills/<name>`、`skills/public/<name>`、`.claude/skills/<name>` 等常见布局，并把成功解析出的 GitHub URL 写入预览和 `source.json`。
 - 桌面 source preview / bind command 必须在线程池中执行；Git fetch 必须非交互且有界超时，避免 `Checking source...` 阻塞整个 app。
 - 校验本地 skill name，并解析 GitHub URL 的 owner、repo、ref 和 path。
-- 在临时工作树中 fetch 目标 ref，并只 checkout URL 指向的 skill path。
+- 在临时工作树中 fetch 目标 ref。目录 source 只 checkout URL 指向的 skill path；repository-root source checkout 完整 worktree 并移除 `.git` metadata。
 - 读取远端 `SKILL.md`，和本地 `current` 指向的 skill 做本地验证。
 - `exact_match`：远端 skill name 和内容 hash 都匹配，可以绑定 source。
 - `same_skill_changed`：远端 skill name 匹配但内容 hash 不同，可以绑定 source，但必须告知用户当前内容不会被替换。
@@ -319,7 +321,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 如果没有新 SHA，返回 no-op。
 - 桌面打开 review dialog 后必须先渲染 loading 状态，再启动 `preview_remote_version_change`。
 - 预览阶段先列出 `versions/*`，标记当前 `currentVersion`。
-- 在临时工作树中 fetch 目标 ref，并只 checkout `source.json.path` 对应的 skill 目录。
+- 在临时工作树中 fetch 目标 ref。目录 source checkout `source.json.path` 对应的 skill 目录；`source.json.root: true` 的 repository-root source 使用移除 `.git` metadata 的完整 worktree。
 - 验证 `SKILL.md` 和 skill name。
 - 应用前对当前 `current` 目录和目标 snapshot 生成 no-index diff；diff 必须包含所有新增、修改、删除文件，路径规范化为 skill 内相对路径。
 - diff preview 对二进制文件或超过 1 MB 的文件保留文件行、hash 和 size，但不展开文本 diff。
@@ -502,7 +504,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 - 桌面 UI 打开 Workspaces 页面。
 - 桌面 UI 或 Rust CLI 执行 workspace scan。
-- 用户手动添加或忘记 workspace。
+- 用户通过手动路径或打包版 Tauri app 的原生单目录选择器添加现有 skills root，或选择普通项目目录并显式初始化一个受支持的项目局部 root。
 - 用户按 workspace 名称、路径或 agent 搜索，并可与 Global/User 类型组合过滤。
 - 用户点击 workspace 查看其中 skills，并选择导入。
 - Dashboard scan import candidates 时自动登记已扫描的 workspace。
@@ -515,13 +517,23 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - display name 由 path 推导：global root 使用 agent 名，项目局部 root 使用项目目录名，不拼接 `global` 或 `user`。
 - 扫描每个 workspace root，记录 skill 数、已导入 skill 数、scan error 数和最后一条 scan error。
 - 点击 workspace 时只扫描该 workspace path，复用 import candidate review 行样式展示其中的 skills，并使用现有 `import_candidates` 流程导入选中项。
-- 手动添加 workspace 时必须提供已存在目录，并立即扫描该目录。
+- Add workspace 的 `Project` 选项继续持久化为兼容现有 registry 的 `kind=user`；`Global` 继续持久化为 `kind=global`，不需要 schema migration。
+- `Project or skills folder` 保留可编辑的绝对路径输入；打包版 Tauri app 额外提供原生目录选择器，只允许选择一个本地目录，不接受文件或多选。浏览器 prototype 不把 file input 当成可信绝对路径来源。
+- 原生选择器返回目录后，UI 将绝对路径写入现有输入框，清除旧 preview、root selection 和 error，并在保持当前 Project/Global scope 的前提下立即调用只读 workspace setup preview；用户取消选择时保留当前路径和 preview，不显示错误。
+- workspace setup preview 是只读操作。现有 skills-root path 可直接登记；普通项目目录只检测直属的 `.agents/skills`、`.codex/skills`、`.claude/skills`。
+- 若项目中存在一个或多个受支持 root，用户必须选择其中一个登记。若不存在，UI 只允许选择并创建一个 root；已有 runtime marker 优先推荐对应 root，否则确定性默认 `.agents/skills`。
+- apply 会重新校验 preview identity、项目 canonical boundary、固定 relative-root allowlist、目录类型和 symlink 边界，然后才创建并登记。不会修改现有项目文件，也不会同时创建多个 runtime roots。
+- Global setup 只允许登记已存在目录，不推断或创建 global root。旧 `workspace-add <path> --kind user|global` CLI contract 继续只登记已存在目录。
 - 忘记 workspace 只允许删除 `source=manual` 的 registry row，不删除或修改磁盘文件。
 - Workspace 搜索只过滤当前已登记的 rows，不触发文件系统扫描；清空 query 后恢复当前类型下的全部 rows。
 
 失败与回滚：
 
 - 不存在的手动 path 拒绝添加。
+- 目录选择器取消是 no-op；picker/plugin 错误以内联可操作错误显示，不替换现有路径，也不绕过 setup preview。
+- setup preview 不写 managed store、SQLite 或项目目录；缺失 root 只在用户确认 `Create & add` 后创建。
+- traversal、project/candidate symlink、逃逸项目 canonical boundary、现有非目录 target、不可读目录、stale/tampered preview 都拒绝 apply；用户明确选择的精确 skills-root symlink 仍按旧 contract 解析到其真实目录后登记。
+- apply 后注册失败时，只反向移除本次操作新建且仍为空的目录；不删除预先存在的目录或内容。
 - 自动 scan 跳过不存在或不可读取的 roots。
 - scan error 记录在 workspace 行上，不中断其它 workspace。
 - forget 不能删除 auto workspace，也不能删除 runtime 目录中的内容。
@@ -532,7 +544,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `cargo run -p skillbox-cli --offline -- workspace-scan --managed-root <temp-skillbox-root>`
 - `cargo run -p skillbox-cli --offline -- workspace-add <temp-root> --kind user --managed-root <temp-skillbox-root>`
 - `npm test`
-- 桌面 UI 验证 sidebar 只保留 Dashboard、Workspaces、Settings，Workspace 页面可 search、组合类型筛选、scan、add、forget manual rows，并且点击 workspace 可查看和导入该 workspace 下的 skills。
+- 桌面 UI 验证 sidebar 只保留 Dashboard、Workspaces、Settings；Workspace 页面可 search、组合类型筛选、scan、add、forget manual rows，并覆盖 manual path、native single-directory picker、picker cancellation/error、existing-root、no-root initialization、multiple-root selection 和窄窗口状态。
 
 ## 14. Skill Usage Recording
 

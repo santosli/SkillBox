@@ -1,4 +1,11 @@
 use crate::*;
+use std::os::unix::fs::MetadataExt;
+
+const PROJECT_WORKSPACE_ROOTS: [(&str, &str, &str); 3] = [
+    (".agents/skills", "agents", "Agents"),
+    (".codex/skills", "codex", "Codex"),
+    (".claude/skills", "claude", "Claude Code"),
+];
 
 pub fn list_workspaces(managed_root: impl AsRef<Path>) -> Result<Vec<Workspace>> {
     let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
@@ -69,6 +76,440 @@ pub fn add_workspace(
             )
         },
     )
+}
+
+pub fn preview_workspace_setup(
+    request: WorkspaceSetupPreviewRequest,
+    managed_root: impl AsRef<Path>,
+) -> Result<WorkspaceSetupPreview> {
+    let selected_path = expand_home(request.selected_path);
+    let selected_metadata = fs::symlink_metadata(&selected_path).map_err(|error| {
+        format!(
+            "Project or skills folder cannot be read: {} ({error})",
+            selected_path.display()
+        )
+    })?;
+    let exact_root = request.kind == WorkspaceKind::Global
+        || selected_path.file_name().and_then(|name| name.to_str()) == Some("skills");
+    if selected_metadata.file_type().is_symlink() && !exact_root {
+        return Err(format!(
+            "Project directory cannot be a symlink: {}",
+            selected_path.display()
+        ));
+    }
+    let selected_path = fs::canonicalize(&selected_path).map_err(|error| error.to_string())?;
+    let metadata = fs::metadata(&selected_path).map_err(|error| error.to_string())?;
+    if !metadata.is_dir() {
+        return Err(format!(
+            "Project or skills folder is not a directory: {}",
+            selected_path.display()
+        ));
+    }
+    if metadata.permissions().mode() & 0o444 == 0 || metadata.permissions().mode() & 0o111 == 0 {
+        return Err(format!(
+            "Project or skills folder is not readable: {}",
+            selected_path.display()
+        ));
+    }
+    fs::read_dir(&selected_path).map_err(|error| {
+        format!(
+            "Project or skills folder is not readable: {} ({error})",
+            selected_path.display()
+        )
+    })?;
+    let (mode, roots) = if exact_root {
+        (
+            WorkspaceSetupMode::ExistingRoot,
+            vec![workspace_setup_exact_root(&selected_path)],
+        )
+    } else {
+        validate_workspace_setup_project(&selected_path, managed_root.as_ref())?;
+        let roots = project_workspace_root_options(&selected_path)?;
+        let mode = if roots.iter().any(|root| root.exists) {
+            WorkspaceSetupMode::ProjectWithRoots
+        } else {
+            WorkspaceSetupMode::ProjectWithoutRoots
+        };
+        (mode, roots)
+    };
+
+    let preview_id = workspace_setup_preview_id(&selected_path, request.kind, mode, &roots);
+    Ok(WorkspaceSetupPreview {
+        preview_id,
+        selected_path,
+        kind: request.kind,
+        mode,
+        roots,
+    })
+}
+
+pub fn apply_workspace_setup(
+    request: WorkspaceSetupApplyRequest,
+    managed_root: impl AsRef<Path>,
+) -> Result<WorkspaceSetupApplyResult> {
+    let managed_root = managed_root.as_ref().to_path_buf();
+    let selected_root = request.selected_root.clone();
+    audited_operation(
+        OperationStart {
+            operation_type: "add_workspace".to_string(),
+            actor: "core".to_string(),
+            entity_type: "workspace".to_string(),
+            entity_name: selected_root.to_string_lossy().to_string(),
+            summary: "Set up workspace".to_string(),
+            payload: serde_json::json!({
+                "selectedPath": request.selected_path,
+                "selectedRoot": request.selected_root,
+                "kind": request.kind.as_str(),
+                "createMissing": request.create_missing,
+                "previewId": request.preview_id
+            }),
+        },
+        &managed_root,
+        || apply_workspace_setup_unlogged(request, &managed_root),
+        |result| {
+            (
+                format!("Added workspace {}", result.workspace.display_name),
+                serde_json::json!({
+                    "path": result.workspace.path,
+                    "kind": result.workspace.kind.as_str(),
+                    "source": result.workspace.source.as_str(),
+                    "createdPath": result.created_path
+                }),
+            )
+        },
+    )
+}
+
+fn apply_workspace_setup_unlogged(
+    request: WorkspaceSetupApplyRequest,
+    managed_root: &Path,
+) -> Result<WorkspaceSetupApplyResult> {
+    apply_workspace_setup_with_register(request, managed_root, |workspace_request| {
+        add_workspace_unlogged(workspace_request, managed_root)
+    })
+}
+
+pub(crate) fn apply_workspace_setup_with_register<F>(
+    request: WorkspaceSetupApplyRequest,
+    managed_root: &Path,
+    register: F,
+) -> Result<WorkspaceSetupApplyResult>
+where
+    F: FnOnce(WorkspaceAddRequest) -> Result<Workspace>,
+{
+    let preview = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: request.selected_path.clone(),
+            kind: request.kind,
+        },
+        managed_root,
+    )?;
+    if preview.preview_id != request.preview_id {
+        return Err(
+            "Workspace setup preview is stale. Preview the folder again before continuing."
+                .to_string(),
+        );
+    }
+
+    let selected_root = expand_home(request.selected_root);
+    let selected_option = preview
+        .roots
+        .iter()
+        .find(|option| option.path == selected_root)
+        .ok_or_else(|| {
+            "Selected skills folder is not part of this workspace preview.".to_string()
+        })?;
+    if request.create_missing == selected_option.exists {
+        return Err(
+            "Workspace setup selection changed. Preview the folder again before continuing."
+                .to_string(),
+        );
+    }
+    if request.kind == WorkspaceKind::Global && request.create_missing {
+        return Err("Global skills folders must already exist.".to_string());
+    }
+
+    let mut created = Vec::new();
+    let workspace_path = if request.create_missing {
+        create_project_workspace_root(&preview.selected_path, selected_option, &mut created)?
+    } else {
+        validate_existing_workspace_root(&preview.selected_path, &selected_root, preview.mode)?
+    };
+
+    let result = register(WorkspaceAddRequest {
+        path: workspace_path.clone(),
+        kind: request.kind,
+    });
+    match result {
+        Ok(workspace) => Ok(WorkspaceSetupApplyResult {
+            workspace,
+            created_path: request.create_missing.then_some(workspace_path),
+        }),
+        Err(error) => {
+            cleanup_created_workspace_dirs(&created);
+            Err(error)
+        }
+    }
+}
+
+fn workspace_setup_exact_root(path: &Path) -> WorkspaceSetupRootOption {
+    let agent_id = workspace_agent_id(path).unwrap_or_else(|| "custom".to_string());
+    let label =
+        workspace_agent_label(Some(&agent_id)).unwrap_or_else(|| "Skills folder".to_string());
+    WorkspaceSetupRootOption {
+        path: path.to_path_buf(),
+        relative_path: path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("skills")
+            .to_string(),
+        agent_id,
+        label,
+        exists: true,
+        recommended: true,
+    }
+}
+
+fn project_workspace_root_options(project: &Path) -> Result<Vec<WorkspaceSetupRootOption>> {
+    let mut roots = Vec::new();
+    for (index, (relative_path, agent_id, label)) in PROJECT_WORKSPACE_ROOTS.iter().enumerate() {
+        let candidate = project.join(relative_path);
+        validate_project_workspace_root_chain(project, Path::new(relative_path))?;
+        let exists = match fs::symlink_metadata(&candidate) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() {
+                    return Err(format!(
+                        "Supported skills folder cannot be a symlink: {}",
+                        candidate.display()
+                    ));
+                }
+                if !metadata.is_dir() {
+                    return Err(format!(
+                        "Supported skills folder is not a directory: {}",
+                        candidate.display()
+                    ));
+                }
+                if metadata.permissions().mode() & 0o444 == 0
+                    || metadata.permissions().mode() & 0o111 == 0
+                {
+                    return Err(format!(
+                        "Supported skills folder is not readable: {}",
+                        candidate.display()
+                    ));
+                }
+                let canonical = fs::canonicalize(&candidate).map_err(|error| error.to_string())?;
+                if !canonical.starts_with(project) {
+                    return Err(format!(
+                        "Supported skills folder escapes the selected project: {}",
+                        candidate.display()
+                    ));
+                }
+                fs::read_dir(&candidate).map_err(|error| {
+                    format!(
+                        "Supported skills folder is not readable: {} ({error})",
+                        candidate.display()
+                    )
+                })?;
+                true
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => return Err(error.to_string()),
+        };
+        roots.push(WorkspaceSetupRootOption {
+            path: candidate,
+            relative_path: (*relative_path).to_string(),
+            agent_id: (*agent_id).to_string(),
+            label: (*label).to_string(),
+            exists,
+            recommended: index == 0,
+        });
+    }
+
+    let recommended_index = roots.iter().position(|root| root.exists).or_else(|| {
+        roots.iter().position(|root| {
+            let marker = root.relative_path.split('/').next().unwrap_or_default();
+            project.join(marker).is_dir()
+        })
+    });
+    if let Some(recommended_index) = recommended_index {
+        for (index, root) in roots.iter_mut().enumerate() {
+            root.recommended = index == recommended_index;
+        }
+    }
+    Ok(roots)
+}
+
+fn validate_workspace_setup_project(project: &Path, managed_root: &Path) -> Result<()> {
+    let home = fs::canonicalize(home_dir()).ok();
+    if project.parent().is_none() || home.as_deref() == Some(project) {
+        return Err(
+            "Choose a project directory, not the filesystem or home directory.".to_string(),
+        );
+    }
+
+    let managed_root = expand_home(managed_root.to_path_buf());
+    let managed_root = fs::canonicalize(&managed_root).unwrap_or(managed_root);
+    if project == managed_root || project.starts_with(&managed_root) {
+        return Err("The SkillBox managed store cannot be initialized as a workspace.".to_string());
+    }
+    Ok(())
+}
+
+fn validate_project_workspace_root_chain(project: &Path, relative: &Path) -> Result<()> {
+    let mut current = project.to_path_buf();
+    for component in relative.components() {
+        let Component::Normal(name) = component else {
+            return Err("Workspace root contains an unsafe path component.".to_string());
+        };
+        current.push(name);
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(format!(
+                    "Supported workspace path cannot be a symlink: {}",
+                    current.display()
+                ));
+            }
+            Ok(metadata) if !metadata.is_dir() => {
+                return Err(format!(
+                    "Supported workspace path is not a directory: {}",
+                    current.display()
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    Ok(())
+}
+
+fn workspace_setup_preview_id(
+    selected_path: &Path,
+    kind: WorkspaceKind,
+    mode: WorkspaceSetupMode,
+    roots: &[WorkspaceSetupRootOption],
+) -> String {
+    let selected_identity = fs::metadata(selected_path)
+        .map(|metadata| format!("{}:{}", metadata.dev(), metadata.ino()))
+        .unwrap_or_else(|_| "missing".to_string());
+    let roots = roots
+        .iter()
+        .map(|root| {
+            let identity = fs::metadata(&root.path)
+                .map(|metadata| format!("{}:{}", metadata.dev(), metadata.ino()))
+                .unwrap_or_else(|_| "missing".to_string());
+            format!("{}:{}:{identity}", root.path.display(), root.exists)
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+    content_hash_text(&format!(
+        "workspace-setup-v1\n{}\n{}\n{}\n{:?}\n{}",
+        selected_path.display(),
+        selected_identity,
+        kind.as_str(),
+        mode,
+        roots
+    ))
+}
+
+fn validate_existing_workspace_root(
+    selected_path: &Path,
+    selected_root: &Path,
+    mode: WorkspaceSetupMode,
+) -> Result<PathBuf> {
+    let metadata = fs::symlink_metadata(selected_root).map_err(|error| error.to_string())?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(format!(
+            "Skills folder is no longer a safe directory: {}",
+            selected_root.display()
+        ));
+    }
+    let canonical = fs::canonicalize(selected_root).map_err(|error| error.to_string())?;
+    if mode != WorkspaceSetupMode::ExistingRoot && !canonical.starts_with(selected_path) {
+        return Err(format!(
+            "Skills folder escapes the selected project: {}",
+            selected_root.display()
+        ));
+    }
+    fs::read_dir(&canonical).map_err(|error| error.to_string())?;
+    Ok(canonical)
+}
+
+fn create_project_workspace_root(
+    project: &Path,
+    option: &WorkspaceSetupRootOption,
+    created: &mut Vec<PathBuf>,
+) -> Result<PathBuf> {
+    if option.exists
+        || !PROJECT_WORKSPACE_ROOTS
+            .iter()
+            .any(|(relative, _, _)| *relative == option.relative_path)
+    {
+        return Err("Unsupported workspace root choice.".to_string());
+    }
+    let relative = Path::new(&option.relative_path);
+    if relative.is_absolute()
+        || relative.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err("Workspace root contains an unsafe path component.".to_string());
+    }
+
+    let mut current = project.to_path_buf();
+    for component in relative.components() {
+        let Component::Normal(name) = component else {
+            return Err("Workspace root contains an unsafe path component.".to_string());
+        };
+        current.push(name);
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                    cleanup_created_workspace_dirs(created);
+                    return Err(format!(
+                        "Refusing to create skills folder through a non-directory or symlink: {}",
+                        current.display()
+                    ));
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if let Err(error) = fs::create_dir(&current) {
+                    cleanup_created_workspace_dirs(created);
+                    return Err(format!("Unable to create {}: {error}", current.display()));
+                }
+                created.push(current.clone());
+            }
+            Err(error) => {
+                cleanup_created_workspace_dirs(created);
+                return Err(error.to_string());
+            }
+        }
+    }
+
+    let canonical = match fs::canonicalize(&current) {
+        Ok(canonical) => canonical,
+        Err(error) => {
+            cleanup_created_workspace_dirs(created);
+            return Err(error.to_string());
+        }
+    };
+    if !canonical.starts_with(project) {
+        cleanup_created_workspace_dirs(created);
+        return Err(format!(
+            "Created skills folder escapes the selected project: {}",
+            current.display()
+        ));
+    }
+    Ok(canonical)
+}
+
+fn cleanup_created_workspace_dirs(created: &[PathBuf]) {
+    for path in created.iter().rev() {
+        let _ = fs::remove_dir(path);
+    }
 }
 
 fn add_workspace_unlogged(request: WorkspaceAddRequest, managed_root: &Path) -> Result<Workspace> {

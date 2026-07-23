@@ -963,6 +963,446 @@ fn add_workspace_scans_existing_root_and_dedupes_by_canonical_path() {
 }
 
 #[test]
+fn workspace_setup_existing_skills_root_previews_and_applies_without_creating_paths() {
+    let root = temp_dir("workspace-setup-existing");
+    let managed_root = root.join("SkillBox");
+    let workspace_root = root.join("project").join(".agents").join("skills");
+    make_skill(&workspace_root.join("alpha"), "alpha", "Alpha skill");
+
+    let preview = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: workspace_root.clone(),
+            kind: WorkspaceKind::User,
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    assert_eq!(preview.mode, WorkspaceSetupMode::ExistingRoot);
+    assert_eq!(preview.roots.len(), 1);
+    assert!(preview.roots[0].exists);
+    assert!(!managed_root.exists());
+
+    let result = apply_workspace_setup(
+        WorkspaceSetupApplyRequest {
+            selected_path: workspace_root.clone(),
+            kind: WorkspaceKind::User,
+            selected_root: preview.roots[0].path.clone(),
+            create_missing: false,
+            preview_id: preview.preview_id,
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    assert_eq!(
+        result.workspace.path,
+        fs::canonicalize(workspace_root).unwrap()
+    );
+    assert!(result.created_path.is_none());
+}
+
+#[test]
+fn workspace_setup_preserves_exact_symlinked_skills_root_registration() {
+    let root = temp_dir("workspace-setup-existing-symlink");
+    let managed_root = root.join("SkillBox");
+    let actual_root = root.join("shared").join("skills");
+    let linked_root = root.join("project").join(".agents").join("skills");
+    fs::create_dir_all(&actual_root).unwrap();
+    fs::create_dir_all(linked_root.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&actual_root, &linked_root).unwrap();
+
+    let preview = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: linked_root,
+            kind: WorkspaceKind::User,
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    assert_eq!(preview.mode, WorkspaceSetupMode::ExistingRoot);
+    assert_eq!(
+        preview.roots[0].path,
+        fs::canonicalize(actual_root).unwrap()
+    );
+}
+
+#[test]
+fn workspace_setup_project_preview_discovers_one_and_multiple_roots() {
+    let root = temp_dir("workspace-setup-discover");
+    let project = root.join("project");
+    fs::create_dir_all(project.join(".codex/skills")).unwrap();
+
+    let one = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: project.clone(),
+            kind: WorkspaceKind::User,
+        },
+        root.join("SkillBox"),
+    )
+    .unwrap();
+    assert_eq!(one.mode, WorkspaceSetupMode::ProjectWithRoots);
+    assert_eq!(one.roots.iter().filter(|root| root.exists).count(), 1);
+    assert_eq!(
+        one.roots
+            .iter()
+            .find(|root| root.exists)
+            .unwrap()
+            .relative_path,
+        ".codex/skills"
+    );
+
+    fs::create_dir_all(project.join(".claude/skills")).unwrap();
+    let multiple = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: project,
+            kind: WorkspaceKind::User,
+        },
+        root.join("SkillBox"),
+    )
+    .unwrap();
+    assert_eq!(multiple.roots.iter().filter(|root| root.exists).count(), 2);
+}
+
+#[test]
+fn workspace_setup_missing_project_preview_is_read_only_and_defaults_to_agents() {
+    let root = temp_dir("workspace-setup-missing-preview");
+    let project = root.join("project");
+    fs::create_dir_all(&project).unwrap();
+
+    let preview = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: project.clone(),
+            kind: WorkspaceKind::User,
+        },
+        root.join("SkillBox"),
+    )
+    .unwrap();
+
+    assert_eq!(preview.mode, WorkspaceSetupMode::ProjectWithoutRoots);
+    assert_eq!(preview.roots.len(), 3);
+    assert!(preview.roots.iter().all(|root| !root.exists));
+    assert_eq!(
+        preview
+            .roots
+            .iter()
+            .find(|root| root.recommended)
+            .unwrap()
+            .relative_path,
+        ".agents/skills"
+    );
+    assert!(!project.join(".agents").exists());
+    assert!(!project.join(".codex").exists());
+    assert!(!project.join(".claude").exists());
+}
+
+#[test]
+fn workspace_setup_missing_project_uses_existing_runtime_marker_as_recommendation() {
+    let root = temp_dir("workspace-setup-marker");
+    let project = root.join("project");
+    fs::create_dir_all(project.join(".claude")).unwrap();
+
+    let preview = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: project,
+            kind: WorkspaceKind::User,
+        },
+        root.join("SkillBox"),
+    )
+    .unwrap();
+
+    assert_eq!(
+        preview
+            .roots
+            .iter()
+            .find(|root| root.recommended)
+            .unwrap()
+            .relative_path,
+        ".claude/skills"
+    );
+}
+
+#[test]
+fn workspace_setup_rejects_home_root_and_managed_store_as_projects() {
+    let root = temp_dir("workspace-setup-broad-root");
+    let managed_root = root.join("SkillBox");
+    fs::create_dir_all(&managed_root).unwrap();
+
+    let managed_error = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: managed_root.clone(),
+            kind: WorkspaceKind::User,
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+    assert!(managed_error.contains("managed store"));
+
+    let home = home_dir();
+    let home_error = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: home,
+            kind: WorkspaceKind::User,
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+    assert!(home_error.contains("home directory"));
+}
+
+#[test]
+fn workspace_setup_creates_only_selected_root_and_registers_it() {
+    let root = temp_dir("workspace-setup-create");
+    let project = root.join("project");
+    let managed_root = root.join("SkillBox");
+    fs::create_dir_all(&project).unwrap();
+    let preview = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: project.clone(),
+            kind: WorkspaceKind::User,
+        },
+        &managed_root,
+    )
+    .unwrap();
+    let selected = preview
+        .roots
+        .iter()
+        .find(|root| root.relative_path == ".codex/skills")
+        .unwrap();
+
+    let result = apply_workspace_setup(
+        WorkspaceSetupApplyRequest {
+            selected_path: project.clone(),
+            kind: WorkspaceKind::User,
+            selected_root: selected.path.clone(),
+            create_missing: true,
+            preview_id: preview.preview_id,
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    assert_eq!(
+        result.created_path.as_deref(),
+        Some(selected.path.as_path())
+    );
+    assert!(project.join(".codex/skills").is_dir());
+    assert!(!project.join(".agents").exists());
+    assert!(!project.join(".claude").exists());
+    assert_eq!(result.workspace.agent_id.as_deref(), Some("codex"));
+    assert_eq!(result.workspace.kind, WorkspaceKind::User);
+    let operations = list_operations(OperationFilter::default(), &managed_root).unwrap();
+    assert!(operations.operations.iter().any(|operation| {
+        operation.operation_type == "add_workspace"
+            && operation.status == OperationStatus::Succeeded
+    }));
+}
+
+#[test]
+fn workspace_setup_rejects_stale_and_tampered_preview_selections() {
+    let root = temp_dir("workspace-setup-stale");
+    let project = root.join("project");
+    let managed_root = root.join("SkillBox");
+    fs::create_dir_all(&project).unwrap();
+    let preview = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: project.clone(),
+            kind: WorkspaceKind::User,
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    let stale = apply_workspace_setup(
+        WorkspaceSetupApplyRequest {
+            selected_path: project.clone(),
+            kind: WorkspaceKind::User,
+            selected_root: preview.roots[0].path.clone(),
+            create_missing: true,
+            preview_id: format!("{}-stale", preview.preview_id),
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+    assert!(stale.contains("preview is stale"));
+
+    let tampered = apply_workspace_setup(
+        WorkspaceSetupApplyRequest {
+            selected_path: project.clone(),
+            kind: WorkspaceKind::User,
+            selected_root: project.join("../outside/skills"),
+            create_missing: true,
+            preview_id: preview.preview_id,
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+    assert!(tampered.contains("not part of this workspace preview"));
+    assert!(!project.join(".agents").exists());
+}
+
+#[test]
+fn workspace_setup_rejects_preview_after_project_directory_is_replaced() {
+    let root = temp_dir("workspace-setup-replaced-project");
+    let project = root.join("project");
+    let managed_root = root.join("SkillBox");
+    fs::create_dir_all(&project).unwrap();
+    let preview = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: project.clone(),
+            kind: WorkspaceKind::User,
+        },
+        &managed_root,
+    )
+    .unwrap();
+    let selected = preview.roots[0].clone();
+
+    fs::rename(&project, root.join("old-project")).unwrap();
+    fs::create_dir_all(&project).unwrap();
+    let error = apply_workspace_setup(
+        WorkspaceSetupApplyRequest {
+            selected_path: project.clone(),
+            kind: WorkspaceKind::User,
+            selected_root: selected.path,
+            create_missing: true,
+            preview_id: preview.preview_id,
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+
+    assert!(error.contains("preview is stale"));
+    assert!(!project.join(".agents").exists());
+}
+
+#[test]
+fn workspace_setup_rejects_symlink_escape_and_non_directory_target() {
+    let root = temp_dir("workspace-setup-unsafe");
+    let project = root.join("project");
+    let outside = root.join("outside");
+    fs::create_dir_all(&project).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    std::os::unix::fs::symlink(&outside, project.join(".agents")).unwrap();
+
+    let symlink_error = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: project.clone(),
+            kind: WorkspaceKind::User,
+        },
+        root.join("SkillBox"),
+    )
+    .unwrap_err();
+    assert!(symlink_error.contains("cannot be a symlink"));
+
+    fs::remove_file(project.join(".agents")).unwrap();
+    fs::create_dir_all(project.join(".codex")).unwrap();
+    fs::write(project.join(".codex/skills"), "not a directory").unwrap();
+    let file_error = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: project,
+            kind: WorkspaceKind::User,
+        },
+        root.join("SkillBox"),
+    )
+    .unwrap_err();
+    assert!(file_error.contains("not a directory"));
+}
+
+#[test]
+fn workspace_setup_rejects_unreadable_project_directory() {
+    let root = temp_dir("workspace-setup-unreadable");
+    let project = root.join("project");
+    fs::create_dir_all(&project).unwrap();
+    let mut permissions = fs::metadata(&project).unwrap().permissions();
+    permissions.set_mode(0o000);
+    fs::set_permissions(&project, permissions).unwrap();
+
+    let error = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: project.clone(),
+            kind: WorkspaceKind::User,
+        },
+        root.join("SkillBox"),
+    )
+    .unwrap_err();
+
+    let mut restore = fs::metadata(&project).unwrap().permissions();
+    restore.set_mode(0o700);
+    fs::set_permissions(&project, restore).unwrap();
+    assert!(error.contains("not readable"));
+}
+
+#[test]
+fn workspace_setup_registration_failure_removes_only_new_empty_directories() {
+    let root = temp_dir("workspace-setup-cleanup");
+    let project = root.join("project");
+    let marker = project.join(".agents");
+    fs::create_dir_all(&marker).unwrap();
+    fs::write(marker.join("keep.txt"), "keep").unwrap();
+    let preview = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: project.clone(),
+            kind: WorkspaceKind::User,
+        },
+        root.join("SkillBox"),
+    )
+    .unwrap();
+    let selected = preview
+        .roots
+        .iter()
+        .find(|root| root.relative_path == ".agents/skills")
+        .unwrap();
+
+    let error = apply_workspace_setup_with_register(
+        WorkspaceSetupApplyRequest {
+            selected_path: project.clone(),
+            kind: WorkspaceKind::User,
+            selected_root: selected.path.clone(),
+            create_missing: true,
+            preview_id: preview.preview_id,
+        },
+        &root.join("SkillBox"),
+        |_| Err("registration failed".to_string()),
+    )
+    .unwrap_err();
+
+    assert_eq!(error, "registration failed");
+    assert!(!project.join(".agents/skills").exists());
+    assert_eq!(fs::read_to_string(marker.join("keep.txt")).unwrap(), "keep");
+}
+
+#[test]
+fn workspace_setup_global_scope_requires_an_existing_exact_root() {
+    let root = temp_dir("workspace-setup-global");
+    let global_root = root.join("custom-global-skills");
+    let managed_root = root.join("SkillBox");
+    fs::create_dir_all(&global_root).unwrap();
+    let preview = preview_workspace_setup(
+        WorkspaceSetupPreviewRequest {
+            selected_path: global_root.clone(),
+            kind: WorkspaceKind::Global,
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    assert_eq!(preview.mode, WorkspaceSetupMode::ExistingRoot);
+    let error = apply_workspace_setup(
+        WorkspaceSetupApplyRequest {
+            selected_path: global_root,
+            kind: WorkspaceKind::Global,
+            selected_root: preview.roots[0].path.clone(),
+            create_missing: true,
+            preview_id: preview.preview_id,
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+    assert!(error.contains("selection changed"));
+}
+
+#[test]
 fn add_workspace_does_not_count_copied_only_skills_as_imported() {
     let root = temp_dir("workspace-imported-count");
     let managed_root = root.join("SkillBox");
@@ -3717,6 +4157,298 @@ fn install_github_remote_skill_writes_version_current_metadata_and_index() {
 }
 
 #[test]
+fn install_github_root_skill_previews_installs_indexes_and_deploys_sanitized_worktree() {
+    let root = temp_dir("install-github-root-skill");
+    let managed_root = root.join("SkillBox");
+    let target_root = root.join("runtime");
+    let (remote, _work) = bare_remote_with_root_skill_content(
+        "install-github-root-skill-origin",
+        "humanizer-zh",
+        "Humanizer zh",
+        "Original body\n",
+    );
+    let installed_sha = remote_head(&remote);
+    let _rewrite = github_repo_rewrite("acme", "install-github-root-skill", &remote);
+    let source_url =
+        "https://github.com/acme/install-github-root-skill/blob/main/SKILL.md".to_string();
+    let preview = github_install_preview(&source_url, Some(target_root.clone()), &managed_root);
+
+    assert_eq!(preview.skill_name, "humanizer-zh");
+    assert!(preview.root);
+    assert_eq!(preview.path, "");
+    assert_eq!(
+        preview.source_url,
+        "https://github.com/acme/install-github-root-skill/tree/main"
+    );
+    for expected in ["SKILL.md", "README.md", "assets/prompt.txt"] {
+        assert!(preview.files.iter().any(|file| file.path == expected));
+    }
+    assert!(!preview
+        .files
+        .iter()
+        .any(|file| file.path == ".git" || file.path.starts_with(".git/")));
+    assert!(!managed_root.exists());
+    assert!(!target_root.exists());
+
+    let result = install_github_remote_skill(
+        InstallGithubRemoteSkillRequest {
+            source_url,
+            target_root: Some(target_root.clone()),
+            preview_id: Some(preview.preview_id),
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    let paths = managed_paths(&managed_root);
+    let remote_root = paths.remote_skills_root.join("humanizer-zh");
+    let version_path = remote_root.join("versions").join(&installed_sha);
+    assert!(result.root);
+    assert_eq!(result.path, "");
+    assert_eq!(result.version_path, version_path);
+    assert!(version_path.join("SKILL.md").exists());
+    assert!(version_path.join("README.md").exists());
+    assert!(version_path.join("assets/prompt.txt").exists());
+    assert!(!version_path.join(".git").exists());
+    assert_eq!(
+        fs::canonicalize(remote_root.join("current")).unwrap(),
+        fs::canonicalize(&version_path).unwrap()
+    );
+    let deployment = result.deployment.unwrap();
+    assert_eq!(deployment.target_root, target_root);
+    assert_eq!(
+        fs::canonicalize(deployment.target_path).unwrap(),
+        fs::canonicalize(remote_root.join("current")).unwrap()
+    );
+
+    let source_json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(remote_root.join("source.json")).unwrap())
+            .unwrap();
+    assert_eq!(source_json["root"], true);
+    assert_eq!(source_json["path"], "");
+    assert_eq!(source_json["currentVersion"], installed_sha);
+    let round_trip = read_remote_source(&remote_root).unwrap();
+    assert!(round_trip.root);
+    assert_eq!(round_trip.path.as_deref(), Some(""));
+
+    let connection = open_database(&paths.database_path).unwrap();
+    let indexed_path: String = connection
+        .query_row(
+            "SELECT managed_path FROM skills WHERE name = 'humanizer-zh'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(indexed_path, version_path.to_string_lossy());
+}
+
+#[test]
+fn install_github_root_skill_rejects_preview_after_branch_advances() {
+    let root = temp_dir("install-github-root-skill-stale");
+    let managed_root = root.join("SkillBox");
+    let (remote, work) = bare_remote_with_root_skill_content(
+        "install-github-root-skill-stale-origin",
+        "humanizer-zh",
+        "Humanizer zh",
+        "Original body\n",
+    );
+    let _rewrite = github_repo_rewrite("acme", "install-github-root-skill-stale", &remote);
+    let source_url =
+        "https://github.com/acme/install-github-root-skill-stale/blob/main/SKILL.md".to_string();
+    let preview = github_install_preview(&source_url, None, &managed_root);
+
+    make_skill_with_body(&work, "humanizer-zh", "Humanizer zh", "Advanced body\n");
+    run_git(&work, &["add", "."]);
+    run_git(
+        &work,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Advance root skill",
+        ],
+    );
+    run_git(&work, &["push", "origin", "main"]);
+
+    let error = install_github_remote_skill(
+        InstallGithubRemoteSkillRequest {
+            source_url,
+            target_root: None,
+            preview_id: Some(preview.preview_id),
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+
+    let paths = managed_paths(&managed_root);
+    let remote_root = paths.remote_skills_root.join("humanizer-zh");
+    assert!(error.contains("Remote install preview is stale"));
+    assert!(!remote_root.join("versions").exists());
+    assert!(!remote_root.join("current").exists());
+    assert!(!remote_root.join("source.json").exists());
+    let connection = open_database(&paths.database_path).unwrap();
+    let indexed = connection
+        .query_row(
+            "SELECT name FROM skills WHERE name = 'humanizer-zh'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .unwrap();
+    assert_eq!(indexed, None);
+}
+
+#[test]
+fn preview_github_root_skill_rejects_symlink_escape_without_managed_state() {
+    let root = temp_dir("preview-github-root-symlink-escape");
+    let managed_root = root.join("SkillBox");
+    let outside = root.join("outside.txt");
+    fs::write(&outside, "secret").unwrap();
+    let (remote, work) = bare_remote_with_root_skill_content(
+        "preview-github-root-symlink-escape-origin",
+        "humanizer-zh",
+        "Humanizer zh",
+        "Original body\n",
+    );
+    symlink_any(&outside, &work.join("outside-link")).unwrap();
+    run_git(&work, &["add", "."]);
+    run_git(
+        &work,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Add escaping symlink",
+        ],
+    );
+    run_git(&work, &["push", "origin", "main"]);
+    let _rewrite = github_repo_rewrite("acme", "preview-github-root-symlink-escape", &remote);
+
+    let error = preview_github_remote_skill_install(
+        PreviewGithubRemoteSkillInstallRequest {
+            source_url:
+                "https://github.com/acme/preview-github-root-symlink-escape/blob/main/SKILL.md"
+                    .to_string(),
+            target_root: None,
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+
+    assert!(error.contains("Refusing to copy symlink outside source root"));
+    assert!(!managed_root.exists());
+}
+
+#[test]
+fn github_root_skill_update_check_preview_and_apply_preserve_root_metadata() {
+    let root = temp_dir("github-root-skill-update");
+    let managed_root = root.join("SkillBox");
+    let (remote, work) = bare_remote_with_root_skill_content(
+        "github-root-skill-update-origin",
+        "humanizer-zh",
+        "Humanizer zh",
+        "Original body\n",
+    );
+    let _rewrite = github_repo_rewrite("acme", "github-root-skill-update", &remote);
+    let source_url =
+        "https://github.com/acme/github-root-skill-update/blob/main/SKILL.md".to_string();
+    let install_preview = github_install_preview(&source_url, None, &managed_root);
+    let installed = install_github_remote_skill(
+        InstallGithubRemoteSkillRequest {
+            source_url,
+            target_root: None,
+            preview_id: Some(install_preview.preview_id),
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    make_skill_with_body(&work, "humanizer-zh", "Humanizer zh", "Updated body\n");
+    fs::write(work.join("assets/prompt.txt"), "updated prompt\n").unwrap();
+    run_git(&work, &["add", "."]);
+    run_git(
+        &work,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Update root skill",
+        ],
+    );
+    run_git(&work, &["push", "origin", "main"]);
+    let latest_sha = remote_head(&remote);
+
+    let checked = check_remote_skill_update(&managed_root, "humanizer-zh").unwrap();
+    let status = remote_status(&checked.statuses, "humanizer-zh");
+    assert_eq!(status.state, RemoteSkillUpdateState::UpdateAvailable);
+    assert_eq!(status.latest_sha.as_deref(), Some(latest_sha.as_str()));
+
+    let preview = preview_remote_version_change(
+        RemoteVersionChangeRequest {
+            skill_name: "humanizer-zh".to_string(),
+            action: RemoteVersionChangeAction::Update,
+            target_version: Some(latest_sha.clone()),
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+    assert_eq!(preview.from_version, installed.installed_sha);
+    assert_eq!(preview.to_version, latest_sha);
+    assert!(preview.files.iter().any(|file| file.path == "SKILL.md"));
+    assert!(preview
+        .files
+        .iter()
+        .any(|file| file.path == "assets/prompt.txt"));
+    assert!(!preview
+        .files
+        .iter()
+        .any(|file| file.path == ".git" || file.path.starts_with(".git/")));
+
+    let applied = apply_remote_version_change(
+        RemoteVersionChangeApplyRequest {
+            skill_name: "humanizer-zh".to_string(),
+            action: RemoteVersionChangeAction::Update,
+            target_version: preview.to_version.clone(),
+            preview_id: Some(preview.preview_id),
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    let paths = managed_paths(&managed_root);
+    let remote_root = paths.remote_skills_root.join("humanizer-zh");
+    let updated_version = remote_root.join("versions").join(&latest_sha);
+    assert_eq!(applied.to_version, latest_sha);
+    assert_eq!(
+        current_remote_version(&paths, "humanizer-zh").unwrap(),
+        latest_sha
+    );
+    assert_eq!(
+        fs::read_to_string(updated_version.join("assets/prompt.txt")).unwrap(),
+        "updated prompt\n"
+    );
+    assert!(!updated_version.join(".git").exists());
+    let source = read_remote_source(&remote_root).unwrap();
+    assert!(source.root);
+    assert_eq!(source.path.as_deref(), Some(""));
+    assert_eq!(source.current_version.as_deref(), Some(latest_sha.as_str()));
+}
+
+#[test]
 fn install_github_remote_skill_rejects_missing_preview_id() {
     let root = temp_dir("install-github-missing-preview");
     let managed_root = root.join("SkillBox");
@@ -4447,6 +5179,60 @@ fn source_binding_preview_detects_exact_match() {
 }
 
 #[test]
+fn source_binding_supports_repository_root_skill_metadata() {
+    let root = temp_dir("source-binding-root-skill");
+    let managed_root = root.join("SkillBox");
+    let source = root.join("local").join("humanizer-zh");
+    make_skill(&source, "humanizer-zh", "Humanizer zh");
+    import_skill(&source, SkillKind::Remote, &managed_root).unwrap();
+    let (remote, _work) = bare_remote_with_root_skill_content(
+        "source-binding-root-skill-origin",
+        "humanizer-zh",
+        "Humanizer zh",
+        "",
+    );
+    let _rewrite = github_repo_rewrite("acme", "source-binding-root-skill", &remote);
+    let source_url = "https://github.com/acme/source-binding-root-skill".to_string();
+
+    let preview = preview_remote_source_binding(
+        RemoteSourceBindingRequest {
+            skill_name: "humanizer-zh".to_string(),
+            source_url: source_url.clone(),
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    assert!(preview.root);
+    assert_eq!(preview.path, "");
+    assert_eq!(
+        preview.source_url,
+        "https://github.com/acme/source-binding-root-skill/tree/main"
+    );
+    assert_eq!(preview.validation, SourceBindingValidation::ExactMatch);
+
+    bind_remote_source(
+        BindRemoteSourceRequest {
+            skill_name: "humanizer-zh".to_string(),
+            source_url,
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    let paths = managed_paths(&managed_root);
+    let metadata = read_remote_source(&paths.remote_skills_root.join("humanizer-zh")).unwrap();
+    assert!(metadata.root);
+    assert_eq!(metadata.path.as_deref(), Some(""));
+    assert_eq!(
+        remote_source_browser_url(&metadata).as_deref(),
+        Some("https://github.com/acme/source-binding-root-skill/tree/main")
+    );
+}
+
+#[test]
 fn source_binding_preview_resolves_marketplace_skill_path() {
     let root = temp_dir("source-binding-marketplace-path");
     let managed_root = root.join("SkillBox");
@@ -4694,6 +5480,39 @@ fn read_remote_source_rejects_untrusted_github_metadata() {
 
     let error = read_remote_source(&remote_root).unwrap_err();
     assert!(error.contains("path must stay inside the repository"));
+
+    write_remote_source_with_json(
+        &remote_root,
+        r#"{
+              "type":"github",
+              "repoUrl":"https://github.com/acme/repo.git",
+              "ref":"main",
+              "path":"skills/demo",
+              "root":true
+            }"#,
+    );
+
+    let error = read_remote_source(&remote_root).unwrap_err();
+    assert!(error.contains("root source must not include a repository path"));
+}
+
+#[test]
+fn read_remote_source_keeps_path_only_metadata_backward_compatible() {
+    let root = temp_dir("remote-source-path-only-compatibility");
+    let remote_root = root.join("remote-skills").join("demo");
+    write_remote_source_with_json(
+        &remote_root,
+        r#"{
+              "type":"github",
+              "repoUrl":"https://github.com/acme/repo.git",
+              "ref":"main",
+              "path":"skills/demo"
+            }"#,
+    );
+
+    let source = read_remote_source(&remote_root).unwrap();
+    assert!(!source.root);
+    assert_eq!(source.path.as_deref(), Some("skills/demo"));
 }
 
 #[test]
@@ -6669,6 +7488,41 @@ description: \"{description}\"
     remote
 }
 
+fn bare_remote_with_root_skill_content(
+    label: &str,
+    skill_name: &str,
+    description: &str,
+    body: &str,
+) -> (PathBuf, PathBuf) {
+    let remote = bare_remote(label);
+    let work = temp_dir(&format!("{label}-work"));
+    run_git(&work, &["init", "-b", "main"]);
+    make_skill_with_body(&work, skill_name, description, body);
+    fs::write(work.join("README.md"), format!("# {skill_name}\n")).unwrap();
+    fs::write(work.join(".gitignore"), "*.tmp\n").unwrap();
+    fs::create_dir_all(work.join("assets")).unwrap();
+    fs::write(work.join("assets/prompt.txt"), "prompt\n").unwrap();
+    run_git(&work, &["add", "."]);
+    run_git(
+        &work,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Add root skill",
+        ],
+    );
+    run_git(
+        &work,
+        &["remote", "add", "origin", remote.to_str().unwrap()],
+    );
+    run_git(&work, &["push", "-u", "origin", "main"]);
+    (remote, work)
+}
+
 fn github_source_url(owner: &str, repo: &str, skill_name: &str) -> String {
     format!("https://github.com/{owner}/{repo}/tree/main/skills/{skill_name}")
 }
@@ -6697,11 +7551,24 @@ struct GitConfigRewriteGuard {
 
 impl Drop for GitConfigRewriteGuard {
     fn drop(&mut self) {
-        for (key, value) in self.previous.drain(..) {
+        let previous_count = self
+            .previous
+            .iter()
+            .find_map(|(key, value)| (*key == "GIT_CONFIG_COUNT").then(|| value.clone()))
+            .flatten();
+        std::env::remove_var("GIT_CONFIG_COUNT");
+        for (key, value) in self
+            .previous
+            .drain(..)
+            .filter(|(key, _)| *key != "GIT_CONFIG_COUNT")
+        {
             match value {
                 Some(value) => std::env::set_var(key, value),
                 None => std::env::remove_var(key),
             }
+        }
+        if let Some(value) = previous_count {
+            std::env::set_var("GIT_CONFIG_COUNT", value);
         }
     }
 }
@@ -6714,7 +7581,6 @@ fn github_repo_rewrite(owner: &str, repo: &str, remote: &std::path::Path) -> Git
         .map(|key| (key, std::env::var_os(key)))
         .collect::<Vec<_>>();
 
-    std::env::set_var("GIT_CONFIG_COUNT", "1");
     std::env::set_var(
         "GIT_CONFIG_KEY_0",
         format!("url.file://{}.insteadOf", remote.display()),
@@ -6723,6 +7589,7 @@ fn github_repo_rewrite(owner: &str, repo: &str, remote: &std::path::Path) -> Git
         "GIT_CONFIG_VALUE_0",
         format!("https://github.com/{owner}/{repo}.git"),
     );
+    std::env::set_var("GIT_CONFIG_COUNT", "1");
 
     GitConfigRewriteGuard {
         _lock: lock,

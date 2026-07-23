@@ -53,6 +53,8 @@ React UI
 - `list_workspaces` -> `skillbox_core::list_workspaces`
 - `scan_workspaces` -> `skillbox_core::scan_workspaces`
 - `add_workspace` -> `skillbox_core::add_workspace`
+- `preview_workspace_setup` -> `skillbox_core::preview_workspace_setup`
+- `apply_workspace_setup` -> `skillbox_core::apply_workspace_setup`
 - `forget_workspace` -> `skillbox_core::forget_workspace`
 - `find_remote_source_candidates` -> `skillbox_core::find_remote_source_candidates`
 - `preview_remote_source_binding` -> `skillbox_core::preview_remote_source_binding`
@@ -160,9 +162,13 @@ Runtime 目录只是部署目标：
 Workspace registry 记录这些 skills root，作为后续 deploy skills 的目标候选。`global` workspace 表示
 home-level agent root，`user` workspace 表示项目局部 root；React 只展示和提交结构化请求，发现、分类、持久化和按 workspace 扫描 import candidates 都在 Rust core。
 
+桌面 Add workspace 将普通项目目录交给 Rust core 做只读 preview，并只展示 core 返回的固定 root 候选。`Project` 是现有 `kind=user` 的 UI 语义标签；apply 会重放 preview 校验，再按 allowlist 创建至多一个项目局部 root。React 不拼接路径、不创建目录，Global scope 也不自动初始化目录。
+
 不要在没有 adapter 语义的情况下猜测某个 agent 的目录布局。新增 agent 支持时，先定义 adapter 的发现路径、原生格式、部署方式和冲突处理。
 
 默认部署方式是从 runtime 目录 symlink 到 managed store。runtime 目录中已有的非 symlink skill 不能被静默覆盖，导入或迁移时必须先备份或拒绝。
+
+GitHub remote source 可以是仓库中的 skill 子目录，也可以是根目录包含 `SKILL.md` 的 standalone repository。后者在 metadata 中显式记录为 `root: true`，preview、install、update 和 deploy 共用同一份清理后的 repository worktree snapshot；Git checkout 的 `.git` metadata 不进入 managed store，逃逸 source root 的 symlink 在 copy 边界被拒绝。
 
 重复候选只在名称、`SKILL.md` hash、推断类型、状态、冲突结果和完整导入快照均一致时合并；快照忽略顶层 `.git`，并覆盖其它路径、文件内容、Unix mode 与 symlink target。已 imported 的多个 runtime symlink 仅在解析到同一 managed `real_path` 时作为 alias 合并。primary 来源沿扫描 root 顺序选择；其它实体来源保留在 `additional_source_paths`，仅用于 review/search，不会在本次操作中被修改。导入只备份 primary、替换其 managed symlink 并写入 import record。仅 `SKILL.md` 相同但脚本、权限或资源不同的目录不能合并或复用；User 和 Remote 的已有 managed target 都必须通过完整快照校验。
 
