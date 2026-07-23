@@ -89,7 +89,7 @@ Longer-term support for native Claude, OpenClaw, Cursor, Claude Code, Copilot, a
 
 ## Features
 
-- Scan and register supported global or project-local `SKILL.md` workspaces, then search them by name, path, or agent and filter by scope.
+- Scan and register supported global or project-local `SKILL.md` workspaces. The desktop can also preview a normal project directory and explicitly create exactly one selected `.agents/skills`, `.codex/skills`, or `.claude/skills` root before registration; it never creates all runtime roots automatically.
 - Review user, remote, and system import candidates before copying anything; group import-equivalent multi-root copies without losing their source locations, and conservatively revert eligible deploy-back imports.
 - Install GitHub-backed skills through a preview/apply flow and bind discovered remote source candidates without replacing the active version.
 - Check remote sources, preview all-file diffs, apply updates, and roll back to immutable versions.
@@ -164,7 +164,7 @@ Homebrew uninstall does not delete `~/.skillbox`.
 ## First Run
 
 1. Open SkillBox.
-2. Run `Scan` to discover known global and project-local skill workspaces.
+2. Run `Scan` to discover known global and project-local skill workspaces, or use `Add workspace` to register an existing skills folder or explicitly initialize one supported project-local root.
 3. Use `Import` to review candidates before SkillBox copies them into `~/.skillbox`.
 4. Use `Install` to preview GitHub-backed remote skills, then confirm before SkillBox copies them into the managed store. SkillBox accepts standalone repository URLs with a root `SKILL.md`, root `SKILL.md` file URLs, and skill directory URLs. Repository-root snapshots exclude Git metadata.
 5. Deploy managed skills to selected runtime workspaces when you want an agent to use them.

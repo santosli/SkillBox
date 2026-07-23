@@ -53,6 +53,8 @@ React UI
 - `list_workspaces` -> `skillbox_core::list_workspaces`
 - `scan_workspaces` -> `skillbox_core::scan_workspaces`
 - `add_workspace` -> `skillbox_core::add_workspace`
+- `preview_workspace_setup` -> `skillbox_core::preview_workspace_setup`
+- `apply_workspace_setup` -> `skillbox_core::apply_workspace_setup`
 - `forget_workspace` -> `skillbox_core::forget_workspace`
 - `find_remote_source_candidates` -> `skillbox_core::find_remote_source_candidates`
 - `preview_remote_source_binding` -> `skillbox_core::preview_remote_source_binding`
@@ -159,6 +161,8 @@ Runtime 目录只是部署目标：
 
 Workspace registry 记录这些 skills root，作为后续 deploy skills 的目标候选。`global` workspace 表示
 home-level agent root，`user` workspace 表示项目局部 root；React 只展示和提交结构化请求，发现、分类、持久化和按 workspace 扫描 import candidates 都在 Rust core。
+
+桌面 Add workspace 将普通项目目录交给 Rust core 做只读 preview，并只展示 core 返回的固定 root 候选。`Project` 是现有 `kind=user` 的 UI 语义标签；apply 会重放 preview 校验，再按 allowlist 创建至多一个项目局部 root。React 不拼接路径、不创建目录，Global scope 也不自动初始化目录。
 
 不要在没有 adapter 语义的情况下猜测某个 agent 的目录布局。新增 agent 支持时，先定义 adapter 的发现路径、原生格式、部署方式和冲突处理。
 

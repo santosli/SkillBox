@@ -119,6 +119,7 @@ import {
 } from './userSkillsGitSync.js';
 import {
   normalizeWorkspace,
+  normalizeWorkspaceSetupPreview,
   normalizeWorkspaces,
   sidebarFooterItems,
   sidebarItems,
@@ -146,6 +147,8 @@ const autoRefreshBlockedStatuses = new Set([
   'scanning',
   'scanning_workspace_skills',
   'scanning_workspaces',
+  'previewing_workspace',
+  'setting_up_workspace',
   'changing_skill_type',
   'reverting_import',
   'syncing'
@@ -159,6 +162,44 @@ const closedRemoteSourceCandidateBind = {
   binding: false,
   error: ''
 };
+
+function prototypeWorkspaceSetupPreview(selectedPath, kind) {
+  const path = selectedPath.replace(/\/$/, '');
+  const exactRoot = kind === 'global' || path.endsWith('/skills');
+  const detectedRootFixture = !exactRoot && path.endsWith('/multi-root-demo');
+  const roots = exactRoot
+    ? [{
+        path,
+        relative_path: 'skills',
+        agent_id: path.includes('/.codex/') ? 'codex' : path.includes('/.claude/') ? 'claude' : 'agents',
+        label: 'Skills folder',
+        exists: true,
+        recommended: true
+      }]
+    : [
+        ['.agents/skills', 'agents', 'Agents'],
+        ['.codex/skills', 'codex', 'Codex'],
+        ['.claude/skills', 'claude', 'Claude Code']
+      ].map(([relativePath, agentId, label], index) => ({
+        path: `${path}/${relativePath}`,
+        relative_path: relativePath,
+        agent_id: agentId,
+        label,
+        exists: detectedRootFixture && index < 2,
+        recommended: index === 0
+      }));
+  return {
+    preview_id: `prototype:${kind}:${path}`,
+    selected_path: path,
+    kind,
+    mode: exactRoot
+      ? 'existing_root'
+      : detectedRootFixture
+        ? 'project_with_roots'
+        : 'project_without_roots',
+    roots
+  };
+}
 
 function normalizeImportRecord(record = {}) {
   const affectedDeploymentCount = Number(
@@ -254,8 +295,11 @@ export default function App() {
     open: false,
     path: '',
     kind: 'user',
-    error: ''
+    error: '',
+    preview: null,
+    selectedRoot: ''
   });
+  const workspacePreviewRequestRef = useRef(0);
   const [deployDialog, setDeployDialog] = useState({
     open: false,
     skillName: '',
@@ -2887,42 +2931,121 @@ export default function App() {
   }
 
   function openWorkspaceDialog() {
-    setWorkspaceDialog({ open: true, path: '', kind: 'user', error: '' });
+    setWorkspaceDialog({
+      open: true,
+      path: '',
+      kind: 'user',
+      error: '',
+      preview: null,
+      selectedRoot: ''
+    });
     setNotice('');
     setError('');
   }
 
   function closeWorkspaceDialog() {
-    if (status === 'scanning_workspaces') {
+    if (
+      status === 'scanning_workspaces'
+      || status === 'previewing_workspace'
+      || status === 'setting_up_workspace'
+    ) {
       return;
     }
     setWorkspaceDialog((current) => ({ ...current, open: false, error: '' }));
   }
 
   function updateWorkspaceDialog(patch) {
-    setWorkspaceDialog((current) => ({ ...current, ...patch, error: '' }));
+    if ('path' in patch || 'kind' in patch) {
+      workspacePreviewRequestRef.current += 1;
+    }
+    setWorkspaceDialog((current) => ({
+      ...current,
+      ...patch,
+      error: '',
+      ...(('path' in patch || 'kind' in patch) ? { preview: null, selectedRoot: '' } : {})
+    }));
+  }
+
+  async function previewWorkspaceDialog(kindOverride) {
+    const workspacePath = workspaceDialog.path.trim();
+    const kind = kindOverride || workspaceDialog.kind;
+    if (!workspacePath) {
+      setWorkspaceDialog((current) => ({
+        ...current,
+        error: 'Enter a project or skills folder.',
+        preview: null,
+        selectedRoot: ''
+      }));
+      return null;
+    }
+
+    const requestId = workspacePreviewRequestRef.current + 1;
+    workspacePreviewRequestRef.current = requestId;
+    setStatus('previewing_workspace');
+    setWorkspaceDialog((current) => ({ ...current, kind, error: '', preview: null, selectedRoot: '' }));
+    try {
+      const rawPreview = window.__TAURI_INTERNALS__
+        ? await invoke('preview_workspace_setup', {
+            request: { selected_path: workspacePath, kind }
+          })
+        : prototypeWorkspaceSetupPreview(workspacePath, kind);
+      const preview = normalizeWorkspaceSetupPreview(rawPreview);
+      if (requestId !== workspacePreviewRequestRef.current) {
+        return null;
+      }
+      const availableRoots = preview.mode === 'project_with_roots'
+        ? preview.roots.filter((root) => root.exists)
+        : preview.roots;
+      const selected = availableRoots.find((root) => root.recommended) || availableRoots[0];
+      setWorkspaceDialog((current) => ({
+        ...current,
+        kind,
+        preview,
+        selectedRoot: selected?.path || '',
+        error: ''
+      }));
+      setStatus(window.__TAURI_INTERNALS__ ? 'ready' : 'prototype');
+      return preview;
+    } catch (workspaceError) {
+      if (requestId !== workspacePreviewRequestRef.current) {
+        return null;
+      }
+      setWorkspaceDialog((current) => ({
+        ...current,
+        error: workspaceError.message || String(workspaceError) || 'Unable to preview this folder.',
+        preview: null,
+        selectedRoot: ''
+      }));
+      setStatus(window.__TAURI_INTERNALS__ ? 'ready' : 'prototype');
+      return null;
+    }
   }
 
   async function submitWorkspaceDialog(event) {
     event.preventDefault();
     const workspacePath = workspaceDialog.path.trim();
+    const preview = workspaceDialog.preview;
+    const selectedRoot = preview?.roots.find((root) => root.path === workspaceDialog.selectedRoot);
 
-    if (!workspacePath) {
-      setWorkspaceDialog((current) => ({ ...current, error: 'Enter a workspace path.' }));
+    if (!workspacePath || !preview || !selectedRoot) {
+      setWorkspaceDialog((current) => ({
+        ...current,
+        error: 'Preview the project or skills folder before continuing.'
+      }));
       return;
     }
 
-    setStatus('scanning_workspaces');
+    setStatus('setting_up_workspace');
     setError('');
     setNotice('');
 
     if (!window.__TAURI_INTERNALS__) {
       const workspace = normalizeWorkspace({
-        canonical_path: workspacePath,
-        path: workspacePath,
+        canonical_path: selectedRoot.path,
+        path: selectedRoot.path,
         kind: workspaceDialog.kind,
         source: 'manual',
-        agent_id: workspacePath.includes('/.codex/') ? 'codex' : 'agents',
+        agent_id: selectedRoot.agentId,
         skill_count: 0,
         last_scan_error_count: 0,
         last_scanned_at: new Date().toISOString()
@@ -2935,25 +3058,47 @@ export default function App() {
         [...workspaces.filter((item) => item.canonicalPath !== workspace.canonicalPath), workspace]
           .sort((left, right) => left.path.localeCompare(right.path))
       );
-      setWorkspaceDialog({ open: false, path: '', kind: 'user', error: '' });
-      setNotice('Workspace added.');
+      setWorkspaceDialog({
+        open: false,
+        path: '',
+        kind: 'user',
+        error: '',
+        preview: null,
+        selectedRoot: ''
+      });
+      setNotice(selectedRoot.exists ? 'Workspace added.' : `Created and added ${selectedRoot.relativePath}.`);
       setStatus('prototype');
       return;
     }
 
     try {
-      const workspace = await invoke('add_workspace', {
+      const result = await invoke('apply_workspace_setup', {
         request: {
-          path: workspacePath,
-          kind: workspaceDialog.kind
+          selected_path: workspacePath,
+          kind: workspaceDialog.kind,
+          selected_root: selectedRoot.path,
+          create_missing: !selectedRoot.exists,
+          preview_id: preview.previewId
         }
       });
+      const workspace = result.workspace;
       const rows = await invoke('list_workspaces').catch(() => [workspace]);
       const normalizedRows = normalizeWorkspaces(rows);
       setWorkspaces(normalizedRows);
       refreshDeployDialogRows(normalizedRows);
-      setWorkspaceDialog({ open: false, path: '', kind: 'user', error: '' });
-      setNotice(`Workspace added: ${normalizeWorkspace(workspace).compactPath}`);
+      setWorkspaceDialog({
+        open: false,
+        path: '',
+        kind: 'user',
+        error: '',
+        preview: null,
+        selectedRoot: ''
+      });
+      setNotice(
+        result.created_path
+          ? `Created and added: ${normalizeWorkspace(workspace).compactPath}`
+          : `Workspace added: ${normalizeWorkspace(workspace).compactPath}`
+      );
       setStatus('ready');
     } catch (workspaceError) {
       setWorkspaceDialog((current) => ({
@@ -3299,6 +3444,8 @@ export default function App() {
           dialog={workspaceDialog}
           status={status}
           onClose={closeWorkspaceDialog}
+          onPreview={previewWorkspaceDialog}
+          onSelectRoot={(selectedRoot) => updateWorkspaceDialog({ selectedRoot })}
           onSubmit={submitWorkspaceDialog}
           onUpdate={updateWorkspaceDialog}
         />

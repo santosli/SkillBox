@@ -2,7 +2,10 @@ import React from 'react';
 import {
   AlertTriangle,
   Check,
+  FolderCheck,
+  FolderPlus,
   Link2,
+  LoaderCircle,
   Plus,
   RefreshCw,
   Search,
@@ -164,8 +167,23 @@ function WorkspaceCard({ isBusy, workspace, onForget, onOpenSkills }) {
   );
 }
 
-export function WorkspaceAddDialog({ dialog, status, onClose, onSubmit, onUpdate }) {
-  const isBusy = status === 'scanning_workspaces';
+export function WorkspaceAddDialog({
+  dialog,
+  status,
+  onClose,
+  onPreview,
+  onSelectRoot,
+  onSubmit,
+  onUpdate
+}) {
+  const isBusy = status === 'scanning_workspaces'
+    || status === 'previewing_workspace'
+    || status === 'setting_up_workspace';
+  const availableRoots = dialog.preview?.mode === 'project_with_roots'
+    ? dialog.preview.roots.filter((root) => root.exists)
+    : dialog.preview?.roots || [];
+  const selectedRoot = availableRoots.find((root) => root.path === dialog.selectedRoot);
+  const willCreate = Boolean(selectedRoot && !selectedRoot.exists);
 
   return (
     <div
@@ -177,7 +195,7 @@ export function WorkspaceAddDialog({ dialog, status, onClose, onSubmit, onUpdate
         <div className="importSheetHeader">
           <div>
             <h2 id="workspace-add-title">Add workspace</h2>
-            <p>Register an existing skills root.</p>
+            <p>Register an existing skills folder or initialize one project-local root.</p>
           </div>
           <button className="iconButton" disabled={isBusy} type="button" aria-label="Close workspace dialog" onClick={onClose}>
             <X aria-hidden="true" />
@@ -186,14 +204,18 @@ export function WorkspaceAddDialog({ dialog, status, onClose, onSubmit, onUpdate
 
         <form className="remoteImportForm" onSubmit={onSubmit}>
           <label className="remoteImportField">
-            <span>Path</span>
+            <span>Project or skills folder</span>
             <input
               autoFocus
               disabled={isBusy}
-              placeholder="/path/to/.agents/skills"
+              placeholder="/path/to/project or /path/to/.agents/skills"
               value={dialog.path}
               onChange={(event) => onUpdate({ path: event.target.value })}
+              onBlur={() => dialog.path.trim() && !dialog.preview && onPreview()}
             />
+            <small className="workspaceSetupHint">
+              Paste a project directory to detect supported roots, or an exact existing skills folder.
+            </small>
           </label>
 
           <div className="remoteImportModes" role="group" aria-label="Workspace scope">
@@ -201,19 +223,93 @@ export function WorkspaceAddDialog({ dialog, status, onClose, onSubmit, onUpdate
               className={dialog.kind === 'user' ? 'active' : ''}
               disabled={isBusy}
               type="button"
-              onClick={() => onUpdate({ kind: 'user' })}
+              onClick={() => {
+                onUpdate({ kind: 'user' });
+                if (dialog.path.trim()) onPreview('user');
+              }}
             >
-              User
+              Project
             </button>
             <button
               className={dialog.kind === 'global' ? 'active' : ''}
               disabled={isBusy}
               type="button"
-              onClick={() => onUpdate({ kind: 'global' })}
+              onClick={() => {
+                onUpdate({ kind: 'global' });
+                if (dialog.path.trim()) onPreview('global');
+              }}
             >
               Global
             </button>
           </div>
+
+          {status === 'previewing_workspace' ? (
+            <div className="workspaceSetupLoading" role="status">
+              <LoaderCircle aria-hidden="true" />
+              Checking this folder without making changes...
+            </div>
+          ) : null}
+
+          {dialog.preview ? (
+            <div className="workspaceSetupPreview">
+              <div className="workspaceSetupPreviewHeader">
+                {dialog.preview.mode === 'project_without_roots' ? (
+                  <FolderPlus aria-hidden="true" />
+                ) : (
+                  <FolderCheck aria-hidden="true" />
+                )}
+                <div>
+                  <strong>
+                    {dialog.preview.mode === 'existing_root'
+                      ? 'Skills folder ready'
+                      : dialog.preview.mode === 'project_with_roots'
+                        ? `${availableRoots.length} skills folder${availableRoots.length === 1 ? '' : 's'} found`
+                        : 'No skills folder found'}
+                  </strong>
+                  <span>
+                    {dialog.preview.mode === 'project_without_roots'
+                      ? 'Choose one supported project-local root to create.'
+                      : 'Choose the exact root SkillBox should register.'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="workspaceSetupRoots" role="radiogroup" aria-label="Skills folder">
+                {availableRoots.map((root) => (
+                  <button
+                    className={dialog.selectedRoot === root.path ? 'workspaceSetupRoot active' : 'workspaceSetupRoot'}
+                    key={root.path}
+                    role="radio"
+                    aria-checked={dialog.selectedRoot === root.path}
+                    type="button"
+                    onClick={() => onSelectRoot(root.path)}
+                  >
+                    <span className="workspaceSetupRootChoice">
+                      <span className="workspaceSetupRadio" aria-hidden="true" />
+                      <span>
+                        <strong>{root.relativePath}</strong>
+                        <small>{root.label}{root.recommended ? ' · Recommended' : ''}</small>
+                      </span>
+                    </span>
+                    <span className={root.exists ? 'badge green' : 'badge blue'}>
+                      {root.exists ? 'Existing' : 'Create'}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              {selectedRoot ? (
+                <div className="workspaceSetupBoundary">
+                  <Check aria-hidden="true" />
+                  <span>
+                    {willCreate
+                      ? <>Only <code>{selectedRoot.path}</code> will be created. Existing project files will not be changed.</>
+                      : <>SkillBox will register <code>{selectedRoot.path}</code> without changing files.</>}
+                  </span>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           {dialog.error ? <div className="formError">{dialog.error}</div> : null}
 
@@ -221,8 +317,12 @@ export function WorkspaceAddDialog({ dialog, status, onClose, onSubmit, onUpdate
             <button className="button secondary" disabled={isBusy} type="button" onClick={onClose}>
               Cancel
             </button>
-            <button className="button primary" disabled={isBusy} type="submit">
-              {isBusy ? 'Scanning...' : 'Add workspace'}
+            <button className="button primary" disabled={isBusy || !selectedRoot} type="submit">
+              {status === 'setting_up_workspace'
+                ? 'Working...'
+                : willCreate
+                  ? 'Create & add'
+                  : 'Add workspace'}
             </button>
           </div>
         </form>

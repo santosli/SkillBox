@@ -262,7 +262,8 @@ deployments
 - `kind=global` 表示 agent 自带或 home-level skills root，例如 `~/.codex/skills`、`~/.agents/skills`、`~/.claude/skills`。
 - `kind=user` 表示用户项目局部 skills root，例如 `<project>/.agents/skills`。
 - `source=auto` 表示由 scan 自动发现；`source=manual` 表示用户显式添加。
-- 手动添加要求目录已存在；删除 manual workspace 只删除 registry 记录，不删除文件。
+- `source=manual` 可以来自现有 skills-root 注册，也可以来自 desktop workspace setup 的 preview-confirmed project-local root 初始化。UI 的 `Project` 仍写入 `kind=user`，因此不改变现有 enum 或 schema。
+- 初始化只允许 `<project>/.agents/skills`、`<project>/.codex/skills`、`<project>/.claude/skills`；preview 不写磁盘，apply 每次最多创建一个选中的 root。删除 manual workspace 只删除 registry 记录，不删除文件。
 - `canonical_path` 用于去重，`path` 保留展示路径。
 
 Node MVP 旧表差异：

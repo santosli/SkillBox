@@ -253,6 +253,54 @@ pub struct WorkspaceAddRequest {
     pub kind: WorkspaceKind,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceSetupPreviewRequest {
+    pub selected_path: PathBuf,
+    pub kind: WorkspaceKind,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceSetupMode {
+    ExistingRoot,
+    ProjectWithRoots,
+    ProjectWithoutRoots,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceSetupRootOption {
+    pub path: PathBuf,
+    pub relative_path: String,
+    pub agent_id: String,
+    pub label: String,
+    pub exists: bool,
+    pub recommended: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceSetupPreview {
+    pub preview_id: String,
+    pub selected_path: PathBuf,
+    pub kind: WorkspaceKind,
+    pub mode: WorkspaceSetupMode,
+    pub roots: Vec<WorkspaceSetupRootOption>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceSetupApplyRequest {
+    pub selected_path: PathBuf,
+    pub kind: WorkspaceKind,
+    pub selected_root: PathBuf,
+    pub create_missing: bool,
+    pub preview_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WorkspaceSetupApplyResult {
+    pub workspace: Workspace,
+    pub created_path: Option<PathBuf>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct WorkspaceScanResult {
     pub workspaces: Vec<Workspace>,
