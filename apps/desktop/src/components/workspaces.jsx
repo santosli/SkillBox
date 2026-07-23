@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   Check,
   FolderCheck,
+  FolderOpen,
   FolderPlus,
   Link2,
   LoaderCircle,
@@ -170,6 +171,7 @@ function WorkspaceCard({ isBusy, workspace, onForget, onOpenSkills }) {
 export function WorkspaceAddDialog({
   dialog,
   status,
+  onChooseFolder,
   onClose,
   onPreview,
   onSelectRoot,
@@ -177,6 +179,7 @@ export function WorkspaceAddDialog({
   onUpdate
 }) {
   const isBusy = status === 'scanning_workspaces'
+    || status === 'choosing_workspace'
     || status === 'previewing_workspace'
     || status === 'setting_up_workspace';
   const availableRoots = dialog.preview?.mode === 'project_with_roots'
@@ -203,20 +206,34 @@ export function WorkspaceAddDialog({
         </div>
 
         <form className="remoteImportForm" onSubmit={onSubmit}>
-          <label className="remoteImportField">
-            <span>Project or skills folder</span>
-            <input
-              autoFocus
-              disabled={isBusy}
-              placeholder="/path/to/project or /path/to/.agents/skills"
-              value={dialog.path}
-              onChange={(event) => onUpdate({ path: event.target.value })}
-              onBlur={() => dialog.path.trim() && !dialog.preview && onPreview()}
-            />
+          <div className="remoteImportField">
+            <label htmlFor="workspace-folder-path">Project or skills folder</label>
+            <div className="workspacePathPickerRow">
+              <input
+                autoFocus
+                disabled={isBusy}
+                id="workspace-folder-path"
+                placeholder="/path/to/project or /path/to/.agents/skills"
+                value={dialog.path}
+                onChange={(event) => onUpdate({ path: event.target.value })}
+                onBlur={() => dialog.path.trim() && !dialog.preview && onPreview()}
+              />
+              <button
+                aria-label={onChooseFolder ? 'Choose local project or skills folder' : 'Native folder picker unavailable in browser preview'}
+                className="button secondary workspaceFolderPickerButton"
+                disabled={isBusy || !onChooseFolder}
+                title={onChooseFolder ? 'Choose a local directory' : 'Available in the packaged desktop app'}
+                type="button"
+                onClick={onChooseFolder}
+              >
+                <FolderOpen aria-hidden="true" />
+                {status === 'choosing_workspace' ? 'Choosing...' : 'Choose folder'}
+              </button>
+            </div>
             <small className="workspaceSetupHint">
-              Paste a project directory to detect supported roots, or an exact existing skills folder.
+              Choose a local directory or paste an absolute path. SkillBox previews it before making changes.
             </small>
-          </label>
+          </div>
 
           <div className="remoteImportModes" role="group" aria-label="Workspace scope">
             <button

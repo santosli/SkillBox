@@ -2774,6 +2774,23 @@ dd {
   line-height: 1.45;
 }
 
+.workspacePathPickerRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.workspaceFolderPickerButton {
+  min-width: 132px;
+  white-space: nowrap;
+}
+
+.workspaceFolderPickerButton svg {
+  width: 16px;
+  height: 16px;
+}
+
 .workspaceSetupLoading {
   display: flex;
   align-items: center;
@@ -2931,6 +2948,14 @@ dd {
 
   .workspaceSetupRoot {
     align-items: flex-start;
+  }
+
+  .workspacePathPickerRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workspaceFolderPickerButton {
+    width: 100%;
   }
 }
 
@@ -4285,6 +4310,7 @@ dd {
 }
 
 .remoteImportField > span,
+.remoteImportField > label,
 .fieldLabelRow > span {
   color: var(--skillbox-text-secondary);
   font-size: 13px;

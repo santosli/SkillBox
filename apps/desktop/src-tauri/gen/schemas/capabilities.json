@@ -1,1 +1,1 @@
-{}
+{"main-window":{"identifier":"main-window","description":"Allow the main SkillBox window to use core APIs and choose one local directory.","local":true,"windows":["main"],"permissions":["core:default","dialog:allow-open"]}}

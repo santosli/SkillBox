@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import desktopPackage from '../package.json';
 import skillBoxAppIcon from '../src-tauri/icons/icon.png';
 import { FooterButton, NavButton } from './components/common.jsx';
@@ -108,6 +109,7 @@ import {
   normalizeStatusRefreshIntervalMinutes
 } from './skillStatusRefresh.js';
 import { normalizeUsageHookStatuses } from './usageHooks.js';
+import { chooseWorkspaceDirectory } from './workspaceDirectoryPicker.js';
 import {
   defaultSyncCommitMessage,
   normalizeUserSkillsGitChanges,
@@ -147,6 +149,7 @@ const autoRefreshBlockedStatuses = new Set([
   'scanning',
   'scanning_workspace_skills',
   'scanning_workspaces',
+  'choosing_workspace',
   'previewing_workspace',
   'setting_up_workspace',
   'changing_skill_type',
@@ -2946,6 +2949,7 @@ export default function App() {
   function closeWorkspaceDialog() {
     if (
       status === 'scanning_workspaces'
+      || status === 'choosing_workspace'
       || status === 'previewing_workspace'
       || status === 'setting_up_workspace'
     ) {
@@ -2966,8 +2970,8 @@ export default function App() {
     }));
   }
 
-  async function previewWorkspaceDialog(kindOverride) {
-    const workspacePath = workspaceDialog.path.trim();
+  async function previewWorkspaceDialog(kindOverride, pathOverride) {
+    const workspacePath = (pathOverride ?? workspaceDialog.path).trim();
     const kind = kindOverride || workspaceDialog.kind;
     if (!workspacePath) {
       setWorkspaceDialog((current) => ({
@@ -2982,7 +2986,14 @@ export default function App() {
     const requestId = workspacePreviewRequestRef.current + 1;
     workspacePreviewRequestRef.current = requestId;
     setStatus('previewing_workspace');
-    setWorkspaceDialog((current) => ({ ...current, kind, error: '', preview: null, selectedRoot: '' }));
+    setWorkspaceDialog((current) => ({
+      ...current,
+      path: pathOverride ?? current.path,
+      kind,
+      error: '',
+      preview: null,
+      selectedRoot: ''
+    }));
     try {
       const rawPreview = window.__TAURI_INTERNALS__
         ? await invoke('preview_workspace_setup', {
@@ -3018,6 +3029,35 @@ export default function App() {
       }));
       setStatus(window.__TAURI_INTERNALS__ ? 'ready' : 'prototype');
       return null;
+    }
+  }
+
+  async function chooseWorkspaceDialogFolder() {
+    if (!window.__TAURI_INTERNALS__ || autoRefreshBlockedStatuses.has(status)) return;
+
+    const kind = workspaceDialog.kind;
+    setStatus('choosing_workspace');
+    try {
+      const selectedPath = await chooseWorkspaceDirectory(openDialog);
+      if (selectedPath === null) {
+        setStatus('ready');
+        return;
+      }
+      workspacePreviewRequestRef.current += 1;
+      setWorkspaceDialog((current) => ({
+        ...current,
+        path: selectedPath,
+        error: '',
+        preview: null,
+        selectedRoot: ''
+      }));
+      await previewWorkspaceDialog(kind, selectedPath);
+    } catch (pickerError) {
+      setWorkspaceDialog((current) => ({
+        ...current,
+        error: `Unable to choose a local folder. ${pickerError.message || String(pickerError)}`
+      }));
+      setStatus('ready');
     }
   }
 
@@ -3443,6 +3483,7 @@ export default function App() {
         <WorkspaceAddDialog
           dialog={workspaceDialog}
           status={status}
+          onChooseFolder={window.__TAURI_INTERNALS__ ? chooseWorkspaceDialogFolder : null}
           onClose={closeWorkspaceDialog}
           onPreview={previewWorkspaceDialog}
           onSelectRoot={(selectedRoot) => updateWorkspaceDialog({ selectedRoot })}
