@@ -9,6 +9,12 @@ version tags such as `v0.3.0`.
 
 - No unreleased changes.
 
+## 0.4.5
+
+- Install standalone GitHub skill repositories and root `SKILL.md` URLs through a preview-confirmed flow. SkillBox excludes `.git` metadata from managed snapshots and keeps later source updates root-aware.
+- Add normal project directories as workspaces through a read-only setup preview, then explicitly create and register exactly one selected `.agents/skills`, `.codex/skills`, or `.claude/skills` root with stale-preview, traversal, symlink, and cleanup protections.
+- Choose a local project or skills folder with the packaged macOS app's native single-directory picker while retaining manual path entry. Folder selection immediately opens the preview, and cancelling the picker leaves the current setup unchanged.
+
 ## 0.4.4
 
 - Add consent-gated VibeLoft page-view telemetry with DNT/GPC support, withdrawal controls, and a website privacy notice that remains separate from SkillBox app and CLI data.

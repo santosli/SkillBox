@@ -16,7 +16,7 @@ English | [简体中文](README.zh-CN.md)
 
 SkillBox is a local-first macOS desktop app with a Rust core and CLI for managing `SKILL.md`-based skill and capability packages without treating any supported agent runtime as the source of truth.
 
-Current release: `v0.4.4`. SkillBox is useful today for local skill management, but it is still early software. Keep backups of important skills, and review each filesystem change before applying it.
+Current release: `v0.4.5`. SkillBox is useful today for local skill management, but it is still early software. Keep backups of important skills, and review each filesystem change before applying it.
 
 ## Promo Video
 
@@ -124,13 +124,13 @@ https://github.com/santosli/SkillBox/releases
 For this release, use the asset named:
 
 ```text
-SkillBox_0.4.4_universal.dmg
+SkillBox_0.4.5_universal.dmg
 ```
 
 The matching checksum is published as:
 
 ```text
-SkillBox_0.4.4_universal.dmg.sha256
+SkillBox_0.4.5_universal.dmg.sha256
 ```
 
 Open the DMG and drag `SkillBox.app` into `/Applications`.
