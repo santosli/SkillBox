@@ -792,6 +792,7 @@ async fn install_app_update(
 
 pub fn run() {
     let result = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;

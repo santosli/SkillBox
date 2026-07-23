@@ -504,7 +504,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 - 桌面 UI 打开 Workspaces 页面。
 - 桌面 UI 或 Rust CLI 执行 workspace scan。
-- 用户手动添加现有 skills root，或选择普通项目目录并显式初始化一个受支持的项目局部 root。
+- 用户通过手动路径或打包版 Tauri app 的原生单目录选择器添加现有 skills root，或选择普通项目目录并显式初始化一个受支持的项目局部 root。
 - 用户按 workspace 名称、路径或 agent 搜索，并可与 Global/User 类型组合过滤。
 - 用户点击 workspace 查看其中 skills，并选择导入。
 - Dashboard scan import candidates 时自动登记已扫描的 workspace。
@@ -518,6 +518,8 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 扫描每个 workspace root，记录 skill 数、已导入 skill 数、scan error 数和最后一条 scan error。
 - 点击 workspace 时只扫描该 workspace path，复用 import candidate review 行样式展示其中的 skills，并使用现有 `import_candidates` 流程导入选中项。
 - Add workspace 的 `Project` 选项继续持久化为兼容现有 registry 的 `kind=user`；`Global` 继续持久化为 `kind=global`，不需要 schema migration。
+- `Project or skills folder` 保留可编辑的绝对路径输入；打包版 Tauri app 额外提供原生目录选择器，只允许选择一个本地目录，不接受文件或多选。浏览器 prototype 不把 file input 当成可信绝对路径来源。
+- 原生选择器返回目录后，UI 将绝对路径写入现有输入框，清除旧 preview、root selection 和 error，并在保持当前 Project/Global scope 的前提下立即调用只读 workspace setup preview；用户取消选择时保留当前路径和 preview，不显示错误。
 - workspace setup preview 是只读操作。现有 skills-root path 可直接登记；普通项目目录只检测直属的 `.agents/skills`、`.codex/skills`、`.claude/skills`。
 - 若项目中存在一个或多个受支持 root，用户必须选择其中一个登记。若不存在，UI 只允许选择并创建一个 root；已有 runtime marker 优先推荐对应 root，否则确定性默认 `.agents/skills`。
 - apply 会重新校验 preview identity、项目 canonical boundary、固定 relative-root allowlist、目录类型和 symlink 边界，然后才创建并登记。不会修改现有项目文件，也不会同时创建多个 runtime roots。
@@ -528,6 +530,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 失败与回滚：
 
 - 不存在的手动 path 拒绝添加。
+- 目录选择器取消是 no-op；picker/plugin 错误以内联可操作错误显示，不替换现有路径，也不绕过 setup preview。
 - setup preview 不写 managed store、SQLite 或项目目录；缺失 root 只在用户确认 `Create & add` 后创建。
 - traversal、project/candidate symlink、逃逸项目 canonical boundary、现有非目录 target、不可读目录、stale/tampered preview 都拒绝 apply；用户明确选择的精确 skills-root symlink 仍按旧 contract 解析到其真实目录后登记。
 - apply 后注册失败时，只反向移除本次操作新建且仍为空的目录；不删除预先存在的目录或内容。
@@ -541,7 +544,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `cargo run -p skillbox-cli --offline -- workspace-scan --managed-root <temp-skillbox-root>`
 - `cargo run -p skillbox-cli --offline -- workspace-add <temp-root> --kind user --managed-root <temp-skillbox-root>`
 - `npm test`
-- 桌面 UI 验证 sidebar 只保留 Dashboard、Workspaces、Settings；Workspace 页面可 search、组合类型筛选、scan、add、forget manual rows，并覆盖 existing-root、no-root initialization、multiple-root selection 和窄窗口状态。
+- 桌面 UI 验证 sidebar 只保留 Dashboard、Workspaces、Settings；Workspace 页面可 search、组合类型筛选、scan、add、forget manual rows，并覆盖 manual path、native single-directory picker、picker cancellation/error、existing-root、no-root initialization、multiple-root selection 和窄窗口状态。
 
 ## 14. Skill Usage Recording
 

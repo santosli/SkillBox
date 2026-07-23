@@ -21,7 +21,8 @@ const appSourcePaths = [
   './appUpdates.js',
   './preferences.js',
   './previewData.js',
-  './importFlow.js'
+  './importFlow.js',
+  './workspaceDirectoryPicker.js'
 ];
 const appSource = (
   await Promise.all(
@@ -31,6 +32,13 @@ const appSource = (
 const mainSource = await readFile(new URL('./main.jsx', import.meta.url), 'utf8');
 const tauriSource = await readFile(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8');
 const tauriMainSource = await readFile(new URL('../src-tauri/src/main.rs', import.meta.url), 'utf8');
+const tauriCargo = await readFile(new URL('../src-tauri/Cargo.toml', import.meta.url), 'utf8');
+const tauriMainCapability = JSON.parse(
+  await readFile(new URL('../src-tauri/capabilities/main.json', import.meta.url), 'utf8')
+);
+const desktopPackage = JSON.parse(
+  await readFile(new URL('../package.json', import.meta.url), 'utf8')
+);
 
 test('all current and future text fields disable automatic writing assistance', () => {
   assert.match(mainSource, /node\.matches\('input, textarea'\)/);
@@ -207,6 +215,14 @@ test('tauri desktop bridge registers app update commands and pending state', () 
   assert.match(tauriSource, /async fn install_app_update/);
   assert.match(tauriSource, /tauri_plugin_updater::Builder::new\(\)\.build\(\)/);
   assert.match(tauriSource, /app\.manage\(PendingAppUpdate::default\(\)\)/);
+});
+
+test('tauri desktop grants only native directory open permission for workspace picking', () => {
+  assert.equal(desktopPackage.dependencies['@tauri-apps/plugin-dialog'], '2.7.2');
+  assert.match(tauriCargo, /tauri-plugin-dialog = "=2\.7\.2"/);
+  assert.match(tauriSource, /\.plugin\(tauri_plugin_dialog::init\(\)\)/);
+  assert.deepEqual(tauriMainCapability.windows, ['main']);
+  assert.deepEqual(tauriMainCapability.permissions, ['core:default', 'dialog:allow-open']);
 });
 
 test('dashboard filters share one continuous control surface', () => {
@@ -1231,4 +1247,24 @@ test('workspace setup previews project roots before creating or registering one 
   assert.match(appSource, /onSelectRoot\(root\.path\)/);
   assert.doesNotMatch(appSource, /invoke\('add_workspace'[\s\S]*submitWorkspaceDialog/);
   assert.match(css, /\.workspaceSetupRoots\s*\{[^}]*display:\s*grid;/s);
+});
+
+test('workspace setup exposes a native single-directory picker without removing manual input', () => {
+  assert.match(appSource, /import \{ open as openDialog \} from '@tauri-apps\/plugin-dialog'/);
+  assert.match(appSource, /directory:\s*true/);
+  assert.match(appSource, /multiple:\s*false/);
+  assert.match(appSource, /async function chooseWorkspaceDialogFolder\(\)/);
+  assert.match(appSource, /await chooseWorkspaceDirectory\(openDialog\)/);
+  assert.match(appSource, /selectedPath === null[\s\S]*setStatus\('ready'\);[\s\S]*return;/);
+  assert.match(appSource, /path:\s*selectedPath,[\s\S]*preview:\s*null,[\s\S]*selectedRoot:\s*''/);
+  assert.match(appSource, /await previewWorkspaceDialog\(kind, selectedPath\)/);
+  assert.match(appSource, /Unable to choose a local folder\./);
+  assert.match(appSource, /onChooseFolder=\{window\.__TAURI_INTERNALS__ \? chooseWorkspaceDialogFolder : null\}/);
+  assert.match(appSource, /aria-label=\{onChooseFolder \? 'Choose local project or skills folder'/);
+  assert.match(appSource, /disabled=\{isBusy \|\| !onChooseFolder\}/);
+  assert.match(appSource, /<FolderOpen aria-hidden="true" \/>/);
+  assert.match(appSource, /Choose folder/);
+  assert.match(appSource, /onChange=\{\(event\) => onUpdate\(\{ path: event\.target\.value \}\)\}/);
+  assert.match(css, /\.workspacePathPickerRow\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto;/s);
+  assert.match(css, /@media \(max-width:\s*640px\)[\s\S]*\.workspacePathPickerRow\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
 });
