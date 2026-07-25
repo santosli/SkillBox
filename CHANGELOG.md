@@ -19,6 +19,7 @@ version tags such as `v0.3.0`.
 - Mark ambiguous legacy events as `Unknown source` instead of guessing a regular skill, and validate Rankings imports against the complete source identity recorded in SQLite.
 - Mark unmanaged ranking skills whose local source is gone as `Deleted`.
 - Canonicalize legacy usage agent ids (`agents`/`claude` → `codex`/`claude-code`) via schema v5 and rebuild affected stats from canonical events so Rankings, Dashboard, and Workspace totals stay consistent.
+- Update PostCSS and Nano ID to patched releases so the v0.5 dependency audit completes without high-severity findings.
 
 ## 0.4.5
 
