@@ -52,7 +52,7 @@ verified; completing a feature list alone does not qualify a release.
 | Version | Product outcome | Promotion gates |
 | --- | --- | --- |
 | **0.4 — Reliability foundation** | Versioned database migrations, persisted user metadata, Doctor diagnostics, and durable mutation auditing. | Upgrade and backup tests pass; Doctor is available through core, CLI, Tauri, and desktop; audited workflows record both success and failure; release automation passes. |
-| **0.5 — Discovery, source trust, and release awareness** | FTS-backed search across skills, operations, and usage history; local skill usage rankings with time-range, agent, and workspace filters; clearer source provenance and trust classification before remote install or update; daily signed app-update awareness without automatic downloads. | CLI and desktop return consistent search and ranking results; ranking coverage is explicit and never presented as global popularity; schema upgrades and representative large-library queries are tested; trust state never treats popularity as proof of safety; update checks are rate-limited and every install is revalidated after an explicit click. |
+| **0.5 — Discovery, source trust, and release awareness** | FTS-backed search across skills, operations, and usage history; local skill usage rankings with time-range, skill-type, agent, and workspace filters; clearer source provenance and trust classification before remote install or update; daily signed app-update awareness without automatic downloads. | CLI and desktop return consistent search and ranking results; ranking coverage is explicit and never presented as global popularity; schema upgrades and representative large-library queries are tested; trust state never treats popularity as proof of safety; update checks are rate-limited and every install is revalidated after an explicit click. |
 | **0.6 — Runtime profiles and portability** | Rust-owned runtime profiles model roots, precedence, frontmatter capabilities, and compatibility without hard-coding agent behavior in React. | Each supported profile has fixtures and compatibility tests; unsupported fields are reported before deployment; runtime-specific behavior remains behind an adapter boundary. |
 | **0.7 — Safe sync, deployment, and recovery** | Reviewed inbound user-skills Git updates, copy-snapshot deployment, and stronger restore/audit workflows complement the existing symlink path. | Ahead/behind/diverged states are explicit; conflicts are never auto-merged; overwrite protection, rollback, and backup restoration have automated coverage. |
 | **0.8 — Product hardening** | Large-library performance, actionable diagnostics, accessibility, onboarding, and recovery behavior are ready for sustained daily use. | Performance budgets and critical UI workflows are verified; no known data-loss path remains; supported upgrade and recovery procedures are documented and exercised. |
@@ -61,19 +61,44 @@ verified; completing a feature list alone does not qualify a release.
 
 ### 0.5 Usage Ranking Boundaries
 
-Skill Usage Rankings are a local discovery signal, not a community leaderboard
-or a trust score. The initial ranking defaults to currently managed skills and
-uses only events observed in the local SkillBox database. It does not upload or
-merge usage across devices. A zero count means that SkillBox has not observed a
-call; disabled, untrusted, or unsupported hooks can make recorded usage
-incomplete.
+Skill Usage Rankings are explicitly labeled `Locally observed calls`: a local
+discovery signal, not a community leaderboard or a trust score. The default ranking includes currently managed skills (with
+zero rows when no events were observed) plus unmanaged skills that appear in
+the selected local time window. Coverage is limited to events stored in the
+local SkillBox database. It does not upload or merge usage across devices. A
+zero count means that SkillBox has not observed a call; disabled, untrusted, or
+unsupported hooks can make recorded usage incomplete. Users can optionally run
+one `Sync histories` action to backfill auditable local history from Codex,
+Claude Code, and Cursor without changing those agents' configuration. Codex
+only accepts explicit user-input carriers containing a complete `<skill>` block
+or an explicit `[$skill](.../SKILL.md)` link. Claude Code only accepts
+structured Skill tool/command attribution that resolves to a real `SKILL.md`.
+Cursor only accepts explicitly attached `context.cursorRules` entries that
+resolve to a real `SKILL.md`; its private SQLite schema is validated, opened
+read-only, and rejected when incompatible. Assistant/tool prose and chat bodies
+are never copied. Every provider deduplicates stable event identities, so
+repeated scans remain idempotent.
+
+Every ranking response includes coverage for the selected filters: earliest and
+latest observed event times, mutually exclusive canonical stored-origin counts
+for `agent_hook`, `codex_session_backfill`,
+`claude_code_session_backfill`, `cursor_session_backfill`, and other events,
+plus provider-specific session/file counts from the latest history scans. Event
+origin counts sum to the locally observed total; scan counts are operational
+coverage and do not change with ranking filters.
 
 Ranking order must be deterministic: observed call count descending, most
-recent observed use descending, then skill name ascending. Historical events
-for deleted or unmanaged skills remain available in History but do not enter
-the default managed-skill ranking. Prompt excerpts and event metadata never
-affect ranking, and local usage frequency never changes source trust, safety,
-or quality classification.
+recent observed use descending, then skill name ascending. Unmanaged rows are
+labeled Not imported; Codex `*/.system/` skills are labeled System and are not
+importable from Rankings; sources missing from the skill's observed runtime
+roots are labeled Deleted. Prompt excerpts and event metadata never affect
+ranking, and local usage frequency never changes source trust, safety, or
+quality classification.
+
+Future Codex reported runs remain a separate metric and storage boundary. They
+must retain provider, subject kind, time window, scope, and provenance, must not
+be written to `skill_usage_events`, and must never be included in local ranking,
+total, or delta values.
 
 Minor-version scope may change with evidence from real usage. When the scope,
 ordering, status, or promotion gate of a milestone changes, the same change set

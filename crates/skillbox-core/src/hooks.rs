@@ -169,19 +169,37 @@ pub fn record_skill_usage_from_hook(
         .get("model")
         .and_then(|value| value.as_str())
         .unwrap_or("");
+    let preferred_runtime_context = hook
+        .get("runtime_root")
+        .or_else(|| hook.get("runtimeRoot"))
+        .or_else(|| hook.get("cwd"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
     let agent = normalize_usage_hook_agent(agent)?;
     let skill_refs = extract_skill_refs_from_transcript(&transcript, turn_id);
     let mut recorded = Vec::new();
     let mut skipped = Vec::new();
 
     for (index, skill_ref) in skill_refs.into_iter().enumerate() {
-        match usage_request_from_skill_ref(
-            &skill_ref, &agent, session_id, turn_id, index, hook_event, model,
-        ) {
-            Ok(request) => match record_skill_usage(request, managed_root.as_ref()) {
-                Ok(result) => recorded.push(result),
-                Err(error) => skipped.push(format!("{}: {error}", skill_ref.name)),
-            },
+        match usage_request_from_skill_ref_with_roots(UsageRequestFromSkillRef {
+            skill_ref: &skill_ref,
+            hook_agent: &agent,
+            session_id,
+            turn_id,
+            index,
+            hook_event,
+            model,
+            runtime_roots: None,
+            preferred_runtime_context: preferred_runtime_context.as_deref(),
+        }) {
+            Ok(request) => {
+                match record_trusted_generated_skill_usage(request, managed_root.as_ref()) {
+                    Ok(result) => recorded.push(result),
+                    Err(error) => skipped.push(format!("{}: {error}", skill_ref.name)),
+                }
+            }
             Err(error) => skipped.push(format!("{}: {error}", skill_ref.name)),
         }
     }
@@ -516,55 +534,72 @@ pub(crate) fn next_usage_hook_backup_path(path: &Path) -> PathBuf {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HookSkillRef {
-    name: String,
-    path: PathBuf,
-    prompt_excerpt: Option<String>,
+    pub(crate) name: String,
+    pub(crate) path: PathBuf,
+    pub(crate) prompt_excerpt: Option<String>,
 }
 
 pub(crate) fn normalize_usage_hook_agent(value: &str) -> Result<String> {
     match value.trim().to_ascii_lowercase().as_str() {
         "codex" | "codex-app" | "codex-cli" | "agents" => Ok("codex".to_string()),
         "claude" | "claude-code" | "claude-code-cli" => Ok("claude-code".to_string()),
+        "cursor" | "cursor-agent" | "cursor-cli" => Ok("cursor".to_string()),
         other => Err(format!("Unknown usage hook agent: {other}")),
     }
 }
 
-pub(crate) fn usage_request_from_skill_ref(
-    skill_ref: &HookSkillRef,
-    hook_agent: &str,
-    session_id: &str,
-    turn_id: Option<&str>,
-    index: usize,
-    hook_event: &str,
-    model: &str,
+pub(crate) struct UsageRequestFromSkillRef<'a> {
+    pub(crate) skill_ref: &'a HookSkillRef,
+    pub(crate) hook_agent: &'a str,
+    pub(crate) session_id: &'a str,
+    pub(crate) turn_id: Option<&'a str>,
+    pub(crate) index: usize,
+    pub(crate) hook_event: &'a str,
+    pub(crate) model: &'a str,
+    pub(crate) runtime_roots: Option<&'a [PathBuf]>,
+    pub(crate) preferred_runtime_context: Option<&'a Path>,
+}
+
+pub(crate) fn usage_request_from_skill_ref_with_roots(
+    input: UsageRequestFromSkillRef<'_>,
 ) -> Result<RecordSkillUsageRequest> {
-    let (runtime_root, agent_id) =
-        infer_usage_runtime_from_skill_path(&skill_ref.path, hook_agent)?;
-    let path_hash = &sha256(&skill_ref.path.to_string_lossy())[..12];
-    let turn = turn_id.unwrap_or("session");
+    let (runtime_root, agent_id) = infer_usage_runtime_from_skill_path_with_roots(
+        &input.skill_ref.path,
+        input.hook_agent,
+        input.runtime_roots,
+        input.preferred_runtime_context,
+    )?;
+    let path_hash = &sha256(&input.skill_ref.path.to_string_lossy())[..12];
+    let turn = input.turn_id.unwrap_or("session");
     let metadata = serde_json::json!({
         "source": "agent_hook",
-        "hook_agent": hook_agent,
-        "hook_event": hook_event,
-        "model": model
+        "hook_agent": input.hook_agent,
+        "hook_event": input.hook_event,
+        "model": input.model,
+        "skill_source_kind": usage_source_kind_from_skill_path(
+            &input.skill_ref.path,
+            &runtime_root
+        )
     });
     Ok(RecordSkillUsageRequest {
-        skill_name: skill_ref.name.clone(),
+        skill_name: input.skill_ref.name.clone(),
         agent_id,
         runtime_root,
         event_id: Some(format!(
-            "{hook_agent}:{session_id}:{turn}:{index}:{}:{path_hash}",
-            skill_ref.name
+            "{}:{}:{}:{}:{}:{path_hash}",
+            input.hook_agent, input.session_id, turn, input.index, input.skill_ref.name
         )),
         used_at: None,
-        prompt_excerpt: skill_ref.prompt_excerpt.clone(),
+        prompt_excerpt: input.skill_ref.prompt_excerpt.clone(),
         metadata: Some(metadata),
     })
 }
 
-pub(crate) fn infer_usage_runtime_from_skill_path(
+pub(crate) fn infer_usage_runtime_from_skill_path_with_roots(
     skill_path: &Path,
     hook_agent: &str,
+    runtime_roots: Option<&[PathBuf]>,
+    preferred_runtime_context: Option<&Path>,
 ) -> Result<(PathBuf, String)> {
     let expanded = expand_home(skill_path.to_path_buf());
     for ancestor in expanded.ancestors() {
@@ -576,9 +611,9 @@ pub(crate) fn infer_usage_runtime_from_skill_path(
             .and_then(|path| path.file_name())
             .and_then(|name| name.to_str());
         let agent_id = match parent {
-            Some(".codex") => Some("codex"),
-            Some(".agents") => Some("agents"),
-            Some(".claude") => Some("claude"),
+            Some(".codex") | Some(".agents") => Some("codex"),
+            Some(".claude") => Some("claude-code"),
+            Some(".cursor") => Some("cursor"),
             _ => None,
         };
         if let Some(agent_id) = agent_id {
@@ -589,19 +624,151 @@ pub(crate) fn infer_usage_runtime_from_skill_path(
         }
     }
 
+    let owned_roots;
+    let roots = match runtime_roots {
+        Some(roots) => roots,
+        None => {
+            owned_roots = global_runtime_roots();
+            owned_roots.as_slice()
+        }
+    };
+    if let Some((runtime_root, agent_id)) = agent_runtime_root_for_managed_skill_path(
+        &expanded,
+        hook_agent,
+        roots,
+        preferred_runtime_context,
+    ) {
+        return Ok((runtime_root, agent_id));
+    }
+
     let fallback_root = expanded
         .parent()
         .and_then(|path| path.parent())
         .map(Path::to_path_buf)
         .unwrap_or_else(|| expanded.parent().unwrap_or(&expanded).to_path_buf());
     let agent_id = match hook_agent {
-        "claude-code" => "claude",
+        "claude-code" | "claude" => "claude-code",
+        "cursor" => "cursor",
         _ => "codex",
     };
     Ok((
         fs::canonicalize(&fallback_root).unwrap_or(fallback_root),
         agent_id.to_string(),
     ))
+}
+
+fn agent_runtime_root_for_managed_skill_path(
+    skill_path: &Path,
+    hook_agent: &str,
+    runtime_roots: &[PathBuf],
+    preferred_runtime_context: Option<&Path>,
+) -> Option<(PathBuf, String)> {
+    let skill_name = managed_skill_name_from_path(skill_path)?;
+    let canonical_skill_path =
+        fs::canonicalize(skill_path).unwrap_or_else(|_| skill_path.to_path_buf());
+    let mut matches = Vec::new();
+    for root in runtime_roots {
+        let link = root.join(&skill_name);
+        let Ok(metadata) = fs::symlink_metadata(&link) else {
+            continue;
+        };
+        if !metadata.file_type().is_symlink() {
+            continue;
+        }
+        let Ok(target) = fs::read_link(&link) else {
+            continue;
+        };
+        let resolved = if target.is_absolute() {
+            fs::canonicalize(&target).unwrap_or(target)
+        } else {
+            fs::canonicalize(root.join(&target)).unwrap_or_else(|_| root.join(&skill_name))
+        };
+        if !(resolved == canonical_skill_path
+            || canonical_skill_path.starts_with(&resolved)
+            || resolved.starts_with(&canonical_skill_path))
+        {
+            continue;
+        }
+        let agent_id = root
+            .parent()
+            .and_then(|path| path.file_name())
+            .and_then(|name| name.to_str())
+            .and_then(|name| match name {
+                ".codex" | ".agents" => Some("codex"),
+                ".claude" => Some("claude-code"),
+                ".cursor" => Some("cursor"),
+                _ => None,
+            })
+            .unwrap_or(match hook_agent {
+                "claude-code" | "claude" => "claude-code",
+                "cursor" => "cursor",
+                _ => "codex",
+            });
+        let root = fs::canonicalize(root).unwrap_or_else(|_| root.clone());
+        let preference = runtime_context_preference(&root, preferred_runtime_context);
+        matches.push((preference, root, agent_id.to_string()));
+    }
+    matches.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then_with(|| left.1.cmp(&right.1))
+            .then_with(|| left.2.cmp(&right.2))
+    });
+    matches
+        .into_iter()
+        .next()
+        .map(|(_, root, agent_id)| (root, agent_id))
+}
+
+fn runtime_context_preference(runtime_root: &Path, context: Option<&Path>) -> u8 {
+    let Some(context) = context else {
+        return 2;
+    };
+    let context = expand_home(context.to_path_buf());
+    let context = fs::canonicalize(&context).unwrap_or(context);
+    if usage_runtime_key(runtime_root) == usage_runtime_key(&context) {
+        return 0;
+    }
+    let workspace = runtime_root
+        .parent()
+        .and_then(Path::parent)
+        .unwrap_or(runtime_root);
+    if runtime_root.starts_with(&context)
+        || context.starts_with(runtime_root)
+        || context.starts_with(workspace)
+    {
+        return 1;
+    }
+    2
+}
+
+fn usage_source_kind_from_skill_path(skill_path: &Path, runtime_root: &Path) -> &'static str {
+    let skill_path = expand_home(skill_path.to_path_buf());
+    let system_root = runtime_root.join(".system");
+    if skill_path.starts_with(&system_root) {
+        "system"
+    } else {
+        "regular"
+    }
+}
+
+fn managed_skill_name_from_path(path: &Path) -> Option<String> {
+    let parts = path
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(name) => name.to_str().map(str::to_string),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    for index in 0..parts.len() {
+        if matches!(parts[index].as_str(), "remote-skills" | "user-skills") {
+            return parts
+                .get(index + 1)
+                .cloned()
+                .filter(|name| !name.is_empty());
+        }
+    }
+    None
 }
 
 pub(crate) fn extract_skill_refs_from_transcript(
@@ -782,6 +949,39 @@ pub(crate) fn extract_skill_refs_from_text(text: &str) -> Vec<HookSkillRef> {
     skills
 }
 
+pub(crate) fn extract_explicit_skill_refs_from_text(text: &str) -> Vec<HookSkillRef> {
+    let mut remaining = text;
+    let mut skills = Vec::new();
+    while let Some(start) = remaining.find("[$") {
+        let invocation = &remaining[start + 2..];
+        let Some(label_end) = invocation.find("](") else {
+            break;
+        };
+        let name = invocation[..label_end].trim();
+        let destination = &invocation[label_end + 2..];
+        let Some(destination_end) = destination.find(')') else {
+            break;
+        };
+        let path = destination[..destination_end]
+            .trim()
+            .trim_matches(|character| matches!(character, '<' | '>'));
+        if !name.is_empty()
+            && name.chars().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.' | ':')
+            })
+            && Path::new(path).file_name().and_then(|value| value.to_str()) == Some("SKILL.md")
+        {
+            skills.push(HookSkillRef {
+                name: name.to_string(),
+                path: PathBuf::from(path),
+                prompt_excerpt: None,
+            });
+        }
+        remaining = &destination[destination_end + 1..];
+    }
+    skills
+}
+
 pub(crate) fn xml_tag_text(input: &str, tag: &str) -> Option<String> {
     let open = format!("<{tag}>");
     let close = format!("</{tag}>");
@@ -794,7 +994,9 @@ pub(crate) fn dedupe_hook_skill_refs(skills: Vec<HookSkillRef>) -> Vec<HookSkill
     let mut seen = HashSet::new();
     let mut deduped = Vec::new();
     for skill in skills {
-        let key = format!("{}\n{}", skill.name, skill.path.display());
+        let expanded = expand_home(skill.path.clone());
+        let normalized_path = fs::canonicalize(&expanded).unwrap_or(expanded);
+        let key = format!("{}\n{}", skill.name.trim(), normalized_path.display());
         if seen.insert(key) {
             deduped.push(skill);
         }

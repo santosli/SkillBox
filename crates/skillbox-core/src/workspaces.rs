@@ -1,10 +1,11 @@
 use crate::*;
 use std::os::unix::fs::MetadataExt;
 
-const PROJECT_WORKSPACE_ROOTS: [(&str, &str, &str); 3] = [
+const PROJECT_WORKSPACE_ROOTS: [(&str, &str, &str); 4] = [
     (".agents/skills", "agents", "Agents"),
     (".codex/skills", "codex", "Codex"),
     (".claude/skills", "claude", "Claude Code"),
+    (".cursor/skills", "cursor", "Cursor"),
 ];
 
 pub fn list_workspaces(managed_root: impl AsRef<Path>) -> Result<Vec<Workspace>> {
@@ -992,7 +993,7 @@ pub(crate) fn trusted_skill_symlink_roots(roots: &[PathBuf], paths: &ManagedPath
     for root in roots {
         trusted_roots.push(root.clone());
         if let Some(base) = runtime_workspace_base(root) {
-            for runtime_parent in [".agents", ".codex", ".claude"] {
+            for runtime_parent in [".agents", ".codex", ".claude", ".cursor"] {
                 let runtime_root = base.join(runtime_parent).join("skills");
                 if runtime_root.is_dir() {
                     trusted_roots.push(runtime_root);
@@ -1009,7 +1010,8 @@ pub(crate) fn runtime_workspace_base(root: &Path) -> Option<PathBuf> {
     let parent = root.parent()?;
     let parent_name = parent.file_name()?.to_str()?;
 
-    if root_name == "skills" && matches!(parent_name, ".agents" | ".codex" | ".claude") {
+    if root_name == "skills" && matches!(parent_name, ".agents" | ".codex" | ".claude" | ".cursor")
+    {
         parent.parent().map(Path::to_path_buf)
     } else {
         None
@@ -1092,6 +1094,7 @@ pub(crate) fn direct_global_workspace_roots(home: &Path) -> Vec<PathBuf> {
         home.join(".codex/skills"),
         home.join(".agents/skills"),
         home.join(".claude/skills"),
+        home.join(".cursor/skills"),
     ]
 }
 
@@ -1104,6 +1107,7 @@ pub(crate) fn workspace_agent_id(path: &Path) -> Option<String> {
         Some(".codex") => Some("codex".to_string()),
         Some(".agents") => Some("agents".to_string()),
         Some(".claude") => Some("claude".to_string()),
+        Some(".cursor") => Some("cursor".to_string()),
         _ => None,
     }
 }
@@ -1133,6 +1137,7 @@ pub(crate) fn workspace_agent_label(agent_id: Option<&str>) -> Option<String> {
         Some("codex") => "Codex",
         Some("agents") => "Agents",
         Some("claude") => "Claude Code",
+        Some("cursor") => "Cursor",
         _ => return None,
     };
 
@@ -1147,7 +1152,8 @@ pub(crate) fn workspace_project_name(path: &Path) -> Option<String> {
         .and_then(|name| name.to_str())
         .unwrap_or("");
 
-    if root_name == "skills" && matches!(parent_name, ".codex" | ".agents" | ".claude") {
+    if root_name == "skills" && matches!(parent_name, ".codex" | ".agents" | ".claude" | ".cursor")
+    {
         parent
             .parent()
             .and_then(|project| project.file_name())

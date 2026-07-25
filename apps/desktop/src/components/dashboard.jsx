@@ -359,7 +359,9 @@ function SkillCard({ skill, onOpen, onToggleFavorite }) {
             <SkillTypeBadge type={skill.type} />
             <Badge tone={skill.statusTone}>{skill.statusLabel}</Badge>
             {skill.usageCount > 0 ? (
-              <span className="skillCardUsage">{skill.usageCount} calls</span>
+              <span className="skillCardUsage">
+                {skill.usageCount} locally observed calls
+              </span>
             ) : null}
           </span>
           <AgentIconStack agents={skill.installedAgents} />
@@ -418,17 +420,19 @@ export function DashboardStatusNotice({ message, onDismiss }) {
   return (
     <div className="panelNotice notice success dashboardStatusNotice" role="status">
       <span className="dashboardStatusNoticeMessage">{message}</span>
-      <span className="dashboardStatusNoticeCountdown">
-        {formatStatusNoticeCountdown(remainingSeconds)}
-      </span>
-      <button
-        className="noticeDismissButton"
-        type="button"
-        aria-label="Dismiss status notice"
-        onClick={onDismiss}
-      >
-        <X aria-hidden="true" size={14} />
-      </button>
+      <div className="dashboardStatusNoticeActions">
+        <span className="dashboardStatusNoticeCountdown">
+          {formatStatusNoticeCountdown(remainingSeconds)}
+        </span>
+        <button
+          className="noticeDismissButton"
+          type="button"
+          aria-label="Dismiss status notice"
+          onClick={onDismiss}
+        >
+          <X aria-hidden="true" size={14} />
+        </button>
+      </div>
     </div>
   );
 }

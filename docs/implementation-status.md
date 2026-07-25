@@ -32,7 +32,7 @@
 - Added a read-only Doctor workflow in Rust core, Rust CLI, Tauri, and desktop Settings for checking schema/integrity, managed skill layouts, remote `current` links, deployments, workspaces, import backups, and stale metadata.
 - Extended operation auditing across direct/reviewed imports, deploy/undeploy, skill type changes, workspace add/forget, user-skills Git remote/sync, and usage hook injection, including failed attempts.
 - Implemented reviewed skill deletion across Rust core, CLI, Tauri, and Skill Detail UI, including all-workspace symlink removal, active-import and foreign-target blockers, preview identity checks, transactional active-state cleanup, and retained deletion backups. Single-workspace removal continues through the deployment picker and shared `undeploy_skill` core.
-- Implemented local Skill Usage Rankings in Rust core, CLI, Tauri, and a standalone desktop Rankings page, including 7-day, 30-day, and all-time ranges, Agent and Workspace filters, deterministic ordering, managed-skill zero rows, local coverage messaging, and schema-v4 query indexes.
+- Implemented local Skill Usage Rankings in Rust core, CLI, Tauri, and a standalone desktop Rankings page, including 7-day, 30-day, and all-time ranges, User/Remote/System skill-type filters, Agent and Workspace filters, deterministic source-aware ordering, managed-skill zero rows, same-name regular/System separation, unmanaged / Codex system / ambiguous-source / deleted-source skill markers, SQLite-validated source-aware Import, schema-v4 query indexes, schema-v5 canonical usage agent ids with stats rebuild, and workspace-aware hook/session attribution. The user-visible metric is `Locally observed calls`; coverage includes filtered earliest/latest event times, canonical stored-origin counts for hooks, Codex, Claude Code, Cursor, and other local observations, plus provider-specific latest scan counts. `Sync histories` runs all three local-history providers independently: Codex parses explicit user-input `<skill>` blocks or `[$skill](.../SKILL.md)` links; Claude Code accepts structured Skill tool/command attribution; Cursor accepts explicitly attached `context.cursorRules` from a validated read-only local SQLite schema. All providers resolve a real `SKILL.md`, ignore chat/assistant/tool prose, deduplicate stable event identities, and report partial provider failures without discarding successful imports. Usage Rankings is an early 0.5 capability; FTS search and source trust remain open below.
 - Added Rust crate scaffolding for the planned Tauri/Rust architecture.
 - Verified the desktop shell in browser preview at `http://127.0.0.1:1420/`.
 
@@ -44,6 +44,11 @@ from implementation status and is tracked in `docs/release.md`. The next milesto
 
 ### 0.5 — Discovery And Source Trust
 
+- Keep Usage Rankings coverage messaging and filter contracts aligned across
+  Rust core, CLI, Tauri, and desktop.
+- Keep any future Codex reported-run analytics in an independent provider metric
+  model with provider, subject kind, time window, scope, and provenance; never
+  write them to usage events or include them in local ranking, total, or delta.
 - Add FTS-backed search across skills, operations, and usage history.
 - Add remote source provenance and trust classification without treating
   popularity as verification.

@@ -71,7 +71,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `cargo test --offline`
 - `npm test`
 - 使用临时目录运行 Rust CLI：`cargo run -p skillbox-cli --offline -- import <source-dir> --type user --managed-root <temp-skillbox-root>`
-- UI 路径变更时，手动验证 import review 中冲突、默认选中和备份提示。
+- UI 路径变更时，手动验证 import review 与本地 import 确认弹窗中的 User/Remote 类型选择、冲突、默认选中和备份提示。
 - 使用两个 runtime roots 验证导入内容一致的副本只显示一行、列出两个位置、只为 primary 创建 backup/symlink，并保持 additional source 不变；修改任一附加脚本或 executable bit 后应恢复为两条候选。
 
 ## 3. Revert Local Import
@@ -567,10 +567,10 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 注入命令挂在 `Stop` 事件上。hook 命令读取 agent 提供的 `transcript_path`，只提取本 turn 中 Skill 块的 `name`、`path` 和触发用户 prompt 的受限 excerpt；不保存完整 prompt、聊天正文、文件内容或 transcript。
 - `usage-hook` 命令必须 fail-open：解析或写入失败时不应让 agent hook 返回失败，从而不影响 agent 会话结束。
 - Rust core 写入 `skill_usage_events`，允许 `skill_name` 尚未导入 SkillBox。
-- 如果同一 `agent_id + runtime_root + event_id` 已存在，返回 deduplicated 结果，不递增聚合计数。
+- 普通 `usage-record` 只在同一 `agent_id + runtime_root + event_id` 已存在时返回 deduplicated 结果。由 core 内部生成的 trusted hook/backfill 事件使用稳定 event id；当部署变化导致 runtime attribution 改变时，core 可在 canonical agent aliases 范围内按 `skill_name + event_id` 复用首次记录的 runtime root。公开请求即使伪造 `metadata.source` 也不能启用这条跨 runtime 去重。
 - 写入成功后更新 `skill_usage_stats`，聚合键为 `skill_name + agent_id + runtime_root`。
 - `used_at` 不传时使用当前 UTC RFC3339 时间；`recorded_at` 始终记录 SkillBox 收到上报的时间。
-- `metadata` 必须是 JSON object，大小受限，不能包含 prompt、聊天正文、文件内容、diff 等内容型字段。
+- `metadata` 必须是 JSON object，大小受限，不能包含 prompt、聊天正文、文件内容、diff 等内容型字段。公开 `usage-record` 不能设置保留值 `metadata.source=agent_hook|codex_session_backfill`；这两个来源只由 core 内部 trusted 入口写入。
 - 桌面 skill 详情页按 `skill_name` 汇总显示 Usage；Workspace card 按 runtime root 显示 Calls；workspace skill/import 行显示该 workspace 下的 Calls。
 - 桌面 skill card 在 skill name 下方直接显示全局 Calls。
 
@@ -593,41 +593,58 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 使用相同 `--event-id` 重复上报，确认第二次返回 deduplicated 且计数不增加。
 - `npm test`
 
-### 14.1 Local Skill Usage Rankings
+### 14.1 Locally Observed Skill Usage Rankings
 
 触发条件：
 
-- Rust core 入口：`list_skill_usage_rankings`。
-- Rust CLI 入口：`usage-rankings [--range 7d|30d|all] [--agent <id>] [--workspace <runtime-root>] [--include-unmanaged]`。
-- Tauri command：`list_skill_usage_rankings`。
-- 桌面左侧一级导航进入 Rankings 页面，或修改时间、Agent、Workspace 过滤器。
+- Rust core 入口：`list_skill_usage_rankings`、`backfill_codex_session_usage`、`backfill_claude_code_session_usage`、`backfill_cursor_session_usage`。
+- Rust CLI 入口：`usage-rankings [--range 7d|30d|all] [--type user|remote|system] [--agent <id>] [--workspace <runtime-root>] [--include-unmanaged]`、`usage-backfill-codex [--include-archived]`、`usage-backfill-claude-code [--projects-root <path>]`、`usage-backfill-cursor [--database-path <path>]`。
+- Tauri command：`list_skill_usage_rankings`、`backfill_codex_session_usage`、`backfill_claude_code_session_usage`、`backfill_cursor_session_usage`。
+- 桌面左侧一级导航进入 Rankings 页面，或修改时间、skill type（User/Remote/System）、Agent、Workspace 过滤器；也可点击 `Sync histories`。
 
 步骤：
 
 - 默认查询最近 30 天，用户可切换最近 7 天或全部历史；时间窗按 `used_at` 计算，并排除晚于本次查询时间的未来事件。
-- Agent 使用与 usage event 相同的 normalized `agent_id`；Workspace 表示事件写入时的 canonical runtime root，不根据当前 deployment 反推。
-- 默认范围只包含当前 managed store 中实际存在的 User/Remote skills，并为没有观测事件的 skill 返回 `0 calls`；CLI 显式传 `--include-unmanaged` 时才把窗口内的 deleted/unmanaged skill 加入结果。
+- skill type 过滤只接受 User、Remote、System：User/Remote 按当前 managed store 中的类型分类，System 按事件的可信 source identity 分类；`Not imported`、`Deleted`、`Unknown source` 是管理或来源状态，不属于 skill type。筛选在 coverage 累计前执行，因此 rows、rank、total 和 coverage 使用同一快照口径。
+- Agent 使用与 usage event 相同的 normalized `agent_id`（写入时把路径型 `agents`/`claude` 规范为 `codex`/`claude-code`；过滤同时兼容历史遗留 id）；Workspace 表示事件写入时的 canonical runtime root。实时 hook 优先使用结构化 `runtime_root` 或 `cwd` 在同一 managed skill 的多个 deployment 中定位 workspace，session 回填使用 session metadata 的 `cwd`，无上下文时才使用确定性 fallback。
+- 默认结果包含当前 managed store 中的 User/Remote skills（无观测事件时为 `0 locally observed calls`），以及时间窗内有观测事件、但尚未导入 SkillBox 的 unmanaged skills；CLI 可用 `--include-unmanaged` 显式打开同一范围，桌面 Rankings 默认开启。未导入 skill 在 UI 中标记为 `Not imported`；本地源已在该 skill 观测到的 runtime roots 中缺失（例如 broken symlink 或目录已删）标记为 `Deleted` 且不提供 Import；仅当事件 metadata 或观测 root 能唯一证明 `*/.system/<name>` 时标记为 `System`。旧事件在同一 root 同时存在普通与 System 同名 skill、无法可靠归属时标记为 `Unknown source`。System、Unknown source 均不提供 Import，且不因其他 Workspace 同名目录串号。
 - 聚合来源是 `skill_usage_events`，不是只包含 all-time 数据的 `skill_usage_stats`。同一 skill 跨 Agent/Workspace 的事件在未过滤时相加。
-- 排序固定为 calls 降序、last observed time 降序、skill name 升序，随后分配连续 ordinal rank，保证 core、CLI、Tauri 和 desktop 一致。
-- 桌面以可访问的数据表展示精确名次、skill 名称、calls 和 last observed time；Rankings 是与 Dashboard、Workspaces、History 同级的一级页面，History 只承载调用和操作时间线。
-- UI 必须说明它只统计本机 enabled/trusted hooks 已观测到的事件。`0 calls` 表示没有记录，不表示从未使用；usage frequency 不能改变 source trust、安全性或质量判断。
-- 查询和响应不读取、不返回 `prompt_excerpt` 或 `metadata_json`；usage 数据不上传、不跨设备合并，也不作为社区排行榜。
+- 排序固定为 calls 降序、last observed time 降序、skill name 升序、source identity 升序，随后分配连续 ordinal rank，保证同名行及 core、CLI、Tauri 和 desktop 的顺序稳定。
+- 桌面以可访问的数据表展示精确名次、skill 名称、`Locally observed calls`、last observed time 和 Actions；Rankings 是与 Dashboard、Workspaces、History 同级的一级页面，History 只承载调用和操作时间线。
+- Rankings 页提供 `Sync histories`，顺序运行三个互相独立的本地 provider 并在完成后刷新一次 ranking；单个 provider 失败时继续运行其余 provider，notice 明确成功/失败来源，已成功写入的幂等事件不回滚：
+  - Codex 流式扫描本机 `~/.codex/sessions`（可选 `archived_sessions`）中的 `rollout-*.jsonl`（不跟随目录 symlink），只从显式 user-input carrier 提取包含绝对 `SKILL.md` 路径的完整 `<skill><name>/<path>` block 或 `[$skill](.../SKILL.md)` link；相对路径、代码模板占位符及 assistant/tool/custom output 均忽略。同一 turn 按规范化 name + path 去重，并使用与 hook 对齐的 event identity。
+  - Claude Code 扫描 `~/.claude/projects/**/*.jsonl`（不跟随 symlink），只接受 assistant record 中结构化的 Skill tool use 或 command attribution；skill 必须解析到可读 `SKILL.md`，不从自由文本猜测调用，也不保存消息正文。
+  - Cursor 以 read-only、`query_only` 和 bounded busy timeout 打开本机 `state.vscdb`，先验证 `cursorDiskKV` / `composerHeaders` 所需 schema；仅扫描非 subagent composer 的 human bubble，接受 `addedWithoutMention=false` 且解析到可读 `SKILL.md` / `SKILL.md.mdc` 的 `context.cursorRules[].filename`。未知 schema、锁等待超时或非法路径 fail closed，不扫描 assistant/tool 文本，不修改 Cursor 数据库。
+  - 三个 provider 都用 provider/session/turn/path 构造稳定 `event_id`，重复导入不递增；非法或不受支持记录计入 skipped/errors。
+- 桌面 Full ranking 表格包含 Actions 列：已导入 skill 显示 `Detail` 并打开既有 skill 详情弹窗；未导入 skill 显示 `Import`，通过 row 的 `source_id + source_kind + source_runtime_roots`，以及生成该行的 ranking filters 和 `generated_at` 调用 source-aware `preview_usage_skill_import`。core 必须用同一查询快照重建完整 row identity，拒绝缺失 identity、任意 roots 子集、被篡改或已过期的请求；只在重建出的全部 roots 中选择 Importable candidate，某个 root 已失效时可继续检查同一 source 的其他 root，但不得回退到任意全局 runtime 或删除备份。旧的 name-only Rust API 保留原有本地恢复搜索，但 Tauri Rankings command 始终要求完整 identity。候选确认后用户可选择导入为 User 或 Remote，确认后写入 managed store 并刷新 Rankings。同名普通 skill 与 System/Unknown source 即使共享 runtime root 或普通副本已 managed 也拆成独立行；System 与 Unknown source 均不可 Import。
+- Rankings 页面宽度与 Dashboard 一致，不再单独收窄。
+- UI 必须将指标标为 `Locally observed calls`，并说明统计来自本机观测（trusted hooks 与已导入的 Codex、Claude Code、Cursor history）。`0 locally observed calls` 表示没有记录，不表示从未使用；usage frequency 不能改变 source trust、安全性或质量判断。
+- 每个 ranking 查询返回与过滤快照一致的 coverage：最早/最新观测事件，以及按 canonical 已存储 `metadata.source` 统计的 `agent_hook`、`codex_session_backfill`、`claude_code_session_backfill`、`cursor_session_backfill` 和 other 数量；这些分类之和必须等于 locally observed total。coverage 另展示三个 provider preferences 中最近一次扫描的文件/session 数；操作覆盖指标不随 ranking filters 改变。
+- 未来若接入 Codex reported runs，必须按 provider、subject kind、time window、scope 和 provenance 独立存储与展示；不得写入 `skill_usage_events`，不得参与本地 ranking、total 或 delta。
+- 查询只读取 `metadata_json.skill_source_kind` 这一受限身份字段，响应不返回 `prompt_excerpt` 或完整 `metadata_json`；usage 数据不上传、不跨设备合并，也不作为社区排行榜。
+- 导入预览或 backfill 进行中切换离开 Rankings 时，迟到响应不得再打开确认框或把错误写到其它页面；loading 标记仍须清理，避免返回后按钮永久禁用。
 
 失败与回滚：
 
 - 非法 range、agent id 或相对 Workspace path 拒绝查询；读取失败只展示错误，不修改 usage events、managed store 或 runtime。
-- schema v4 migration 只增加 ranking 查询索引；已有数据库按通用 migration 规则先备份，失败时 transaction 回滚。
+- history sync 只读各 agent 的本机会话存储；解析或单条写入失败计入 skipped/errors，不中断同一 provider 的其余可读记录，也不修改 agent 会话、数据库或 hook 配置。Cursor 私有 schema 不满足白名单时整个 Cursor provider fail closed。
+- schema v4 migration 只增加 ranking 查询索引；schema v5 将遗留 `agents`/`claude` usage agent id 规范为 `codex`/`claude-code`，删除相同 event identity 的重复事件，并从规范化事件重建受影响 stats，避免 Rankings 与 Dashboard/Workspace totals 分叉；已有数据库按通用 migration 规则先备份，失败时 transaction 回滚。
 - 快速连续切换过滤器时，桌面只应用最后一个请求的结果，避免旧响应覆盖新条件。
 
 完成验证：
 
 - `cargo test -p skillbox-core --offline usage_ranking`
-- `cargo test -p skillbox-core --offline database_migration`
+- `cargo test -p skillbox-core --offline usage_backfill`
+- `cargo test -p skillbox-core --offline cursor_backfill`
+- `cargo test -p skillbox-core --offline schema_v`
 - `cargo test -p skillbox-cli --offline usage_ranking`
 - `cargo run -p skillbox-cli --offline -- usage-rankings --range 30d --managed-root <temp-skillbox-root>`
+- `cargo run -p skillbox-cli --offline -- usage-backfill-codex --sessions-root <temp-sessions> --managed-root <temp-skillbox-root>`
+- `cargo run -p skillbox-cli --offline -- usage-backfill-claude-code --projects-root <temp-claude-projects> --managed-root <temp-skillbox-root>`
+- `cargo run -p skillbox-cli --offline -- usage-backfill-cursor --database-path <temp-state-vscdb> --managed-root <temp-skillbox-root>`
 - `node --test apps/desktop/src/usageRankings.test.js apps/desktop/src/cardLayout.test.js`
 - `npm test`
-- 桌面手动验证 Rankings 的 7/30/all、Agent/Workspace 组合过滤、空状态、键盘 focus、最后请求获胜和 managed skill detail 跳转。
+- 桌面手动验证 Rankings 的 7/30/all、User/Remote/System、Agent/Workspace 组合过滤、Sync histories（含单 provider 失败）、空状态、键盘 focus、最后请求获胜和 managed skill detail 跳转。
 
 ## 15. App Updates
 

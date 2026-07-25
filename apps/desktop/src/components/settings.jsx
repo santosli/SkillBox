@@ -243,7 +243,7 @@ function UsageHookSettingsPanel({ hookGroups, status, onInstall, onOpenConfig, o
       <div className="panelHeader compact">
         <div>
           <h2>Usage hook injection</h2>
-          <p>Record real agent skill calls from runtime hooks.</p>
+          <p>Record locally observed agent skill calls from runtime hooks.</p>
         </div>
         <div className="panelActions">
           <button

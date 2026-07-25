@@ -125,7 +125,7 @@ function WorkspaceCard({ isBusy, workspace, onForget, onOpenSkills }) {
     Scope: <Badge tone={workspace.kind === 'global' ? 'blue' : 'green'}>{workspace.kindLabel}</Badge>,
     Skills: <strong>{workspace.skillCount}</strong>,
     Imported: <strong>{workspace.importedSkillCount}</strong>,
-    Calls: <strong>{workspace.usageCount}</strong>
+    'Locally observed calls': <strong>{workspace.usageCount}</strong>
   };
 
   return (

@@ -731,6 +731,66 @@ async fn list_skill_usage_rankings(
 }
 
 #[tauri::command]
+async fn preview_usage_skill_import(
+    request: skillbox_core::PreviewUsageSkillImportRequest,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = skillbox_core::preview_usage_skill_import_for_source(
+            request,
+            skillbox_core::default_managed_root(),
+        )?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Usage skill import preview task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn backfill_codex_session_usage(
+    request: skillbox_core::BackfillCodexSessionUsageRequest,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = skillbox_core::backfill_codex_session_usage(
+            request,
+            skillbox_core::default_managed_root(),
+        )?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Codex usage backfill task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn backfill_claude_code_session_usage(
+    request: skillbox_core::BackfillClaudeCodeSessionUsageRequest,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = skillbox_core::backfill_claude_code_session_usage(
+            request,
+            skillbox_core::default_managed_root(),
+        )?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Claude Code usage backfill task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn backfill_cursor_session_usage(
+    request: skillbox_core::BackfillCursorSessionUsageRequest,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = skillbox_core::backfill_cursor_session_usage(
+            request,
+            skillbox_core::default_managed_root(),
+        )?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Cursor usage backfill task failed: {error}"))?
+}
+
+#[tauri::command]
 async fn record_skill_usage(
     request: skillbox_core::RecordSkillUsageRequest,
 ) -> Result<Value, String> {
@@ -897,10 +957,70 @@ async fn install_app_update(
     app.restart();
 }
 
+#[cfg(debug_assertions)]
+fn development_frontmost_application_pid() -> Option<i32> {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::NSWorkspace;
+
+        NSWorkspace::sharedWorkspace()
+            .frontmostApplication()
+            .map(|application| application.processIdentifier())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    None
+}
+
+#[cfg(all(debug_assertions, target_os = "macos"))]
+fn restore_frontmost_application(pid: Option<i32>) {
+    use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
+
+    if let Some(application) =
+        pid.and_then(NSRunningApplication::runningApplicationWithProcessIdentifier)
+    {
+        application.activateWithOptions(NSApplicationActivationOptions::empty());
+    }
+}
+
+#[cfg(debug_assertions)]
+fn create_development_window(
+    app: &mut tauri::App,
+    previous_frontmost_application_pid: Option<i32>,
+) -> tauri::Result<()> {
+    if !app.webview_windows().is_empty() {
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        app.handle()
+            .set_activation_policy(tauri::ActivationPolicy::Regular)?;
+        restore_frontmost_application(previous_frontmost_application_pid);
+    }
+
+    tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
+        .title("SkillBox Dev")
+        .hidden_title(true)
+        .maximized(true)
+        .inner_size(1120.0, 760.0)
+        .min_inner_size(860.0, 620.0)
+        .focused(false)
+        .build()?;
+
+    Ok(())
+}
+
 pub fn run() {
-    let result = tauri::Builder::default()
+    #[cfg(debug_assertions)]
+    let previous_frontmost_application_pid = development_frontmost_application_pid();
+
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .setup(|app| {
+        .setup(move |app| {
+            #[cfg(debug_assertions)]
+            create_development_window(app, previous_frontmost_application_pid)?;
+
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
             app.manage(PendingAppUpdate::default());
@@ -953,6 +1073,10 @@ pub fn run() {
             repair_stale_deployment_records,
             list_history,
             list_skill_usage_rankings,
+            preview_usage_skill_import,
+            backfill_codex_session_usage,
+            backfill_claude_code_session_usage,
+            backfill_cursor_session_usage,
             record_skill_usage,
             usage_hook_statuses,
             install_usage_hook,
@@ -964,8 +1088,19 @@ pub fn run() {
             forget_workspace,
             check_app_update,
             install_app_update
-        ])
-        .run(tauri::generate_context!());
+        ]);
+
+    let result = builder.build(tauri::generate_context!()).map(|app| {
+        #[cfg(all(debug_assertions, target_os = "macos"))]
+        let mut app = app;
+
+        #[cfg(all(debug_assertions, target_os = "macos"))]
+        if app.config().app.windows.is_empty() {
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+        }
+
+        app.run(|_, _| {});
+    });
 
     if let Err(error) = result {
         eprintln!("failed to run SkillBox: {error}");

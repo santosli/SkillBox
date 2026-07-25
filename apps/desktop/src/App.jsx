@@ -65,7 +65,6 @@ import {
 import {
   clearLegacyDashboardMetadata,
   normalizePreferences,
-  previewPreferenceStorageKey,
   previewRemoteUpdateTimeoutStorageKey,
   previewStatusRefreshIntervalStorageKey,
   readDashboardFavorites,
@@ -117,7 +116,10 @@ import { chooseWorkspaceDirectory } from './workspaceDirectoryPicker.js';
 import {
   defaultUsageRankingFilters,
   normalizeUsageRankings,
-  usageRankingRequest
+  usageRankingRequest,
+  normalizeCodexUsageBackfill,
+  usageHistorySyncNotice,
+  usageHistorySyncProviders
 } from './usageRankings.js';
 import {
   defaultSyncCommitMessage,
@@ -239,6 +241,8 @@ function normalizeImportRecord(record = {}) {
   };
 }
 
+const APP_DISPLAY_NAME = import.meta.env.DEV ? 'SkillBox Dev' : 'SkillBox';
+
 export default function App() {
   const [skills, setSkills] = useState([]);
   const [workspaces, setWorkspaces] = useState([]);
@@ -276,7 +280,6 @@ export default function App() {
   const [localImportConfirmation, setLocalImportConfirmation] = useState({
     open: false,
     candidates: [],
-    dontShowAgain: false,
     noticePrefix: ''
   });
   const [remoteImport, setRemoteImport] = useState({
@@ -381,6 +384,9 @@ export default function App() {
   const [history, setHistory] = useState(normalizeHistory(null));
   const [usageRankings, setUsageRankings] = useState(normalizeUsageRankings(null));
   const [usageRankingLoading, setUsageRankingLoading] = useState(false);
+  const [usageBackfillLoading, setUsageBackfillLoading] = useState(false);
+  const [usageBackfillNotice, setUsageBackfillNotice] = useState('');
+  const [rankingImportSkillName, setRankingImportSkillName] = useState('');
   const [remoteContextLoading, setRemoteContextLoading] = useState({});
   const [userContextLoading, setUserContextLoading] = useState({});
   const [appUpdate, setAppUpdate] = useState(() =>
@@ -397,6 +403,8 @@ export default function App() {
   const refreshSkillStatusesRef = useRef(null);
   const appUpdateAutoCheckedRef = useRef(false);
   const usageRankingRequestRef = useRef(0);
+  const rankingImportRequestRef = useRef(0);
+  const pageRef = useRef(page);
   const dismissNotice = () => setNotice('');
   const lastStatusCheckedLabel = useMemo(
     () => formatStatusCheckedAt(lastStatusCheckedAt),
@@ -406,6 +414,10 @@ export default function App() {
   useEffect(() => {
     refresh();
   }, []);
+
+  useEffect(() => {
+    pageRef.current = page;
+  }, [page]);
 
   useEffect(() => {
     if (!window.__TAURI_INTERNALS__) {
@@ -1109,11 +1121,10 @@ export default function App() {
       return;
     }
 
-    if (shouldConfirmLocalImport(selected, preferences)) {
+    if (shouldConfirmLocalImport(selected)) {
       setLocalImportConfirmation({
         open: true,
         candidates: selected,
-        dontShowAgain: false,
         noticePrefix: importReview.noticePrefix || ''
       });
       return;
@@ -1146,6 +1157,9 @@ export default function App() {
 
       setImportReview({ open: false, candidates: [], errors: [], noticePrefix: '' });
       await refresh();
+      if (page === 'rankings') {
+        await loadUsageRankings(usageRankingFilters);
+      }
       setNotice(importNotice(noticePrefix, importBatchNotice(result)));
     } catch (importError) {
       setError(importError.message || 'Unable to import selected skills.');
@@ -1157,44 +1171,15 @@ export default function App() {
     if (status === 'importing') {
       return;
     }
-    setLocalImportConfirmation({ open: false, candidates: [], dontShowAgain: false, noticePrefix: '' });
+    setLocalImportConfirmation({ open: false, candidates: [], noticePrefix: '' });
   }
 
   async function confirmLocalImport() {
     const selected = localImportConfirmation.candidates;
-    let noticePrefix = localImportConfirmation.noticePrefix || '';
+    const noticePrefix = localImportConfirmation.noticePrefix || '';
 
-    if (localImportConfirmation.dontShowAgain) {
-      try {
-        await saveSkipLocalImportConfirmation(true);
-      } catch (preferenceError) {
-        noticePrefix = importNotice(
-          noticePrefix,
-          `Preference was not saved: ${preferenceError.message || String(preferenceError)}.`
-        );
-      }
-    }
-
-    setLocalImportConfirmation({ open: false, candidates: [], dontShowAgain: false, noticePrefix: '' });
+    setLocalImportConfirmation({ open: false, candidates: [], noticePrefix: '' });
     await runCandidateImport(selected, noticePrefix);
-  }
-
-  async function saveSkipLocalImportConfirmation(skip) {
-    if (!window.__TAURI_INTERNALS__) {
-      try {
-        window.localStorage.setItem(previewPreferenceStorageKey, skip ? 'true' : 'false');
-      } catch {
-        // Browser preview can run without durable storage; keep the session preference in React state.
-      }
-      const nextPreferences = { ...preferences, skipLocalImportConfirmation: skip };
-      setPreferences(nextPreferences);
-      return nextPreferences;
-    }
-
-    const storedPreferences = await invoke('set_skip_local_import_confirmation', { skip });
-    const nextPreferences = normalizePreferences(storedPreferences);
-    setPreferences(nextPreferences);
-    return nextPreferences;
   }
 
   async function saveStatusRefreshIntervalMinutes(minutes) {
@@ -1568,10 +1553,18 @@ export default function App() {
     }
   }
 
+  function navigateToPage(nextPage) {
+    pageRef.current = nextPage;
+    if (nextPage !== 'rankings') {
+      cancelUsageRankingRequest();
+    }
+    setPage(nextPage);
+  }
+
   function openDashboard(nextFilter = filter) {
     setFilter(nextFilter);
     setSelectedName('');
-    setPage('dashboard');
+    navigateToPage('dashboard');
   }
 
   function clearDashboardFilters() {
@@ -1582,9 +1575,8 @@ export default function App() {
   }
 
   function openHistory() {
-    cancelUsageRankingRequest();
     setSelectedName('');
-    setPage('history');
+    navigateToPage('history');
     void loadHistory();
   }
 
@@ -1610,22 +1602,29 @@ export default function App() {
 
   function openRankings() {
     setSelectedName('');
-    setPage('rankings');
+    navigateToPage('rankings');
     void loadUsageRankings(usageRankingFilters);
   }
 
   function cancelUsageRankingRequest() {
     usageRankingRequestRef.current += 1;
+    rankingImportRequestRef.current += 1;
     setUsageRankingLoading(false);
+    setRankingImportSkillName('');
     setError('');
   }
 
-  async function loadUsageRankings(nextFilters) {
+  async function loadUsageRankings(
+    nextFilters,
+    { clearError = true, reportError = true } = {}
+  ) {
     const requestId = usageRankingRequestRef.current + 1;
     usageRankingRequestRef.current = requestId;
     setUsageRankingFilters(nextFilters);
     setUsageRankingLoading(true);
-    setError('');
+    if (clearError) {
+      setError('');
+    }
 
     try {
       const result = window.__TAURI_INTERNALS__
@@ -1633,15 +1632,21 @@ export default function App() {
             request: usageRankingRequest(nextFilters)
           })
         : previewUsageRankings(nextFilters);
-      if (usageRankingRequestRef.current === requestId) {
+      if (usageRankingRequestRef.current === requestId && pageRef.current === 'rankings') {
         setUsageRankings(normalizeUsageRankings(result));
       }
+      return '';
     } catch (rankingError) {
-      if (usageRankingRequestRef.current === requestId) {
-        setError(
-          rankingError.message || String(rankingError) || 'Unable to load skill usage rankings.'
-        );
+      const rankingErrorMessage =
+        rankingError.message || String(rankingError) || 'Unable to load skill usage rankings.';
+      if (
+        reportError
+        && usageRankingRequestRef.current === requestId
+        && pageRef.current === 'rankings'
+      ) {
+        setError(rankingErrorMessage);
       }
+      return rankingErrorMessage;
     } finally {
       if (usageRankingRequestRef.current === requestId) {
         setUsageRankingLoading(false);
@@ -1649,10 +1654,159 @@ export default function App() {
     }
   }
 
+  async function syncLocalUsageHistories() {
+    if (pageRef.current !== 'rankings') return;
+    setUsageBackfillLoading(true);
+    setError('');
+    setUsageBackfillNotice('');
+    try {
+      const providerResults = [];
+      for (const provider of usageHistorySyncProviders) {
+        if (pageRef.current !== 'rankings') return;
+        try {
+          const result = window.__TAURI_INTERNALS__
+            ? await invoke(provider.command, { request: provider.request })
+            : {
+                scanned_files: provider.id === 'cursor' ? 4 : 2,
+                discovered: provider.id === 'codex' ? 3 : 1,
+                recorded: provider.id === 'codex' ? 3 : 1,
+                deduplicated: 0,
+                skipped: 0,
+                errors: []
+              };
+          providerResults.push({ provider: provider.label, ...result });
+        } catch (providerError) {
+          providerResults.push({
+            provider: provider.label,
+            errors: [
+              providerError.message
+                || String(providerError)
+                || `${provider.label} history sync failed.`
+            ]
+          });
+        }
+      }
+      if (pageRef.current !== 'rankings') return;
+      const normalizedResults = providerResults.map((result) => ({
+        provider: result.provider,
+        ...normalizeCodexUsageBackfill(result)
+      }));
+      const errorCount = normalizedResults.reduce(
+        (total, result) => total + result.errors.length,
+        0
+      );
+      const syncNotice = usageHistorySyncNotice(providerResults);
+      const partialWarning = errorCount > 0
+        ? `Local history sync completed with ${errorCount} error${
+            errorCount === 1 ? '' : 's'
+          }: ${syncNotice}`
+        : '';
+      if (errorCount > 0) {
+        setUsageBackfillNotice('');
+      } else {
+        setUsageBackfillNotice(syncNotice);
+      }
+      const rankingRefreshError = await loadUsageRankings(usageRankingFilters, {
+        clearError: !partialWarning,
+        reportError: !partialWarning
+      });
+      if (partialWarning && pageRef.current === 'rankings') {
+        setError(
+          rankingRefreshError
+            ? `${partialWarning} Rankings refresh failed: ${rankingRefreshError}`
+            : partialWarning
+        );
+      }
+    } catch (backfillError) {
+      if (pageRef.current !== 'rankings') return;
+      setError(
+        backfillError.message
+          || String(backfillError)
+          || 'Unable to import local agent usage history.'
+      );
+    } finally {
+      setUsageBackfillLoading(false);
+    }
+  }
+
   function openRankedSkill(skillName) {
     const skill = skills.find((candidate) => candidate.name === skillName);
-    if (skill) {
-      openSkill(skill);
+    if (!skill) {
+      setError(`Managed skill ${skillName} was not found. Refresh Rankings and try again.`);
+      return;
+    }
+    openSkill(skill);
+  }
+
+  async function importRankedSkill(row) {
+    if (pageRef.current !== 'rankings') return;
+    const skillName = row.skillName;
+    const sourceId = row.sourceId || skillName;
+    const requestId = rankingImportRequestRef.current + 1;
+    rankingImportRequestRef.current = requestId;
+    setRankingImportSkillName(sourceId);
+    setError('');
+    setNotice('');
+
+    try {
+      const candidate = window.__TAURI_INTERNALS__
+        ? normalizeImportCandidate(
+            await invoke('preview_usage_skill_import', {
+              request: {
+                skillName,
+                sourceKind: row.sourceKind || (row.system ? 'system' : 'regular'),
+                sourceId: row.sourceId || null,
+                sourceRuntimeRoots: row.sourceRuntimeRoots || [],
+                rankingRequest: usageRankingRequest(usageRankingFilters),
+                rankingGeneratedAt: usageRankings.generatedAt
+              }
+            })
+          )
+        : normalizeImportCandidate({
+            name: skillName,
+            description: `Preview import for ${skillName}`,
+            sourcePath: `/tmp/preview-skills/${skillName}`,
+            sourceRoot: '/tmp/preview-skills',
+            realPath: `/tmp/preview-skills/${skillName}`,
+            isSymlink: false,
+            contentHash: `preview-${skillName}`,
+            suggestedType: 'user',
+            suggestionReason: 'Observed in Rankings',
+            importStatus: 'importable',
+            isSelected: true,
+            usageCount: 1
+          });
+
+      if (!isImportableCandidate(candidate)) {
+        throw new Error(
+          candidate.conflict
+            || `Skill ${skillName} is not importable from the recorded runtime location.`
+        );
+      }
+
+      if (
+        rankingImportRequestRef.current !== requestId
+        || pageRef.current !== 'rankings'
+      ) return;
+      setLocalImportConfirmation({
+        open: true,
+        candidates: [candidate],
+        noticePrefix: 'Imported from Rankings.'
+      });
+    } catch (importError) {
+      if (
+        rankingImportRequestRef.current !== requestId
+        || pageRef.current !== 'rankings'
+      ) return;
+      setError(
+        importError.message
+          || String(importError)
+          || `Unable to prepare import for ${skillName}.`
+      );
+    } finally {
+      if (rankingImportRequestRef.current === requestId) {
+        setRankingImportSkillName('');
+      }
     }
   }
 
@@ -3291,7 +3445,7 @@ export default function App() {
 
   function openSyncSettings() {
     setSyncDialog((current) => ({ ...current, open: false, error: '' }));
-    setPage('settings');
+    navigateToPage('settings');
   }
 
   return (
@@ -3300,7 +3454,7 @@ export default function App() {
         <div className="brand">
           <img className="brandMark" src={skillBoxAppIcon} alt="" aria-hidden="true" />
           <div className="brandName">
-            <strong>SkillBox</strong>
+            <strong>{APP_DISPLAY_NAME}</strong>
           </div>
           {appUpdate.available ? (
             <button
@@ -3329,16 +3483,14 @@ export default function App() {
               label={item.label}
               onClick={() => {
                 if (item.id === 'dashboard') {
-                  cancelUsageRankingRequest();
                   openDashboard('all');
                 } else if (item.id === 'rankings') {
                   openRankings();
                 } else if (item.id === 'history') {
                   openHistory();
                 } else {
-                  cancelUsageRankingRequest();
                   setSelectedName('');
-                  setPage(item.id);
+                  navigateToPage(item.id);
                 }
               }}
             />
@@ -3353,8 +3505,7 @@ export default function App() {
               key={item.id}
               label={item.label}
               onClick={item.url ? () => openRemoteSourceUrl(item.url) : () => {
-                cancelUsageRankingRequest();
-                setPage(item.id);
+                navigateToPage(item.id);
               }}
             />
           ))}
@@ -3415,16 +3566,24 @@ export default function App() {
           />
         ) : page === 'rankings' ? (
           <UsageRankingsPage
+            backfilling={usageBackfillLoading}
             error={error}
             filters={usageRankingFilters}
+            importingSkillName={rankingImportSkillName}
             loading={usageRankingLoading}
+            notice={usageBackfillNotice || notice}
             ranking={usageRankings}
             usageHooks={usageHooks}
             workspaces={workspaces}
+            onSyncHistories={syncLocalUsageHistories}
+            onDismissNotice={() => {
+              setUsageBackfillNotice('');
+              dismissNotice();
+            }}
             onFilters={loadUsageRankings}
+            onImportSkill={importRankedSkill}
             onOpenSettings={() => {
-              cancelUsageRankingRequest();
-              setPage('settings');
+              navigateToPage('settings');
             }}
             onOpenSkill={openRankedSkill}
             onRefresh={() => loadUsageRankings(usageRankingFilters)}
@@ -3460,7 +3619,7 @@ export default function App() {
         )}
       </section>
 
-      {page === 'dashboard' && selectedSkill ? (
+      {(page === 'dashboard' || page === 'rankings') && selectedSkill ? (
         <SkillDetailDialog
           skill={selectedSkill}
           status={status}
@@ -3553,12 +3712,16 @@ export default function App() {
       {localImportConfirmation.open ? (
         <LocalImportConfirmationDialog
           candidates={localImportConfirmation.candidates}
-          dontShowAgain={localImportConfirmation.dontShowAgain}
           status={status}
           onClose={closeLocalImportConfirmation}
           onConfirm={confirmLocalImport}
-          onDontShowAgainChange={(dontShowAgain) =>
-            setLocalImportConfirmation((current) => ({ ...current, dontShowAgain }))
+          onTypeChange={(candidate, skillType) =>
+            setLocalImportConfirmation((current) => ({
+              ...current,
+              candidates: current.candidates.map((item) =>
+                item.sourcePath === candidate.sourcePath ? { ...item, skillType } : item
+              )
+            }))
           }
         />
       ) : null}

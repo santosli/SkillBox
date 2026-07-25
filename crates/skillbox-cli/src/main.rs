@@ -268,6 +268,29 @@ fn run(args: Vec<String>) -> Result<(), String> {
             usage_ranking_request(command_args)?,
             managed_root(command_args),
         )?),
+        "usage-backfill-codex" => print_json(&skillbox_core::backfill_codex_session_usage(
+            skillbox_core::BackfillCodexSessionUsageRequest {
+                include_archived: has_flag(command_args, "--include-archived"),
+                sessions_root: option(command_args, "--sessions-root").map(PathBuf::from),
+                archived_sessions_root: option(command_args, "--archived-sessions-root")
+                    .map(PathBuf::from),
+            },
+            managed_root(command_args),
+        )?),
+        "usage-backfill-claude-code" => {
+            print_json(&skillbox_core::backfill_claude_code_session_usage(
+                skillbox_core::BackfillClaudeCodeSessionUsageRequest {
+                    projects_root: option(command_args, "--projects-root").map(PathBuf::from),
+                },
+                managed_root(command_args),
+            )?)
+        }
+        "usage-backfill-cursor" => print_json(&skillbox_core::backfill_cursor_session_usage(
+            skillbox_core::BackfillCursorSessionUsageRequest {
+                database_path: option(command_args, "--database-path").map(PathBuf::from),
+            },
+            managed_root(command_args),
+        )?),
         "usage-hook" => {
             let agent = positional(command_args)
                 .into_iter()
@@ -490,8 +513,20 @@ fn usage_ranking_request(
             ))
         }
     };
+    let skill_type = match option(args, "--type").as_deref() {
+        None => None,
+        Some("user") => Some(skillbox_core::SkillUsageRankingSkillType::User),
+        Some("remote") => Some(skillbox_core::SkillUsageRankingSkillType::Remote),
+        Some("system") => Some(skillbox_core::SkillUsageRankingSkillType::System),
+        Some(other) => {
+            return Err(format!(
+                "Invalid usage ranking skill type: {other}. Use user, remote, or system."
+            ))
+        }
+    };
     Ok(skillbox_core::SkillUsageRankingRequest {
         range,
+        skill_type,
         agent_id: option(args, "--agent"),
         workspace_root: option(args, "--workspace").map(PathBuf::from),
         include_unmanaged: has_flag(args, "--include-unmanaged"),
@@ -525,7 +560,10 @@ Commands:
   skillbox remote-apply-change <skill-name> --action update|rollback --to <version> [--preview-id <id>] [--managed-root <path>]
   skillbox rollback <skill-name> --to <version> [--managed-root <path>]
   skillbox usage-record --skill <name> --agent <id> --runtime-root <path> [--event-id <id>] [--used-at <rfc3339>] [--prompt-excerpt <text>] [--metadata-json <json>] [--managed-root <path>]
-  skillbox usage-rankings [--range 7d|30d|all] [--agent <id>] [--workspace <path>] [--include-unmanaged] [--managed-root <path>]
+  skillbox usage-rankings [--range 7d|30d|all] [--type user|remote|system] [--agent <id>] [--workspace <path>] [--include-unmanaged] [--managed-root <path>]
+  skillbox usage-backfill-codex [--include-archived] [--sessions-root <path>] [--archived-sessions-root <path>] [--managed-root <path>]
+  skillbox usage-backfill-claude-code [--projects-root <path>] [--managed-root <path>]
+  skillbox usage-backfill-cursor [--database-path <path>] [--managed-root <path>]
   skillbox usage-hook codex|claude-code [--managed-root <path>]
   skillbox usage-hook-status
   skillbox usage-hook-install <target>
@@ -611,6 +649,7 @@ mod tests {
             request.range,
             skillbox_core::SkillUsageRankingRange::Last30Days
         );
+        assert_eq!(request.skill_type, None);
         assert_eq!(request.agent_id, None);
         assert_eq!(request.workspace_root, None);
         assert!(!request.include_unmanaged);
@@ -621,6 +660,8 @@ mod tests {
         let args = vec![
             "--range".to_string(),
             "7d".to_string(),
+            "--type".to_string(),
+            "remote".to_string(),
             "--agent".to_string(),
             "codex".to_string(),
             "--workspace".to_string(),
@@ -633,6 +674,10 @@ mod tests {
         assert_eq!(
             request.range,
             skillbox_core::SkillUsageRankingRange::Last7Days
+        );
+        assert_eq!(
+            request.skill_type,
+            Some(skillbox_core::SkillUsageRankingSkillType::Remote)
         );
         assert_eq!(request.agent_id.as_deref(), Some("codex"));
         assert_eq!(
@@ -649,6 +694,18 @@ mod tests {
 
         assert!(error.contains("7d, 30d, or all"));
         assert!(help_text().contains("skillbox usage-rankings"));
+        assert!(help_text().contains("skillbox usage-backfill-codex"));
+        assert!(help_text().contains("skillbox usage-backfill-claude-code"));
+        assert!(help_text().contains("skillbox usage-backfill-cursor"));
+    }
+
+    #[test]
+    fn usage_ranking_request_rejects_invalid_skill_type() {
+        let error =
+            usage_ranking_request(&["--type".to_string(), "managed".to_string()]).unwrap_err();
+
+        assert!(error.contains("Invalid usage ranking skill type: managed"));
+        assert!(error.contains("user, remote, or system"));
     }
 
     #[test]

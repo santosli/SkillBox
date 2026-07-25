@@ -84,6 +84,9 @@ mod skills;
 mod state;
 mod types;
 mod usage;
+mod usage_backfill;
+mod usage_backfill_claude;
+mod usage_backfill_cursor;
 mod workspaces;
 
 pub(crate) use db::*;
@@ -101,6 +104,9 @@ pub use skills::*;
 pub use state::*;
 pub use types::*;
 pub use usage::*;
+pub use usage_backfill::*;
+pub use usage_backfill_claude::*;
+pub use usage_backfill_cursor::*;
 pub use workspaces::*;
 
 #[cfg(test)]

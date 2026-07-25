@@ -20,11 +20,7 @@ export function remoteImportCandidate(mode, value) {
   };
 }
 
-export function shouldConfirmLocalImport(candidates, preferences) {
-  if (preferences.skipLocalImportConfirmation) {
-    return false;
-  }
-
+export function shouldConfirmLocalImport(candidates) {
   return candidates.some((candidate) => isImportableCandidate(candidate) && requiresLocalImportConfirmation(candidate));
 }
 

@@ -94,14 +94,17 @@ export function PageHeader({ actions, eyebrow, subtitle, title }) {
   );
 }
 
-export function PageTitleRow({ actions, count, title }) {
+export function PageTitleRow({ actions, count, subtitle, title }) {
   const hasCount = count !== undefined && count !== null;
 
   return (
     <div className="pageTitleRow">
       <div className="pageTitleGroup">
-        <h1>{title}</h1>
-        {hasCount ? <span className="pageTitlePill">{count}</span> : null}
+        <div className="pageTitleHeading">
+          <h1>{title}</h1>
+          {hasCount ? <span className="pageTitlePill">{count}</span> : null}
+        </div>
+        {subtitle ? <p className="pageTitleSubtitle">{subtitle}</p> : null}
       </div>
       {actions ? <div className="pageTitleActions">{actions}</div> : null}
     </div>

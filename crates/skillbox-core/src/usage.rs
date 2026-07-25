@@ -1,43 +1,128 @@
 use crate::*;
 
+type UsageRankingRootAggregates = HashMap<(String, String, SkillUsageSourceKind), UsageSummary>;
+
 pub fn record_skill_usage(
     request: RecordSkillUsageRequest,
     managed_root: impl AsRef<Path>,
 ) -> Result<SkillUsageRecordResult> {
+    reject_reserved_usage_source(&request)?;
     let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let mut connection = open_database(&paths.database_path).map_err(|error| error.to_string())?;
+    record_skill_usage_on_connection(request, &mut connection, false)
+}
+
+fn reject_reserved_usage_source(request: &RecordSkillUsageRequest) -> Result<()> {
+    let source = request
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get("source"))
+        .and_then(|value| value.as_str());
+    if matches!(
+        source,
+        Some(
+            "agent_hook"
+                | "codex_session_backfill"
+                | "claude_code_session_backfill"
+                | "cursor_session_backfill"
+        )
+    ) {
+        return Err(
+            "metadata.source is reserved for SkillBox trusted hook and backfill events."
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+pub(crate) fn record_trusted_generated_skill_usage(
+    request: RecordSkillUsageRequest,
+    managed_root: impl AsRef<Path>,
+) -> Result<SkillUsageRecordResult> {
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let mut connection = open_database(&paths.database_path).map_err(|error| error.to_string())?;
+    record_skill_usage_on_connection(request, &mut connection, true)
+}
+
+pub(crate) fn record_skill_usage_on_connection(
+    request: RecordSkillUsageRequest,
+    connection: &mut Connection,
+    trusted_generated_source: bool,
+) -> Result<SkillUsageRecordResult> {
+    let transaction = connection
+        .transaction()
+        .map_err(|error| error.to_string())?;
+    let result =
+        record_skill_usage_in_transaction(request, &transaction, trusted_generated_source)?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(result)
+}
+
+fn record_skill_usage_in_transaction(
+    request: RecordSkillUsageRequest,
+    connection: &Connection,
+    trusted_generated_source: bool,
+) -> Result<SkillUsageRecordResult> {
     let skill_name = request.skill_name.trim().to_string();
     validate_skill_name(&skill_name)?;
     let agent_id = normalize_usage_agent_id(&request.agent_id)?;
-    let runtime_root = normalize_usage_runtime_root(request.runtime_root)?;
-    let runtime_root_value = runtime_root.to_string_lossy().to_string();
+    let mut runtime_root = normalize_usage_runtime_root(request.runtime_root)?;
+    let mut runtime_root_value = runtime_root.to_string_lossy().to_string();
     let event_id = normalize_usage_event_id(request.event_id)?;
     let used_at = normalize_usage_timestamp(request.used_at.as_deref())?;
     let recorded_at = current_rfc3339_timestamp();
     let prompt_excerpt = normalize_usage_prompt_excerpt(request.prompt_excerpt.as_deref());
     let metadata_json = normalize_usage_metadata(request.metadata)?;
-    let connection = open_database(&paths.database_path).map_err(|error| error.to_string())?;
+    if let Some(existing_runtime_root) = generated_usage_event_runtime(
+        connection,
+        &skill_name,
+        &agent_id,
+        event_id.as_deref(),
+        &metadata_json,
+        trusted_generated_source,
+    )? {
+        runtime_root = PathBuf::from(&existing_runtime_root);
+        runtime_root_value = existing_runtime_root;
+    }
+    canonicalize_runtime_usage_agent_aliases(connection, &agent_id, &runtime_root_value)?;
 
     if let Some(event_id_value) = event_id.as_deref() {
-        let existing = connection
-            .query_row(
-                "
-                SELECT used_at, recorded_at, prompt_excerpt
-                FROM skill_usage_events
-                WHERE agent_id = ?1 AND runtime_root = ?2 AND event_id = ?3
-                ",
-                params![&agent_id, &runtime_root_value, event_id_value],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                    ))
-                },
-            )
-            .optional()
-            .map_err(|error| error.to_string())?;
-
-        if let Some((existing_used_at, existing_recorded_at, existing_prompt_excerpt)) = existing {
+        if let Some(existing) =
+            find_existing_usage_event(connection, &agent_id, &runtime_root_value, event_id_value)?
+        {
+            let (
+                existing_agent_id,
+                existing_used_at,
+                existing_recorded_at,
+                existing_prompt_excerpt,
+                existing_metadata_json,
+            ) = existing;
+            if existing_agent_id != agent_id {
+                connection
+                    .execute(
+                        "
+                        UPDATE skill_usage_events
+                        SET agent_id = ?1
+                        WHERE agent_id = ?2
+                          AND runtime_root = ?3
+                          AND event_id = ?4
+                        ",
+                        params![
+                            &agent_id,
+                            &existing_agent_id,
+                            &runtime_root_value,
+                            event_id_value,
+                        ],
+                    )
+                    .map_err(|error| error.to_string())?;
+                merge_legacy_usage_stat_into_canonical(
+                    connection,
+                    &skill_name,
+                    &existing_agent_id,
+                    &agent_id,
+                    &runtime_root_value,
+                )?;
+            }
             if existing_prompt_excerpt.is_none() {
                 if let Some(prompt_excerpt_value) = prompt_excerpt.as_deref() {
                     connection
@@ -60,8 +145,29 @@ pub fn record_skill_usage(
                         .map_err(|error| error.to_string())?;
                 }
             }
+            if let Some(merged_metadata_json) =
+                merge_usage_source_identity(&existing_metadata_json, &metadata_json)?
+            {
+                connection
+                    .execute(
+                        "
+                        UPDATE skill_usage_events
+                        SET metadata_json = ?1
+                        WHERE agent_id = ?2
+                          AND runtime_root = ?3
+                          AND event_id = ?4
+                        ",
+                        params![
+                            merged_metadata_json,
+                            &agent_id,
+                            &runtime_root_value,
+                            event_id_value,
+                        ],
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
             let usage =
-                load_usage_stat_for_key(&connection, &skill_name, &agent_id, &runtime_root_value)?;
+                load_usage_stat_for_key(connection, &skill_name, &agent_id, &runtime_root_value)?;
             return Ok(SkillUsageRecordResult {
                 skill_name,
                 agent_id,
@@ -129,7 +235,7 @@ pub fn record_skill_usage(
         )
         .map_err(|error| error.to_string())?;
 
-    let usage = load_usage_stat_for_key(&connection, &skill_name, &agent_id, &runtime_root_value)?;
+    let usage = load_usage_stat_for_key(connection, &skill_name, &agent_id, &runtime_root_value)?;
     Ok(SkillUsageRecordResult {
         skill_name,
         agent_id,
@@ -150,6 +256,283 @@ pub fn list_skill_usage_rankings(
     list_skill_usage_rankings_at(request, managed_root, Utc::now())
 }
 
+pub fn preview_usage_skill_import(
+    skill_name: impl AsRef<str>,
+    managed_root: impl AsRef<Path>,
+) -> Result<ImportCandidate> {
+    preview_usage_skill_import_impl(
+        PreviewUsageSkillImportRequest {
+            skill_name: skill_name.as_ref().to_string(),
+            source_kind: Some(SkillUsageSourceKind::Regular),
+            source_id: None,
+            source_runtime_roots: Vec::new(),
+            ranking_request: None,
+            ranking_generated_at: None,
+            runtime_root: None,
+        },
+        managed_root,
+        false,
+    )
+}
+
+pub fn preview_usage_skill_import_for_source(
+    request: PreviewUsageSkillImportRequest,
+    managed_root: impl AsRef<Path>,
+) -> Result<ImportCandidate> {
+    preview_usage_skill_import_impl(request, managed_root, true)
+}
+
+fn preview_usage_skill_import_impl(
+    request: PreviewUsageSkillImportRequest,
+    managed_root: impl AsRef<Path>,
+    require_source_identity: bool,
+) -> Result<ImportCandidate> {
+    let skill_name = request.skill_name.trim();
+    validate_skill_name(skill_name)?;
+    let source_kind = request.source_kind.unwrap_or(SkillUsageSourceKind::Regular);
+    if source_kind == SkillUsageSourceKind::System {
+        return Err(format!(
+            "System skill `{skill_name}` cannot be imported into SkillBox."
+        ));
+    }
+    if source_kind == SkillUsageSourceKind::Unknown {
+        return Err(format!(
+            "Skill `{skill_name}` has an unknown historical source and cannot be imported from Rankings."
+        ));
+    }
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    if resolve_managed_skill_path(&paths, skill_name).is_ok() {
+        return Err(format!(
+            "Skill `{skill_name}` is already imported into SkillBox."
+        ));
+    }
+
+    let mut preferred_roots = request
+        .source_runtime_roots
+        .into_iter()
+        .map(normalize_usage_runtime_root)
+        .collect::<Result<Vec<_>>>()?;
+    if let Some(runtime_root) = request.runtime_root {
+        preferred_roots.push(normalize_usage_runtime_root(runtime_root)?);
+    }
+    preferred_roots = sorted_usage_roots(preferred_roots);
+    if require_source_identity {
+        let source_id = request.source_id.as_deref().ok_or_else(|| {
+            "Ranking source identity is required. Refresh Rankings and try again.".to_string()
+        })?;
+        let ranking_request = request.ranking_request.ok_or_else(|| {
+            "Ranking query identity is required. Refresh Rankings and try again.".to_string()
+        })?;
+        let ranking_generated_at = request.ranking_generated_at.as_deref().ok_or_else(|| {
+            "Ranking snapshot time is required. Refresh Rankings and try again.".to_string()
+        })?;
+        let ranking_as_of = DateTime::parse_from_rfc3339(ranking_generated_at)
+            .map_err(|_| "Ranking snapshot time is invalid. Refresh Rankings and try again.")?
+            .with_timezone(&Utc);
+        let ranking = list_skill_usage_rankings_at(ranking_request, &paths.root, ranking_as_of)?;
+        let source_row = ranking
+            .rows
+            .into_iter()
+            .find(|row| {
+                row.source_id == source_id
+                    && row.skill_name == skill_name
+                    && row.source_kind == source_kind
+                    && !row.managed
+            })
+            .ok_or_else(|| {
+                format!("Ranking source `{source_id}` is stale. Refresh Rankings and try again.")
+            })?;
+        let source_roots = sorted_usage_roots(source_row.source_runtime_roots);
+        if source_roots.is_empty()
+            || preferred_roots
+                .iter()
+                .map(|root| usage_runtime_key(root))
+                .ne(source_roots.iter().map(|root| usage_runtime_key(root)))
+        {
+            return Err(format!(
+                "Ranking source `{source_id}` no longer matches the displayed row. Refresh Rankings and try again."
+            ));
+        }
+        preferred_roots = source_roots;
+    }
+    let roots = usage_skill_import_roots(
+        &paths,
+        skill_name,
+        &preferred_roots,
+        !require_source_identity,
+    )?;
+    if roots.is_empty() {
+        return Err(format!(
+            "No recoverable local source found for skill `{skill_name}`. Reinstall it from a runtime folder or GitHub."
+        ));
+    }
+
+    let scan = scan_import_candidates(&roots, &paths.root)?;
+    let source_matches = |candidate: &ImportCandidate| {
+        preferred_roots.is_empty()
+            || preferred_roots.iter().any(|preferred| {
+                candidate
+                    .source_root
+                    .as_ref()
+                    .is_some_and(|root| usage_runtime_key(root) == usage_runtime_key(preferred))
+                    || candidate.source_path.starts_with(preferred)
+            })
+    };
+    let candidate = scan
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.name == skill_name)
+        .filter(|candidate| candidate.import_status == ImportCandidateStatus::Importable)
+        .find(|candidate| source_matches(candidate))
+        .cloned();
+    let Some(candidate) = candidate else {
+        if scan.candidates.iter().any(|candidate| {
+            candidate.name == skill_name
+                && candidate.import_status == ImportCandidateStatus::System
+                && source_matches(candidate)
+        }) {
+            return Err(format!(
+                "Skill `{skill_name}` is not importable from a System source."
+            ));
+        }
+        return Err(format!(
+            "Unable to locate skill `{skill_name}` under recoverable local sources."
+        ));
+    };
+
+    if let Some(conflict) = candidate.conflict.as_deref() {
+        return Err(format!(
+            "Skill `{skill_name}` cannot be imported: {conflict}"
+        ));
+    }
+
+    Ok(ImportCandidate {
+        is_selected: true,
+        ..candidate
+    })
+}
+
+fn usage_skill_import_roots(
+    paths: &ManagedPaths,
+    skill_name: &str,
+    preferred_roots: &[PathBuf],
+    include_fallbacks: bool,
+) -> Result<Vec<PathBuf>> {
+    let mut roots = Vec::new();
+    for root in preferred_roots {
+        push_usage_import_root(&mut roots, root.clone(), paths);
+    }
+    if include_fallbacks {
+        for root in recorded_usage_runtime_roots(&paths.database_path, skill_name)? {
+            push_usage_import_root(&mut roots, root, paths);
+        }
+        for root in global_runtime_roots() {
+            push_usage_import_root(&mut roots, root, paths);
+        }
+        if let Some(backup_root) = latest_deletion_backup_import_root(paths, skill_name) {
+            push_usage_import_root(&mut roots, backup_root, paths);
+        }
+    }
+    Ok(roots)
+}
+
+fn recorded_usage_runtime_roots(database_path: &Path, skill_name: &str) -> Result<Vec<PathBuf>> {
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT runtime_root
+            FROM skill_usage_events
+            WHERE skill_name = ?1
+            ORDER BY used_at DESC, recorded_at DESC
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![skill_name], |row| row.get::<_, String>(0))
+        .map_err(|error| error.to_string())?;
+    let mut roots = Vec::new();
+    let mut seen = HashSet::new();
+    for row in rows {
+        let runtime_root = row.map_err(|error| error.to_string())?;
+        if !seen.insert(runtime_root.clone()) {
+            continue;
+        }
+        roots.push(PathBuf::from(runtime_root));
+    }
+    Ok(roots)
+}
+
+fn push_usage_import_root(roots: &mut Vec<PathBuf>, root: PathBuf, paths: &ManagedPaths) {
+    if !root.is_dir() {
+        return;
+    }
+    if is_under_path(&root, &paths.root) && !is_under_path(&root, &paths.root.join("backups")) {
+        return;
+    }
+    let key = usage_runtime_key(&root);
+    if roots
+        .iter()
+        .any(|existing| usage_runtime_key(existing) == key)
+    {
+        return;
+    }
+    roots.push(root);
+}
+
+fn latest_deletion_backup_import_root(paths: &ManagedPaths, skill_name: &str) -> Option<PathBuf> {
+    let deletions_root = paths.root.join("backups").join("deletions");
+    let entries = fs::read_dir(&deletions_root).ok()?;
+    let prefix = format!("{skill_name}-");
+    let mut backups = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_dir()
+                && path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with(&prefix))
+        })
+        .collect::<Vec<_>>();
+    backups.sort_by(|left, right| right.cmp(left));
+    for backup in backups {
+        if backup.join("SKILL.md").is_file() {
+            return Some(backup);
+        }
+        let current = backup.join("current");
+        if current.join("SKILL.md").is_file() {
+            return Some(fs::canonicalize(&current).unwrap_or(current));
+        }
+        let versions = backup.join("versions");
+        if let Some(version) = newest_skill_version_dir(&versions) {
+            return Some(version);
+        }
+    }
+    None
+}
+
+fn newest_skill_version_dir(versions_root: &Path) -> Option<PathBuf> {
+    let entries = fs::read_dir(versions_root).ok()?;
+    let mut versions = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir() && path.join("SKILL.md").is_file())
+        .collect::<Vec<_>>();
+    versions.sort_by(|left, right| {
+        let left_modified = fs::metadata(left)
+            .and_then(|metadata| metadata.modified())
+            .ok();
+        let right_modified = fs::metadata(right)
+            .and_then(|metadata| metadata.modified())
+            .ok();
+        right_modified
+            .cmp(&left_modified)
+            .then_with(|| right.cmp(left))
+    });
+    versions.into_iter().next()
+}
+
 pub(crate) fn list_skill_usage_rankings_at(
     request: SkillUsageRankingRequest,
     managed_root: impl AsRef<Path>,
@@ -161,6 +544,10 @@ pub(crate) fn list_skill_usage_rankings_at(
         .as_deref()
         .map(normalize_usage_agent_id)
         .transpose()?;
+    let agent_filter_ids = agent_id
+        .as_deref()
+        .map(usage_ranking_agent_filter_ids)
+        .unwrap_or_default();
     let workspace_root = request
         .workspace_root
         .map(normalize_usage_runtime_root)
@@ -174,23 +561,80 @@ pub(crate) fn list_skill_usage_rankings_at(
         .as_deref()
         .unwrap_or("0001-01-01T00:00:00+00:00");
     let connection = open_database(&paths.database_path).map_err(|error| error.to_string())?;
-    let mut observed = load_usage_ranking_aggregates(
-        &connection,
-        query_start,
-        &range_end,
-        agent_id.as_deref(),
-        workspace_key.as_deref(),
-    )?;
     let managed = load_managed_skill_kinds(&paths)?;
+    let (root_aggregates, mut coverage) = load_usage_ranking_root_aggregates(
+        &connection,
+        RankingFilterBounds {
+            range_start: query_start,
+            range_end: &range_end,
+            agent_ids: &agent_filter_ids,
+            workspace_root: workspace_key.as_deref(),
+        },
+        &managed,
+        request.include_unmanaged,
+        request.skill_type,
+    )?;
+    coverage.scanned_codex_session_files =
+        read_u32_preference(&paths.database_path, "codex_usage_backfill_scanned_files")?
+            .unwrap_or_default() as usize;
+    coverage.scanned_claude_code_session_files = read_u32_preference(
+        &paths.database_path,
+        "claude_code_usage_backfill_scanned_files",
+    )?
+    .unwrap_or_default() as usize;
+    coverage.scanned_cursor_sessions = read_u32_preference(
+        &paths.database_path,
+        "cursor_usage_backfill_scanned_sessions",
+    )?
+    .unwrap_or_default() as usize;
+    let mut system_aggregates: HashMap<String, UsageSummary> = HashMap::new();
+    let mut regular_aggregates: HashMap<String, UsageSummary> = HashMap::new();
+    let mut unknown_aggregates: HashMap<String, UsageSummary> = HashMap::new();
+    let mut system_roots: HashMap<String, Vec<PathBuf>> = HashMap::new();
+    let mut regular_roots: HashMap<String, Vec<PathBuf>> = HashMap::new();
+    let mut unknown_roots: HashMap<String, Vec<PathBuf>> = HashMap::new();
+
+    for ((skill_name, runtime_root, source_kind), summary) in root_aggregates {
+        let root = PathBuf::from(&runtime_root);
+        let (aggregates, roots) = match source_kind {
+            SkillUsageSourceKind::Regular => (&mut regular_aggregates, &mut regular_roots),
+            SkillUsageSourceKind::System => (&mut system_aggregates, &mut system_roots),
+            SkillUsageSourceKind::Unknown => (&mut unknown_aggregates, &mut unknown_roots),
+        };
+        merge_usage_summary(aggregates.entry(skill_name.clone()).or_default(), &summary);
+        let entry = roots.entry(skill_name).or_default();
+        if !entry.iter().any(|existing| existing == &root) {
+            entry.push(root);
+        }
+    }
+
     let mut rows = managed
         .iter()
+        .filter(|(skill_name, _)| {
+            usage_ranking_matches_skill_type(
+                skill_name,
+                SkillUsageSourceKind::Regular,
+                &managed,
+                request.skill_type,
+            )
+        })
         .map(|(skill_name, kind)| {
-            let summary = observed.remove(skill_name).unwrap_or_default();
+            let summary = regular_aggregates.remove(skill_name).unwrap_or_default();
+            let roots = regular_roots.remove(skill_name).unwrap_or_default();
             SkillUsageRankingRow {
                 rank: 0,
                 skill_name: skill_name.clone(),
                 kind: Some(*kind),
                 managed: true,
+                system: false,
+                source_missing: false,
+                source_kind: SkillUsageSourceKind::Regular,
+                source_id: usage_ranking_source_id(
+                    skill_name,
+                    SkillUsageSourceKind::Regular,
+                    &roots,
+                ),
+                source_runtime_roots: sorted_usage_roots(roots),
                 usage_count: summary.usage_count,
                 last_used_at: summary.last_used_at,
             }
@@ -198,18 +642,62 @@ pub(crate) fn list_skill_usage_rankings_at(
         .collect::<Vec<_>>();
 
     if request.include_unmanaged {
-        rows.extend(
-            observed
-                .into_iter()
-                .map(|(skill_name, summary)| SkillUsageRankingRow {
-                    rank: 0,
-                    skill_name,
-                    kind: None,
-                    managed: false,
-                    usage_count: summary.usage_count,
-                    last_used_at: summary.last_used_at,
-                }),
-        );
+        rows.extend(regular_aggregates.into_iter().map(|(skill_name, summary)| {
+            let roots = regular_roots.remove(&skill_name).unwrap_or_default();
+            let source_missing = !unmanaged_regular_skill_source_present(&skill_name, &roots);
+            let source_id =
+                usage_ranking_source_id(&skill_name, SkillUsageSourceKind::Regular, &roots);
+            SkillUsageRankingRow {
+                rank: 0,
+                skill_name,
+                kind: None,
+                managed: false,
+                system: false,
+                source_missing,
+                source_kind: SkillUsageSourceKind::Regular,
+                source_id,
+                source_runtime_roots: sorted_usage_roots(roots),
+                usage_count: summary.usage_count,
+                last_used_at: summary.last_used_at,
+            }
+        }));
+        rows.extend(system_aggregates.into_iter().map(|(skill_name, summary)| {
+            let roots = system_roots.remove(&skill_name).unwrap_or_default();
+            let source_missing = !unmanaged_system_skill_source_present(&skill_name, &roots);
+            let source_id =
+                usage_ranking_source_id(&skill_name, SkillUsageSourceKind::System, &roots);
+            SkillUsageRankingRow {
+                rank: 0,
+                skill_name,
+                kind: None,
+                managed: false,
+                system: true,
+                source_missing,
+                source_kind: SkillUsageSourceKind::System,
+                source_id,
+                source_runtime_roots: sorted_usage_roots(roots),
+                usage_count: summary.usage_count,
+                last_used_at: summary.last_used_at,
+            }
+        }));
+        rows.extend(unknown_aggregates.into_iter().map(|(skill_name, summary)| {
+            let roots = unknown_roots.remove(&skill_name).unwrap_or_default();
+            let source_id =
+                usage_ranking_source_id(&skill_name, SkillUsageSourceKind::Unknown, &roots);
+            SkillUsageRankingRow {
+                rank: 0,
+                skill_name,
+                kind: None,
+                managed: false,
+                system: false,
+                source_missing: false,
+                source_kind: SkillUsageSourceKind::Unknown,
+                source_id,
+                source_runtime_roots: sorted_usage_roots(roots),
+                usage_count: summary.usage_count,
+                last_used_at: summary.last_used_at,
+            }
+        }));
     }
 
     rows.sort_by(|left, right| {
@@ -218,6 +706,7 @@ pub(crate) fn list_skill_usage_rankings_at(
             .cmp(&left.usage_count)
             .then_with(|| right.last_used_at.cmp(&left.last_used_at))
             .then_with(|| left.skill_name.cmp(&right.skill_name))
+            .then_with(|| left.source_id.cmp(&right.source_id))
     });
     for (index, row) in rows.iter_mut().enumerate() {
         row.rank = index + 1;
@@ -230,8 +719,10 @@ pub(crate) fn list_skill_usage_rankings_at(
         range_start,
         range_end,
         agent_id,
+        skill_type: request.skill_type,
         workspace_root,
         total_observed_calls,
+        coverage,
         rows,
     })
 }
@@ -259,84 +750,301 @@ fn load_managed_skill_kinds(paths: &ManagedPaths) -> Result<HashMap<String, Skil
     Ok(managed)
 }
 
-fn load_usage_ranking_aggregates(
+fn merge_usage_summary(target: &mut UsageSummary, other: &UsageSummary) {
+    target.usage_count = target.usage_count.saturating_add(other.usage_count);
+    match (&target.last_used_at, &other.last_used_at) {
+        (Some(left), Some(right)) if right > left => {
+            target.last_used_at = Some(right.clone());
+        }
+        (None, Some(right)) => {
+            target.last_used_at = Some(right.clone());
+        }
+        _ => {}
+    }
+}
+
+fn load_usage_ranking_root_aggregates(
     connection: &Connection,
-    range_start: &str,
-    range_end: &str,
-    agent_id: Option<&str>,
-    workspace_root: Option<&str>,
-) -> Result<HashMap<String, UsageSummary>> {
-    let (sql, values): (&str, Vec<String>) = match (agent_id, workspace_root) {
-        (None, None) => (
-            "
-            SELECT skill_name, COUNT(*), MAX(used_at)
+    bounds: RankingFilterBounds<'_>,
+    managed: &HashMap<String, SkillKind>,
+    include_unmanaged: bool,
+    skill_type: Option<SkillUsageRankingSkillType>,
+) -> Result<(UsageRankingRootAggregates, SkillUsageCoverage)> {
+    let (sql, values) = ranking_filter_sql(
+        RankingFilterSqlTemplates {
+            no_filter: "
+            SELECT skill_name, runtime_root, metadata_json, used_at
             FROM skill_usage_events
             WHERE used_at >= ?1 AND used_at <= ?2
-            GROUP BY skill_name
             ",
-            vec![range_start.to_string(), range_end.to_string()],
-        ),
-        (Some(agent_id), None) => (
-            "
-            SELECT skill_name, COUNT(*), MAX(used_at)
+            workspace_only: "
+            SELECT skill_name, runtime_root, metadata_json, used_at
             FROM skill_usage_events
-            WHERE agent_id = ?1 AND used_at >= ?2 AND used_at <= ?3
-            GROUP BY skill_name
+            WHERE used_at >= ?1 AND used_at <= ?2
+              AND runtime_root = ?3
             ",
-            vec![
-                agent_id.to_string(),
-                range_start.to_string(),
-                range_end.to_string(),
-            ],
-        ),
-        (None, Some(workspace_root)) => (
-            "
-            SELECT skill_name, COUNT(*), MAX(used_at)
+            agent_only: "
+            SELECT skill_name, runtime_root, metadata_json, used_at
             FROM skill_usage_events
-            WHERE runtime_root = ?1 AND used_at >= ?2 AND used_at <= ?3
-            GROUP BY skill_name
+            WHERE used_at >= ?1 AND used_at <= ?2
+              AND agent_id IN ({agent_ids})
             ",
-            vec![
-                workspace_root.to_string(),
-                range_start.to_string(),
-                range_end.to_string(),
-            ],
-        ),
-        (Some(agent_id), Some(workspace_root)) => (
-            "
-            SELECT skill_name, COUNT(*), MAX(used_at)
+            agent_and_workspace: "
+            SELECT skill_name, runtime_root, metadata_json, used_at
             FROM skill_usage_events
-            WHERE agent_id = ?1 AND runtime_root = ?2
-              AND used_at >= ?3 AND used_at <= ?4
-            GROUP BY skill_name
+            WHERE used_at >= ?1 AND used_at <= ?2
+              AND runtime_root = ?3
+              AND agent_id IN ({agent_ids})
             ",
-            vec![
-                agent_id.to_string(),
-                workspace_root.to_string(),
-                range_start.to_string(),
-                range_end.to_string(),
-            ],
-        ),
-    };
-    let mut statement = connection.prepare(sql).map_err(|error| error.to_string())?;
+        },
+        bounds,
+    );
+    let mut statement = connection
+        .prepare(&sql)
+        .map_err(|error| error.to_string())?;
     let rows = statement
         .query_map(rusqlite::params_from_iter(values.iter()), |row| {
-            let usage_count: i64 = row.get(1)?;
             Ok((
                 row.get::<_, String>(0)?,
-                UsageSummary {
-                    usage_count: usize::try_from(usage_count.max(0)).unwrap_or_default(),
-                    last_used_at: row.get(2)?,
-                },
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
             ))
         })
         .map_err(|error| error.to_string())?;
     let mut usage = HashMap::new();
+    let mut coverage = SkillUsageCoverage::default();
     for row in rows {
-        let (skill_name, summary) = row.map_err(|error| error.to_string())?;
-        usage.insert(skill_name, summary);
+        let (skill_name, runtime_root, metadata_json, used_at) =
+            row.map_err(|error| error.to_string())?;
+        let source_kind = usage_source_kind_for_event(&skill_name, &runtime_root, &metadata_json);
+        let is_managed_regular =
+            source_kind == SkillUsageSourceKind::Regular && managed.contains_key(&skill_name);
+        if (!include_unmanaged && !is_managed_regular)
+            || !usage_ranking_matches_skill_type(&skill_name, source_kind, managed, skill_type)
+        {
+            continue;
+        }
+        if coverage
+            .earliest_event_at
+            .as_ref()
+            .is_none_or(|earliest| &used_at < earliest)
+        {
+            coverage.earliest_event_at = Some(used_at.clone());
+        }
+        if coverage
+            .latest_event_at
+            .as_ref()
+            .is_none_or(|latest| &used_at > latest)
+        {
+            coverage.latest_event_at = Some(used_at.clone());
+        }
+        match usage_event_observation_source(&metadata_json) {
+            Some("agent_hook") => {
+                coverage.agent_hook_calls = coverage.agent_hook_calls.saturating_add(1);
+            }
+            Some("codex_session_backfill") => {
+                coverage.codex_session_backfill_calls =
+                    coverage.codex_session_backfill_calls.saturating_add(1);
+            }
+            Some("claude_code_session_backfill") => {
+                coverage.claude_code_session_backfill_calls = coverage
+                    .claude_code_session_backfill_calls
+                    .saturating_add(1);
+            }
+            Some("cursor_session_backfill") => {
+                coverage.cursor_session_backfill_calls =
+                    coverage.cursor_session_backfill_calls.saturating_add(1);
+            }
+            _ => {
+                coverage.other_observed_calls = coverage.other_observed_calls.saturating_add(1);
+            }
+        }
+        let summary = usage
+            .entry((skill_name, runtime_root, source_kind))
+            .or_insert_with(UsageSummary::default);
+        summary.usage_count = summary.usage_count.saturating_add(1);
+        if summary
+            .last_used_at
+            .as_ref()
+            .is_none_or(|last| &used_at > last)
+        {
+            summary.last_used_at = Some(used_at);
+        }
     }
-    Ok(usage)
+    Ok((usage, coverage))
+}
+
+fn usage_ranking_matches_skill_type(
+    skill_name: &str,
+    source_kind: SkillUsageSourceKind,
+    managed: &HashMap<String, SkillKind>,
+    skill_type: Option<SkillUsageRankingSkillType>,
+) -> bool {
+    match skill_type {
+        None => true,
+        Some(SkillUsageRankingSkillType::User) => {
+            source_kind == SkillUsageSourceKind::Regular
+                && managed.get(skill_name) == Some(&SkillKind::User)
+        }
+        Some(SkillUsageRankingSkillType::Remote) => {
+            source_kind == SkillUsageSourceKind::Regular
+                && managed.get(skill_name) == Some(&SkillKind::Remote)
+        }
+        Some(SkillUsageRankingSkillType::System) => source_kind == SkillUsageSourceKind::System,
+    }
+}
+
+fn usage_event_observation_source(metadata_json: &str) -> Option<&str> {
+    let metadata = serde_json::from_str::<serde_json::Value>(metadata_json).ok()?;
+    metadata
+        .get("source")
+        .and_then(|value| value.as_str())
+        .map(|source| match source {
+            "agent_hook" => "agent_hook",
+            "codex_session_backfill" => "codex_session_backfill",
+            "claude_code_session_backfill" => "claude_code_session_backfill",
+            "cursor_session_backfill" => "cursor_session_backfill",
+            _ => "other",
+        })
+}
+
+fn usage_source_kind_for_event(
+    skill_name: &str,
+    runtime_root: &str,
+    metadata_json: &str,
+) -> SkillUsageSourceKind {
+    let metadata_kind = serde_json::from_str::<serde_json::Value>(metadata_json)
+        .ok()
+        .and_then(|metadata| {
+            metadata
+                .get("skill_source_kind")
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        });
+    match metadata_kind.as_deref() {
+        Some("system") => return SkillUsageSourceKind::System,
+        Some("regular") => return SkillUsageSourceKind::Regular,
+        _ => {}
+    }
+    let root = Path::new(runtime_root);
+    let regular_present = root.join(skill_name).join("SKILL.md").is_file();
+    let system_present = root
+        .join(".system")
+        .join(skill_name)
+        .join("SKILL.md")
+        .is_file();
+    match (regular_present, system_present) {
+        (true, false) | (false, false) => SkillUsageSourceKind::Regular,
+        (false, true) => SkillUsageSourceKind::System,
+        (true, true) => SkillUsageSourceKind::Unknown,
+    }
+}
+
+fn unmanaged_regular_skill_source_present(skill_name: &str, roots: &[PathBuf]) -> bool {
+    roots
+        .iter()
+        .any(|root| root.join(skill_name).join("SKILL.md").is_file())
+}
+
+fn unmanaged_system_skill_source_present(skill_name: &str, roots: &[PathBuf]) -> bool {
+    roots.iter().any(|root| {
+        root.join(".system")
+            .join(skill_name)
+            .join("SKILL.md")
+            .is_file()
+    })
+}
+
+fn sorted_usage_roots(mut roots: Vec<PathBuf>) -> Vec<PathBuf> {
+    roots.sort();
+    roots.dedup_by(|left, right| usage_runtime_key(left) == usage_runtime_key(right));
+    roots
+}
+
+fn usage_ranking_source_id(
+    skill_name: &str,
+    kind: SkillUsageSourceKind,
+    roots: &[PathBuf],
+) -> String {
+    let kind = match kind {
+        SkillUsageSourceKind::Regular => "regular",
+        SkillUsageSourceKind::System => "system",
+        SkillUsageSourceKind::Unknown => "unknown",
+    };
+    let mut keys = roots
+        .iter()
+        .map(|root| usage_runtime_key(root))
+        .collect::<Vec<_>>();
+    keys.sort();
+    keys.dedup();
+    let digest = sha256(&format!("{skill_name}\n{}", keys.join("\n")));
+    format!("{skill_name}:{kind}:{}", &digest[..12])
+}
+
+struct RankingFilterSqlTemplates<'a> {
+    no_filter: &'a str,
+    workspace_only: &'a str,
+    agent_only: &'a str,
+    agent_and_workspace: &'a str,
+}
+
+struct RankingFilterBounds<'a> {
+    range_start: &'a str,
+    range_end: &'a str,
+    agent_ids: &'a [String],
+    workspace_root: Option<&'a str>,
+}
+
+fn ranking_filter_sql(
+    templates: RankingFilterSqlTemplates<'_>,
+    bounds: RankingFilterBounds<'_>,
+) -> (String, Vec<String>) {
+    match (bounds.agent_ids.is_empty(), bounds.workspace_root) {
+        (true, None) => (
+            templates.no_filter.to_string(),
+            vec![bounds.range_start.to_string(), bounds.range_end.to_string()],
+        ),
+        (true, Some(workspace_root)) => (
+            templates.workspace_only.to_string(),
+            vec![
+                bounds.range_start.to_string(),
+                bounds.range_end.to_string(),
+                workspace_root.to_string(),
+            ],
+        ),
+        (false, None) => {
+            let placeholders = sql_in_placeholders(3, bounds.agent_ids.len());
+            let mut values = vec![bounds.range_start.to_string(), bounds.range_end.to_string()];
+            values.extend(bounds.agent_ids.iter().cloned());
+            (
+                templates.agent_only.replace("{agent_ids}", &placeholders),
+                values,
+            )
+        }
+        (false, Some(workspace_root)) => {
+            let placeholders = sql_in_placeholders(4, bounds.agent_ids.len());
+            let mut values = vec![
+                bounds.range_start.to_string(),
+                bounds.range_end.to_string(),
+                workspace_root.to_string(),
+            ];
+            values.extend(bounds.agent_ids.iter().cloned());
+            (
+                templates
+                    .agent_and_workspace
+                    .replace("{agent_ids}", &placeholders),
+                values,
+            )
+        }
+    }
+}
+
+fn sql_in_placeholders(start: usize, count: usize) -> String {
+    (0..count)
+        .map(|offset| format!("?{}", start + offset))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 pub(crate) fn normalize_usage_timestamp(value: Option<&str>) -> Result<String> {
@@ -354,14 +1062,27 @@ pub(crate) fn normalize_usage_timestamp(value: Option<&str>) -> Result<String> {
 
 pub(crate) fn normalize_usage_agent_id(value: &str) -> Result<String> {
     let normalized = value.trim().to_ascii_lowercase();
-    if normalized.is_empty()
-        || normalized
+    let canonical = match normalized.as_str() {
+        "codex" | "codex-app" | "codex-cli" | "agents" => "codex",
+        "claude" | "claude-code" | "claude-code-cli" => "claude-code",
+        other => other,
+    };
+    if canonical.is_empty()
+        || canonical
             .chars()
             .any(|character| !matches!(character, 'a'..='z' | '0'..='9' | '-' | '_'))
     {
         return Err(format!("Invalid usage agent id: {value}"));
     }
-    Ok(normalized)
+    Ok(canonical.to_string())
+}
+
+pub(crate) fn usage_ranking_agent_filter_ids(agent_id: &str) -> Vec<String> {
+    match agent_id {
+        "codex" => vec!["codex".to_string(), "agents".to_string()],
+        "claude-code" => vec!["claude-code".to_string(), "claude".to_string()],
+        other => vec![other.to_string()],
+    }
 }
 
 pub(crate) fn normalize_usage_runtime_root(path: PathBuf) -> Result<PathBuf> {
@@ -403,6 +1124,24 @@ pub(crate) fn normalize_usage_metadata(value: Option<serde_json::Value>) -> Resu
         ));
     }
     Ok(metadata_json)
+}
+
+fn merge_usage_source_identity(existing: &str, incoming: &str) -> Result<Option<String>> {
+    let mut existing = serde_json::from_str::<serde_json::Value>(existing)
+        .map_err(|error| format!("Invalid stored usage metadata: {error}"))?;
+    let incoming = serde_json::from_str::<serde_json::Value>(incoming)
+        .map_err(|error| format!("Invalid usage metadata: {error}"))?;
+    let existing_object = existing
+        .as_object_mut()
+        .ok_or_else(|| "Stored usage metadata must be a JSON object.".to_string())?;
+    if existing_object.contains_key("skill_source_kind") {
+        return Ok(None);
+    }
+    let Some(source_kind) = incoming.get("skill_source_kind").cloned() else {
+        return Ok(None);
+    };
+    existing_object.insert("skill_source_kind".to_string(), source_kind);
+    normalize_usage_metadata(Some(existing)).map(Some)
 }
 
 pub(crate) fn normalize_usage_prompt_excerpt(value: Option<&str>) -> Option<String> {
@@ -650,6 +1389,374 @@ pub(crate) fn load_usage_by_skill_runtime(
         usage.insert(key, summary);
     }
     Ok(usage)
+}
+
+type ExistingUsageEventRow = (String, String, String, Option<String>, String);
+
+fn generated_usage_event_runtime(
+    connection: &Connection,
+    skill_name: &str,
+    canonical_agent_id: &str,
+    event_id: Option<&str>,
+    metadata_json: &str,
+    trusted_generated_source: bool,
+) -> Result<Option<String>> {
+    let Some(event_id) = event_id else {
+        return Ok(None);
+    };
+    let generated_source = serde_json::from_str::<serde_json::Value>(metadata_json)
+        .ok()
+        .and_then(|metadata| {
+            metadata
+                .get("source")
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        })
+        .is_some_and(|source| is_trusted_generated_usage_source(&source));
+    if !trusted_generated_source || !generated_source {
+        return Ok(None);
+    }
+
+    let agent_ids = usage_ranking_agent_filter_ids(canonical_agent_id);
+    let placeholders = sql_in_placeholders(1, agent_ids.len());
+    let mut values = agent_ids;
+    values.push(event_id.to_string());
+    values.push(skill_name.to_string());
+    values.push(canonical_agent_id.to_string());
+    connection
+        .query_row(
+            &format!(
+                "
+                SELECT runtime_root, metadata_json
+                FROM skill_usage_events
+                WHERE agent_id IN ({placeholders})
+                  AND event_id = ?{}
+                  AND skill_name = ?{}
+                ORDER BY
+                  CASE WHEN agent_id = ?{} THEN 0 ELSE 1 END,
+                  recorded_at ASC,
+                  runtime_root ASC
+                LIMIT 1
+                ",
+                values.len() - 2,
+                values.len() - 1,
+                values.len(),
+            ),
+            rusqlite::params_from_iter(values.iter()),
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(|error| error.to_string())
+        .map(|existing| {
+            existing.and_then(|(runtime_root, existing_metadata_json)| {
+                let existing_generated =
+                    serde_json::from_str::<serde_json::Value>(&existing_metadata_json)
+                        .ok()
+                        .and_then(|metadata| {
+                            metadata
+                                .get("source")
+                                .and_then(|value| value.as_str())
+                                .map(str::to_string)
+                        })
+                        .is_some_and(|source| is_trusted_generated_usage_source(&source));
+                existing_generated.then_some(runtime_root)
+            })
+        })
+}
+
+fn is_trusted_generated_usage_source(source: &str) -> bool {
+    matches!(
+        source,
+        "agent_hook"
+            | "codex_session_backfill"
+            | "claude_code_session_backfill"
+            | "cursor_session_backfill"
+    )
+}
+
+fn canonicalize_runtime_usage_agent_aliases(
+    connection: &Connection,
+    canonical_agent_id: &str,
+    runtime_root: &str,
+) -> Result<()> {
+    let aliases = usage_ranking_agent_filter_ids(canonical_agent_id)
+        .into_iter()
+        .filter(|alias| alias != canonical_agent_id)
+        .collect::<Vec<_>>();
+    if aliases.is_empty() {
+        return Ok(());
+    }
+    let placeholders = sql_in_placeholders(1, aliases.len());
+    let mut exists_values = aliases.clone();
+    exists_values.push(runtime_root.to_string());
+    let has_legacy_events: bool = connection
+        .query_row(
+            &format!(
+                "
+                SELECT EXISTS(
+                  SELECT 1
+                  FROM skill_usage_events
+                  WHERE agent_id IN ({placeholders})
+                    AND runtime_root = ?{}
+                )
+                ",
+                exists_values.len(),
+            ),
+            rusqlite::params_from_iter(exists_values.iter()),
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if !has_legacy_events {
+        return Ok(());
+    }
+
+    for alias in &aliases {
+        connection
+            .execute(
+                "
+                DELETE FROM skill_usage_events
+                WHERE agent_id = ?1
+                  AND runtime_root = ?2
+                  AND event_id IS NOT NULL
+                  AND EXISTS (
+                    SELECT 1
+                    FROM skill_usage_events AS canonical
+                    WHERE canonical.agent_id = ?3
+                      AND canonical.runtime_root = skill_usage_events.runtime_root
+                      AND canonical.event_id = skill_usage_events.event_id
+                  )
+                ",
+                params![alias, runtime_root, canonical_agent_id],
+            )
+            .map_err(|error| error.to_string())?;
+        connection
+            .execute(
+                "
+                UPDATE skill_usage_events
+                SET agent_id = ?1
+                WHERE agent_id = ?2 AND runtime_root = ?3
+                ",
+                params![canonical_agent_id, alias, runtime_root],
+            )
+            .map_err(|error| error.to_string())?;
+        connection
+            .execute(
+                "
+                DELETE FROM skill_usage_stats
+                WHERE agent_id = ?1 AND runtime_root = ?2
+                ",
+                params![alias, runtime_root],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    connection
+        .execute(
+            "
+            DELETE FROM skill_usage_stats
+            WHERE agent_id = ?1 AND runtime_root = ?2
+            ",
+            params![canonical_agent_id, runtime_root],
+        )
+        .map_err(|error| error.to_string())?;
+    connection
+        .execute(
+            "
+            INSERT INTO skill_usage_stats (
+              skill_name,
+              agent_id,
+              runtime_root,
+              usage_count,
+              last_used_at
+            )
+            SELECT
+              skill_name,
+              agent_id,
+              runtime_root,
+              COUNT(*),
+              MAX(used_at)
+            FROM skill_usage_events
+            WHERE agent_id = ?1 AND runtime_root = ?2
+            GROUP BY skill_name, agent_id, runtime_root
+            ",
+            params![canonical_agent_id, runtime_root],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn find_existing_usage_event(
+    connection: &Connection,
+    canonical_agent_id: &str,
+    runtime_root: &str,
+    event_id: &str,
+) -> Result<Option<ExistingUsageEventRow>> {
+    let canonical = connection
+        .query_row(
+            "
+            SELECT agent_id, used_at, recorded_at, prompt_excerpt, metadata_json
+            FROM skill_usage_events
+            WHERE agent_id = ?1 AND runtime_root = ?2 AND event_id = ?3
+            ",
+            params![canonical_agent_id, runtime_root, event_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    if canonical.is_some() {
+        // Drop any leftover legacy alias rows for the same event.
+        let aliases = usage_ranking_agent_filter_ids(canonical_agent_id);
+        for alias in aliases {
+            if alias == canonical_agent_id {
+                continue;
+            }
+            connection
+                .execute(
+                    "
+                    DELETE FROM skill_usage_events
+                    WHERE agent_id = ?1 AND runtime_root = ?2 AND event_id = ?3
+                    ",
+                    params![alias, runtime_root, event_id],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        return Ok(canonical);
+    }
+
+    let aliases = usage_ranking_agent_filter_ids(canonical_agent_id)
+        .into_iter()
+        .filter(|alias| alias != canonical_agent_id)
+        .collect::<Vec<_>>();
+    if aliases.is_empty() {
+        return Ok(None);
+    }
+    let placeholders = sql_in_placeholders(1, aliases.len());
+    let mut values = aliases;
+    values.push(runtime_root.to_string());
+    values.push(event_id.to_string());
+    connection
+        .query_row(
+            &format!(
+                "
+        SELECT agent_id, used_at, recorded_at, prompt_excerpt, metadata_json
+                FROM skill_usage_events
+                WHERE agent_id IN ({placeholders})
+                  AND runtime_root = ?{}
+                  AND event_id = ?{}
+                ",
+                values.len() - 1,
+                values.len(),
+            ),
+            rusqlite::params_from_iter(values.iter()),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| error.to_string())
+}
+
+pub(crate) fn merge_legacy_usage_stat_into_canonical(
+    connection: &Connection,
+    skill_name: &str,
+    legacy_agent_id: &str,
+    canonical_agent_id: &str,
+    runtime_root: &str,
+) -> Result<()> {
+    let legacy = connection
+        .query_row(
+            "
+            SELECT usage_count, last_used_at
+            FROM skill_usage_stats
+            WHERE skill_name = ?1 AND agent_id = ?2 AND runtime_root = ?3
+            ",
+            params![skill_name, legacy_agent_id, runtime_root],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let Some((legacy_count, legacy_last_used_at)) = legacy else {
+        return Ok(());
+    };
+
+    let canonical = connection
+        .query_row(
+            "
+            SELECT usage_count, last_used_at
+            FROM skill_usage_stats
+            WHERE skill_name = ?1 AND agent_id = ?2 AND runtime_root = ?3
+            ",
+            params![skill_name, canonical_agent_id, runtime_root],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+
+    if let Some((canonical_count, canonical_last_used_at)) = canonical {
+        let last_used_at = if legacy_last_used_at > canonical_last_used_at {
+            legacy_last_used_at
+        } else {
+            canonical_last_used_at
+        };
+        connection
+            .execute(
+                "
+                UPDATE skill_usage_stats
+                SET usage_count = ?1,
+                    last_used_at = ?2,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE skill_name = ?3 AND agent_id = ?4 AND runtime_root = ?5
+                ",
+                params![
+                    canonical_count.saturating_add(legacy_count),
+                    last_used_at,
+                    skill_name,
+                    canonical_agent_id,
+                    runtime_root,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        connection
+            .execute(
+                "
+                DELETE FROM skill_usage_stats
+                WHERE skill_name = ?1 AND agent_id = ?2 AND runtime_root = ?3
+                ",
+                params![skill_name, legacy_agent_id, runtime_root],
+            )
+            .map_err(|error| error.to_string())?;
+    } else {
+        connection
+            .execute(
+                "
+                UPDATE skill_usage_stats
+                SET agent_id = ?1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE skill_name = ?2 AND agent_id = ?3 AND runtime_root = ?4
+                ",
+                params![
+                    canonical_agent_id,
+                    skill_name,
+                    legacy_agent_id,
+                    runtime_root
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 pub(crate) fn load_usage_stat_for_key(

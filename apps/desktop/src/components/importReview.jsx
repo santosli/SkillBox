@@ -95,11 +95,10 @@ export function RemoteImportDialog({ error, mode, status, value, onClose, onMode
 
 export function LocalImportConfirmationDialog({
   candidates,
-  dontShowAgain,
   status,
   onClose,
   onConfirm,
-  onDontShowAgainChange
+  onTypeChange
 }) {
   const shownCandidates = candidates.slice(0, 3);
   const remainingCount = Math.max(candidates.length - shownCandidates.length, 0);
@@ -118,7 +117,7 @@ export function LocalImportConfirmationDialog({
         <div className="importSheetHeader">
           <div>
             <h2 id="local-import-title">Confirm local import</h2>
-            <p>SkillBox will move the selected skill folders into the managed store.</p>
+            <p>Choose User or Remote, then SkillBox will move the selected skill folders into the managed store.</p>
           </div>
           <button className="iconButton" type="button" aria-label="Close local import confirmation" onClick={onClose}>
             x
@@ -138,23 +137,39 @@ export function LocalImportConfirmationDialog({
           </div>
 
           <ul className="localImportPaths" aria-label="Selected local skill paths">
-            {shownCandidates.map((candidate) => (
-              <li key={candidate.sourcePath}>
-                <span>{candidate.name}</span>
-                <code>{compactPath(candidate.sourcePath)}</code>
-              </li>
-            ))}
+            {shownCandidates.map((candidate) => {
+              const skillType = candidate.skillType === 'remote' ? 'remote' : 'user';
+
+              return (
+                <li key={candidate.sourcePath}>
+                  <div className="localImportPathMeta">
+                    <span>{candidate.name}</span>
+                    <code>{compactPath(candidate.sourcePath)}</code>
+                  </div>
+                  <div className="candidateTypeSwitch" role="group" aria-label={`${candidate.name} type`}>
+                    <button
+                      className={skillType === 'user' ? 'active' : ''}
+                      disabled={status === 'importing'}
+                      type="button"
+                      onClick={() => onTypeChange(candidate, 'user')}
+                    >
+                      User
+                    </button>
+                    <button
+                      className={skillType === 'remote' ? 'active' : ''}
+                      disabled={status === 'importing'}
+                      type="button"
+                      onClick={() => onTypeChange(candidate, 'remote')}
+                    >
+                      Remote
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
             {remainingCount > 0 ? <li className="muted">+{remainingCount} more</li> : null}
           </ul>
 
-          <label className="localImportPreference">
-            <input
-              checked={dontShowAgain}
-              type="checkbox"
-              onChange={(event) => onDontShowAgainChange(event.target.checked)}
-            />
-            <span>Don't show this again</span>
-          </label>
         </div>
 
         <div className="localImportFooter">
@@ -375,7 +390,9 @@ function CandidateRow({ candidate, onToggleSelected, onTypeChange }) {
             ))}
           </details>
         ) : null}
-        <span className="candidateUsage">Calls {candidate.usageCount || 0}</span>
+        <span className="candidateUsage">
+          Locally observed calls {candidate.usageCount || 0}
+        </span>
         {candidateStatusNote(candidate) ? <p>{candidateStatusNote(candidate)}</p> : null}
       </div>
 

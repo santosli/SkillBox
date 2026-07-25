@@ -68,6 +68,9 @@ React UI
 - `run_doctor` -> `skillbox_core::run_doctor`
 - `list_history` -> `skillbox_core::list_history`
 - `record_skill_usage` -> `skillbox_core::record_skill_usage`
+- `list_skill_usage_rankings` -> `skillbox_core::list_skill_usage_rankings`
+- `preview_usage_skill_import` -> `skillbox_core::preview_usage_skill_import_for_source`
+- `backfill_codex_session_usage` -> `skillbox_core::backfill_codex_session_usage`
 - `usage_hook_statuses` -> `skillbox_core::usage_hook_statuses`
 - `install_usage_hook` -> `skillbox_core::install_usage_hook`
 - `check_app_update(force)` -> Tauri updater plugin HTTPS metadata check，非 force 请求复用 24 小时内、当前 app version 匹配的 SQLite 或进程内展示缓存
@@ -94,8 +97,11 @@ cargo run -p skillbox-cli --offline -- <command>
 - `remote.rs` GitHub install preview/apply、remote source 绑定、update check、diff 预览、版本切换
 - `marketplace.rs` Claude marketplace 候选搜索
 - `git_sync.rs` user-skills Git 同步编排
-- `usage.rs` usage 事件规范化与聚合统计
-- `hooks.rs` agent hook 注入与 transcript 解析
+- `usage.rs` usage 事件规范化、source identity、`Locally observed calls` 聚合、覆盖范围统计和 source-aware Import preview；覆盖范围按 canonical 存储来源拆分 hook、Codex、Claude Code、Cursor 和 other
+- `usage_backfill.rs` 只从本机 Codex session rollout 的显式用户输入载体解析完整 `<skill>` 块或 `[$skill](.../SKILL.md)` 链接，忽略 assistant/tool 输出，按 turn + 规范化 name/path 去重，并用 session `cwd` 恢复 workspace identity
+- `usage_backfill_claude.rs` 只从本机 Claude Code project JSONL 的结构化 Skill tool/command attribution 恢复使用事件，解析真实 `SKILL.md`，不复制消息正文
+- `usage_backfill_cursor.rs` 只读打开并验证 Cursor 本机 history SQLite schema，仅从 human bubble 中显式附加且解析到真实 `SKILL.md` 的 `context.cursorRules` 恢复事件；不兼容 schema fail closed
+- `hooks.rs` agent hook 注入、transcript 解析，以及基于结构化 runtime context 的 workspace 归属
 - `operations.rs` operation 与 history 记录
 - `metadata.rs` 用户 favorites/tags 的 SQLite 持久化和 legacy desktop metadata 迁移
 - `doctor.rs` managed store、SQLite、deployment、workspace 和 backup 的只读健康检查
@@ -117,7 +123,7 @@ cargo run -p skillbox-cli --offline -- <command>
 - 用户 favorites/tags 的 SQLite 持久化和桌面 legacy local-storage 迁移。
 - managed store、deployment、workspace、import backup 和 metadata 的只读 Doctor 检查。
 - 用户偏好读取与写入。
-- skill usage 事件记录、聚合统计和 agent hook 注入配置。
+- skill usage 事件记录、普通/System source identity、workspace-aware 聚合统计和 agent hook 注入配置。
 - 未来应承载 agent adapter registry 和跨 agent 的规范化扫描/部署编排。
 
 `skillbox-github` 负责：
@@ -182,12 +188,13 @@ GitHub remote source 可以是仓库中的 skill 子目录，也可以是根目�
 - Rust CLI 有 `workspaces`、`workspace-scan`、`workspace-add`、`workspace-forget` 来管理 workspace registry。
 - Rust core 和 Tauri 已覆盖 `~/.skillbox/user-skills` 的共享 remote Git 同步。
 - Rust core 已覆盖 remote skill 的 GitHub install preview/apply、GitHub update check、source binding、diff preview、update/rollback apply 和 operation log。
-- Rust core 和 Tauri 已覆盖 usage stats 显式上报，以及 Codex App、Codex CLI、Claude Code CLI 的 Stop hook 注入入口。
+- Rust core 和 Tauri 已覆盖 usage stats 显式上报，以及 Codex App、Codex CLI、Claude Code CLI 的 Stop hook 注入入口。Rankings 对外统一称为 `Locally observed calls`，支持 time range、User/Remote/System skill type、Agent 和 Workspace 的结构化过滤，并返回同一过滤快照内的最早/最新事件、canonical 存储来源计数，以及 Codex、Claude Code、Cursor 最近一次 history scan 的文件/session 数。桌面 `Sync histories` 顺序调用三个 provider；单个 provider 失败不会撤销其他 provider 已成功写入的幂等事件。
+- 未来若接入 Codex reported runs，它属于独立的 provider-reported analytics 边界，必须携带 provider、subject kind、time window、scope 和 provenance；不得写入 `skill_usage_events`，也不得参与本地 ranking、total 或 delta。
 - Tauri desktop 已覆盖 macOS app update check 和用户确认后的 install/restart；React 不直接处理 updater asset URL、签名或安装。
 - SQLite schema 已由有序 transaction migrations 管理；已有数据库升级前生成一次一致性 backup，升级后执行 integrity check。
 - Dashboard favorites/tags 已由 SQLite 持久化；桌面只在升级时读取一次 legacy local-storage metadata。
 - Rust core、CLI、Tauri 和 Settings 已提供只读 Doctor workflow，并为主要 managed-store/runtime/Git/workspace/hook mutations 写 operation history。
-- agent support 当前主要是 `SKILL.md` / Codex-style roots，尚未覆盖 Claude、OpenClaw、Cursor、Claude Code、Copilot 的原生格式。
+- agent support 当前主要是 `SKILL.md` / Codex-style roots，并包含 `.cursor/skills` runtime root 与 Codex、Claude Code、Cursor 的受限历史观测 adapter；尚未覆盖 Claude、OpenClaw、Cursor、Claude Code、Copilot 的完整原生格式和部署语义。
 - legacy Node CLI/core 已移除；旧 Node MVP 写入的 managed store 目录和 `source.json` 字段仍按兼容规则读取。
 
 目标状态：

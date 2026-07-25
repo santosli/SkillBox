@@ -301,6 +301,9 @@ test('sidebar footer icons follow the lucide-react convention', () => {
 });
 
 test('workspace card metadata keeps only user-facing fields', () => {
-  assert.deepEqual(workspaceCardMetaLabels, ['Scope', 'Skills', 'Imported', 'Calls']);
+  assert.deepEqual(
+    workspaceCardMetaLabels,
+    ['Scope', 'Skills', 'Imported', 'Locally observed calls']
+  );
   assert.equal('workspaceTableColumns' in workspaceModule, false);
 });

@@ -280,7 +280,9 @@ fn import_one_candidate_unlogged(
             .join(&imported.name)
             .join("current"),
     };
-    let (backup_path, deployed_path) = if item.deploy_back_to_source {
+    let deploy_back_to_source =
+        item.deploy_back_to_source && !is_under_path(&source_path, &paths.root.join("backups"));
+    let (backup_path, deployed_path) = if deploy_back_to_source {
         let backup_path = replace_source_with_symlink(
             &source_path,
             &deployment_target,

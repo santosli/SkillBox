@@ -24,7 +24,11 @@ export function HistoryPage({
       label: 'All',
       count: numberOrZero(history.skillUsageCount) + numberOrZero(history.operationCount)
     },
-    { id: 'skill_usage', label: 'Skill calls', count: numberOrZero(history.skillUsageCount) },
+    {
+      id: 'skill_usage',
+      label: 'Locally observed calls',
+      count: numberOrZero(history.skillUsageCount)
+    },
     { id: 'operation', label: 'Operations', count: numberOrZero(history.operationCount) }
   ];
   const filteredEntries =
@@ -84,7 +88,7 @@ export function HistoryPage({
       ) : (
         <div className="emptyState dashboardEmptyState historyEmptyState">
           <strong>No history yet</strong>
-          <span>Skill calls and SkillBox operations will appear here.</span>
+          <span>Locally observed skill calls and SkillBox operations will appear here.</span>
         </div>
       )}
     </section>

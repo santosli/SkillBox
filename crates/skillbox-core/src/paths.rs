@@ -19,6 +19,7 @@ pub fn default_runtime_roots() -> Vec<PathBuf> {
         home_dir().join(".codex/skills"),
         home_dir().join(".agents/skills"),
         home_dir().join(".claude/skills"),
+        home_dir().join(".cursor/skills"),
     ]
 }
 
@@ -31,6 +32,7 @@ pub(crate) fn runtime_roots_under(home: &Path) -> Vec<PathBuf> {
         home.join(".codex/skills"),
         home.join(".agents/skills"),
         home.join(".claude/skills"),
+        home.join(".cursor/skills"),
     ];
     roots.extend(discover_runtime_roots_under(home));
     dedupe_runtime_roots(roots)
@@ -80,7 +82,7 @@ pub(crate) fn discover_runtime_roots(
     }
 
     let mut has_direct_runtime_root = false;
-    for runtime_parent in [".agents", ".codex", ".claude"] {
+    for runtime_parent in [".agents", ".codex", ".claude", ".cursor"] {
         let runtime_root = current.join(runtime_parent).join("skills");
         if runtime_root.is_dir() {
             roots.push(runtime_root);
@@ -120,7 +122,7 @@ pub(crate) fn is_runtime_skill_root(path: &Path) -> bool {
             path.parent()
                 .and_then(|parent| parent.file_name())
                 .and_then(|name| name.to_str()),
-            Some(".agents" | ".codex" | ".claude")
+            Some(".agents" | ".codex" | ".claude" | ".cursor")
         )
 }
 
@@ -129,7 +131,7 @@ pub(crate) fn should_skip_runtime_root_search(path: &Path) -> bool {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("");
-    if matches!(name, ".agents" | ".codex" | ".claude") {
+    if matches!(name, ".agents" | ".codex" | ".claude" | ".cursor") {
         return false;
     }
     if name.starts_with('.') {

@@ -20,7 +20,7 @@ export const sidebarFooterItems = [
   { id: 'help', label: 'Help', icon: 'message-circle-question-mark', url: helpIssueUrl }
 ];
 
-export const workspaceCardMetaLabels = ['Scope', 'Skills', 'Imported', 'Calls'];
+export const workspaceCardMetaLabels = ['Scope', 'Skills', 'Imported', 'Locally observed calls'];
 
 export function normalizeWorkspace(workspace = {}) {
   const canonicalPath = workspace.canonicalPath || workspace.canonical_path || '';

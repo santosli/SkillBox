@@ -2,7 +2,7 @@ use crate::*;
 use fs2::FileExt;
 use std::fs::{File, OpenOptions};
 
-pub(crate) const LATEST_DATABASE_SCHEMA_VERSION: i64 = 4;
+pub(crate) const LATEST_DATABASE_SCHEMA_VERSION: i64 = 5;
 
 pub(crate) fn open_database(database_path: &Path) -> Result<Connection> {
     let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
@@ -92,6 +92,7 @@ pub(crate) fn run_database_migrations(connection: &mut Connection) -> Result<()>
         (2_i64, "legacy_compatibility"),
         (3_i64, "skill_user_metadata"),
         (4_i64, "skill_usage_ranking_indexes"),
+        (5_i64, "canonical_usage_agent_ids"),
     ] {
         let applied: bool = connection
             .query_row(
@@ -112,6 +113,7 @@ pub(crate) fn run_database_migrations(connection: &mut Connection) -> Result<()>
             2 => apply_legacy_compatibility_migration(&transaction)?,
             3 => apply_skill_user_metadata_migration(&transaction)?,
             4 => apply_skill_usage_ranking_indexes_migration(&transaction)?,
+            5 => apply_canonical_usage_agent_ids_migration(&transaction)?,
             _ => return Err(format!("Unknown database migration version: {version}")),
         }
         transaction
@@ -277,6 +279,80 @@ fn apply_skill_usage_ranking_indexes_migration(connection: &Connection) -> Resul
             ",
         )
         .map_err(|error| error.to_string())
+}
+
+fn apply_canonical_usage_agent_ids_migration(connection: &Connection) -> Result<()> {
+    canonicalize_stored_usage_agent_id(connection, "agents", "codex")?;
+    canonicalize_stored_usage_agent_id(connection, "claude", "claude-code")?;
+    Ok(())
+}
+
+fn canonicalize_stored_usage_agent_id(
+    connection: &Connection,
+    legacy_agent_id: &str,
+    canonical_agent_id: &str,
+) -> Result<()> {
+    connection
+        .execute(
+            "
+            DELETE FROM skill_usage_events
+            WHERE agent_id = ?1
+              AND event_id IS NOT NULL
+              AND EXISTS (
+                SELECT 1
+                FROM skill_usage_events AS canonical
+                WHERE canonical.agent_id = ?2
+                  AND canonical.runtime_root = skill_usage_events.runtime_root
+                  AND canonical.event_id = skill_usage_events.event_id
+              )
+            ",
+            params![legacy_agent_id, canonical_agent_id],
+        )
+        .map_err(|error| error.to_string())?;
+    connection
+        .execute(
+            "
+            UPDATE skill_usage_events
+            SET agent_id = ?1
+            WHERE agent_id = ?2
+            ",
+            params![canonical_agent_id, legacy_agent_id],
+        )
+        .map_err(|error| error.to_string())?;
+
+    connection
+        .execute(
+            "
+            DELETE FROM skill_usage_stats
+            WHERE agent_id IN (?1, ?2)
+            ",
+            params![legacy_agent_id, canonical_agent_id],
+        )
+        .map_err(|error| error.to_string())?;
+    connection
+        .execute(
+            "
+            INSERT INTO skill_usage_stats (
+              skill_name,
+              agent_id,
+              runtime_root,
+              usage_count,
+              last_used_at
+            )
+            SELECT
+              skill_name,
+              agent_id,
+              runtime_root,
+              COUNT(*),
+              MAX(used_at)
+            FROM skill_usage_events
+            WHERE agent_id = ?1
+            GROUP BY skill_name, agent_id, runtime_root
+            ",
+            params![canonical_agent_id],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 pub(crate) fn backup_database_before_migration(

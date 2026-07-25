@@ -186,29 +186,85 @@ export function previewUsageRankings(filters = {}) {
   const rows = [
     {
       rank: 1,
-      skill_name: 'grill-me',
-      kind: 'remote',
+      skill_name: 'git-merge-to-main',
+      kind: 'user',
       managed: true,
-      usage_count: 18,
-      last_used_at: '2026-07-21T08:00:00Z'
+      usage_count: 4,
+      last_used_at: '2026-07-10T21:12:00Z'
     },
     {
       rank: 2,
-      skill_name: 'frontend-design',
-      kind: 'remote',
-      managed: true,
-      usage_count: 7,
-      last_used_at: '2026-07-20T14:30:00Z'
-    },
-    {
-      rank: 3,
-      skill_name: 'personal-wiki-updater',
+      skill_name: 'black-cat-ai-illustrations',
       kind: 'user',
       managed: true,
       usage_count: 3,
-      last_used_at: '2026-07-18T09:15:00Z'
+      last_used_at: '2026-07-22T19:02:00Z'
+    },
+    {
+      rank: 3,
+      skill_name: 'skill-creator',
+      kind: null,
+      managed: false,
+      usage_count: 2,
+      last_used_at: '2026-07-18T11:20:00Z'
+    },
+    {
+      rank: 4,
+      skill_name: 'skill-creator',
+      kind: null,
+      managed: false,
+      system: true,
+      usage_count: 1,
+      last_used_at: '2026-07-18T11:18:00Z'
+    },
+    {
+      rank: 5,
+      skill_name: 'last30days',
+      kind: 'remote',
+      managed: true,
+      usage_count: 1,
+      last_used_at: '2026-06-27T23:21:00Z'
+    },
+    {
+      rank: 6,
+      skill_name: 'codex-chat-sync',
+      kind: 'user',
+      managed: true,
+      usage_count: 0,
+      last_used_at: ''
+    },
+    {
+      rank: 7,
+      skill_name: 'dida-task-sync',
+      kind: 'user',
+      managed: true,
+      usage_count: 0,
+      last_used_at: ''
     }
   ];
+
+  const sourceAwareRows = rows.map((row) => {
+    const sourceKind = row.system ? 'system' : 'regular';
+    return {
+      ...row,
+      source_kind: sourceKind,
+      source_id: `preview:${sourceKind}:${row.skill_name}`,
+      source_runtime_roots: ['/tmp/preview-skills']
+    };
+  });
+  const filteredRows = sourceAwareRows
+    .filter((row) => {
+      switch (filters.skillType) {
+        case 'user':
+        case 'remote':
+          return row.managed && row.kind === filters.skillType;
+        case 'system':
+          return row.system;
+        default:
+          return true;
+      }
+    })
+    .map((row, index) => ({ ...row, rank: index + 1 }));
 
   return {
     generated_at: '2026-07-22T10:00:00Z',
@@ -216,9 +272,25 @@ export function previewUsageRankings(filters = {}) {
     range_start: '2026-06-22T10:00:00Z',
     range_end: '2026-07-22T10:00:00Z',
     agent_id: filters.agentId || null,
+    skill_type: filters.skillType || null,
     workspace_root: filters.workspaceRoot || null,
-    total_observed_calls: rows.reduce((total, row) => total + row.usage_count, 0),
-    rows
+    total_observed_calls: filteredRows.reduce(
+      (total, row) => total + row.usage_count,
+      0
+    ),
+    coverage: {
+      earliest_event_at: '2026-06-24T09:15:00Z',
+      latest_event_at: '2026-07-21T08:00:00Z',
+      agent_hook_calls: 4,
+      codex_session_backfill_calls: 18,
+      claude_code_session_backfill_calls: 3,
+      cursor_session_backfill_calls: 2,
+      other_observed_calls: 0,
+      scanned_codex_session_files: 12,
+      scanned_claude_code_session_files: 8,
+      scanned_cursor_sessions: 6
+    },
+    rows: filteredRows
   };
 }
 

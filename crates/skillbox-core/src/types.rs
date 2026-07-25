@@ -961,10 +961,20 @@ pub enum SkillUsageRankingRange {
     AllTime,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillUsageRankingSkillType {
+    User,
+    Remote,
+    System,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct SkillUsageRankingRequest {
     #[serde(default)]
     pub range: SkillUsageRankingRange,
+    #[serde(alias = "skillType")]
+    pub skill_type: Option<SkillUsageRankingSkillType>,
     #[serde(alias = "agentId")]
     pub agent_id: Option<String>,
     #[serde(alias = "workspaceRoot")]
@@ -973,12 +983,46 @@ pub struct SkillUsageRankingRequest {
     pub include_unmanaged: bool,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillUsageSourceKind {
+    #[default]
+    Regular,
+    System,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreviewUsageSkillImportRequest {
+    #[serde(alias = "skillName")]
+    pub skill_name: String,
+    #[serde(default, alias = "sourceKind")]
+    pub source_kind: Option<SkillUsageSourceKind>,
+    #[serde(default, alias = "sourceId")]
+    pub source_id: Option<String>,
+    #[serde(default, alias = "sourceRuntimeRoots")]
+    pub source_runtime_roots: Vec<PathBuf>,
+    #[serde(default, alias = "rankingRequest")]
+    pub ranking_request: Option<SkillUsageRankingRequest>,
+    #[serde(default, alias = "rankingGeneratedAt")]
+    pub ranking_generated_at: Option<String>,
+    #[serde(default, alias = "runtimeRoot")]
+    pub runtime_root: Option<PathBuf>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SkillUsageRankingRow {
     pub rank: usize,
     pub skill_name: String,
     pub kind: Option<SkillKind>,
     pub managed: bool,
+    #[serde(default)]
+    pub system: bool,
+    #[serde(default)]
+    pub source_missing: bool,
+    pub source_kind: SkillUsageSourceKind,
+    pub source_id: String,
+    pub source_runtime_roots: Vec<PathBuf>,
     pub usage_count: usize,
     pub last_used_at: Option<String>,
 }
@@ -990,9 +1034,25 @@ pub struct SkillUsageRankingResult {
     pub range_start: Option<String>,
     pub range_end: String,
     pub agent_id: Option<String>,
+    pub skill_type: Option<SkillUsageRankingSkillType>,
     pub workspace_root: Option<PathBuf>,
     pub total_observed_calls: usize,
+    pub coverage: SkillUsageCoverage,
     pub rows: Vec<SkillUsageRankingRow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
+pub struct SkillUsageCoverage {
+    pub earliest_event_at: Option<String>,
+    pub latest_event_at: Option<String>,
+    pub agent_hook_calls: usize,
+    pub codex_session_backfill_calls: usize,
+    pub claude_code_session_backfill_calls: usize,
+    pub cursor_session_backfill_calls: usize,
+    pub other_observed_calls: usize,
+    pub scanned_codex_session_files: usize,
+    pub scanned_claude_code_session_files: usize,
+    pub scanned_cursor_sessions: usize,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1027,6 +1087,38 @@ pub struct UsageHookInstallResult {
 pub struct UsageHookRecordResult {
     pub recorded: Vec<SkillUsageRecordResult>,
     pub skipped: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct BackfillCodexSessionUsageRequest {
+    #[serde(default, alias = "includeArchived")]
+    pub include_archived: bool,
+    #[serde(default, alias = "sessionsRoot")]
+    pub sessions_root: Option<PathBuf>,
+    #[serde(default, alias = "archivedSessionsRoot")]
+    pub archived_sessions_root: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct BackfillClaudeCodeSessionUsageRequest {
+    #[serde(default, alias = "projectsRoot")]
+    pub projects_root: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct BackfillCursorSessionUsageRequest {
+    #[serde(default, alias = "databasePath")]
+    pub database_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
+pub struct BackfillCodexSessionUsageResult {
+    pub scanned_files: usize,
+    pub discovered: usize,
+    pub recorded: usize,
+    pub deduplicated: usize,
+    pub skipped: usize,
+    pub errors: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]

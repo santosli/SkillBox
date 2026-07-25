@@ -22,12 +22,18 @@ npm install
 Run the desktop app in development:
 
 ```sh
-npm --workspace apps/desktop run tauri dev
+npm --workspace apps/desktop run tauri:dev
 ```
 
 The Tauri dev shell loads the Vite dev server at
 `http://127.0.0.1:1420`. Keep that port free because the dev config uses
-`--strictPort`.
+`--strictPort`. On macOS, the development app starts without activation, then
+returns to the regular Dock policy, restores the previously active
+application, and creates an unfocused window. Automatic Rust rebuilds therefore
+remain available in the Dock without interrupting work in another app. The
+development app is named `SkillBox Dev` and uses its own bundle identifier.
+Production builds retain the `SkillBox` name and launch-focus behavior from
+`tauri.conf.json`.
 
 ## Branch And Agent Workflow
 

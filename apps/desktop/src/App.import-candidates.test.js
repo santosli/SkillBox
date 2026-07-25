@@ -45,6 +45,7 @@ import {
 import {
   importBatchNotice,
   importRequestItems,
+  shouldConfirmLocalImport,
   toggleImportCandidateSelection
 } from './importFlow.js';
 
@@ -238,6 +239,22 @@ test('imports only the grouped primary source and leaves duplicate copies unchan
       deploy_back_to_source: true
     }
   ]);
+});
+
+test('always confirms local imports even when a legacy skip preference is stored', () => {
+  const candidates = [
+    normalizeImportCandidate({
+      name: 'dbs',
+      source_path: '/Users/example/.agents/skills/dbs',
+      import_status: 'importable',
+      is_selected: true
+    })
+  ];
+
+  assert.equal(
+    shouldConfirmLocalImport(candidates, { skipLocalImportConfirmation: true }),
+    true
+  );
 });
 
 test('reports grouped import results by skill and source location', () => {

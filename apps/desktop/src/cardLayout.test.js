@@ -91,7 +91,8 @@ test('sidebar brand does not render a subtitle', () => {
   const brandTextRule = css.match(/\.brandName\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const brandTitleRule = css.match(/\.brand strong\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
 
-  assert.match(appSource, /<strong>SkillBox<\/strong>/);
+  assert.match(appSource, /const APP_DISPLAY_NAME = import\.meta\.env\.DEV \? 'SkillBox Dev' : 'SkillBox';/);
+  assert.match(appSource, /<strong>\{APP_DISPLAY_NAME\}<\/strong>/);
   assert.doesNotMatch(appSource, /Local skill manager/);
   assert.doesNotMatch(css, /\.brand span/);
   assert.match(brandRule, /gap:\s*9px;/);
@@ -172,10 +173,12 @@ test('dashboard and settings use the shared page title row template', () => {
   const pageTitlePillRule = css.match(/\.pageTitlePill\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const workbenchRule = css.match(/\.settingsWorkbench\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
 
-  assert.match(commonSource, /export function PageTitleRow\(\{ actions, count, title \}\)/);
+  assert.match(commonSource, /export function PageTitleRow\(\{ actions, count, subtitle, title \}\)/);
   assert.match(commonSource, /className="pageTitleRow"/);
   assert.match(commonSource, /className="pageTitleGroup"/);
+  assert.match(commonSource, /className="pageTitleHeading"/);
   assert.match(commonSource, /className="pageTitlePill"/);
+  assert.match(commonSource, /className="pageTitleSubtitle"/);
   assert.match(dashboardSource, /<PageTitleRow[\s\S]*title="Skills"[\s\S]*count=\{filtered\.length\}[\s\S]*actions=/);
   assert.match(settingsPageSource, /<PageTitleRow title="Settings" \/>/);
   assert.doesNotMatch(settingsPageSource, /<PageHeader/);
@@ -428,6 +431,23 @@ test('import review uses the shared searchable candidate list template', () => {
   assert.doesNotMatch(candidateReviewListSource, /type="search"/);
   assert.match(candidateReviewListSource, /workspaceSkillTabs\(searchedCandidates\)/);
   assert.match(searchRule, /width:\s*100%;/);
+});
+
+test('local import confirmation lets users choose User or Remote', () => {
+  const dialogSource = appSource.match(
+    /export function LocalImportConfirmationDialog\(\{(?<body>[\s\S]*?)export function ImportReview/
+  )?.groups.body || '';
+  const pathRule = css.match(/\.localImportPaths li\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(dialogSource, /onTypeChange/);
+  assert.match(dialogSource, /className="candidateTypeSwitch"/);
+  assert.match(dialogSource, /onClick=\{\(\) => onTypeChange\(candidate, 'user'\)\}/);
+  assert.match(dialogSource, /onClick=\{\(\) => onTypeChange\(candidate, 'remote'\)\}/);
+  assert.match(dialogSource, /Choose User or Remote/);
+  assert.doesNotMatch(dialogSource, /Don't show this again/);
+  assert.doesNotMatch(dialogSource, /localImportPreference/);
+  assert.match(appSource, /onTypeChange=\{\(candidate, skillType\) =>/);
+  assert.match(pathRule, /grid-template-columns:\s*minmax\(0,\s*1fr\) auto;/);
 });
 
 test('remote source binding dialog keeps long candidate lists inside the viewport', () => {
@@ -848,6 +868,9 @@ test('history page combines skill usage and operation logs', () => {
 test('rankings is an accessible top-level page separate from history', () => {
   const historyPageSource = appSource.match(/export function HistoryPage[\s\S]*?function HistoryRow/)?.[0] || '';
   const rankingsPageSource = appSource.match(/export function UsageRankingsPage[\s\S]*$/)?.[0] || '';
+  const rankingRangeSource = rankingsPageSource.match(
+    /className="usageRankingRangeField"[\s\S]*?className="usageRankingSelect"/
+  )?.[0] || '';
 
   assert.doesNotMatch(historyPageSource, /Rankings|usageRanking/);
   assert.match(appSource, /\{ id: 'rankings', label: 'Rankings', icon: 'chart-no-axes-column-increasing' \}/);
@@ -855,22 +878,118 @@ test('rankings is an accessible top-level page separate from history', () => {
   assert.match(appSource, /function openRankings\(\)/);
   assert.match(appSource, /page === 'rankings'/);
   assert.match(rankingsPageSource, /<PageTitleRow[\s\S]*title="Rankings"/);
+  assert.doesNotMatch(rankingsPageSource, /subtitle=/);
   assert.match(rankingsPageSource, /onClick=\{onRefresh\}/);
+  assert.match(rankingsPageSource, /panelNotice notice/);
+  assert.match(rankingsPageSource, /DashboardStatusNotice/);
+  assert.match(
+    rankingsPageSource,
+    /usageRankingControls[\s\S]*panelNotice notice[\s\S]*Most locally observed/
+  );
+  assert.doesNotMatch(
+    rankingsPageSource,
+    /aria-label="Rankings">\s*\{error \? <div className="notice"/
+  );
   assert.match(appSource, /aria-label="Local skill usage rankings"/);
-  assert.match(appSource, /role="group" aria-label="Ranking time range"/);
+  assert.match(rankingsPageSource, /className="usageRankingSelectLabel" id="usage-ranking-range-label">[\s\S]*Time range/);
+  assert.match(appSource, /className="dashboardTypeTabs usageRankingRanges"/);
+  assert.match(appSource, /role="group"[\s\S]*aria-labelledby="usage-ranking-range-label"/);
+  assert.match(rankingsPageSource, /aria-pressed=\{filters\.range === option\.id\}/);
+  assert.doesNotMatch(rankingRangeSource, /role="tab"|aria-selected=/);
   assert.match(appSource, /<option value="">All agents<\/option>/);
+  assert.match(appSource, /<option value="">All types<\/option>/);
   assert.match(appSource, /<option value="">All workspaces<\/option>/);
-  assert.match(appSource, /Local records from enabled and trusted hooks only/);
+  assert.match(rankingsPageSource, /className="usageRankingSelectLabel">Skill type</);
+  assert.match(rankingsPageSource, /className="usageRankingSelectLabel">Agent</);
+  assert.match(rankingsPageSource, /className="usageRankingSelectLabel">Workspace</);
+  assert.match(css, /\.usageRankingControls\s*\{[^}]*align-items:\s*center;/s);
+  assert.match(css, /\.usageRankingRangeField,\s*\.usageRankingSelect\s*\{[^}]*display:\s*grid;[^}]*gap:\s*4px;/s);
+  assert.match(css, /\.usageRankingRanges\s*\{[^}]*border-radius:\s*10px;/s);
+  assert.match(css, /\.usageRankingRanges\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(96px,\s*max-content\)\);/s);
+  assert.match(css, /\.usageRankingRanges button\s*\{[^}]*min-width:\s*96px;/s);
+  assert.match(css, /\.usageRankingRanges button\s*\{[^}]*padding:\s*0 16px;/s);
+  assert.doesNotMatch(css, /\.usageRankingRanges\s*\{[^}]*min-width:\s*280px;/s);
+  assert.match(css, /\.usageRankingSelect select\s*\{[^}]*border-radius:\s*10px;/s);
+  assert.match(css, /\.usageRankingSelect select\s*\{[^}]*height:\s*46px;/s);
+  assert.match(appSource, /Most locally observed/);
+  assert.match(appSource, /Full ranking/);
+  assert.match(appSource, /Includes skills not imported into SkillBox/);
+  assert.match(appSource, /Not imported/);
+  assert.match(appSource, /usageRankingTopCard/);
+  assert.match(appSource, /<strong>\{row\.usageCount\} calls<\/strong>/);
+  assert.doesNotMatch(appSource, /<strong>\{row\.usageCount\} locally observed calls<\/strong>/);
   assert.match(appSource, /<table className="usageRankingTable">/);
+  assert.match(css, /\.usageRankingTableWrap\s*\{[^}]*overflow-x:\s*auto;/s);
+  assert.match(css, /\.usageRankingTable\s*\{[^}]*min-width:\s*720px;/s);
+  assert.match(
+    css,
+    /@media \(max-width:\s*1100px\)\s*\{[\s\S]*?\.usageRankingControls\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);[\s\S]*?\.usageRankingRangeField\s*\{[^}]*grid-column:\s*1 \/ -1;[\s\S]*?\.usageRankingRanges\s*\{[^}]*width:\s*100%;/s
+  );
   assert.match(appSource, /<th scope="col">Rank<\/th>/);
   assert.match(appSource, /<th scope="col">Skill<\/th>/);
   assert.match(appSource, /<th scope="col">Calls<\/th>/);
+  assert.match(rankingsPageSource, /Local data coverage/);
+  assert.match(rankingsPageSource, /Hook observations/);
+  assert.match(rankingsPageSource, /Codex history observations/);
+  assert.match(rankingsPageSource, /Claude Code history observations/);
+  assert.match(rankingsPageSource, /Cursor history observations/);
+  assert.match(rankingsPageSource, /History sessions scanned/);
+  assert.match(rankingsPageSource, /Provider-reported runs/);
   assert.match(appSource, /<th scope="col">Last observed<\/th>/);
+  assert.match(rankingsPageSource, /Sync histories/);
+  assert.match(rankingsPageSource, /onSyncHistories/);
+  assert.match(appSource, /usageHistorySyncProviders/);
+  assert.match(appSource, /await invoke\(provider\.command/);
+  assert.match(appSource, /backfill_claude_code_session_usage/);
+  assert.match(appSource, /backfill_cursor_session_usage/);
+  assert.match(tauriSource, /async fn backfill_codex_session_usage/);
+  assert.match(tauriSource, /skillbox_core::backfill_codex_session_usage/);
+  assert.match(tauriSource, /async fn backfill_claude_code_session_usage/);
+  assert.match(tauriSource, /async fn backfill_cursor_session_usage/);
+  assert.match(appSource, /includeArchived:\s*true/);
   assert.match(appSource, /Open usage hook settings/);
+  assert.match(appSource, /<th scope="col">Actions<\/th>/);
+  assert.match(appSource, /Detail/);
+  assert.match(appSource, /\(page === 'dashboard' \|\| page === 'rankings'\) && selectedSkill/);
+  assert.match(appSource, /row\.system/);
+  assert.match(
+    appSource,
+    /row\.system \|\| row\.sourceKind === 'unknown' \|\| row\.sourceMissing \? null/
+  );
+  assert.match(appSource, /button primary compactAction/);
+  assert.doesNotMatch(appSource, /usageRankingActionNote/);
+  assert.match(appSource, /onImportSkill/);
+  assert.match(rankingsPageSource, /onImportSkill\(row\)/);
+  assert.match(appSource, /preview_usage_skill_import/);
+  assert.match(appComponentSource, /sourceKind:\s*row\.sourceKind/);
+  assert.match(appComponentSource, /sourceId:\s*row\.sourceId/);
+  assert.match(appComponentSource, /sourceRuntimeRoots:\s*row\.sourceRuntimeRoots/);
+  assert.match(appComponentSource, /rankingRequest:\s*usageRankingRequest\(usageRankingFilters\)/);
+  assert.match(appComponentSource, /rankingGeneratedAt:\s*usageRankings\.generatedAt/);
+  assert.match(appSource, /source_id:\s*`preview:\$\{sourceKind\}:\$\{row\.skill_name\}`/);
+  assert.match(appSource, /source_runtime_roots:\s*\['\/tmp\/preview-skills'\]/);
+  assert.match(tauriSource, /async fn preview_usage_skill_import/);
+  assert.match(tauriSource, /PreviewUsageSkillImportRequest/);
+  assert.match(tauriSource, /preview_usage_skill_import_for_source/);
+  assert.match(css, /\.rankingsFrame\s*\{[^}]*max-width:\s*none;/s);
+  assert.match(css, /\.usageRankingActions\s*\{/);
   assert.match(appSource, /invoke\('list_skill_usage_rankings'/);
-  assert.match(appSource, /void loadUsageRankings\(usageRankingFilters\)/);
+  assert.match(appSource, /function navigateToPage\(nextPage\)/);
+  assert.match(appSource, /pageRef\.current = nextPage/);
+  assert.match(appSource, /rankingImportRequestRef\.current \+= 1/);
+  assert.match(appSource, /finally \{\s*setUsageBackfillLoading\(false\);/s);
+  assert.match(
+    appSource,
+    /if \(rankingImportRequestRef\.current === requestId\) \{\s*setRankingImportSkillName\(''\);/s
+  );
+  assert.match(
+    appSource,
+    /if \(usageRankingRequestRef\.current === requestId\) \{\s*setUsageRankingLoading\(false\);/s
+  );
   assert.match(appSource, /usageRankingRequest\(nextFilters\)/);
-  assert.match(appSource, /includeUnmanaged: false/);
+  assert.match(appSource, /includeUnmanaged: true/);
+  assert.match(appSource, /Not imported/);
+  assert.match(appSource, /Includes skills not imported into SkillBox/);
   const loadHistorySource = appComponentSource.match(/async function loadHistory\(\)[\s\S]*?function openRankings/)?.[0] || '';
   assert.match(loadHistorySource, /invoke\('list_history'/);
   assert.doesNotMatch(loadHistorySource, /list_skill_usage_rankings|Promise\.all/);
@@ -878,7 +997,10 @@ test('rankings is an accessible top-level page separate from history', () => {
   assert.match(tauriSource, /skillbox_core::list_skill_usage_rankings/);
   assert.match(css, /\.historyTypeTabs\s*\{[^}]*repeat\(3,/s);
   assert.match(css, /\.usageRankingTable\s*\{/);
-  assert.match(css, /\.usageRankingRanges button:focus-visible/);
+  assert.match(css, /\.usageRankingTopGrid\s*\{/);
+  assert.match(css, /\.usageRankingTopCard\.leader\s*\{/);
+  assert.match(css, /\.usageRankingRanges\s*\{/);
+  assert.match(css, /\.dashboardTypeTabs button\.active/);
   assert.match(css, /font-variant-numeric:\s*tabular-nums/);
 });
 
@@ -948,15 +1070,15 @@ test('active workspace icons sit beside the active workspaces label', () => {
   assert.doesNotMatch(css, /\.skillDetailDeploySurface\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto;/s);
 });
 
-test('skill cards keep usage in metadata and hide zero calls', () => {
+test('skill cards keep locally observed usage in metadata and hide zero calls', () => {
   const skillCardStart = appSource.indexOf('function SkillCard');
   const skillCardEnd = appSource.indexOf('function AgentIconStack', skillCardStart);
   const skillCardSource = appSource.slice(skillCardStart, skillCardEnd);
 
   assert.ok(skillCardStart > 0);
   assert.ok(skillCardEnd > skillCardStart);
-  assert.match(skillCardSource, /className="skillCardMetaDetails"[\s\S]*\{skill\.usageCount > 0 \? \([\s\S]*className="skillCardUsage"[\s\S]*\{skill\.usageCount\} calls/);
-  assert.doesNotMatch(skillCardSource, /\{skill\.usageCount \|\| 0\} calls/);
+  assert.match(skillCardSource, /className="skillCardMetaDetails"[\s\S]*\{skill\.usageCount > 0 \? \([\s\S]*className="skillCardUsage"[\s\S]*\{skill\.usageCount\} locally observed calls/);
+  assert.doesNotMatch(skillCardSource, /\{skill\.usageCount \|\| 0\} locally observed calls/);
   assert.match(css, /\.skillCardTitleText\s*\{/);
   assert.match(css, /\.skillCardUsage\s*\{/);
 });
