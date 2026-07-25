@@ -9,6 +9,12 @@ version tags such as `v0.3.0`.
 
 - No unreleased changes.
 
+## 0.5.1
+
+- Expand History to the same full content width as other standard pages for clearer timelines and better use of desktop space.
+- Share a reusable full-width `PageFrame` across Dashboard, Workspaces, Rankings, and History so standard pages stay consistently aligned.
+- Simplify compact usage labels to `Calls` and `<n> calls`, while detailed help continues to explain that these are locally observed calls rather than account-level analytics.
+
 ## 0.5.0
 
 - Check macOS updater metadata at most once per day, keep the last successful result across launches, and show a one-click Update action beside the SkillBox brand while retaining artifact signature verification during install.
