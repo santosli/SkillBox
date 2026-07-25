@@ -6640,6 +6640,28 @@ fn check_remote_skill_updates_ignores_commits_outside_skill_path() {
 }
 
 #[test]
+fn temporary_work_dirs_are_unique_across_concurrent_checks() {
+    let barrier = Arc::new(Barrier::new(32));
+    let handles = (0..32)
+        .map(|_| {
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                temporary_work_dir("concurrent-check")
+            })
+        })
+        .collect::<Vec<_>>();
+    let mut paths = handles
+        .into_iter()
+        .map(|handle| handle.join().unwrap())
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths.dedup();
+
+    assert_eq!(paths.len(), 32);
+}
+
+#[test]
 fn check_remote_skill_updates_marks_missing_source_separately_from_not_checkable() {
     let root = temp_dir("remote-not-checkable");
     let managed_root = root.join("SkillBox");

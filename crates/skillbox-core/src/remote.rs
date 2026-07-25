@@ -1260,13 +1260,20 @@ pub(crate) fn current_remote_version(paths: &ManagedPaths, skill_name: &str) -> 
 }
 
 pub(crate) fn temporary_work_dir(label: &str) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
 
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .unwrap_or_default();
-    std::env::temp_dir().join(format!("skillbox-{label}-{nanos}"))
+    let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "skillbox-{label}-{}-{nanos}-{sequence}",
+        std::process::id()
+    ))
 }
 
 pub(crate) fn remove_path_if_exists(path: &Path) -> Result<()> {
