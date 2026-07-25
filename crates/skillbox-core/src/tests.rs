@@ -3454,6 +3454,42 @@ fn managed_preferences_reject_invalid_remote_update_timeout() {
 }
 
 #[test]
+fn app_update_check_cache_round_trips_through_preferences() {
+    let root = temp_dir("app-update-cache");
+    let managed_root = root.join("SkillBox");
+    let cache = AppUpdateCheckCache {
+        current_version: "0.4.5".to_string(),
+        available: true,
+        version: "0.5.0".to_string(),
+        date: "2026-07-25T10:00:00Z".to_string(),
+        body: "Daily update reminders.".to_string(),
+        checked_at: "1784954400".to_string(),
+        message: "App update available.".to_string(),
+    };
+
+    assert_eq!(cached_app_update_check(&managed_root).unwrap(), None);
+    cache_app_update_check(&managed_root, &cache).unwrap();
+
+    assert_eq!(cached_app_update_check(&managed_root).unwrap(), Some(cache));
+}
+
+#[test]
+fn app_update_check_cache_rejects_corrupt_json() {
+    let root = temp_dir("app-update-cache-corrupt");
+    let managed_root = root.join("SkillBox");
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    let connection = open_database(&paths.database_path).unwrap();
+    connection
+        .execute(
+            "INSERT INTO preferences (key, value) VALUES ('app_update_check_cache', '{broken')",
+            [],
+        )
+        .unwrap();
+
+    assert!(cached_app_update_check(&managed_root).is_err());
+}
+
+#[test]
 fn operation_log_records_success_failure_and_cancellation() {
     let managed_root = temp_dir("operation-log-statuses").join("SkillBox");
     ensure_managed_layout(&managed_root).unwrap();

@@ -216,6 +216,13 @@ skill_user_metadata
 
 `skill_user_metadata` 保存用户显式设置的 favorite 和 tags。桌面首次读取该表时会把旧 `localStorage` 中仍存在的 metadata 通过 `INSERT OR IGNORE` 迁入，因此 SQLite 中已有值不会被旧浏览器状态覆盖；迁移成功后删除旧 key。
 
+当前 `preferences` key-value 表除用户设置和 remote skill update cache 外，还保存
+`app_update_check_cache`。该值只记录最近一次成功的 updater metadata check 展示快照
+（current/available version、release date/body、checked time 和 message），用于 24 小时
+节流与跨启动恢复提醒。它不保存下载 URL、签名或安装授权；损坏、时间异常或 current
+version 不匹配时必须忽略并重新通过 Tauri updater plugin 检查；下载和安装阶段仍由
+plugin 校验 updater asset 签名。
+
 `workspaces.display_name` 由 path 推导：home-level global roots 使用 agent 名（例如 `Codex`、`Claude`），项目局部 roots 使用项目目录名（例如 `demo-vault`）。`global` / `user` 不拼进名称，由 `kind` 字段表达。`imported_skill_count` 使用 import candidate 的同一套 imported 判定：workspace skill 必须是指向 SkillBox managed root 的 symlink；仅内容 hash 匹配 managed store 不再表示该 runtime 位置仍被 SkillBox 管理。
 
 `operations` 记录会改变用户 skill 内容、managed store、runtime、Git state、workspace registry 或 hook 配置的主要动作。Rust core 统一写入，UI 只能读取展示或通过结构化命令触发新记录；记录从 UI 视角 append-only，MVP 不做自动清理。`payload_json` 保存操作细节，例如 from/to version、changed paths、backup path、affected deployments、commit SHA 或失败恢复状态，但不保存 Git credentials 或 hook 配置正文。低风险 UI metadata、自动 cache/index refresh 和纯读取操作不写 operation history。

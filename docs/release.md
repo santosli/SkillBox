@@ -99,8 +99,9 @@ GitHub release labels.
   ```
 
 - Launch the app.
-- In Settings -> App updates, verify the updater status renders without trying
-  to install anything automatically.
+- Verify the background updater check does not download automatically. When a
+  test update exists, confirm the sidebar Update action survives an app restart
+  within the 24-hour cache window.
 - Scan workspaces.
 - Import one test skill.
 - Deploy and undeploy one symlink.
@@ -108,4 +109,6 @@ GitHub release labels.
 - Verify the Homebrew cask installs, upgrades, uninstalls, and does not delete
   `~/.skillbox`.
 - After publishing a new release, launch the previous DMG build and verify it
-  can find the new version, install it after confirmation, and restart.
+  can find the new version, revalidate it from one Update click, install it,
+  and restart. Keep the previous build open across the due window to verify
+  long-running daily checks as part of release qualification.

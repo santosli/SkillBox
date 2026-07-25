@@ -20,6 +20,7 @@ const settingsSections = [
 
 export function SettingsPage({
   appUpdate,
+  appUpdateInstallBlocked,
   doctorReport,
   paths,
   preferences,
@@ -68,6 +69,7 @@ export function SettingsPage({
           />
           <AppUpdateSettingsPanel
             appUpdate={appUpdate}
+            installBlocked={appUpdateInstallBlocked}
             onCheck={onCheckAppUpdate}
             onInstall={onInstallAppUpdate}
           />
@@ -175,7 +177,7 @@ function SettingsRail({ activeSettingsSection, onSelectSection }) {
   );
 }
 
-function AppUpdateSettingsPanel({ appUpdate, onCheck, onInstall }) {
+function AppUpdateSettingsPanel({ appUpdate, installBlocked, onCheck, onInstall }) {
   const isChecking = appUpdate?.state === 'checking';
   const isInstalling = appUpdate?.state === 'installing';
   const isDisabled = appUpdate?.state === 'disabled';
@@ -218,7 +220,9 @@ function AppUpdateSettingsPanel({ appUpdate, onCheck, onInstall }) {
             </button>
             <button
               className="button primary"
-              disabled={!hasUpdate || isChecking || isInstalling || isDisabled}
+              disabled={
+                !hasUpdate || isChecking || isInstalling || isDisabled || installBlocked
+              }
               type="button"
               onClick={onInstall}
             >

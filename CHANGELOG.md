@@ -7,6 +7,7 @@ version tags such as `v0.3.0`.
 
 ## Unreleased
 
+- Check macOS updater metadata at most once per day, keep the last successful result across launches, and show a one-click Update action beside the SkillBox brand while retaining artifact signature verification during install.
 - Add a standalone Skill Usage Rankings page with 7-day, 30-day, all-time, Agent, and Workspace filters while keeping usage data local and separate from source trust.
 
 ## 0.4.5

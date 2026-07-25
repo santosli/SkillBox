@@ -633,33 +633,40 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 触发条件：
 
-- 桌面 app 启动后后台检查一次。
+- 桌面 app 启动后请求一次后台检查；Rust 对同一 current version 的成功结果执行 24 小时节流。
+- app 连续运行时每小时触发一次轻量 due-check；未到 24 小时时只返回 SQLite 中的最近成功快照，不访问网络。
 - 用户在 Settings -> App updates 点击 `Check for updates`。
-- 用户确认后点击 `Install and restart`。
+- 发现更新后，用户点击侧边栏品牌旁的 `Update`，或在 Settings 点击 `Install and restart`。
 
 步骤：
 
-- React 调用 `check_app_update`，不直接下载 release asset，也不解析任意 URL。
-- Tauri command 使用 Tauri updater plugin 读取 `latest.json`，并由插件校验签名链。
+- React 自动调用 `check_app_update(force=false)`，手动检查调用 `force=true`；React 不直接下载 release asset，也不解析任意 URL。
+- Tauri command 通过 HTTPS 使用 Tauri updater plugin 读取和解析 `latest.json`；metadata check 不等同于 artifact 验签。
 - debug/dev/browser preview 不访问 GitHub，返回 disabled 状态。
-- 有可用更新时，Tauri 保存最近一次签名校验通过的 pending update；Settings 显示版本、notes 和安装按钮。
-- `install_app_update` 只能消费 pending update，调用插件下载、验证、安装，然后重启 app。
+- 成功检查的展示快照写入 managed SQLite `preferences.app_update_check_cache`。同一 current version 在 24 小时内复用该快照；损坏、未来时间、过期或版本不匹配的快照都不会阻止新检查。
+- SQLite cache 写入失败时记录 desktop stderr，并保留进程内成功快照继续执行 24 小时节流；跨启动恢复会在持久化恢复后重新生效。
+- 有可用更新时，Tauri 保存最近一次成功 metadata check 得到的进程内 pending update；侧边栏显示 Update，Settings 显示版本、notes 和安装按钮。
+- 点击安装时先执行一次 force check，确认版本仍然可用，再调用 `install_app_update` 下载、验证、安装并重启。进程内 pending 缺失时，Rust 也必须重新检查，不能从 SQLite cache 构造 URL 或安装对象。
+- 自动检查只检查 metadata；没有用户点击时不下载、不安装、不重启。
 - Release workflow 必须上传 DMG、updater `.app.tar.gz`、`.sig` 和 `latest.json`；`latest.json` 同时包含 `darwin-aarch64` 和 `darwin-x86_64`，指向同一个 universal updater archive。
 
 失败与回滚：
 
-- 没有 pending update 时拒绝安装。
+- force recheck 后没有可用版本时清除提醒并报告已是最新；Rust fallback 仍在没有 pending/update 时拒绝安装。
 - updater check/download/install 失败时展示错误，不修改 managed store 或 runtime skills。
-- 签名校验失败由 Tauri updater plugin 拒绝安装。
+- 自动网络检查失败不覆盖最近一次成功 cache，也不弹出阻塞提示；当前进程后续 due-check 可以重试。
+- 下载或安装失败时保留 pending update，允许用户直接重试。
+- 用户点击后，Tauri updater plugin 下载 updater asset，并在安装前验证 artifact 签名；签名失败时拒绝安装。
 - 丢失 `TAURI_SIGNING_PRIVATE_KEY` 会导致已安装用户无法接受未来更新，必须保留离线备份。
 
 完成验证：
 
+- `cargo test -p skillbox-core --offline app_update_check_cache`
 - `cargo test -p skillbox-desktop --offline app_update`
 - `npm test`
 - `npm --workspace apps/desktop run build`
 - Release workflow `workflow_dispatch` dry run 必须验证 DMG、updater archive、signature 和 `latest.json`。
-- 正式发布后，用前一版 DMG 安装包验证能检查到新版本、确认安装并重启。
+- 正式发布后，用前一版 DMG 安装包验证：首次检查出现侧边栏提醒；重启后 24 小时内恢复提醒且不重复联网；点击一次即可重新检查、安装并重启。
 
 ## 16. Database Migrations And Doctor
 

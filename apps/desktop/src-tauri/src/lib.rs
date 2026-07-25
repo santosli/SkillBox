@@ -6,8 +6,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Manager;
 use tauri_plugin_updater::{Update, UpdaterExt};
 
+const APP_UPDATE_CHECK_INTERVAL_SECONDS: u64 = 24 * 60 * 60;
+
 #[derive(Default)]
 struct PendingAppUpdate(Mutex<Option<Update>>);
+
+#[derive(Default)]
+struct AppUpdateSessionCache(Mutex<Option<skillbox_core::AppUpdateCheckCache>>);
 
 #[derive(Debug)]
 enum AppUpdateError {
@@ -55,9 +60,13 @@ struct AppUpdateResponse {
 }
 
 fn app_update_checked_at() -> String {
+    app_update_now_seconds().to_string()
+}
+
+fn app_update_now_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs().to_string())
+        .map(|duration| duration.as_secs())
         .unwrap_or_default()
 }
 
@@ -105,6 +114,55 @@ fn app_update_no_update_response(current_version: &str) -> AppUpdateResponse {
         body: String::new(),
         checked_at: app_update_checked_at(),
         message: "SkillBox is up to date.".to_string(),
+    }
+}
+
+fn app_update_cache_is_fresh(
+    cache: &skillbox_core::AppUpdateCheckCache,
+    current_version: &str,
+    now_seconds: u64,
+) -> bool {
+    if cache.current_version != current_version {
+        return false;
+    }
+
+    let Ok(checked_at) = cache.checked_at.parse::<u64>() else {
+        return false;
+    };
+
+    now_seconds
+        .checked_sub(checked_at)
+        .is_some_and(|age| age < APP_UPDATE_CHECK_INTERVAL_SECONDS)
+}
+
+fn app_update_response_from_cache(cache: skillbox_core::AppUpdateCheckCache) -> AppUpdateResponse {
+    AppUpdateResponse {
+        current_version: cache.current_version,
+        available: cache.available,
+        disabled: false,
+        version: cache.version,
+        date: cache.date,
+        body: cache.body,
+        checked_at: cache.checked_at,
+        message: cache.message,
+    }
+}
+
+fn cache_app_update_response(response: &AppUpdateResponse, session_cache: &AppUpdateSessionCache) {
+    let cache = skillbox_core::AppUpdateCheckCache {
+        current_version: response.current_version.clone(),
+        available: response.available,
+        version: response.version.clone(),
+        date: response.date.clone(),
+        body: response.body.clone(),
+        checked_at: response.checked_at.clone(),
+        message: response.message.clone(),
+    };
+    *session_cache.0.lock().unwrap() = Some(cache.clone());
+    if let Err(error) =
+        skillbox_core::cache_app_update_check(skillbox_core::default_managed_root(), &cache)
+    {
+        eprintln!("Unable to persist the app update check cache: {error}");
     }
 }
 
@@ -760,6 +818,8 @@ fn forget_workspace(path: String) -> Result<Value, String> {
 async fn check_app_update(
     app: tauri::AppHandle,
     pending_update: tauri::State<'_, PendingAppUpdate>,
+    session_cache: tauri::State<'_, AppUpdateSessionCache>,
+    force: Option<bool>,
 ) -> Result<AppUpdateResponse, AppUpdateError> {
     if app_updater_disabled() {
         *pending_update.0.lock().unwrap() = None;
@@ -769,16 +829,41 @@ async fn check_app_update(
         ));
     }
 
+    let current_version = env!("CARGO_PKG_VERSION");
+    if !force.unwrap_or(false) {
+        let cached_for_session = {
+            let cache = session_cache.0.lock().unwrap();
+            cache.clone()
+        };
+        if let Some(cache) = cached_for_session {
+            if app_update_cache_is_fresh(&cache, current_version, app_update_now_seconds()) {
+                return Ok(app_update_response_from_cache(cache));
+            }
+        }
+
+        if let Ok(Some(cache)) =
+            skillbox_core::cached_app_update_check(skillbox_core::default_managed_root())
+        {
+            if app_update_cache_is_fresh(&cache, current_version, app_update_now_seconds()) {
+                *session_cache.0.lock().unwrap() = Some(cache.clone());
+                return Ok(app_update_response_from_cache(cache));
+            }
+        }
+    }
+
     let update = app.updater()?.check().await?;
     match update {
         Some(update) => {
             let response = app_update_response_from_update(&update);
             *pending_update.0.lock().unwrap() = Some(update);
+            cache_app_update_response(&response, &session_cache);
             Ok(response)
         }
         None => {
             *pending_update.0.lock().unwrap() = None;
-            Ok(app_update_no_update_response(env!("CARGO_PKG_VERSION")))
+            let response = app_update_no_update_response(current_version);
+            cache_app_update_response(&response, &session_cache);
+            Ok(response)
         }
     }
 }
@@ -794,14 +879,21 @@ async fn install_app_update(
         ));
     }
 
-    let update = pending_update
-        .0
-        .lock()
-        .unwrap()
-        .take()
-        .ok_or(AppUpdateError::NoPendingUpdate)?;
+    let cached_pending_update = {
+        let pending = pending_update.0.lock().unwrap();
+        pending.clone()
+    };
+    let update = match cached_pending_update {
+        Some(update) => update,
+        None => app
+            .updater()?
+            .check()
+            .await?
+            .ok_or(AppUpdateError::NoPendingUpdate)?,
+    };
 
     update.download_and_install(|_, _| {}, || {}).await?;
+    *pending_update.0.lock().unwrap() = None;
     app.restart();
 }
 
@@ -812,6 +904,7 @@ pub fn run() {
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
             app.manage(PendingAppUpdate::default());
+            app.manage(AppUpdateSessionCache::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -883,7 +976,8 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        validate_external_github_url, validate_local_file_path, validate_local_folder_path,
+        app_update_cache_is_fresh, validate_external_github_url, validate_local_file_path,
+        validate_local_folder_path, APP_UPDATE_CHECK_INTERVAL_SECONDS,
     };
 
     #[test]
@@ -967,5 +1061,47 @@ mod tests {
             serde_json::to_string(&super::AppUpdateError::NoPendingUpdate).unwrap(),
             "\"There is no pending app update to install.\""
         );
+    }
+
+    #[test]
+    fn app_update_cache_is_fresh_for_the_same_version_within_one_day() {
+        let cache = skillbox_core::AppUpdateCheckCache {
+            current_version: "0.4.5".to_string(),
+            available: true,
+            version: "0.5.0".to_string(),
+            date: String::new(),
+            body: String::new(),
+            checked_at: "100".to_string(),
+            message: "App update available.".to_string(),
+        };
+
+        assert!(app_update_cache_is_fresh(
+            &cache,
+            "0.4.5",
+            100 + APP_UPDATE_CHECK_INTERVAL_SECONDS - 1
+        ));
+        assert!(!app_update_cache_is_fresh(
+            &cache,
+            "0.4.5",
+            100 + APP_UPDATE_CHECK_INTERVAL_SECONDS
+        ));
+        assert!(!app_update_cache_is_fresh(&cache, "0.5.0", 101));
+    }
+
+    #[test]
+    fn app_update_cache_is_stale_for_invalid_or_future_timestamps() {
+        let mut cache = skillbox_core::AppUpdateCheckCache {
+            current_version: "0.4.5".to_string(),
+            available: false,
+            version: String::new(),
+            date: String::new(),
+            body: String::new(),
+            checked_at: "invalid".to_string(),
+            message: "SkillBox is up to date.".to_string(),
+        };
+
+        assert!(!app_update_cache_is_fresh(&cache, "0.4.5", 100));
+        cache.checked_at = "101".to_string();
+        assert!(!app_update_cache_is_fresh(&cache, "0.4.5", 100));
     }
 }

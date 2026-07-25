@@ -587,6 +587,43 @@ pub(crate) fn write_remote_update_cache(
     Ok(())
 }
 
+pub(crate) fn read_app_update_cache(database_path: &Path) -> Result<Option<AppUpdateCheckCache>> {
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
+    let value: Option<String> = connection
+        .query_row(
+            "SELECT value FROM preferences WHERE key = ?1",
+            params!["app_update_check_cache"],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+
+    value
+        .map(|raw| serde_json::from_str(&raw).map_err(|error| error.to_string()))
+        .transpose()
+}
+
+pub(crate) fn write_app_update_cache(
+    database_path: &Path,
+    result: &AppUpdateCheckCache,
+) -> Result<()> {
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
+    let value = serde_json::to_string(result).map_err(|error| error.to_string())?;
+    connection
+        .execute(
+            "
+            INSERT INTO preferences (key, value)
+            VALUES (?1, ?2)
+            ON CONFLICT(key) DO UPDATE SET
+              value = excluded.value,
+              updated_at = CURRENT_TIMESTAMP
+            ",
+            params!["app_update_check_cache", value],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 pub(crate) fn index_skill(
     database_path: &Path,
     skill: &Skill,

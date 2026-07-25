@@ -66,7 +66,7 @@ button {
   object-fit: cover;
 }
 
-.brand > div {
+.brandName {
   display: flex;
   min-height: 36px;
   align-items: center;
@@ -76,6 +76,35 @@ button {
   display: block;
   font-size: 21px;
   line-height: 36px;
+}
+
+.sidebarUpdateButton {
+  min-width: 52px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--skillbox-blue);
+  border-radius: 8px;
+  background: var(--skillbox-blue);
+  color: var(--skillbox-surface);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease;
+}
+
+.sidebarUpdateButton:hover:not(:disabled) {
+  border-color: var(--skillbox-blue-text);
+  background: var(--skillbox-blue-text);
+  color: var(--skillbox-surface);
+}
+
+.sidebarUpdateButton:disabled {
+  cursor: wait;
+  opacity: 0.55;
 }
 
 .navGroup {

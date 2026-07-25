@@ -99,7 +99,7 @@ Runtime 目录只是部署目标：
 - 按类型、更新状态、tag 或 favorite 搜索过滤 Dashboard，在 grid/list 间切换，并把 favorites 与 tags 持久化到 SQLite。
 - 记录受支持的 Codex App、Codex CLI 和 Claude Code CLI hook 调用；与管理操作一同浏览，并按时间范围、Agent 或 Workspace 对 managed skills 做本地排名，不保存完整 transcript。
 - 执行顺序 SQLite migrations、迁移前备份和完整性检查；运行 Doctor 诊断并显式清理 stale deployment records。
-- 检查已签名的 GitHub Releases，并只在用户确认后安装 macOS app 更新。
+- 后台每天至多检查一次已签名的 GitHub Releases；发现新版时显示 Update 操作，并且只在用户点击后安装 macOS app 更新。
 
 ## 依赖
 
@@ -135,8 +135,10 @@ SkillBox_0.4.5_universal.dmg.sha256
 
 打开 DMG，把 `SkillBox.app` 拖到 `/Applications`。
 
-通过 DMG 安装的 app 可以在 Settings -> App updates 检查已签名的
-GitHub Releases，并在确认后安装更新。
+通过 DMG 安装的 app 每天至多在后台检查一次已签名的 GitHub Releases。
+发现新版本时，可以点击 SkillBox 品牌旁的 Update 直接执行已签名安装并重启，
+也可以在 Settings -> App updates 查看 release notes。没有用户点击时，
+SkillBox 不会自动下载或安装 app 更新。
 
 ### Homebrew
 

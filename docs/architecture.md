@@ -16,7 +16,7 @@ SkillBox 是一个 Rust core + Tauri desktop monorepo。产品目标是管理跨
 - `crates/skillbox-cli` 是 Rust CLI，和桌面应用共享同一套 Rust core。
 
 新增业务能力必须进入 Rust crates。Node/npm 仅作为桌面前端、仓库脚本和测试运行时使用，不承载 SkillBox 产品业务逻辑。
-App 自更新是桌面分发能力，边界在 Tauri updater plugin；React 只调用结构化 Tauri command，不直接下载或安装 release 资产。
+App 自更新是桌面分发能力，边界在 Tauri updater plugin；React 只调用结构化 Tauri command，不直接下载或安装 release 资产。最近一次成功 updater metadata check 的展示快照保存在 managed SQLite preferences 中，用于跨启动的 24 小时节流和提醒恢复；该缓存不包含安装授权，点击 Update 后仍必须由 updater plugin 重新检查，并在下载安装时验证签名。
 
 跨 agent 支持应通过 adapter 层表达：
 
@@ -70,8 +70,8 @@ React UI
 - `record_skill_usage` -> `skillbox_core::record_skill_usage`
 - `usage_hook_statuses` -> `skillbox_core::usage_hook_statuses`
 - `install_usage_hook` -> `skillbox_core::install_usage_hook`
-- `check_app_update` -> Tauri updater plugin signed update check
-- `install_app_update` -> Tauri updater plugin signed download/install and restart
+- `check_app_update(force)` -> Tauri updater plugin HTTPS metadata check，非 force 请求复用 24 小时内、当前 app version 匹配的 SQLite 或进程内展示缓存
+- `install_app_update` -> Tauri updater plugin signed download/install and restart；缺少进程内 pending update 时先重新检查，不能从缓存构造下载
 
 Rust CLI 当前调用链：
 

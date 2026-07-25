@@ -47,7 +47,9 @@ import {
 } from './importCandidates.js';
 import {
   appUpdateNotice,
+  appUpdateStatusAfterCheckError,
   normalizeAppUpdateStatus,
+  previewAppUpdateStatus,
   shouldCheckAppUpdateOnStartup
 } from './appUpdates.js';
 import {
@@ -384,6 +386,12 @@ export default function App() {
   const [appUpdate, setAppUpdate] = useState(() =>
     normalizeAppUpdateStatus(null, desktopPackage.version)
   );
+  const appUpdateInstallBlocked =
+    autoRefreshBlockedStatuses.has(status) ||
+    remoteVersionDialog.applying ||
+    remoteInstallDialog.applying ||
+    remoteSourceDialog.binding ||
+    remoteSourceDialog.candidateBind.binding;
   const contentRef = useRef(null);
   const autoRefreshStateRef = useRef({ status: 'idle', isFirstUse: false });
   const refreshSkillStatusesRef = useRef(null);
@@ -401,15 +409,19 @@ export default function App() {
 
   useEffect(() => {
     if (!window.__TAURI_INTERNALS__) {
+      const previewStatus = import.meta.env.DEV
+        ? previewAppUpdateStatus(window.location.search, desktopPackage.version)
+        : null;
       setAppUpdate(
-        normalizeAppUpdateStatus(
-          {
-            disabled: true,
-            current_version: desktopPackage.version,
-            message: 'App updater is disabled in browser preview.'
-          },
-          desktopPackage.version
-        )
+        previewStatus ||
+          normalizeAppUpdateStatus(
+            {
+              disabled: true,
+              current_version: desktopPackage.version,
+              message: 'App updater is disabled in browser preview.'
+            },
+            desktopPackage.version
+          )
       );
     }
   }, []);
@@ -437,6 +449,21 @@ export default function App() {
       checkAppUpdate({ automatic: true });
     }
   }, [appUpdate]);
+
+  useEffect(() => {
+    if (!window.__TAURI_INTERNALS__) {
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      if (appUpdate.state === 'checking' || appUpdate.state === 'installing') {
+        return;
+      }
+      checkAppUpdate({ automatic: true });
+    }, 60 * 60 * 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [appUpdate.state]);
 
   useEffect(() => {
     const intervalMinutes = normalizeStatusRefreshIntervalMinutes(
@@ -657,27 +684,30 @@ export default function App() {
     }));
 
     try {
-      const result = await invoke('check_app_update');
+      const result = await invoke('check_app_update', {
+        force: !automatic
+      });
       const nextStatus = normalizeAppUpdateStatus(result, desktopPackage.version);
       setAppUpdate(nextStatus);
 
-      if (nextStatus.available) {
+      if (nextStatus.available && (!automatic || !appUpdate.available)) {
         setNotice(appUpdateNotice(nextStatus));
       } else if (!automatic) {
         setNotice(appUpdateNotice(nextStatus) || nextStatus.message || 'SkillBox is up to date.');
       }
     } catch (updateError) {
-      const nextStatus = normalizeAppUpdateStatus(
-        {
-          error: updateError.message || String(updateError) || 'Unable to check for app updates.',
-          current_version: desktopPackage.version,
-          checked_at: new Date().toISOString()
-        },
-        desktopPackage.version
+      const message =
+        updateError.message || String(updateError) || 'Unable to check for app updates.';
+      setAppUpdate((current) =>
+        appUpdateStatusAfterCheckError(
+          current,
+          message,
+          desktopPackage.version,
+          new Date().toISOString()
+        )
       );
-      setAppUpdate(nextStatus);
       if (!automatic) {
-        setError(nextStatus.message);
+        setError(message);
       }
     }
   }
@@ -734,6 +764,16 @@ export default function App() {
   }
 
   async function installAppUpdate() {
+    if (!window.__TAURI_INTERNALS__) {
+      setNotice('Development preview only. Packaged release builds perform the signed update.');
+      return;
+    }
+
+    if (appUpdateInstallBlocked) {
+      setNotice('Finish the current SkillBox operation before installing an app update.');
+      return;
+    }
+
     setAppUpdate((current) => ({
       ...current,
       state: 'installing',
@@ -741,6 +781,19 @@ export default function App() {
     }));
 
     try {
+      const checked = normalizeAppUpdateStatus(
+        await invoke('check_app_update', { force: true }),
+        desktopPackage.version
+      );
+      if (!checked.available) {
+        setAppUpdate(checked);
+        setNotice(appUpdateNotice(checked) || 'SkillBox is already up to date.');
+        return;
+      }
+      setAppUpdate({
+        ...checked,
+        state: 'installing'
+      });
       await invoke('install_app_update');
       setNotice('App update installed. Restarting SkillBox.');
     } catch (updateError) {
@@ -3246,9 +3299,25 @@ export default function App() {
       <aside className="sidebar">
         <div className="brand">
           <img className="brandMark" src={skillBoxAppIcon} alt="" aria-hidden="true" />
-          <div>
+          <div className="brandName">
             <strong>SkillBox</strong>
           </div>
+          {appUpdate.available ? (
+            <button
+              aria-label={`Update SkillBox to version ${appUpdate.version}`}
+              className="sidebarUpdateButton"
+              disabled={
+                appUpdate.state === 'checking' ||
+                appUpdate.state === 'installing' ||
+                appUpdateInstallBlocked
+              }
+              title={`Install SkillBox v${appUpdate.version} and restart`}
+              type="button"
+              onClick={installAppUpdate}
+            >
+              {appUpdate.state === 'installing' ? 'Updating…' : 'Update'}
+            </button>
+          ) : null}
         </div>
 
         <nav className="navGroup" aria-label="Primary">
@@ -3300,6 +3369,7 @@ export default function App() {
         {page === 'settings' ? (
           <SettingsPage
             appUpdate={appUpdate}
+            appUpdateInstallBlocked={appUpdateInstallBlocked}
             doctorReport={doctorReport}
             paths={paths}
             preferences={preferences}

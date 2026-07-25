@@ -144,6 +144,17 @@ pub struct ManagedPreferences {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppUpdateCheckCache {
+    pub current_version: String,
+    pub available: bool,
+    pub version: String,
+    pub date: String,
+    pub body: String,
+    pub checked_at: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SkillUserMetadata {
     pub skill_name: String,
     pub favorite: bool,

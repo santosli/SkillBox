@@ -3,7 +3,9 @@ import test from 'node:test';
 
 import {
   appUpdateNotice,
+  appUpdateStatusAfterCheckError,
   normalizeAppUpdateStatus,
+  previewAppUpdateStatus,
   shouldCheckAppUpdateOnStartup
 } from './appUpdates.js';
 
@@ -63,4 +65,46 @@ test('does not auto check app updates in browser preview or after a completed ch
     }),
     true
   );
+});
+
+test('keeps an existing update reminder when a later background check fails', () => {
+  const available = normalizeAppUpdateStatus(
+    {
+      available: true,
+      current_version: '0.4.5',
+      version: '0.5.0',
+      checked_at: '1784954400',
+      message: 'App update available.'
+    },
+    '0.4.5'
+  );
+
+  assert.deepEqual(
+    appUpdateStatusAfterCheckError(
+      available,
+      'Network unavailable.',
+      '0.4.5',
+      '2026-07-25T12:00:00Z'
+    ),
+    available
+  );
+
+  const failed = appUpdateStatusAfterCheckError(
+    normalizeAppUpdateStatus(null, '0.4.5'),
+    'Network unavailable.',
+    '0.4.5',
+    '2026-07-25T12:00:00Z'
+  );
+  assert.equal(failed.state, 'error');
+  assert.equal(failed.message, 'Network unavailable.');
+});
+
+test('creates an update reminder only from a valid development preview query', () => {
+  const preview = previewAppUpdateStatus('?previewAppUpdate=0.5.0', '0.4.5');
+
+  assert.equal(preview?.state, 'available');
+  assert.equal(preview?.currentVersion, '0.4.5');
+  assert.equal(preview?.version, '0.5.0');
+  assert.equal(previewAppUpdateStatus('?previewAppUpdate=latest', '0.4.5'), null);
+  assert.equal(previewAppUpdateStatus('', '0.4.5'), null);
 });

@@ -88,7 +88,7 @@ test('sidebar footer icons use the same shell as primary nav icons', () => {
 
 test('sidebar brand does not render a subtitle', () => {
   const brandRule = css.match(/\.brand\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
-  const brandTextRule = css.match(/\.brand > div\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const brandTextRule = css.match(/\.brandName\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const brandTitleRule = css.match(/\.brand strong\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
 
   assert.match(appSource, /<strong>SkillBox<\/strong>/);
@@ -108,7 +108,33 @@ test('settings exposes app update checks without downloading automatically', () 
   assert.match(appSource, /invoke\('check_app_update'/);
   assert.match(appSource, /invoke\('install_app_update'/);
   assert.match(appSource, /shouldCheckAppUpdateOnStartup/);
+  assert.match(appComponentSource, /invoke\('check_app_update',\s*\{\s*force:\s*!automatic/s);
+  assert.match(appComponentSource, /60 \* 60 \* 1000/);
   assert.doesNotMatch(appSource, /downloadAndInstall/);
+});
+
+test('sidebar exposes a disabled-while-installing update action only when an update is available', () => {
+  const buttonSource =
+    appComponentSource.match(
+      /\{appUpdate\.available \? \([\s\S]*?className="sidebarUpdateButton"[\s\S]*?\) : null\}/
+    )?.[0] || '';
+  const buttonRule =
+    css.match(/\.sidebarUpdateButton\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(buttonSource, /Update SkillBox to version/);
+  assert.match(buttonSource, /Install SkillBox v/);
+  assert.match(buttonSource, /appUpdate\.state === 'installing'/);
+  assert.match(buttonSource, /appUpdateInstallBlocked/);
+  assert.match(buttonSource, /Updating…/);
+  assert.match(buttonRule, /height:\s*24px;/);
+  assert.match(buttonRule, /padding:\s*0 6px;/);
+  assert.match(buttonRule, /background:\s*var\(--skillbox-blue\);/);
+  assert.match(buttonRule, /color:\s*var\(--skillbox-surface\);/);
+  assert.doesNotMatch(buttonRule, /margin-left:\s*auto;/);
+  assert.match(appComponentSource, /if \(appUpdateInstallBlocked\)/);
+  assert.match(appComponentSource, /Development preview only\. Packaged release builds/);
+  assert.match(appSource, /isDisabled \|\| installBlocked/);
+  assert.match(appComponentSource, /import\.meta\.env\.DEV[\s\S]*previewAppUpdateStatus/);
 });
 
 test('settings page uses a workbench rail with state-driven section nav only', () => {
@@ -217,8 +243,15 @@ test('tauri desktop bridge registers app update commands and pending state', () 
   assert.match(tauriSource, /fn app_update_disabled_response/);
   assert.match(tauriSource, /async fn check_app_update/);
   assert.match(tauriSource, /async fn install_app_update/);
+  assert.match(tauriSource, /APP_UPDATE_CHECK_INTERVAL_SECONDS/);
+  assert.match(tauriSource, /struct AppUpdateSessionCache/);
+  assert.match(tauriSource, /cached_app_update_check/);
+  assert.match(tauriSource, /cache_app_update_response/);
+  assert.match(tauriSource, /Unable to persist the app update check cache/);
+  assert.match(tauriSource, /let cached_pending_update = \{[\s\S]*pending\.clone\(\)/);
   assert.match(tauriSource, /tauri_plugin_updater::Builder::new\(\)\.build\(\)/);
   assert.match(tauriSource, /app\.manage\(PendingAppUpdate::default\(\)\)/);
+  assert.match(tauriSource, /app\.manage\(AppUpdateSessionCache::default\(\)\)/);
 });
 
 test('tauri desktop grants only native directory open permission for workspace picking', () => {

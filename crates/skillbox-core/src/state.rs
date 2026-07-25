@@ -192,3 +192,18 @@ pub fn set_remote_update_timeout_seconds(
 
     managed_preferences(paths.root)
 }
+
+pub fn cached_app_update_check(
+    managed_root: impl AsRef<Path>,
+) -> Result<Option<AppUpdateCheckCache>> {
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    read_app_update_cache(&paths.database_path)
+}
+
+pub fn cache_app_update_check(
+    managed_root: impl AsRef<Path>,
+    result: &AppUpdateCheckCache,
+) -> Result<()> {
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    write_app_update_cache(&paths.database_path, result)
+}

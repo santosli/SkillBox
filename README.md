@@ -99,7 +99,7 @@ Longer-term support for native Claude, OpenClaw, Cursor, Claude Code, Copilot, a
 - Search and filter the dashboard by type, update status, tag, or favorite; switch between grid and list views, with favorites and tags persisted in SQLite.
 - Record supported Codex App, Codex CLI, and Claude Code CLI hook calls; browse usage beside management operations and rank managed skills locally by time range, Agent, or Workspace without storing full transcripts.
 - Apply ordered SQLite migrations with pre-migration backups and integrity checks; run Doctor diagnostics and explicitly clean up stale deployment records.
-- Check signed GitHub Releases and install macOS app updates only after user confirmation.
+- Check signed GitHub Releases in the background at most once per day, show an Update action when a new macOS build is available, and install only after the user clicks it.
 
 ## Requirements
 
@@ -135,8 +135,11 @@ SkillBox_0.4.5_universal.dmg.sha256
 
 Open the DMG and drag `SkillBox.app` into `/Applications`.
 
-DMG installs can use Settings -> App updates to check signed GitHub Releases
-and install updates after confirmation.
+DMG installs check signed GitHub Releases in the background at most once per
+day. When a new version is available, use the Update action beside the SkillBox
+brand for a direct signed install and restart, or review release notes in
+Settings -> App updates. SkillBox never downloads or installs an app update
+without a click.
 
 ### Homebrew
 

@@ -26,6 +26,7 @@
 - Implemented import records and import revert in Rust core, Rust CLI, Tauri commands, and Skill Detail UI, including backup restoration, conservative legacy reconciliation, multi-workspace blocking, and warning/danger confirmation states.
 - Implemented whole-directory duplicate grouping for Import Review, including deterministic primary source selection, retained additional source paths, grouped desktop review/search, explicit untouched-copy messaging, and primary-only backup/symlink deployment that preserves existing revert guarantees.
 - Added signed macOS app update checks and user-confirmed install/restart through the Tauri updater plugin, plus release workflow assets for updater archives, signatures, and `latest.json`.
+- Added daily macOS updater metadata checks with a SQLite-backed successful-result cache, a sidebar Update reminder, one-click metadata recheck plus signed install/restart, and retry-safe pending updates without automatic downloads.
 - Added ordered, transactional Rust SQLite migrations, consistent pre-migration backups for existing databases, schema version tracking, and integrity validation.
 - Moved dashboard favorites and user-edited tags from browser-only storage into SQLite, with a one-time desktop migration for existing local metadata.
 - Added a read-only Doctor workflow in Rust core, Rust CLI, Tauri, and desktop Settings for checking schema/integrity, managed skill layouts, remote `current` links, deployments, workspaces, import backups, and stale metadata.

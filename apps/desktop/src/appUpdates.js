@@ -41,6 +41,47 @@ export function appUpdateNotice(updateStatus) {
   return updateStatus?.message || '';
 }
 
+export function appUpdateStatusAfterCheckError(
+  currentStatus,
+  message,
+  currentVersion = '',
+  checkedAt = ''
+) {
+  if (currentStatus?.available) {
+    return {
+      ...currentStatus,
+      state: 'available'
+    };
+  }
+
+  return normalizeAppUpdateStatus(
+    {
+      error: message,
+      current_version: currentVersion,
+      checked_at: checkedAt
+    },
+    currentVersion
+  );
+}
+
 export function shouldCheckAppUpdateOnStartup({ tauriAvailable, updateStatus }) {
   return Boolean(tauriAvailable && updateStatus?.state === 'idle' && !updateStatus.checkedAt);
+}
+
+export function previewAppUpdateStatus(search, currentVersion = '') {
+  const version = new URLSearchParams(search || '').get('previewAppUpdate')?.trim() || '';
+  if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) {
+    return null;
+  }
+
+  return normalizeAppUpdateStatus(
+    {
+      available: true,
+      current_version: currentVersion,
+      version,
+      checked_at: new Date().toISOString(),
+      message: 'Development preview only. No update will be downloaded.'
+    },
+    currentVersion
+  );
 }
