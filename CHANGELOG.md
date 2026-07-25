@@ -9,6 +9,22 @@ version tags such as `v0.3.0`.
 
 - No unreleased changes.
 
+## 0.5.0
+
+- Check macOS updater metadata at most once per day, keep the last successful result across launches, and show a one-click Update action beside the SkillBox brand while retaining artifact signature verification during install.
+- Add a standalone Skill Usage Rankings page with 7-day, 30-day, all-time, skill-type (User/Remote/System), Agent, and Workspace filters, labeling its metric as `Locally observed calls` and keeping it separate from source trust.
+- Import historical Codex skill calls from explicit user-input carriers in local session rollout logs via `usage-backfill-codex` / `Sync histories`. Backfill accepts complete `<skill>` blocks and explicit `[$skill](.../SKILL.md)` links, ignores assistant/tool output, and deduplicates by turn plus normalized name/path and against existing hook events.
+- Expand Rankings history sync to Claude Code structured Skill attribution and explicitly attached Cursor `SKILL.md` context. Cursor history is read from a validated read-only SQLite schema and fails closed when the private format is unsupported.
+- Ignore relative paths and code-template placeholders in Codex history so stale examples do not surface as sync errors or usage calls; provider summaries now identify which history source reported errors.
+- Report ranking coverage with earliest/latest observed events, canonical stored-origin counts for hooks, Codex, Claude Code, Cursor, and other observations, plus provider-specific latest scan counts.
+- Reserve Codex reported runs as an independent metric with provider, subject kind, time window, scope, and provenance; reported runs never enter `skill_usage_events` or local ranking, total, and delta values.
+- Let Confirm local import choose User or Remote before moving skills into the managed store.
+- Distinguish Codex system skills in Rankings as `System` (not importable) instead of `Not imported`; keep same-name regular and System observations as source-aware ranking rows, including when the regular skill is already managed or both sources share one runtime root.
+- Mark ambiguous legacy events as `Unknown source` instead of guessing a regular skill, and validate Rankings imports against the complete source identity recorded in SQLite.
+- Mark unmanaged ranking skills whose local source is gone as `Deleted`.
+- Canonicalize legacy usage agent ids (`agents`/`claude` → `codex`/`claude-code`) via schema v5 and rebuild affected stats from canonical events so Rankings, Dashboard, and Workspace totals stay consistent.
+- Update PostCSS and Nano ID to patched releases so the v0.5 dependency audit completes without high-severity findings.
+
 ## 0.4.5
 
 - Install standalone GitHub skill repositories and root `SKILL.md` URLs through a preview-confirmed flow. SkillBox excludes `.git` metadata from managed snapshots and keeps later source updates root-aware.
