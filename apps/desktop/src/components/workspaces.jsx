@@ -21,7 +21,7 @@ import {
   workspaceDeploymentChanges,
   workspaceDeployRequiresConfirmation
 } from '../workspaces.js';
-import { AgentIconBadge, Badge, PageTitleRow } from './common.jsx';
+import { AgentIconBadge, Badge, PageFrame, PageTitleRow } from './common.jsx';
 import { DashboardStatusNotice } from './dashboard.jsx';
 
 export function WorkspacePage({
@@ -44,7 +44,7 @@ export function WorkspacePage({
   const isOpeningWorkspace = status === 'scanning_workspace_skills';
 
   return (
-    <section className="dashboardFrame workspaceFrame" aria-label="Workspace registry">
+    <PageFrame ariaLabel="Workspace registry">
       {error ? <div className="notice">{error}</div> : null}
       <PageTitleRow
         title="Workspaces"
@@ -116,7 +116,7 @@ export function WorkspacePage({
           <span>{query ? 'Try another workspace search.' : 'Run Scan or add an existing skills root.'}</span>
         </div>
       )}
-    </section>
+    </PageFrame>
   );
 }
 
@@ -125,7 +125,7 @@ function WorkspaceCard({ isBusy, workspace, onForget, onOpenSkills }) {
     Scope: <Badge tone={workspace.kind === 'global' ? 'blue' : 'green'}>{workspace.kindLabel}</Badge>,
     Skills: <strong>{workspace.skillCount}</strong>,
     Imported: <strong>{workspace.importedSkillCount}</strong>,
-    'Locally observed calls': <strong>{workspace.usageCount}</strong>
+    Calls: <strong>{workspace.usageCount}</strong>
   };
 
   return (

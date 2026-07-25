@@ -455,8 +455,9 @@ button {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.dashboardFrame {
+.pageFrame {
   display: grid;
+  width: 100%;
   gap: 18px;
   min-width: 0;
 }
@@ -787,7 +788,7 @@ button {
   animation: syncSpin 760ms linear infinite;
 }
 
-.dashboardFrame .panelNotice {
+.pageFrame .panelNotice {
   margin: 0;
 }
 
@@ -1515,10 +1516,6 @@ button {
   line-height: 1.35;
 }
 
-.workspaceFrame {
-  max-width: none;
-}
-
 .pageTypeFilterBar {
   width: max-content;
   max-width: 100%;
@@ -1552,14 +1549,6 @@ button {
   align-items: center;
   gap: 10px;
   margin-left: auto;
-}
-
-.historyFrame {
-  max-width: 1040px;
-}
-
-.rankingsFrame {
-  max-width: none;
 }
 
 .historyTypeTabs {
@@ -6104,16 +6093,7 @@ dd {
     grid-template-columns: 1fr;
   }
 
-  .workspaceFrame .pageTitleRow,
-  .historyFrame .pageTitleRow,
-  .rankingsFrame .pageTitleRow {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 14px;
-    padding-bottom: 14px;
-  }
-
-  .dashboardFrame .pageTitleRow {
+  .pageFrame .pageTitleRow {
     align-items: flex-start;
     flex-direction: column;
     gap: 14px;

@@ -123,6 +123,10 @@ For UI changes, also run the app and verify the affected workflow manually.
   explicitly confirmed.
 - New agent ecosystems should go through an adapter or compatibility layer
   instead of hard-coding one agent format globally.
+- Standard desktop top-level pages should use the shared `PageFrame` component.
+  It fills the available content width by default; narrower page widths must be
+  an explicit page-specific exception. Settings keeps its constrained workbench
+  layout intentionally.
 
 ## Documentation Expectations
 

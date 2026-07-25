@@ -204,6 +204,32 @@ test('dashboard and settings use the shared page title row template', () => {
   assert.match(workbenchRule, /max-width:\s*1220px;/);
 });
 
+test('standard top-level pages share a full-width page frame by default', () => {
+  const commonSource = appSource.match(/export function PageFrame[\s\S]*?export function PageTitleRow/)?.[0] || '';
+  const dashboardSource = appSource.match(/export function Dashboard[\s\S]*?function DashboardActionGroup/)?.[0] || '';
+  const workspacePageSource = appSource.match(/export function WorkspacePage[\s\S]*?function WorkspaceCard/)?.[0] || '';
+  const historyPageSource = appSource.match(/export function HistoryPage[\s\S]*?function HistoryRow/)?.[0] || '';
+  const rankingsPageSource = appSource.match(/export function UsageRankingsPage[\s\S]*$/)?.[0] || '';
+  const pageFrameRule = css.match(/\.pageFrame\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const settingsPageRule = css.match(/\.settingsPage\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(commonSource, /export function PageFrame\(\{ ariaLabel, children, className = '' \}\)/);
+  assert.match(commonSource, /className=\{frameClassName\}/);
+  assert.match(commonSource, /aria-label=\{ariaLabel\}/);
+  assert.match(dashboardSource, /<PageFrame ariaLabel="Skills dashboard">/);
+  assert.match(workspacePageSource, /<PageFrame ariaLabel="Workspace registry">/);
+  assert.match(historyPageSource, /<PageFrame ariaLabel="History">/);
+  assert.match(rankingsPageSource, /<PageFrame ariaLabel="Rankings">/);
+  assert.match(pageFrameRule, /display:\s*grid;/);
+  assert.match(pageFrameRule, /width:\s*100%;/);
+  assert.match(pageFrameRule, /min-width:\s*0;/);
+  assert.match(pageFrameRule, /gap:\s*18px;/);
+  assert.doesNotMatch(pageFrameRule, /max-width:/);
+  assert.doesNotMatch(css, /\.historyFrame\s*\{[^}]*max-width:\s*1040px;/s);
+  assert.doesNotMatch(css, /\.dashboardFrame\s*\{/);
+  assert.match(settingsPageRule, /max-width:\s*1220px;/);
+});
+
 test('settings sections are anchored and sync controls are grouped together', () => {
   assert.match(appSource, /id="settings-storage"/);
   assert.match(appSource, /id="settings-sync"/);
@@ -865,6 +891,32 @@ test('history page combines skill usage and operation logs', () => {
   assert.doesNotMatch(css, /\.historyRowMarker\s*\{/);
 });
 
+test('compact call labels stay short while usage explanations retain local scope', () => {
+  const historyPageSource = appSource.match(/export function HistoryPage[\s\S]*?function HistoryRow/)?.[0] || '';
+  const skillCardStart = appSource.indexOf('function SkillCard');
+  const skillCardEnd = appSource.indexOf('function SkillTypeBadge', skillCardStart);
+  const skillCardSource = appSource.slice(skillCardStart, skillCardEnd);
+
+  assert.match(historyPageSource, /id:\s*'skill_usage',[\s\S]*label:\s*'Calls'/);
+  assert.doesNotMatch(historyPageSource, /label:\s*'Locally observed calls'/);
+  assert.match(historyPageSource, /Calls and SkillBox operations will appear here\./);
+  assert.match(skillCardSource, /\{skill\.usageCount\} calls/);
+  assert.doesNotMatch(skillCardSource, /locally observed calls/i);
+  assert.match(appSource, /className="candidateUsage">[\s\S]*Calls \{candidate\.usageCount \|\| 0\}/);
+  assert.match(appSource, /Calls:\s*<strong>\{workspace\.usageCount\}<\/strong>/);
+  assert.match(appSource, /<strong>No calls in this range<\/strong>/);
+  assert.match(appSource, /<caption className="srOnly">Skills ranked by calls<\/caption>/);
+  assert.match(
+    appSource,
+    /Locally observed calls are recorded on this Mac[\s\S]*not Codex or Claude account analytics/
+  );
+  assert.match(
+    appSource,
+    /title="Locally observed calls recorded by SkillBox, not Codex or Claude account analytics\."/
+  );
+  assert.match(appSource, /Record locally observed agent skill calls from runtime hooks\./);
+});
+
 test('rankings is an accessible top-level page separate from history', () => {
   const historyPageSource = appSource.match(/export function HistoryPage[\s\S]*?function HistoryRow/)?.[0] || '';
   const rankingsPageSource = appSource.match(/export function UsageRankingsPage[\s\S]*$/)?.[0] || '';
@@ -884,7 +936,7 @@ test('rankings is an accessible top-level page separate from history', () => {
   assert.match(rankingsPageSource, /DashboardStatusNotice/);
   assert.match(
     rankingsPageSource,
-    /usageRankingControls[\s\S]*panelNotice notice[\s\S]*Most locally observed/
+    /usageRankingControls[\s\S]*panelNotice notice[\s\S]*Top skills by calls/
   );
   assert.doesNotMatch(
     rankingsPageSource,
@@ -911,7 +963,7 @@ test('rankings is an accessible top-level page separate from history', () => {
   assert.doesNotMatch(css, /\.usageRankingRanges\s*\{[^}]*min-width:\s*280px;/s);
   assert.match(css, /\.usageRankingSelect select\s*\{[^}]*border-radius:\s*10px;/s);
   assert.match(css, /\.usageRankingSelect select\s*\{[^}]*height:\s*46px;/s);
-  assert.match(appSource, /Most locally observed/);
+  assert.match(appSource, /Top skills by calls/);
   assert.match(appSource, /Full ranking/);
   assert.match(appSource, /Includes skills not imported into SkillBox/);
   assert.match(appSource, /Not imported/);
@@ -934,7 +986,7 @@ test('rankings is an accessible top-level page separate from history', () => {
   assert.match(rankingsPageSource, /Claude Code history observations/);
   assert.match(rankingsPageSource, /Cursor history observations/);
   assert.match(rankingsPageSource, /History sessions scanned/);
-  assert.match(rankingsPageSource, /Provider-reported runs/);
+  assert.match(rankingsPageSource, /provider-reported runs/i);
   assert.match(appSource, /<th scope="col">Last observed<\/th>/);
   assert.match(rankingsPageSource, /Sync histories/);
   assert.match(rankingsPageSource, /onSyncHistories/);
@@ -971,7 +1023,7 @@ test('rankings is an accessible top-level page separate from history', () => {
   assert.match(tauriSource, /async fn preview_usage_skill_import/);
   assert.match(tauriSource, /PreviewUsageSkillImportRequest/);
   assert.match(tauriSource, /preview_usage_skill_import_for_source/);
-  assert.match(css, /\.rankingsFrame\s*\{[^}]*max-width:\s*none;/s);
+  assert.match(rankingsPageSource, /<PageFrame ariaLabel="Rankings">/);
   assert.match(css, /\.usageRankingActions\s*\{/);
   assert.match(appSource, /invoke\('list_skill_usage_rankings'/);
   assert.match(appSource, /function navigateToPage\(nextPage\)/);
@@ -1051,6 +1103,7 @@ test('skill detail metadata starts with deploy workspace', () => {
   assert.match(appSource, /className="skillDetailDeployMetric"[\s\S]*\{skill\.installedAgents\.length \|\| 0\}/);
   assert.match(appSource, /<strong>Active workspaces<\/strong>/);
   assert.match(appSource, /className="skillDetailUsageSummary"[\s\S]*\{skill\.usageCount \|\| 0\}[\s\S]*<strong>Usage<\/strong>/);
+  assert.match(appSource, /title="Locally observed calls recorded by SkillBox, not Codex or Claude account analytics\."[\s\S]*Calls/);
   assert.match(appSource, /labelPrefix="Deploy workspaces"/);
   assert.match(css, /\.skillDetailDeploySurface\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
   assert.match(css, /\.skillDetailDeployMetric\s*\{/);
@@ -1070,15 +1123,16 @@ test('active workspace icons sit beside the active workspaces label', () => {
   assert.doesNotMatch(css, /\.skillDetailDeploySurface\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto;/s);
 });
 
-test('skill cards keep locally observed usage in metadata and hide zero calls', () => {
+test('skill cards use compact call counts and hide zero calls', () => {
   const skillCardStart = appSource.indexOf('function SkillCard');
   const skillCardEnd = appSource.indexOf('function AgentIconStack', skillCardStart);
   const skillCardSource = appSource.slice(skillCardStart, skillCardEnd);
 
   assert.ok(skillCardStart > 0);
   assert.ok(skillCardEnd > skillCardStart);
-  assert.match(skillCardSource, /className="skillCardMetaDetails"[\s\S]*\{skill\.usageCount > 0 \? \([\s\S]*className="skillCardUsage"[\s\S]*\{skill\.usageCount\} locally observed calls/);
-  assert.doesNotMatch(skillCardSource, /\{skill\.usageCount \|\| 0\} locally observed calls/);
+  assert.match(skillCardSource, /className="skillCardMetaDetails"[\s\S]*\{skill\.usageCount > 0 \? \([\s\S]*className="skillCardUsage"[\s\S]*\{skill\.usageCount\} calls/);
+  assert.doesNotMatch(skillCardSource, /locally observed calls/);
+  assert.doesNotMatch(skillCardSource, /\{skill\.usageCount \|\| 0\} calls/);
   assert.match(css, /\.skillCardTitleText\s*\{/);
   assert.match(css, /\.skillCardUsage\s*\{/);
 });

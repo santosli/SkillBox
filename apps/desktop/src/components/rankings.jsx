@@ -14,7 +14,7 @@ import {
   usageRankingTopRows,
   usageRankingWorkspaceOptions
 } from '../usageRankings.js';
-import { Badge, PageTitleRow } from './common.jsx';
+import { Badge, PageFrame, PageTitleRow } from './common.jsx';
 import { DashboardStatusNotice } from './dashboard.jsx';
 
 export function UsageRankingsPage({
@@ -49,7 +49,7 @@ export function UsageRankingsPage({
   const busy = loading || backfilling || Boolean(importingSkillName);
 
   return (
-    <section className="dashboardFrame rankingsFrame" aria-label="Rankings">
+    <PageFrame ariaLabel="Rankings">
       <PageTitleRow
         title="Rankings"
         count={rows.length}
@@ -160,7 +160,7 @@ export function UsageRankingsPage({
           </div>
         ) : !hasObservedCalls ? (
           <div className="emptyState dashboardEmptyState historyEmptyState">
-            <strong>No locally observed skill calls in this range</strong>
+            <strong>No calls in this range</strong>
             <span>
               Sync local agent histories, enable a trusted usage hook, or choose a wider time range.
             </span>
@@ -175,9 +175,9 @@ export function UsageRankingsPage({
           </div>
         ) : (
           <>
-            <section className="usageRankingSection" aria-label="Most locally observed skills">
+            <section className="usageRankingSection" aria-label="Top skills by calls">
               <div className="usageRankingSectionHeader">
-                <h2>Most locally observed</h2>
+                <h2>Top skills by calls</h2>
                 <span>Current range: {rangeLabel}</span>
               </div>
               <div className="usageRankingTopGrid">
@@ -199,7 +199,7 @@ export function UsageRankingsPage({
               </div>
               <div className="usageRankingTableWrap">
                 <table className="usageRankingTable">
-                  <caption className="srOnly">Skills ranked by locally observed calls</caption>
+                  <caption className="srOnly">Skills ranked by calls</caption>
                   <thead>
                     <tr>
                       <th scope="col">Rank</th>
@@ -285,7 +285,7 @@ export function UsageRankingsPage({
           </>
         )}
       </section>
-    </section>
+    </PageFrame>
   );
 }
 
@@ -398,8 +398,9 @@ function UsageCoverageSummary({ coverage = {} }) {
         </div>
       </dl>
       <p>
-        Provider-reported runs use separate metrics and are never added to locally observed calls
-        or this ranking.
+        Locally observed calls are recorded on this Mac from supported hooks and imported local
+        histories. They are not Codex or Claude account analytics; provider-reported runs use
+        separate metrics and are never added to this ranking.
       </p>
     </section>
   );
