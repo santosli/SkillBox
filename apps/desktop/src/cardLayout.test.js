@@ -204,6 +204,32 @@ test('dashboard and settings use the shared page title row template', () => {
   assert.match(workbenchRule, /max-width:\s*1220px;/);
 });
 
+test('standard top-level pages share a full-width page frame by default', () => {
+  const commonSource = appSource.match(/export function PageFrame[\s\S]*?export function PageTitleRow/)?.[0] || '';
+  const dashboardSource = appSource.match(/export function Dashboard[\s\S]*?function DashboardActionGroup/)?.[0] || '';
+  const workspacePageSource = appSource.match(/export function WorkspacePage[\s\S]*?function WorkspaceCard/)?.[0] || '';
+  const historyPageSource = appSource.match(/export function HistoryPage[\s\S]*?function HistoryRow/)?.[0] || '';
+  const rankingsPageSource = appSource.match(/export function UsageRankingsPage[\s\S]*$/)?.[0] || '';
+  const pageFrameRule = css.match(/\.pageFrame\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const settingsPageRule = css.match(/\.settingsPage\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(commonSource, /export function PageFrame\(\{ ariaLabel, children, className = '' \}\)/);
+  assert.match(commonSource, /className=\{frameClassName\}/);
+  assert.match(commonSource, /aria-label=\{ariaLabel\}/);
+  assert.match(dashboardSource, /<PageFrame ariaLabel="Skills dashboard">/);
+  assert.match(workspacePageSource, /<PageFrame ariaLabel="Workspace registry">/);
+  assert.match(historyPageSource, /<PageFrame ariaLabel="History">/);
+  assert.match(rankingsPageSource, /<PageFrame ariaLabel="Rankings">/);
+  assert.match(pageFrameRule, /display:\s*grid;/);
+  assert.match(pageFrameRule, /width:\s*100%;/);
+  assert.match(pageFrameRule, /min-width:\s*0;/);
+  assert.match(pageFrameRule, /gap:\s*18px;/);
+  assert.doesNotMatch(pageFrameRule, /max-width:/);
+  assert.doesNotMatch(css, /\.historyFrame\s*\{[^}]*max-width:\s*1040px;/s);
+  assert.doesNotMatch(css, /\.dashboardFrame\s*\{/);
+  assert.match(settingsPageRule, /max-width:\s*1220px;/);
+});
+
 test('settings sections are anchored and sync controls are grouped together', () => {
   assert.match(appSource, /id="settings-storage"/);
   assert.match(appSource, /id="settings-sync"/);
@@ -971,7 +997,7 @@ test('rankings is an accessible top-level page separate from history', () => {
   assert.match(tauriSource, /async fn preview_usage_skill_import/);
   assert.match(tauriSource, /PreviewUsageSkillImportRequest/);
   assert.match(tauriSource, /preview_usage_skill_import_for_source/);
-  assert.match(css, /\.rankingsFrame\s*\{[^}]*max-width:\s*none;/s);
+  assert.match(rankingsPageSource, /<PageFrame ariaLabel="Rankings">/);
   assert.match(css, /\.usageRankingActions\s*\{/);
   assert.match(appSource, /invoke\('list_skill_usage_rankings'/);
   assert.match(appSource, /function navigateToPage\(nextPage\)/);

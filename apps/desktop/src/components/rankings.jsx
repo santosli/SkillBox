@@ -14,7 +14,7 @@ import {
   usageRankingTopRows,
   usageRankingWorkspaceOptions
 } from '../usageRankings.js';
-import { Badge, PageTitleRow } from './common.jsx';
+import { Badge, PageFrame, PageTitleRow } from './common.jsx';
 import { DashboardStatusNotice } from './dashboard.jsx';
 
 export function UsageRankingsPage({
@@ -49,7 +49,7 @@ export function UsageRankingsPage({
   const busy = loading || backfilling || Boolean(importingSkillName);
 
   return (
-    <section className="dashboardFrame rankingsFrame" aria-label="Rankings">
+    <PageFrame ariaLabel="Rankings">
       <PageTitleRow
         title="Rankings"
         count={rows.length}
@@ -285,7 +285,7 @@ export function UsageRankingsPage({
           </>
         )}
       </section>
-    </section>
+    </PageFrame>
   );
 }
 

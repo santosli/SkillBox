@@ -20,7 +20,7 @@ import {
   formatStatusNoticeCountdown,
   statusNoticeAutoCloseSeconds
 } from '../skillStatusRefresh.js';
-import { AgentIconStack, Badge, PageTitleRow } from './common.jsx';
+import { AgentIconStack, Badge, PageFrame, PageTitleRow } from './common.jsx';
 
 export function Dashboard({
   activeTag,
@@ -81,7 +81,7 @@ export function Dashboard({
       {isFirstUse ? (
         <FirstUseDashboard status={status} onInstall={onInstall} onScan={onRefresh} />
       ) : (
-        <section className="dashboardFrame" aria-label="Skills dashboard">
+        <PageFrame ariaLabel="Skills dashboard">
           <PageTitleRow
             title="Skills"
             count={filtered.length}
@@ -226,7 +226,7 @@ export function Dashboard({
               ) : null}
             </div>
           ) : null}
-        </section>
+        </PageFrame>
       )}
     </>
   );

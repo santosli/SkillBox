@@ -94,6 +94,16 @@ export function PageHeader({ actions, eyebrow, subtitle, title }) {
   );
 }
 
+export function PageFrame({ ariaLabel, children, className = '' }) {
+  const frameClassName = className ? `pageFrame ${className}` : 'pageFrame';
+
+  return (
+    <section className={frameClassName} aria-label={ariaLabel}>
+      {children}
+    </section>
+  );
+}
+
 export function PageTitleRow({ actions, count, subtitle, title }) {
   const hasCount = count !== undefined && count !== null;
 

@@ -7,7 +7,7 @@ import {
 } from '../historyEntries.js';
 import { formatOperationTimestamp } from '../remoteSkills.js';
 import { compactPath, numberOrZero } from '../skills.js';
-import { Badge, PageTitleRow } from './common.jsx';
+import { Badge, PageFrame, PageTitleRow } from './common.jsx';
 
 export function HistoryPage({
   error,
@@ -38,7 +38,7 @@ export function HistoryPage({
   const visibleCount = filteredEntries.length;
 
   return (
-    <section className="dashboardFrame historyFrame" aria-label="History">
+    <PageFrame ariaLabel="History">
       {error ? <div className="notice">{error}</div> : null}
       <PageTitleRow
         title="History"
@@ -91,7 +91,7 @@ export function HistoryPage({
           <span>Locally observed skill calls and SkillBox operations will appear here.</span>
         </div>
       )}
-    </section>
+    </PageFrame>
   );
 }
 
