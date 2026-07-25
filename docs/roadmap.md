@@ -4,23 +4,21 @@ SkillBox is early-stage software. This roadmap describes the public direction,
 not a date-based commitment. Implementation details can change as the app gets
 more real-world use.
 
-## Current Focus: 0.4.x
+## Current Focus: 0.5.x
 
-The 0.4 development line establishes the reliability foundation required for
-the later search, runtime, synchronization, and stable-release milestones:
+The 0.5 development line turns local usage history into a practical discovery
+signal and makes signed app updates visible without automatic downloads:
 
-- ordered, transactional SQLite migrations with schema version history;
-- one-time pre-migration backups and post-migration integrity checks;
-- SQLite-backed dashboard favorites and tags with legacy local-storage migration;
-- a read-only Doctor workflow across Rust core, CLI, Tauri, and desktop Settings;
-- broader operation auditing for managed-store, runtime, Git, workspace, and
-  hook configuration mutations.
-- reviewed removal from one workspace and full managed-skill deletion with
-  all-workspace cleanup, ownership preflight, and retained recovery backups.
+- local skill usage rankings with time-range, skill-type, agent, and workspace
+  filters;
+- explicit local-only coverage and deterministic ranking semantics;
+- auditable, deduplicated history sync from Codex, Claude Code, and Cursor;
+- daily signed app-update awareness with user-confirmed install and restart.
 
-The implementation is complete. The currently shipped version and distribution
-assets are tracked in `docs/release.md`; a version is not considered shipped
-until the release workflow and its distribution checks succeed.
+The implementation scope is complete. Release qualification and the currently
+shipped version and distribution assets are tracked in `docs/release.md`; a
+version is not considered shipped until the release workflow and its
+distribution checks succeed.
 
 ## Near-Term Priorities
 
@@ -28,13 +26,13 @@ These are the next areas where focused contributions are most useful:
 
 - **Rust CLI and desktop parity.** Keep CLI behavior and desktop Tauri commands
   aligned on the shared Rust core.
-- **Search and navigation.** Add FTS-backed search for skills, operations, and
-  usage history on top of the versioned SQLite schema, plus local usage
-  rankings that help users rediscover the skills they actually rely on.
+- **Search and navigation.** After 0.5, add FTS-backed search for skills,
+  operations, and usage history on top of the versioned SQLite schema.
 - **Runtime profiles.** Model additional `SKILL.md` roots, precedence, and
   frontmatter capabilities without hard-coding agent behavior in React.
-- **Remote trust.** Preserve source provenance and show explicit trust state
-  before install or update without using popularity as proof of safety.
+- **Remote trust.** After 0.5, preserve source provenance and show explicit
+  trust state before install or update without using popularity as proof of
+  safety.
 - **User-skills inbound sync.** Report ahead/behind/diverged Git state and allow
   reviewed fast-forward updates without automatically merging conflicts.
 - **Dependency hygiene.** Keep Tauri, Vite, Rust crates, and GitHub Actions
@@ -52,7 +50,7 @@ verified; completing a feature list alone does not qualify a release.
 | Version | Product outcome | Promotion gates |
 | --- | --- | --- |
 | **0.4 — Reliability foundation** | Versioned database migrations, persisted user metadata, Doctor diagnostics, and durable mutation auditing. | Upgrade and backup tests pass; Doctor is available through core, CLI, Tauri, and desktop; audited workflows record both success and failure; release automation passes. |
-| **0.5 — Discovery, source trust, and release awareness** | FTS-backed search across skills, operations, and usage history; local skill usage rankings with time-range, skill-type, agent, and workspace filters; clearer source provenance and trust classification before remote install or update; daily signed app-update awareness without automatic downloads. | CLI and desktop return consistent search and ranking results; ranking coverage is explicit and never presented as global popularity; schema upgrades and representative large-library queries are tested; trust state never treats popularity as proof of safety; update checks are rate-limited and every install is revalidated after an explicit click. |
+| **0.5 — Local usage discovery and release awareness** | Local skill usage rankings with time-range, skill-type, agent, and workspace filters; explicit local-only coverage; auditable multi-provider history sync from Codex, Claude Code, and Cursor; daily signed app-update awareness without automatic downloads. | CLI and desktop return consistent ranking results; ranking coverage is explicit and never presented as global popularity; history providers resolve real local skills, deduplicate stable event identities, and preserve successful imports when another provider fails; schema upgrades and representative ranking queries are tested; update checks are rate-limited and every install is revalidated after an explicit click. |
 | **0.6 — Runtime profiles and portability** | Rust-owned runtime profiles model roots, precedence, frontmatter capabilities, and compatibility without hard-coding agent behavior in React. | Each supported profile has fixtures and compatibility tests; unsupported fields are reported before deployment; runtime-specific behavior remains behind an adapter boundary. |
 | **0.7 — Safe sync, deployment, and recovery** | Reviewed inbound user-skills Git updates, copy-snapshot deployment, and stronger restore/audit workflows complement the existing symlink path. | Ahead/behind/diverged states are explicit; conflicts are never auto-merged; overwrite protection, rollback, and backup restoration have automated coverage. |
 | **0.8 — Product hardening** | Large-library performance, actionable diagnostics, accessibility, onboarding, and recovery behavior are ready for sustained daily use. | Performance budgets and critical UI workflows are verified; no known data-loss path remains; supported upgrade and recovery procedures are documented and exercised. |
@@ -124,6 +122,9 @@ guidance.
 These are important, but need more design or production feedback before they
 should become starter work:
 
+- FTS-backed search across skills, operations, and usage history;
+- remote source provenance and trust classification without treating popularity
+  as proof of safety;
 - broader CLI packaging and distribution beyond the current macOS desktop
   release;
 - Windows and Linux support evaluation;
