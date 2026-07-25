@@ -651,7 +651,9 @@ export function SkillDetailDialog({
                     <span className="skillDetailDeployMetric">{skill.usageCount || 0}</span>
                     <div>
                       <strong>Usage</strong>
-                      <small>Locally observed calls</small>
+                      <small title="Locally observed calls recorded by SkillBox, not Codex or Claude account analytics.">
+                        Calls
+                      </small>
                     </div>
                   </div>
                 </div>

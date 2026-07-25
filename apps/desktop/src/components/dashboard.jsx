@@ -360,7 +360,7 @@ function SkillCard({ skill, onOpen, onToggleFavorite }) {
             <Badge tone={skill.statusTone}>{skill.statusLabel}</Badge>
             {skill.usageCount > 0 ? (
               <span className="skillCardUsage">
-                {skill.usageCount} locally observed calls
+                {skill.usageCount} calls
               </span>
             ) : null}
           </span>

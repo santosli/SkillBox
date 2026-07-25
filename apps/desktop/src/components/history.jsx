@@ -26,7 +26,7 @@ export function HistoryPage({
     },
     {
       id: 'skill_usage',
-      label: 'Locally observed calls',
+      label: 'Calls',
       count: numberOrZero(history.skillUsageCount)
     },
     { id: 'operation', label: 'Operations', count: numberOrZero(history.operationCount) }
@@ -88,7 +88,7 @@ export function HistoryPage({
       ) : (
         <div className="emptyState dashboardEmptyState historyEmptyState">
           <strong>No history yet</strong>
-          <span>Locally observed skill calls and SkillBox operations will appear here.</span>
+          <span>Calls and SkillBox operations will appear here.</span>
         </div>
       )}
     </PageFrame>

@@ -391,7 +391,7 @@ function CandidateRow({ candidate, onToggleSelected, onTypeChange }) {
           </details>
         ) : null}
         <span className="candidateUsage">
-          Locally observed calls {candidate.usageCount || 0}
+          Calls {candidate.usageCount || 0}
         </span>
         {candidateStatusNote(candidate) ? <p>{candidateStatusNote(candidate)}</p> : null}
       </div>
