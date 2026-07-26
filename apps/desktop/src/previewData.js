@@ -352,7 +352,7 @@ export function previewUsageRankings(filters = {}) {
       source_counts: [
         { source: 'agent_hook', evidence_class: 'confirmed', count: 4 },
         { source: 'codex_session_backfill', evidence_class: 'inferred', count: 7 },
-        { source: 'cursor_agent_transcript_read', evidence_class: 'confirmed', count: 2 },
+        { source: 'cursor_agent_transcript_read', evidence_class: 'inferred', count: 2 },
         { source: 'cursor_session_backfill', evidence_class: 'reference', count: 8 }
       ],
       agent_hook_calls: 4,

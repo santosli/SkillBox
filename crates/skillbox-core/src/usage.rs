@@ -960,12 +960,42 @@ pub fn usage_audit(managed_root: impl AsRef<Path>) -> Result<SkillUsageAudit> {
         "cursor_usage_backfill_scanned_transcript_files",
     )?
     .unwrap_or_default() as usize;
-    audit.confirmed_cursor_transcript_reads = audit
+    audit.inferred_cursor_transcript_calls = audit
         .source_counts
         .iter()
         .find(|item| item.source == "cursor_agent_transcript_read")
         .map(|item| item.count)
         .unwrap_or_default();
+    audit.cursor_transcript_read_candidates = read_u32_preference(
+        &paths.database_path,
+        "cursor_usage_backfill_read_candidates",
+    )?
+    .unwrap_or_default() as usize;
+    audit.cursor_transcript_read_file_candidates = read_u32_preference(
+        &paths.database_path,
+        "cursor_usage_backfill_read_file_candidates",
+    )?
+    .unwrap_or_default() as usize;
+    audit.cursor_transcript_turn_duplicates = read_u32_preference(
+        &paths.database_path,
+        "cursor_usage_backfill_turn_duplicates",
+    )?
+    .unwrap_or_default() as usize;
+    audit.cursor_transcript_duplicate_files = read_u32_preference(
+        &paths.database_path,
+        "cursor_usage_backfill_duplicate_files",
+    )?
+    .unwrap_or_default() as usize;
+    audit.cursor_transcript_historical_missing = read_u32_preference(
+        &paths.database_path,
+        "cursor_usage_backfill_historical_missing",
+    )?
+    .unwrap_or_default() as usize;
+    audit.cursor_transcript_unsafe_rejected = read_u32_preference(
+        &paths.database_path,
+        "cursor_usage_backfill_unsafe_rejected",
+    )?
+    .unwrap_or_default() as usize;
     audit.total_calls = audit.confirmed_calls.saturating_add(audit.inferred_calls);
     audit.known_limitations.push(
         "Codex local stores do not expose a stable provider-reported skill-run total. Calls include confirmed hooks and structured per-turn inferred invocations, but may still undercount Codex usage."
@@ -1592,8 +1622,10 @@ fn classify_usage_evidence(
         .unwrap_or("manual")
         .to_string();
     let evidence_class = match source.as_str() {
-        "agent_hook" | "cursor_agent_transcript_read" => SkillUsageEvidenceClass::Confirmed,
-        "codex_session_backfill" => SkillUsageEvidenceClass::Inferred,
+        "agent_hook" => SkillUsageEvidenceClass::Confirmed,
+        "codex_session_backfill" | "cursor_agent_transcript_read" => {
+            SkillUsageEvidenceClass::Inferred
+        }
         "claude_code_session_backfill"
             if metadata
                 .as_ref()

@@ -10,10 +10,12 @@ version tags such as `v0.3.0`.
 - Add schema-v7 usage evidence classification with `confirmed`, `inferred`, and
   `reference` events. Calls now equal confirmed executions plus defensible
   structured invocations; history references remain separate.
-- Treat Stop hooks, Claude Code native Skill attribution, and validated Cursor
-  agent transcript `Read` / `ReadFile` events as confirmed; treat Codex
-  structured per-turn skill carriers as inferred Calls and Cursor state
-  attachments or public `usage-record` events as references.
+- Treat Stop hooks and Claude Code native Skill attribution as confirmed. Treat
+  Codex structured per-turn skill carriers and Cursor agent transcript `Read`
+  events as inferred Calls; Cursor Reads deduplicate once per transcript user
+  turn and skill, while safe historical-missing paths remain evidence-only.
+  Cursor `ReadFile` candidates are diagnostic-only; Cursor state attachments and
+  public `usage-record` events remain references.
 - Upgrade duplicate events only toward stronger evidence while retaining bounded
   provenance, and idempotently rebuild all-time Calls stats without requiring a
   rescan. Explicit `Sync histories` can recover or upgrade evidence later.

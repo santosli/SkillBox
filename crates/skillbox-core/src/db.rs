@@ -412,13 +412,30 @@ fn usage_evidence_repair_required(connection: &Connection) -> Result<bool> {
         return Ok(false);
     }
     let mut statement = connection
-        .prepare("SELECT evidence_sources_json FROM skill_usage_events")
+        .prepare(
+            "
+            SELECT metadata_json, evidence_class, evidence_sources_json
+            FROM skill_usage_events
+            ",
+        )
         .map_err(|error| error.to_string())?;
     let rows = statement
-        .query_map([], |row| row.get::<_, String>(0))
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
         .map_err(|error| error.to_string())?;
     for row in rows {
-        if stored_usage_evidence_needs_repair(&row.map_err(|error| error.to_string())?) {
+        let (metadata_json, evidence_class, evidence_sources_json) =
+            row.map_err(|error| error.to_string())?;
+        if stored_usage_evidence_needs_repair(
+            &metadata_json,
+            &evidence_class,
+            &evidence_sources_json,
+        ) {
             return Ok(true);
         }
     }
@@ -430,7 +447,7 @@ fn backfill_missing_usage_evidence(connection: &Connection) -> Result<()> {
         let mut statement = connection
             .prepare(
                 "
-                SELECT id, metadata_json, evidence_sources_json
+                SELECT id, metadata_json, evidence_class, evidence_sources_json
                 FROM skill_usage_events
                 ",
             )
@@ -441,6 +458,7 @@ fn backfill_missing_usage_evidence(connection: &Connection) -> Result<()> {
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
                 ))
             })
             .map_err(|error| error.to_string())?;
@@ -449,22 +467,22 @@ fn backfill_missing_usage_evidence(connection: &Connection) -> Result<()> {
     };
     let events = events
         .into_iter()
-        .filter(|(_, _, evidence_sources_json)| {
-            stored_usage_evidence_needs_repair(evidence_sources_json)
-        })
+        .filter(
+            |(_, metadata_json, evidence_class, evidence_sources_json)| {
+                stored_usage_evidence_needs_repair(
+                    metadata_json,
+                    evidence_class,
+                    evidence_sources_json,
+                )
+            },
+        )
         .collect::<Vec<_>>();
     if events.is_empty() {
         return Ok(());
     }
-    for (id, metadata_json, _) in events {
+    for (id, metadata_json, _, _) in events {
         let source = migrated_usage_source(&metadata_json);
-        let evidence_class = match source.as_str() {
-            "agent_hook" | "cursor_agent_transcript_read" => SkillUsageEvidenceClass::Confirmed,
-            "codex_session_backfill" | "claude_code_session_backfill" => {
-                SkillUsageEvidenceClass::Inferred
-            }
-            _ => SkillUsageEvidenceClass::Reference,
-        };
+        let evidence_class = migrated_usage_evidence_class(&source);
         let sources_json = serde_json::to_string(&vec![serde_json::json!({
             "source": source,
             "evidence_class": evidence_class.as_str(),
@@ -509,14 +527,39 @@ fn backfill_missing_usage_evidence(connection: &Connection) -> Result<()> {
         .map_err(|error| error.to_string())
 }
 
-fn stored_usage_evidence_needs_repair(value: &str) -> bool {
-    let Ok(items) = serde_json::from_str::<Vec<serde_json::Value>>(value) else {
-        return false;
+fn stored_usage_evidence_needs_repair(
+    metadata_json: &str,
+    evidence_class: &str,
+    evidence_sources_json: &str,
+) -> bool {
+    let source = migrated_usage_source(metadata_json);
+    let expected_class = migrated_usage_evidence_class(&source).as_str();
+    let Ok(items) = serde_json::from_str::<Vec<serde_json::Value>>(evidence_sources_json) else {
+        return true;
     };
-    items.is_empty()
-        || items
-            .iter()
-            .any(|item| matches!(item, serde_json::Value::String(_)))
+    if items.is_empty() || items.iter().any(|item| item.is_string()) {
+        return true;
+    }
+    let cursor_only = source == "cursor_agent_transcript_read"
+        && items.iter().all(|item| {
+            item.get("source").and_then(|value| value.as_str())
+                == Some("cursor_agent_transcript_read")
+        });
+    cursor_only
+        && (evidence_class != expected_class
+            || !items.iter().any(|item| {
+                item.get("evidence_class").and_then(|value| value.as_str()) == Some(expected_class)
+            }))
+}
+
+fn migrated_usage_evidence_class(source: &str) -> SkillUsageEvidenceClass {
+    match source {
+        "agent_hook" => SkillUsageEvidenceClass::Confirmed,
+        "codex_session_backfill"
+        | "claude_code_session_backfill"
+        | "cursor_agent_transcript_read" => SkillUsageEvidenceClass::Inferred,
+        _ => SkillUsageEvidenceClass::Reference,
+    }
 }
 
 fn migrated_usage_source(metadata_json: &str) -> String {

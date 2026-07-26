@@ -20,8 +20,7 @@ struct CursorTranscriptFile {
 struct CursorTranscriptReadCandidate {
     transcript_id: String,
     line_index: usize,
-    content_index: usize,
-    tool_name: String,
+    turn_key: String,
     raw_path: String,
     used_at: String,
 }
@@ -29,7 +28,25 @@ struct CursorTranscriptReadCandidate {
 #[derive(Debug)]
 struct ValidatedCursorTranscriptSkill {
     name: String,
-    canonical_path: PathBuf,
+    evidence_path: PathBuf,
+    historical_missing: bool,
+}
+
+#[derive(Debug)]
+struct CursorTranscriptExtraction {
+    content_hash: String,
+    candidates: Vec<CursorTranscriptReadCandidate>,
+    read_candidates: usize,
+    read_file_candidates: usize,
+}
+
+#[derive(Default)]
+struct CursorTranscriptParseState {
+    current_user_turn: Option<usize>,
+    next_user_turn: usize,
+    read_candidates: usize,
+    read_file_candidates: usize,
+    candidates: Vec<CursorTranscriptReadCandidate>,
 }
 
 enum BoundedLine {
@@ -51,13 +68,14 @@ pub(crate) fn backfill_cursor_agent_transcript_usage(
     collect_cursor_transcript_files(&projects_root, &mut files, &mut result)?;
     files.sort_by(|left, right| left.path.cmp(&right.path));
 
+    let mut seen_transcript_hashes = HashSet::new();
     let mut seen_event_ids = HashSet::new();
     for transcript in files {
         result.scanned_files = result.scanned_files.saturating_add(1);
         result.scanned_cursor_transcript_files =
             result.scanned_cursor_transcript_files.saturating_add(1);
-        let candidates = match extract_cursor_transcript_read_candidates(&transcript) {
-            Ok(candidates) => candidates,
+        let extraction = match extract_cursor_transcript_read_candidates(&transcript) {
+            Ok(extraction) => extraction,
             Err(error) => {
                 result.skipped = result.skipped.saturating_add(1);
                 push_cursor_transcript_error(
@@ -67,8 +85,23 @@ pub(crate) fn backfill_cursor_agent_transcript_usage(
                 continue;
             }
         };
+        result.cursor_transcript_read_candidates = result
+            .cursor_transcript_read_candidates
+            .saturating_add(extraction.read_candidates);
+        result.cursor_transcript_read_file_candidates = result
+            .cursor_transcript_read_file_candidates
+            .saturating_add(extraction.read_file_candidates);
+        if !seen_transcript_hashes.insert(extraction.content_hash) {
+            result.cursor_transcript_duplicate_files =
+                result.cursor_transcript_duplicate_files.saturating_add(1);
+            result.deduplicated = result
+                .deduplicated
+                .saturating_add(extraction.candidates.len());
+            continue;
+        }
 
-        for candidate in candidates {
+        let mut seen_file_event_ids = HashSet::new();
+        for candidate in extraction.candidates {
             let skill = match validate_cursor_transcript_skill_path(
                 &candidate.raw_path,
                 &allowed_skill_root,
@@ -76,6 +109,8 @@ pub(crate) fn backfill_cursor_agent_transcript_usage(
                 Ok(skill) => skill,
                 Err(error) => {
                     result.skipped = result.skipped.saturating_add(1);
+                    result.cursor_transcript_unsafe_rejected =
+                        result.cursor_transcript_unsafe_rejected.saturating_add(1);
                     push_cursor_transcript_error(
                         &mut result.errors,
                         format!(
@@ -87,15 +122,26 @@ pub(crate) fn backfill_cursor_agent_transcript_usage(
                     continue;
                 }
             };
-            let event_id = cursor_transcript_event_id(&candidate, &skill.canonical_path);
+            let event_id = cursor_transcript_event_id(&candidate, &skill.evidence_path);
+            if !seen_file_event_ids.insert(event_id.clone()) {
+                result.deduplicated = result.deduplicated.saturating_add(1);
+                result.cursor_transcript_turn_duplicates =
+                    result.cursor_transcript_turn_duplicates.saturating_add(1);
+                continue;
+            }
             if !seen_event_ids.insert(event_id.clone()) {
                 result.deduplicated = result.deduplicated.saturating_add(1);
                 continue;
             }
 
             result.discovered = result.discovered.saturating_add(1);
-            result.confirmed_cursor_transcript_reads =
-                result.confirmed_cursor_transcript_reads.saturating_add(1);
+            result.inferred_cursor_transcript_calls =
+                result.inferred_cursor_transcript_calls.saturating_add(1);
+            if skill.historical_missing {
+                result.cursor_transcript_historical_missing = result
+                    .cursor_transcript_historical_missing
+                    .saturating_add(1);
+            }
             match record_cursor_transcript_read(
                 &candidate,
                 &skill,
@@ -141,9 +187,27 @@ pub(crate) fn merge_cursor_agent_transcript_backfill_result(
     target.scanned_cursor_transcript_files = target
         .scanned_cursor_transcript_files
         .saturating_add(transcript.scanned_cursor_transcript_files);
-    target.confirmed_cursor_transcript_reads = target
-        .confirmed_cursor_transcript_reads
-        .saturating_add(transcript.confirmed_cursor_transcript_reads);
+    target.inferred_cursor_transcript_calls = target
+        .inferred_cursor_transcript_calls
+        .saturating_add(transcript.inferred_cursor_transcript_calls);
+    target.cursor_transcript_read_candidates = target
+        .cursor_transcript_read_candidates
+        .saturating_add(transcript.cursor_transcript_read_candidates);
+    target.cursor_transcript_read_file_candidates = target
+        .cursor_transcript_read_file_candidates
+        .saturating_add(transcript.cursor_transcript_read_file_candidates);
+    target.cursor_transcript_turn_duplicates = target
+        .cursor_transcript_turn_duplicates
+        .saturating_add(transcript.cursor_transcript_turn_duplicates);
+    target.cursor_transcript_duplicate_files = target
+        .cursor_transcript_duplicate_files
+        .saturating_add(transcript.cursor_transcript_duplicate_files);
+    target.cursor_transcript_historical_missing = target
+        .cursor_transcript_historical_missing
+        .saturating_add(transcript.cursor_transcript_historical_missing);
+    target.cursor_transcript_unsafe_rejected = target
+        .cursor_transcript_unsafe_rejected
+        .saturating_add(transcript.cursor_transcript_unsafe_rejected);
     for error in transcript.errors {
         push_cursor_transcript_error(&mut target.errors, error);
     }
@@ -302,7 +366,7 @@ fn valid_cursor_transcript_id(value: &str) -> bool {
 
 fn extract_cursor_transcript_read_candidates(
     transcript: &CursorTranscriptFile,
-) -> Result<Vec<CursorTranscriptReadCandidate>> {
+) -> Result<CursorTranscriptExtraction> {
     let file = fs::File::open(&transcript.path)
         .map_err(|error| format!("Unable to open transcript: {error}"))?;
     let metadata = file
@@ -321,8 +385,9 @@ fn extract_cursor_transcript_read_candidates(
         .map_err(|error| format!("Transcript modification time is unavailable: {error}"))?;
     let used_at = DateTime::<Utc>::from(modified).to_rfc3339_opts(SecondsFormat::Secs, false);
     let mut reader = BufReader::new(file).take(MAX_CURSOR_TRANSCRIPT_FILE_BYTES.saturating_add(1));
-    let mut candidates = Vec::new();
     let mut line_index = 0usize;
+    let mut parse_state = CursorTranscriptParseState::default();
+    let mut content_hasher = Sha256::new();
 
     loop {
         match read_bounded_line(&mut reader, MAX_CURSOR_TRANSCRIPT_LINE_BYTES)
@@ -336,6 +401,7 @@ fn extract_cursor_transcript_read_candidates(
                 ));
             }
             BoundedLine::Line(line) => {
+                content_hasher.update(&line);
                 if !line.iter().all(u8::is_ascii_whitespace) {
                     let value =
                         serde_json::from_slice::<serde_json::Value>(&line).map_err(|_| {
@@ -349,9 +415,9 @@ fn extract_cursor_transcript_read_candidates(
                         transcript,
                         line_index,
                         &used_at,
-                        &mut candidates,
+                        &mut parse_state,
                     )?;
-                    if candidates.len() > MAX_CURSOR_TRANSCRIPT_CANDIDATES_PER_FILE {
+                    if parse_state.candidates.len() > MAX_CURSOR_TRANSCRIPT_CANDIDATES_PER_FILE {
                         return Err(format!(
                             "Transcript exceeds the {MAX_CURSOR_TRANSCRIPT_CANDIDATES_PER_FILE}-candidate safety limit."
                         ));
@@ -366,7 +432,17 @@ fn extract_cursor_transcript_read_candidates(
             "Transcript exceeds the {MAX_CURSOR_TRANSCRIPT_FILE_BYTES}-byte safety limit."
         ));
     }
-    Ok(candidates)
+    let content_hash = content_hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    Ok(CursorTranscriptExtraction {
+        content_hash,
+        candidates: parse_state.candidates,
+        read_candidates: parse_state.read_candidates,
+        read_file_candidates: parse_state.read_file_candidates,
+    })
 }
 
 fn read_bounded_line(reader: &mut impl BufRead, max_bytes: usize) -> std::io::Result<BoundedLine> {
@@ -415,9 +491,15 @@ fn collect_cursor_transcript_candidates_from_value(
     transcript: &CursorTranscriptFile,
     line_index: usize,
     used_at: &str,
-    candidates: &mut Vec<CursorTranscriptReadCandidate>,
+    state: &mut CursorTranscriptParseState,
 ) -> Result<()> {
-    if value.get("role").and_then(|value| value.as_str()) != Some("assistant") {
+    let role = value.get("role").and_then(|value| value.as_str());
+    if role == Some("user") {
+        state.current_user_turn = Some(state.next_user_turn);
+        state.next_user_turn = state.next_user_turn.saturating_add(1);
+        return Ok(());
+    }
+    if role != Some("assistant") {
         return Ok(());
     }
     let Some(content) = value
@@ -427,15 +509,16 @@ fn collect_cursor_transcript_candidates_from_value(
     else {
         return Ok(());
     };
-    for (content_index, block) in content.iter().enumerate() {
+    for block in content {
         if block.get("type").and_then(|value| value.as_str()) != Some("tool_use") {
             continue;
         }
-        let Some(tool_name @ ("Read" | "ReadFile")) =
-            block.get("name").and_then(|value| value.as_str())
-        else {
+        let Some(tool_name) = block.get("name").and_then(|value| value.as_str()) else {
             continue;
         };
+        if !matches!(tool_name, "Read" | "ReadFile") {
+            continue;
+        }
         let Some(raw_path) = block
             .get("input")
             .and_then(|input| input.get("path"))
@@ -456,11 +539,18 @@ fn collect_cursor_transcript_candidates_from_value(
         {
             continue;
         }
-        candidates.push(CursorTranscriptReadCandidate {
+        if tool_name == "ReadFile" {
+            state.read_file_candidates = state.read_file_candidates.saturating_add(1);
+            continue;
+        }
+        state.read_candidates = state.read_candidates.saturating_add(1);
+        state.candidates.push(CursorTranscriptReadCandidate {
             transcript_id: transcript.transcript_id.clone(),
             line_index,
-            content_index,
-            tool_name: tool_name.to_string(),
+            turn_key: state
+                .current_user_turn
+                .map(|turn| format!("user-{turn}"))
+                .unwrap_or_else(|| "unattributed".to_string()),
             raw_path: raw_path.to_string(),
             used_at: used_at.to_string(),
         });
@@ -485,8 +575,27 @@ fn validate_cursor_transcript_skill_path(
     if expanded.file_name().and_then(|value| value.to_str()) != Some("SKILL.md") {
         return Err("Tool path must end with SKILL.md.".to_string());
     }
-    let metadata = fs::symlink_metadata(&expanded)
-        .map_err(|_| "SKILL.md is missing or unreadable.".to_string())?;
+    let lexical = normalize_lexical_path(&expanded);
+    let parent_name = lexical
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_string();
+    validate_skill_name(&parent_name)?;
+
+    let metadata = match fs::symlink_metadata(&lexical) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let evidence_path = resolve_missing_cursor_skill_path(&lexical, allowed_skill_root)?;
+            return Ok(ValidatedCursorTranscriptSkill {
+                name: parent_name,
+                evidence_path,
+                historical_missing: true,
+            });
+        }
+        Err(_) => return Err("SKILL.md is unreadable.".to_string()),
+    };
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         return Err("SKILL.md must be a regular file, not a symlink or directory.".to_string());
     }
@@ -495,8 +604,8 @@ fn validate_cursor_transcript_skill_path(
             "SKILL.md exceeds the {MAX_CURSOR_SKILL_MD_BYTES}-byte safety limit."
         ));
     }
-    let canonical = fs::canonicalize(&expanded)
-        .map_err(|_| "SKILL.md is missing or unreadable.".to_string())?;
+    let canonical =
+        fs::canonicalize(&lexical).map_err(|_| "SKILL.md is missing or unreadable.".to_string())?;
     if !canonical.starts_with(allowed_skill_root) {
         return Err("SKILL.md resolves outside the allowed skill root.".to_string());
     }
@@ -528,18 +637,54 @@ fn validate_cursor_transcript_skill_path(
     validate_skill_name(&name)?;
     Ok(ValidatedCursorTranscriptSkill {
         name,
-        canonical_path: canonical,
+        evidence_path: canonical,
+        historical_missing: false,
     })
+}
+
+fn resolve_missing_cursor_skill_path(
+    missing_skill_path: &Path,
+    allowed_skill_root: &Path,
+) -> Result<PathBuf> {
+    let mut ancestor = missing_skill_path.parent();
+    while let Some(path) = ancestor {
+        match fs::symlink_metadata(path) {
+            Ok(metadata) => {
+                if !metadata.is_dir() && !metadata.file_type().is_symlink() {
+                    return Err(
+                        "Missing historical SKILL.md has a non-directory ancestor.".to_string()
+                    );
+                }
+                let canonical = fs::canonicalize(path)
+                    .map_err(|_| "Historical SKILL.md ancestor is unreadable.".to_string())?;
+                if !canonical.starts_with(allowed_skill_root) {
+                    return Err(
+                        "Historical SKILL.md ancestor resolves outside the allowed skill root."
+                            .to_string(),
+                    );
+                }
+                let suffix = missing_skill_path
+                    .strip_prefix(path)
+                    .map_err(|_| "Unable to normalize historical SKILL.md path.".to_string())?;
+                return Ok(normalize_lexical_path(&canonical.join(suffix)));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                ancestor = path.parent();
+            }
+            Err(_) => return Err("Historical SKILL.md ancestor is unreadable.".to_string()),
+        }
+    }
+    Err("Historical SKILL.md has no readable local ancestor.".to_string())
 }
 
 fn cursor_transcript_event_id(
     candidate: &CursorTranscriptReadCandidate,
-    canonical_skill_path: &Path,
+    evidence_skill_path: &Path,
 ) -> String {
-    let path_hash = sha256(&canonical_skill_path.to_string_lossy());
+    let path_hash = sha256(&evidence_skill_path.to_string_lossy());
     format!(
-        "cursor-agent-transcript:{}:{}:{}:{}",
-        candidate.transcript_id, candidate.line_index, candidate.content_index, path_hash
+        "cursor-agent-transcript:{}:{}:{}",
+        candidate.transcript_id, candidate.turn_key, path_hash
     )
 }
 
@@ -551,13 +696,13 @@ fn record_cursor_transcript_read(
     managed_database: &mut Connection,
 ) -> Result<SkillUsageRecordResult> {
     let (runtime_root, _) = infer_usage_runtime_from_skill_path_with_roots(
-        &skill.canonical_path,
+        &skill.evidence_path,
         "cursor",
         Some(runtime_roots),
         None,
     )?;
     let source_kind = if skill
-        .canonical_path
+        .evidence_path
         .components()
         .any(|component| component.as_os_str() == ".system")
     {
@@ -575,7 +720,8 @@ fn record_cursor_transcript_read(
             prompt_excerpt: None,
             metadata: Some(serde_json::json!({
                 "source": "cursor_agent_transcript_read",
-                "tool": candidate.tool_name,
+                "tool": "Read",
+                "historical_missing": skill.historical_missing,
                 "skill_source_kind": source_kind
             })),
         },
@@ -663,7 +809,7 @@ mod tests {
     }
 
     #[test]
-    fn cursor_transcripts_record_read_and_read_file_as_confirmed_and_use_mtime() {
+    fn cursor_transcripts_record_read_as_inferred_exclude_read_file_and_use_mtime() {
         let root = transcript_temp_dir("reads");
         let projects = root.join(".cursor/projects");
         fs::create_dir_all(&projects).unwrap();
@@ -678,10 +824,13 @@ mod tests {
         );
         write_transcript(
             &transcript,
-            &[transcript_row(
-                "assistant",
-                vec![tool("Read", &first_skill), tool("ReadFile", &second_skill)],
-            )],
+            &[
+                transcript_row("user", vec![]),
+                transcript_row(
+                    "assistant",
+                    vec![tool("Read", &first_skill), tool("ReadFile", &second_skill)],
+                ),
+            ],
         );
         let expected_used_at =
             DateTime::<Utc>::from(fs::metadata(&transcript).unwrap().modified().unwrap())
@@ -689,8 +838,14 @@ mod tests {
 
         let (result, paths) = run_provider(&root, &projects);
         assert_eq!(result.scanned_cursor_transcript_files, 1);
-        assert_eq!(result.confirmed_cursor_transcript_reads, 2);
-        assert_eq!(result.recorded, 2);
+        assert_eq!(result.cursor_transcript_read_candidates, 1);
+        assert_eq!(result.cursor_transcript_read_file_candidates, 1);
+        assert_eq!(
+            result.inferred_cursor_transcript_calls, 1,
+            "{:?}",
+            result.errors
+        );
+        assert_eq!(result.recorded, 1);
         assert!(result.errors.is_empty(), "{:?}", result.errors);
 
         let connection = open_database(&paths.database_path).unwrap();
@@ -712,8 +867,8 @@ mod tests {
                 .collect::<std::result::Result<Vec<_>, _>>()
                 .unwrap()
         };
-        assert_eq!(rows.len(), 2);
-        assert!(rows.iter().all(|row| row.0 == "confirmed"));
+        assert_eq!(rows.len(), 1);
+        assert!(rows.iter().all(|row| row.0 == "inferred"));
         assert!(rows.iter().all(|row| row.1 == expected_used_at));
         assert!(rows.iter().all(|row| row
             .2
@@ -773,25 +928,33 @@ mod tests {
     }
 
     #[test]
-    fn cursor_transcripts_keep_multiple_reads_and_deduplicate_copied_transcripts() {
+    fn cursor_transcripts_dedupe_per_turn_and_identical_transcript_copies() {
         let root = transcript_temp_dir("dedupe");
         let projects = root.join(".cursor/projects");
         fs::create_dir_all(&projects).unwrap();
         let skill = root.join("skills-cursor/demo/SKILL.md");
         write_skill(&skill, "demo");
         let id = "33333333-3333-3333-3333-333333333333";
-        let values = [transcript_row(
-            "assistant",
-            vec![tool("Read", &skill), tool("Read", &skill)],
-        )];
+        let values = [
+            transcript_row("user", vec![]),
+            transcript_row(
+                "assistant",
+                vec![tool("Read", &skill), tool("Read", &skill)],
+            ),
+            transcript_row("user", vec![]),
+            transcript_row("assistant", vec![tool("Read", &skill)]),
+        ];
         write_transcript(&transcript_path(&projects, "project-one", id), &values);
         write_transcript(&transcript_path(&projects, "empty-window", id), &values);
 
         let (first, paths) = run_provider(&root, &projects);
         assert_eq!(first.scanned_cursor_transcript_files, 2);
-        assert_eq!(first.confirmed_cursor_transcript_reads, 2);
+        assert_eq!(first.cursor_transcript_read_candidates, 6);
+        assert_eq!(first.inferred_cursor_transcript_calls, 2);
+        assert_eq!(first.cursor_transcript_turn_duplicates, 1);
+        assert_eq!(first.cursor_transcript_duplicate_files, 1);
         assert_eq!(first.recorded, 2);
-        assert_eq!(first.deduplicated, 2);
+        assert_eq!(first.deduplicated, 4);
 
         let mut connection = open_database(&paths.database_path).unwrap();
         let runtime_roots = runtime_roots_under(&root);
@@ -803,8 +966,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(second.recorded, 0);
-        assert_eq!(second.confirmed_cursor_transcript_reads, 2);
-        assert_eq!(second.deduplicated, 4);
+        assert_eq!(second.inferred_cursor_transcript_calls, 2);
+        assert_eq!(second.deduplicated, 6);
         let count: i64 = connection
             .query_row("SELECT COUNT(*) FROM skill_usage_events", [], |row| {
                 row.get(0)
@@ -815,12 +978,15 @@ mod tests {
     }
 
     #[test]
-    fn cursor_transcripts_reject_relative_missing_and_non_skill_paths() {
+    fn cursor_transcripts_accept_safe_historical_missing_but_reject_unsafe_paths() {
         let root = transcript_temp_dir("paths");
         let projects = root.join(".cursor/projects");
         fs::create_dir_all(&projects).unwrap();
         let ordinary = root.join("notes.md");
         fs::write(&ordinary, "not a skill").unwrap();
+        let historical_skill = root.join("missing/SKILL.md");
+        write_skill(&historical_skill, "missing");
+        fs::remove_file(&historical_skill).unwrap();
         write_transcript(
             &transcript_path(
                 &projects,
@@ -832,16 +998,49 @@ mod tests {
                 vec![
                     tool("Read", "relative/SKILL.md"),
                     tool("Read", root.join("skills-cursor/demo/../escaped/SKILL.md")),
-                    tool("Read", root.join("missing/SKILL.md")),
+                    tool("Read", &historical_skill),
                     tool("ReadFile", ordinary),
                 ],
             )],
         );
 
-        let (result, _) = run_provider(&root, &projects);
-        assert_eq!(result.recorded, 0);
-        assert_eq!(result.skipped, 3);
-        assert_eq!(result.errors.len(), 3);
+        let (result, paths) = run_provider(&root, &projects);
+        assert_eq!(result.recorded, 1);
+        assert_eq!(result.inferred_cursor_transcript_calls, 1);
+        assert_eq!(result.cursor_transcript_historical_missing, 1);
+        assert_eq!(result.cursor_transcript_unsafe_rejected, 2);
+        assert_eq!(result.skipped, 2);
+        assert_eq!(result.errors.len(), 2);
+        let mut connection = open_database(&paths.database_path).unwrap();
+        let metadata_json: String = connection
+            .query_row("SELECT metadata_json FROM skill_usage_events", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert!(metadata_json.contains("\"historical_missing\":true"));
+        let replay = backfill_cursor_agent_transcript_usage(
+            &projects,
+            &root,
+            &runtime_roots_under(&root),
+            &mut connection,
+        )
+        .unwrap();
+        assert_eq!(replay.recorded, 0);
+        assert_eq!(replay.deduplicated, 1);
+        assert_eq!(replay.cursor_transcript_historical_missing, 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn cursor_transcripts_reject_missing_paths_outside_the_allowed_root() {
+        let root = transcript_temp_dir("missing-outside");
+        let allowed = root.join("home");
+        fs::create_dir_all(&allowed).unwrap();
+        let allowed = fs::canonicalize(allowed).unwrap();
+        let outside = root.join("outside/demo/SKILL.md");
+        let error =
+            validate_cursor_transcript_skill_path(outside.to_str().unwrap(), &allowed).unwrap_err();
+        assert!(error.contains("outside the allowed skill root"));
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -859,12 +1058,17 @@ mod tests {
         let linked_skill = root.join("skills-cursor/escaped/SKILL.md");
         fs::create_dir_all(linked_skill.parent().unwrap()).unwrap();
         symlink(&outside_skill, &linked_skill).unwrap();
+        let linked_parent = root.join("skills-cursor/linked-parent");
+        symlink(outside.join("escaped"), &linked_parent).unwrap();
         let id = "55555555-5555-5555-5555-555555555555";
         write_transcript(
             &transcript_path(&projects, "project-one", id),
             &[transcript_row(
                 "assistant",
-                vec![tool("Read", &linked_skill)],
+                vec![
+                    tool("Read", &linked_skill),
+                    tool("Read", linked_parent.join("missing/SKILL.md")),
+                ],
             )],
         );
         let outside_transcript = outside.join("transcript.jsonl");
@@ -888,7 +1092,8 @@ mod tests {
         let (result, _) = run_provider(&root, &projects);
         assert_eq!(result.scanned_cursor_transcript_files, 1);
         assert_eq!(result.recorded, 0);
-        assert_eq!(result.skipped, 1);
+        assert_eq!(result.skipped, 2);
+        assert_eq!(result.cursor_transcript_unsafe_rejected, 2);
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(outside).unwrap();
     }
@@ -951,7 +1156,8 @@ mod tests {
         let (result, _) = run_provider(&root, &projects);
         assert_eq!(result.scanned_cursor_transcript_files, 4);
         assert_eq!(result.recorded, 0);
-        assert!(result.skipped >= 5);
+        assert_eq!(result.cursor_transcript_read_file_candidates, 1);
+        assert!(result.skipped >= 4);
         assert!(result.errors.len() <= MAX_CURSOR_TRANSCRIPT_ERRORS);
         fs::remove_dir_all(root).unwrap();
     }
@@ -982,14 +1188,17 @@ mod tests {
             backfill_cursor_session_usage_for_home(request.clone(), &home, &managed).unwrap();
         assert_eq!(first.scanned_cursor_state_sessions, 0);
         assert_eq!(first.scanned_cursor_transcript_files, 1);
-        assert_eq!(first.confirmed_cursor_transcript_reads, 1);
+        assert_eq!(first.inferred_cursor_transcript_calls, 1);
         assert_eq!(first.recorded, 1);
 
         let second = backfill_cursor_session_usage_for_home(request, &home, &managed).unwrap();
         assert_eq!(second.recorded, 0);
         assert_eq!(second.deduplicated, 1);
         let audit = usage_audit(&managed).unwrap();
-        assert_eq!(audit.confirmed_calls, 1);
+        assert_eq!(audit.confirmed_calls, 0);
+        assert_eq!(audit.inferred_calls, 1);
+        assert_eq!(audit.inferred_cursor_transcript_calls, 1);
+        assert_eq!(audit.cursor_transcript_read_candidates, 1);
         assert_eq!(audit.history_references, 0);
         assert_eq!(audit.scanned_cursor_transcript_files, 1);
         fs::remove_dir_all(root).unwrap();

@@ -241,7 +241,7 @@ test('summarizes Codex usage backfill results', () => {
       scannedCursorStateSessions: 0,
       cursorStateReferences: 0,
       scannedCursorTranscriptFiles: 0,
-      confirmedCursorTranscriptReads: 0,
+      inferredCursorTranscriptCalls: 0,
       errors: ['probe: bad path']
     }),
     {
@@ -255,7 +255,13 @@ test('summarizes Codex usage backfill results', () => {
       scannedCursorStateSessions: 0,
       cursorStateReferences: 0,
       scannedCursorTranscriptFiles: 0,
-      confirmedCursorTranscriptReads: 0,
+      inferredCursorTranscriptCalls: 0,
+      cursorTranscriptReadCandidates: 0,
+      cursorTranscriptReadFileCandidates: 0,
+      cursorTranscriptTurnDuplicates: 0,
+      cursorTranscriptDuplicateFiles: 0,
+      cursorTranscriptHistoricalMissing: 0,
+      cursorTranscriptUnsafeRejected: 0,
       errors: ['probe: bad path']
     }
   );
@@ -298,11 +304,17 @@ test('syncs Codex, Claude Code, and Cursor histories with one provider-aware not
         scanned_cursor_state_sessions: 3,
         cursor_state_references: 2,
         scanned_cursor_transcript_files: 2,
-        confirmed_cursor_transcript_reads: 4,
+        inferred_cursor_transcript_calls: 4,
+        cursor_transcript_read_candidates: 7,
+        cursor_transcript_read_file_candidates: 1,
+        cursor_transcript_turn_duplicates: 2,
+        cursor_transcript_duplicate_files: 1,
+        cursor_transcript_historical_missing: 3,
+        cursor_transcript_unsafe_rejected: 1,
         errors: ['unsupported record']
       }
     ]),
-    'Scanned 11 local history sources, recorded 6 new observations, 3 already recorded, 1 evidence upgrade, by provider: Codex 3 new, Claude Code 2 new, Cursor 1 new; scanned 2 transcript files and 3 state sessions; 4 confirmed transcript reads, 2 state references (1 error).'
+    'Scanned 11 local history sources, recorded 6 new observations, 3 already recorded, 1 evidence upgrade, by provider: Codex 3 new, Claude Code 2 new, Cursor 1 new; scanned 2 transcript files and 3 state sessions; 4 inferred transcript calls from 7 Read candidates, 2 state references; 2 same-turn duplicates, 1 duplicate files, 3 historical missing paths accepted, 1 ReadFile candidates excluded, 1 unsafe paths rejected (1 error).'
   );
 });
 

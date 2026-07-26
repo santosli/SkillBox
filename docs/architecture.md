@@ -113,7 +113,7 @@ cargo run -p skillbox-cli --offline -- <command>
 - `usage_backfill.rs` 只从本机 Codex session rollout 的显式用户输入载体解析完整 `<skill>` 块或 `[$skill](.../SKILL.md)` 链接，作为逐回合 `inferred` invocation；忽略 catalog、普通 prose、assistant/tool/shell payload 与 output，按 turn + 规范化 name/path 去重，并用 session `cwd` 恢复 workspace identity
 - `usage_backfill_claude.rs` 只从本机 Claude Code project JSONL 的原生 Skill tool/command attribution 恢复 `confirmed` 事件，解析真实 `SKILL.md`，不复制消息正文
 - `usage_backfill_cursor.rs` 只读打开并验证 Cursor 本机 history SQLite schema；human bubble 中显式附加且解析到真实 `SKILL.md` 的 `context.cursorRules` 只记录为 `reference`，不兼容 schema fail closed
-- `usage_backfill_cursor_transcripts.rs` 有界读取 Cursor agent transcript；只有 assistant `Read` / `ReadFile` tool use 的绝对路径通过 traversal、symlink、allowed-root、regular-file、大小和 `SKILL.md` 解析检查后，才记录 `confirmed` event
+- `usage_backfill_cursor_transcripts.rs` 有界读取 Cursor agent transcript；assistant `Read` 的绝对本机 `SKILL.md` 按 transcript user turn + skill 去重并记录 `inferred` event。现存文件执行严格 traversal、symlink、allowed-root、regular-file、大小和 frontmatter 检查；安全的 historical-missing 路径只保留词法 evidence identity，不能成为文件系统或部署权限。`ReadFile` 只进入诊断，不计 Calls
 - `hooks.rs` agent hook 注入、transcript 解析，以及基于结构化 runtime context 的 workspace 归属
 - `operations.rs` operation 与 history 记录
 - `metadata.rs` 用户 favorites/tags 的 SQLite 持久化和 legacy desktop metadata 迁移

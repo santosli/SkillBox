@@ -689,11 +689,16 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
   - Cursor 以 read-only、`query_only` 和 bounded busy timeout 打开本机
     `state.vscdb` 并验证 private schema。non-subagent human bubble 中
     `addedWithoutMention=false context.cursorRules[].filename` 只证明上下文附加，记录为
-    `reference`。此外有界扫描 Cursor agent transcripts；仅 assistant `tool_use` 的
-    `Read` / `ReadFile` 输入为绝对路径，且通过 traversal、symlink、allowed-root、
-    regular-file、大小和真实 `SKILL.md` 检查时，记录
-    `cursor_agent_transcript_read=confirmed`。
-  - provider 使用稳定 provider/session/turn/path identity。重复 sync 不递增；新强证据
+    `reference`。此外有界扫描 Cursor agent transcripts；assistant `tool_use` 的
+    `Read` 输入为绝对本机 `SKILL.md` 路径时，按 transcript user turn + skill 记录
+    `cursor_agent_transcript_read=inferred`。现存文件必须通过 traversal、symlink、
+    allowed-root、regular-file、大小和 frontmatter 检查；后来已移动/删除的文件只在
+    lexical path 与最近现存 ancestor 都未逃逸 allowed root、parent skill name 合法时
+    保留 historical evidence，并且该 path 不得用于 filesystem/deploy authority。
+    `ReadFile` candidates 只进入 aggregate diagnostics，不计 Calls。
+  - provider 使用稳定 provider/session/turn/path identity。Cursor 同一 user turn
+    对同一 skill 的重复 Read 只计一次；缺少 preceding user record 时使用每个 transcript
+    唯一的 `unattributed` fallback turn，因此仍然保守去重。重复 sync 不递增；新强证据
     可以升级旧 event 并保留 provenance。非法或不支持记录计入 skipped/errors。
 - 桌面 Full ranking 表格包含 Actions 列：已导入 skill 显示 `Detail` 并打开既有 skill 详情弹窗；未导入 skill 显示 `Import`，通过 row 的 `source_id + source_kind + source_runtime_roots`，以及生成该行的 ranking filters 和 `generated_at` 调用 source-aware `preview_usage_skill_import`。core 必须用同一查询快照重建完整 row identity，拒绝缺失 identity、任意 roots 子集、被篡改或已过期的请求；只在重建出的全部 roots 中选择 Importable candidate，某个 root 已失效时可继续检查同一 source 的其他 root，但不得回退到任意全局 runtime 或删除备份。旧的 name-only Rust API 保留原有本地恢复搜索，但 Tauri Rankings command 始终要求完整 identity。候选确认后用户可选择导入为 User 或 Remote，确认后写入 managed store 并刷新 Rankings。同名普通 skill 与 System/Unknown source 即使共享 runtime root 或普通副本已 managed 也拆成独立行；System 与 Unknown source 均不可 Import。
 - Rankings 页面宽度与 Dashboard 一致，不再单独收窄。

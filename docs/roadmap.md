@@ -76,8 +76,10 @@ complete per-turn `<skill>` blocks or `[$skill](.../SKILL.md)` links with an
 absolute path as inferred invocation, while catalog/prose, shell/tool payloads,
 and outputs are excluded. Claude Code native Skill tool/command attribution is
 confirmed. Cursor state `context.cursorRules` is a reference; a bounded agent
-transcript assistant `Read` / `ReadFile` of an absolute, allowed, validated
-`SKILL.md` is confirmed. Repeated scans deduplicate stable event identities;
+transcript assistant `Read` of an absolute, allowed `SKILL.md` is inferred and
+deduplicated once per transcript user turn and skill. Safe historical-missing
+paths remain evidence-only, and `ReadFile` stays diagnostic-only until qualified.
+Repeated scans deduplicate stable event identities;
 stronger evidence upgrades the existing event without dropping provenance.
 
 Every ranking response includes mutually exclusive current evidence-class

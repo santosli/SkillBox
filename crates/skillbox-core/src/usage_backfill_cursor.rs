@@ -133,6 +133,47 @@ pub(crate) fn backfill_cursor_session_usage_for_home(
             format!("Unable to persist Cursor transcript coverage: {error}"),
         );
     }
+    for (key, value) in [
+        (
+            "cursor_usage_backfill_inferred_transcript_calls",
+            result.inferred_cursor_transcript_calls,
+        ),
+        (
+            "cursor_usage_backfill_read_candidates",
+            result.cursor_transcript_read_candidates,
+        ),
+        (
+            "cursor_usage_backfill_read_file_candidates",
+            result.cursor_transcript_read_file_candidates,
+        ),
+        (
+            "cursor_usage_backfill_turn_duplicates",
+            result.cursor_transcript_turn_duplicates,
+        ),
+        (
+            "cursor_usage_backfill_duplicate_files",
+            result.cursor_transcript_duplicate_files,
+        ),
+        (
+            "cursor_usage_backfill_historical_missing",
+            result.cursor_transcript_historical_missing,
+        ),
+        (
+            "cursor_usage_backfill_unsafe_rejected",
+            result.cursor_transcript_unsafe_rejected,
+        ),
+    ] {
+        if let Err(error) = write_u32_preference(
+            &paths.database_path,
+            key,
+            u32::try_from(value).unwrap_or(u32::MAX),
+        ) {
+            push_cursor_backfill_error(
+                &mut result.errors,
+                format!("Unable to persist Cursor transcript diagnostics: {error}"),
+            );
+        }
+    }
     if let Some(state_audit_result) = state_audit_result {
         if let Err(error) = persist_usage_backfill_audit(
             &paths.database_path,

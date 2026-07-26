@@ -216,8 +216,26 @@ export function normalizeCodexUsageBackfill(result = {}) {
     scannedCursorTranscriptFiles: numberOrZero(
       result.scannedCursorTranscriptFiles ?? result.scanned_cursor_transcript_files
     ),
-    confirmedCursorTranscriptReads: numberOrZero(
-      result.confirmedCursorTranscriptReads ?? result.confirmed_cursor_transcript_reads
+    inferredCursorTranscriptCalls: numberOrZero(
+      result.inferredCursorTranscriptCalls ?? result.inferred_cursor_transcript_calls
+    ),
+    cursorTranscriptReadCandidates: numberOrZero(
+      result.cursorTranscriptReadCandidates ?? result.cursor_transcript_read_candidates
+    ),
+    cursorTranscriptReadFileCandidates: numberOrZero(
+      result.cursorTranscriptReadFileCandidates ?? result.cursor_transcript_read_file_candidates
+    ),
+    cursorTranscriptTurnDuplicates: numberOrZero(
+      result.cursorTranscriptTurnDuplicates ?? result.cursor_transcript_turn_duplicates
+    ),
+    cursorTranscriptDuplicateFiles: numberOrZero(
+      result.cursorTranscriptDuplicateFiles ?? result.cursor_transcript_duplicate_files
+    ),
+    cursorTranscriptHistoricalMissing: numberOrZero(
+      result.cursorTranscriptHistoricalMissing ?? result.cursor_transcript_historical_missing
+    ),
+    cursorTranscriptUnsafeRejected: numberOrZero(
+      result.cursorTranscriptUnsafeRejected ?? result.cursor_transcript_unsafe_rejected
     ),
     errors: Array.isArray(result.errors) ? result.errors.map(String) : []
   };
@@ -262,7 +280,7 @@ export function usageHistorySyncNotice(results = []) {
         ? ` (${result.errors.length} error${result.errors.length === 1 ? '' : 's'})`
         : '';
       const cursorDetail = result.provider === 'Cursor'
-        ? `; scanned ${result.scannedCursorTranscriptFiles} transcript files and ${result.scannedCursorStateSessions} state sessions; ${result.confirmedCursorTranscriptReads} confirmed transcript reads, ${result.cursorStateReferences} state references`
+        ? `; scanned ${result.scannedCursorTranscriptFiles} transcript files and ${result.scannedCursorStateSessions} state sessions; ${result.inferredCursorTranscriptCalls} inferred transcript calls from ${result.cursorTranscriptReadCandidates} Read candidates, ${result.cursorStateReferences} state references; ${result.cursorTranscriptTurnDuplicates} same-turn duplicates, ${result.cursorTranscriptDuplicateFiles} duplicate files, ${result.cursorTranscriptHistoricalMissing} historical missing paths accepted, ${result.cursorTranscriptReadFileCandidates} ReadFile candidates excluded, ${result.cursorTranscriptUnsafeRejected} unsafe paths rejected`
         : '';
       return `${result.provider} ${result.recorded} new${cursorDetail}${errorLabel}`;
     })

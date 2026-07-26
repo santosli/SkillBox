@@ -41,9 +41,14 @@ Calls = confirmed + defensible inferred
   invocation carrier，不是普通 catalog/prose，但也不是 provider-native execution
   result。
 - Cursor `context.cursorRules` state 只证明 skill 被附加为上下文，是 `reference`。
-- Cursor agent transcript 中 assistant `tool_use` 的 `Read` / `ReadFile`，只有在输入是
- 绝对路径、无 traversal、指向允许 root 内真实且可解析的 regular `SKILL.md` 时，才是
-  `confirmed`。
+- Cursor agent transcript 中 assistant `tool_use` 的 `Read` 是 execution proxy，
+  不是 provider-confirmed execution，因此是 `inferred`。调用单位是每个稳定 transcript
+  user turn、每个 skill 一次；同 turn 重复 Read 去重。现存文件执行严格
+  traversal/symlink/regular-file/size/frontmatter 校验。后来移动/删除的路径只在
+  absolute/local、精确 `SKILL.md` suffix、合法 parent skill name、lexical allowed-root
+  和最近现存 ancestor containment 均成立时保留 historical evidence；它永远不是
+  filesystem/deploy authority。`ReadFile` 的语义尚未完成 qualification，只报告
+  aggregate candidates，不计 Calls。
 - 公开 `usage-record` 没有 trusted parser 证据，默认是 `reference`。
 - catalog、普通 user/assistant prose、`SKILL.md` mention、`exec_command`、任意
   custom/dynamic tool payload、tool output 和 shell output 均不构成 Calls。

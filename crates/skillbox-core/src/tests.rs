@@ -234,6 +234,9 @@ fn usage_evidence_migration_preserves_events_and_rebuilds_call_stats() {
               ('cursor', 'cursor', 'demo', 'cursor', '/tmp/runtime',
                '2026-07-04T00:00:00+00:00', '2026-07-04T00:00:01+00:00',
                '{\"source\":\"cursor_session_backfill\"}'),
+              ('cursor-transcript', 'cursor-transcript', 'demo', 'cursor', '/tmp/runtime',
+               '2026-07-04T01:00:00+00:00', '2026-07-04T01:00:01+00:00',
+               '{\"source\":\"cursor_agent_transcript_read\"}'),
               ('manual', 'manual', 'demo', 'codex', '/tmp/runtime',
                '2026-07-05T00:00:00+00:00', '2026-07-05T00:00:01+00:00',
                '{\"source\":\"/Users/alice/private-client\"}');
@@ -262,6 +265,7 @@ fn usage_evidence_migration_preserves_events_and_rebuilds_call_stats() {
             ("claude".to_string(), "inferred".to_string()),
             ("codex".to_string(), "inferred".to_string()),
             ("cursor".to_string(), "reference".to_string()),
+            ("cursor-transcript".to_string(), "inferred".to_string()),
             ("hook".to_string(), "confirmed".to_string()),
             ("manual".to_string(), "reference".to_string()),
         ]
@@ -278,8 +282,8 @@ fn usage_evidence_migration_preserves_events_and_rebuilds_call_stats() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(raw_count, 5);
-    assert_eq!(call_count, 3);
+    assert_eq!(raw_count, 6);
+    assert_eq!(call_count, 4);
     let evidence_sources_json: String = connection
         .query_row(
             "SELECT evidence_sources_json FROM skill_usage_events WHERE id = 'codex'",
@@ -329,7 +333,7 @@ fn usage_evidence_migration_preserves_events_and_rebuilds_call_stats() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(call_count, 3);
+    assert_eq!(call_count, 4);
     let (raw_count, claude_class): (i64, String) = (
         connection
             .query_row("SELECT COUNT(*) FROM skill_usage_events", [], |row| {
@@ -344,7 +348,7 @@ fn usage_evidence_migration_preserves_events_and_rebuilds_call_stats() {
             )
             .unwrap(),
     );
-    assert_eq!(raw_count, 5);
+    assert_eq!(raw_count, 6);
     assert_eq!(claude_class, "confirmed");
     drop(connection);
     let audit_json = serde_json::to_string(&usage_audit(&managed_root).unwrap()).unwrap();
@@ -375,7 +379,11 @@ fn usage_evidence_repair_recovers_pre_release_v7_rows_with_missing_provenance() 
                '{\"source\":\"codex_session_backfill\"}', 'reference', '[\"codex_session_backfill\"]'),
               ('cursor', 'cursor', 'demo', 'cursor', '/tmp/runtime',
                '2026-07-03T00:00:00+00:00', '2026-07-03T00:00:01+00:00',
-               '{\"source\":\"cursor_session_backfill\"}', 'reference', '[]');
+               '{\"source\":\"cursor_session_backfill\"}', 'reference', '[]'),
+              ('cursor-transcript', 'cursor-transcript', 'demo', 'cursor', '/tmp/runtime',
+               '2026-07-04T00:00:00+00:00', '2026-07-04T00:00:01+00:00',
+               '{\"source\":\"cursor_agent_transcript_read\"}', 'confirmed',
+               '[{\"source\":\"cursor_agent_transcript_read\",\"evidence_class\":\"confirmed\"}]');
             INSERT INTO skill_usage_stats (
               skill_name, agent_id, runtime_root, usage_count, last_used_at
             ) VALUES ('demo', 'codex', '/tmp/runtime', 1, '2026-07-01T00:00:00+00:00');
@@ -386,9 +394,9 @@ fn usage_evidence_repair_recovers_pre_release_v7_rows_with_missing_provenance() 
 
     ensure_managed_layout(&managed_root).unwrap();
     let audit = usage_audit(&managed_root).unwrap();
-    assert_eq!(audit.total_calls, 2);
+    assert_eq!(audit.total_calls, 3);
     assert_eq!(audit.confirmed_calls, 1);
-    assert_eq!(audit.inferred_calls, 1);
+    assert_eq!(audit.inferred_calls, 2);
     assert_eq!(audit.history_references, 1);
     let connection = rusqlite::Connection::open(&paths.database_path).unwrap();
     let call_count: i64 = connection
@@ -398,7 +406,15 @@ fn usage_evidence_repair_recovers_pre_release_v7_rows_with_missing_provenance() 
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(call_count, 2);
+    assert_eq!(call_count, 3);
+    let cursor_transcript_class: String = connection
+        .query_row(
+            "SELECT evidence_class FROM skill_usage_events WHERE id = 'cursor-transcript'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(cursor_transcript_class, "inferred");
     let missing_provenance: i64 = connection
         .query_row(
             "
@@ -416,7 +432,7 @@ fn usage_evidence_repair_recovers_pre_release_v7_rows_with_missing_provenance() 
     drop(connection);
     ensure_managed_layout(&managed_root).unwrap();
     let audit = usage_audit(&managed_root).unwrap();
-    assert_eq!(audit.total_calls, 2);
+    assert_eq!(audit.total_calls, 3);
     assert_eq!(audit.history_references, 1);
 }
 
