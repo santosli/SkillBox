@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>SkillBox - Local AI Agent Skill Manager for macOS</title>
-    <meta name="description" content="SkillBox is a local-first macOS app for managing Codex-style, Claude, and project-local SKILL.md roots, with safe GitHub-backed imports, update previews, and runtime deployment.">
+    <meta name="description" content="SkillBox is a local-first macOS app for managing Agents, Codex, Claude Code, Cursor, and project-local SKILL.md roots with reviewed GitHub installs and runtime compatibility previews.">
     <meta name="robots" content="index, follow">
     <link rel="canonical" href="https://santosli.github.io/SkillBox/">
     <meta name="theme-color" content="#08111f">
@@ -13,7 +13,7 @@
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="SkillBox">
     <meta property="og:title" content="SkillBox - Local AI Agent Skill Manager for macOS">
-    <meta property="og:description" content="Manage Codex-style, Claude, and project-local SKILL.md skills locally, review GitHub imports, preview updates, and deploy safely to runtime folders.">
+    <meta property="og:description" content="Manage SKILL.md libraries locally, review GitHub installs, check runtime compatibility, and separate Calls from History references.">
     <meta property="og:url" content="https://santosli.github.io/SkillBox/">
     <meta property="og:image" content="https://santosli.github.io/SkillBox/assets/skillbox-promo-poster.jpg">
     <meta property="og:image:width" content="1920">
@@ -22,7 +22,7 @@
 
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="SkillBox - Local AI Agent Skill Manager for macOS">
-    <meta name="twitter:description" content="Local-first skill management for Codex-style, Claude, and SKILL.md-based AI agent workflows.">
+    <meta name="twitter:description" content="Local-first SKILL.md management for Agents, Codex, Claude Code, Cursor, and project roots.">
     <meta name="twitter:image" content="https://santosli.github.io/SkillBox/assets/skillbox-promo-poster.jpg">
     <meta name="twitter:image:alt" content="SkillBox macOS app dashboard and promo poster">
 
@@ -49,7 +49,7 @@
             "applicationSubCategory": "AI agent skill manager",
             "operatingSystem": "macOS",
             "softwareRequirements": "macOS",
-            "description": "A local-first macOS app and Rust CLI for managing Codex-style, Claude, and project-local SKILL.md roots from one managed store.",
+            "description": "A local-first macOS app and Rust CLI for managing Agents, Codex, Claude Code, Cursor, and project-local SKILL.md roots from one managed store.",
             "url": "https://santosli.github.io/SkillBox/",
             "downloadUrl": "https://github.com/santosli/SkillBox/releases/latest",
             "installUrl": "https://github.com/santosli/SkillBox/releases/latest",
@@ -62,7 +62,9 @@
             "image": "https://santosli.github.io/SkillBox/assets/skillbox-promo-poster.jpg",
             "screenshot": [
               "https://santosli.github.io/SkillBox/assets/skillbox-dashboard.png",
-              "https://santosli.github.io/SkillBox/assets/skillbox-import-review-crop.png"
+              "https://santosli.github.io/SkillBox/assets/skillbox-workspaces.png",
+              "https://santosli.github.io/SkillBox/assets/skillbox-rankings.png",
+              "https://santosli.github.io/SkillBox/assets/skillbox-github-install-review.png"
             ],
             "offers": {
               "@type": "Offer",
@@ -108,14 +110,14 @@
 
     <main id="main">
       <section class="hero" id="top" aria-labelledby="hero-title">
-        <img class="hero-image" src="assets/skillbox-dashboard.png" alt="SkillBox dashboard showing skill cards, usage counts, update states, and runtime targets">
+        <img class="hero-image" src="assets/skillbox-dashboard.png" alt="Current SkillBox dashboard showing Calls, History references, update states, and runtime targets">
         <div class="hero-copy">
           <p class="eyebrow">macOS desktop app · open source · local-first</p>
           <h1 id="hero-title">SkillBox</h1>
           <p class="hero-value">Local skill manager for AI agents.</p>
           <p class="hero-support">
-            Keep Codex-style, Claude, and project-local skills organized from one local store.
-            Review GitHub-backed imports and updates before they touch your runtime folders.
+            Keep Agents, Codex, Claude Code, Cursor, and project-local <code>SKILL.md</code> roots organized from one managed store.
+            Review GitHub installs and runtime compatibility before SkillBox writes or deploys anything.
           </p>
           <div class="hero-actions" aria-label="Primary actions">
             <a class="button primary" href="https://github.com/santosli/SkillBox/releases/latest">Download for macOS</a>
@@ -131,12 +133,12 @@
           <span class="label">source of truth</span>
         </div>
         <div>
-          <span class="metric">Review first</span>
-          <span class="label">imports and remote updates</span>
+          <span class="metric">5 profiles</span>
+          <span class="label">runtime-aware workspaces</span>
         </div>
         <div>
-          <span class="metric">Symlink deploy</span>
-          <span class="label">runtime targets stay replaceable</span>
+          <span class="metric">Calls + references</span>
+          <span class="label">local evidence stays transparent</span>
         </div>
       </section>
 
@@ -145,8 +147,8 @@
           <p class="eyebrow">30-second overview</p>
           <h2 id="demo-title">See the workflow before installing.</h2>
           <p>
-            The demo shows scattered skills becoming one managed library, then walks through review,
-            update, usage history, and the GitHub release flow.
+            The demo follows one managed library through runtime-aware workspaces, reviewed GitHub installs,
+            compatibility checks, evidence-aware Calls, and transparent local coverage.
           </p>
         </div>
         <figure class="video-frame">
@@ -154,7 +156,7 @@
             <source src="assets/skillbox-promo.mp4" type="video/mp4">
             <a href="assets/skillbox-promo.mp4">Download the SkillBox promo video.</a>
           </video>
-          <figcaption>SkillBox keeps local skills manageable without turning runtime folders into the only copy.</figcaption>
+          <figcaption>SkillBox keeps runtime folders intentional while <code>~/.skillbox</code> remains the local source of truth.</figcaption>
         </figure>
       </section>
 
@@ -168,37 +170,55 @@
               are deployment targets instead of hidden state.
             </p>
           </div>
-          <img src="assets/skillbox-dashboard.png" alt="SkillBox dashboard with local and remote skill cards">
+          <img src="assets/skillbox-dashboard.png" alt="SkillBox dashboard with local and remote skill cards, Calls, and History references">
         </article>
 
         <article class="feature-card reversed">
           <div class="feature-copy">
             <p class="eyebrow">Review</p>
-            <h2>Review before import. Preview before update.</h2>
+            <h2>Review before write. Check compatibility before deploy.</h2>
             <p>
-              Scan candidates are classified before copying. Remote updates are inspected as diffs,
-              then applied or left alone.
+              GitHub installs show incoming file diffs. Runtime profiles explain compatible targets,
+              preserved warnings, and blockers before anything is written.
             </p>
           </div>
-          <img src="assets/skillbox-import-review-crop.png" alt="SkillBox import review dialog with selected skill candidates">
+          <img src="assets/skillbox-github-install-review.png" alt="SkillBox GitHub install review showing file changes and a runtime compatibility warning">
         </article>
 
-        <article class="feature-card runtime-map">
+        <article class="feature-card">
           <div class="feature-copy">
-            <p class="eyebrow">Deploy</p>
-            <h2>Deploy to agent runtimes without losing your source of truth</h2>
+            <p class="eyebrow">Runtime profiles</p>
+            <h2>Know exactly where each skill can run</h2>
             <p>
-              SkillBox deploys managed <code>SKILL.md</code> skills into Codex-style, Claude, and project-local runtime folders
-              through explicit workspace targets.
+              Workspaces identify Agents, Codex, Claude Code, Cursor, and exact custom roots.
+              Deployment stays explicit and <code>~/.skillbox</code> remains the source of truth.
             </p>
           </div>
-          <div class="source-map" aria-label="Managed store deployment map">
-            <div class="hub">~/.skillbox</div>
-            <div class="spoke">~/.codex/skills</div>
-            <div class="spoke">~/.agents/skills</div>
-            <div class="spoke">~/.claude/skills</div>
-            <div class="spoke">project/.codex/skills</div>
+          <img src="assets/skillbox-workspaces.png" alt="SkillBox Workspaces showing runtime profile, scope, root path, Calls, and History references">
+        </article>
+
+        <article class="feature-card reversed">
+          <div class="feature-copy">
+            <p class="eyebrow">Local evidence</p>
+            <h2>Rank Calls. Keep references separate.</h2>
+            <p>
+              Calls combine locally confirmed and defensible inferred invocations.
+              Lower-signal History references stay separate, with provider coverage available on demand.
+            </p>
           </div>
+          <img src="assets/skillbox-rankings-coverage.png" alt="SkillBox Rankings with Top skills, full ranking, and expanded confirmed, inferred, and reference coverage">
+        </article>
+
+        <article class="feature-card">
+          <div class="feature-copy">
+            <p class="eyebrow">Audit trail</p>
+            <h2>Calls, references, and operations stay inspectable</h2>
+            <p>
+              Sync local Codex, Claude Code, and Cursor histories without copying chat bodies.
+              The History view preserves evidence class and management operations without claiming account analytics.
+            </p>
+          </div>
+          <img src="assets/skillbox-history.png" alt="SkillBox History with separate Calls, References, and Operations filters">
         </article>
       </section>
 

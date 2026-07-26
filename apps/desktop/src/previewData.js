@@ -7,11 +7,15 @@ export const previewPaths = {
   databasePath: '~/.skillbox/skillbox.sqlite'
 };
 
+export function publicPreviewRequested(search = '') {
+  return new URLSearchParams(search).get('public-preview') === '1';
+}
+
 export const previewImportCandidates = [
   {
-    name: 'personal-wiki-updater',
-    description: 'Incrementally refresh the personal wiki derived layer.',
-    sourcePath: '~/.agents/skills/personal-wiki-updater',
+    name: 'release-helper',
+    description: 'Prepare release notes and verify project release assets.',
+    sourcePath: '~/.agents/skills/release-helper',
     sourceRoot: '~/.agents/skills',
     contentHash: '87b21f5571a7d332',
     suggestedType: 'user',
@@ -22,9 +26,9 @@ export const previewImportCandidates = [
     conflict: null
   },
   {
-    name: 'find-skills',
-    description: 'Discover and install agent skills from local and remote sources.',
-    sourcePath: '~/.codex/skills/find-skills',
+    name: 'docs-reviewer',
+    description: 'Review project documentation for accuracy and broken links.',
+    sourcePath: '~/.codex/skills/docs-reviewer',
     sourceRoot: '~/.codex/skills',
     contentHash: 'a9c42f1dd4822c80',
     suggestedType: 'remote',
@@ -62,16 +66,18 @@ export const previewWorkspaces = [
     root_key: 'skills',
     format: 'skill_md',
     display_name: 'Codex',
-    skill_count: 4,
-    imported_skill_count: 2,
+    skill_count: 6,
+    imported_skill_count: 5,
+    usage_count: 11,
+    reference_count: 3,
     last_scan_error_count: 0,
     last_scanned_at: '2026-05-26 08:00:00'
   },
   {
     canonical_path:
-      '/Users/example/Library/Mobile Documents/iCloud~md~obsidian/Documents/demo-vault/.agents/skills',
+      '/Users/example/Projects/demo-app/.agents/skills',
     path:
-      '/Users/example/Library/Mobile Documents/iCloud~md~obsidian/Documents/demo-vault/.agents/skills',
+      '/Users/example/Projects/demo-app/.agents/skills',
     kind: 'user',
     source: 'manual',
     agent_id: 'agents',
@@ -79,11 +85,142 @@ export const previewWorkspaces = [
     profile_name: 'Agents',
     root_key: 'skills',
     format: 'skill_md',
-    display_name: 'demo-vault',
-    skill_count: 2,
-    imported_skill_count: 1,
+    display_name: 'demo-app',
+    skill_count: 4,
+    imported_skill_count: 3,
+    usage_count: 7,
+    reference_count: 2,
     last_scan_error_count: 0,
     last_scanned_at: '2026-05-26 08:00:00'
+  },
+  {
+    canonical_path: '/Users/example/Projects/design-system/.claude/skills',
+    path: '/Users/example/Projects/design-system/.claude/skills',
+    kind: 'user',
+    source: 'manual',
+    agent_id: 'claude-code',
+    profile_id: 'claude-code',
+    profile_name: 'Claude Code',
+    root_key: 'skills',
+    format: 'skill_md',
+    display_name: 'design-system',
+    skill_count: 3,
+    imported_skill_count: 3,
+    usage_count: 5,
+    reference_count: 1,
+    last_scan_error_count: 0,
+    last_scanned_at: '2026-07-24 08:00:00'
+  },
+  {
+    canonical_path: '/Users/example/Projects/research-notes/.cursor/skills',
+    path: '/Users/example/Projects/research-notes/.cursor/skills',
+    kind: 'user',
+    source: 'manual',
+    agent_id: 'cursor',
+    profile_id: 'cursor',
+    profile_name: 'Cursor',
+    root_key: 'skills',
+    format: 'skill_md',
+    display_name: 'research-notes',
+    skill_count: 2,
+    imported_skill_count: 1,
+    usage_count: 4,
+    reference_count: 4,
+    last_scan_error_count: 0,
+    last_scanned_at: '2026-07-24 08:00:00'
+  }
+];
+
+export const previewSkills = [
+  {
+    name: 'release-helper',
+    type: 'user',
+    description: 'Prepare release notes and verify project release assets.',
+    source_root: '~/.agents/skills',
+    path: '~/.skillbox/user-skills/release-helper',
+    skill_md_path: '~/.skillbox/user-skills/release-helper/SKILL.md',
+    status: 'synced',
+    usage_count: 8,
+    confirmed_count: 3,
+    inferred_count: 5,
+    reference_count: 2,
+    last_used_at: '2026-07-24T09:12:00Z',
+    deployments: [{ target_root: '/Users/example/Projects/demo-app/.agents/skills' }]
+  },
+  {
+    name: 'docs-reviewer',
+    type: 'remote',
+    description: 'Review project documentation for accuracy and broken links.',
+    source_root: '~/.codex/skills',
+    path: '~/.skillbox/remote-skills/docs-reviewer/current',
+    skill_md_path: '~/.skillbox/remote-skills/docs-reviewer/current/SKILL.md',
+    status: 'up to date',
+    usage_count: 6,
+    confirmed_count: 2,
+    inferred_count: 4,
+    reference_count: 3,
+    last_used_at: '2026-07-23T18:40:00Z',
+    deployments: [{ target_root: '/Users/example/.codex/skills' }]
+  },
+  {
+    name: 'design-audit',
+    type: 'remote',
+    description: 'Check interface hierarchy, accessibility, and responsive layout.',
+    source_root: '~/.claude/skills',
+    path: '~/.skillbox/remote-skills/design-audit/current',
+    skill_md_path: '~/.skillbox/remote-skills/design-audit/current/SKILL.md',
+    status: 'update available',
+    usage_count: 5,
+    confirmed_count: 3,
+    inferred_count: 2,
+    reference_count: 1,
+    last_used_at: '2026-07-22T14:20:00Z',
+    deployments: [{ target_root: '/Users/example/Projects/design-system/.claude/skills' }]
+  },
+  {
+    name: 'research-digest',
+    type: 'remote',
+    description: 'Summarize recent research into a concise source-backed digest.',
+    source_root: '~/.cursor/skills',
+    path: '~/.skillbox/remote-skills/research-digest/current',
+    skill_md_path: '~/.skillbox/remote-skills/research-digest/current/SKILL.md',
+    status: 'up to date',
+    usage_count: 4,
+    confirmed_count: 1,
+    inferred_count: 3,
+    reference_count: 4,
+    last_used_at: '2026-07-21T08:00:00Z',
+    deployments: [{ target_root: '/Users/example/Projects/research-notes/.cursor/skills' }]
+  },
+  {
+    name: 'test-writer',
+    type: 'user',
+    description: 'Add focused regression tests for changed product behavior.',
+    source_root: '~/.agents/skills',
+    path: '~/.skillbox/user-skills/test-writer',
+    skill_md_path: '~/.skillbox/user-skills/test-writer/SKILL.md',
+    status: 'synced',
+    usage_count: 3,
+    confirmed_count: 2,
+    inferred_count: 1,
+    reference_count: 0,
+    last_used_at: '2026-07-20T16:15:00Z',
+    deployments: [{ target_root: '/Users/example/Projects/demo-app/.agents/skills' }]
+  },
+  {
+    name: 'local-notes-sync',
+    type: 'user',
+    description: 'Keep project notes organized with a local-first sync workflow.',
+    source_root: '~/.codex/skills',
+    path: '~/.skillbox/user-skills/local-notes-sync',
+    skill_md_path: '~/.skillbox/user-skills/local-notes-sync/SKILL.md',
+    status: 'needs sync',
+    usage_count: 0,
+    confirmed_count: 0,
+    inferred_count: 0,
+    reference_count: 3,
+    last_used_at: '',
+    deployments: []
   }
 ];
 
@@ -154,48 +291,46 @@ export function previewHistory() {
     operation_count: 2,
     entries: [
       {
-        id: 'preview-usage-grill-me',
+        id: 'preview-usage-release-helper',
         kind: 'skill_usage',
         timestamp: new Date(now - 12 * 60 * 1000).toISOString(),
-        title: 'Skill call: grill-me',
-        subtitle: 'codex in ~/.skillbox/remote-skills/grill-me/versions',
-        skill_name: 'grill-me',
+        title: 'Skill call: release-helper',
+        subtitle: 'codex in ~/.agents/skills',
+        skill_name: 'release-helper',
         agent_id: 'codex',
-        runtime_root: '~/.skillbox/remote-skills/grill-me/versions',
-        prompt_excerpt: 'Use grill-me to review the skill usage stats plan'
+        runtime_root: '~/.agents/skills'
       },
       {
         id: 'preview-operation-install',
         kind: 'operation',
         timestamp: Math.floor((now - 42 * 60 * 1000) / 1000).toString(),
-        title: 'Installed find-skills',
+        title: 'Installed docs-reviewer',
         subtitle: 'install_remote_skill by desktop',
         status: 'succeeded',
         operation_type: 'install_remote_skill',
         actor: 'desktop',
         entity_type: 'skill',
-        entity_name: 'find-skills'
+        entity_name: 'docs-reviewer'
       },
       {
-        id: 'preview-reference-last30days',
+        id: 'preview-reference-research-digest',
         kind: 'usage_reference',
         timestamp: new Date(now - 70 * 60 * 1000).toISOString(),
-        title: 'History reference: last30days',
+        title: 'History reference: research-digest',
         subtitle: 'cursor in ~/.cursor/skills',
-        skill_name: 'last30days',
+        skill_name: 'research-digest',
         agent_id: 'cursor',
         runtime_root: '~/.cursor/skills'
       },
       {
-        id: 'preview-usage-frontend',
+        id: 'preview-usage-design-audit',
         kind: 'skill_usage',
         timestamp: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
-        title: 'Skill call: frontend-design',
-        subtitle: 'codex in ~/.skillbox/remote-skills/frontend-design/versions',
-        skill_name: 'frontend-design',
-        agent_id: 'codex',
-        runtime_root: '~/.skillbox/remote-skills/frontend-design/versions',
-        prompt_excerpt: 'Make the History timeline easier to scan'
+        title: 'Skill call: design-audit',
+        subtitle: 'claude-code in ~/.claude/skills',
+        skill_name: 'design-audit',
+        agent_id: 'claude-code',
+        runtime_root: '~/.claude/skills'
       }
     ]
   };
@@ -205,7 +340,7 @@ export function previewUsageRankings(filters = {}) {
   const rows = [
     {
       rank: 1,
-      skill_name: 'git-merge-to-main',
+      skill_name: 'release-helper',
       kind: 'user',
       managed: true,
       usage_count: 4,
@@ -216,7 +351,7 @@ export function previewUsageRankings(filters = {}) {
     },
     {
       rank: 2,
-      skill_name: 'black-cat-ai-illustrations',
+      skill_name: 'docs-reviewer',
       kind: 'user',
       managed: true,
       usage_count: 3,
@@ -227,7 +362,7 @@ export function previewUsageRankings(filters = {}) {
     },
     {
       rank: 3,
-      skill_name: 'skill-creator',
+      skill_name: 'design-audit',
       kind: null,
       managed: false,
       usage_count: 2,
@@ -238,7 +373,7 @@ export function previewUsageRankings(filters = {}) {
     },
     {
       rank: 4,
-      skill_name: 'skill-creator',
+      skill_name: 'test-writer',
       kind: null,
       managed: false,
       system: true,
@@ -250,7 +385,7 @@ export function previewUsageRankings(filters = {}) {
     },
     {
       rank: 5,
-      skill_name: 'last30days',
+      skill_name: 'research-digest',
       kind: 'remote',
       managed: true,
       usage_count: 1,
@@ -261,7 +396,7 @@ export function previewUsageRankings(filters = {}) {
     },
     {
       rank: 6,
-      skill_name: 'codex-chat-sync',
+      skill_name: 'local-notes-sync',
       kind: 'user',
       managed: true,
       usage_count: 0,
@@ -272,7 +407,7 @@ export function previewUsageRankings(filters = {}) {
     },
     {
       rank: 7,
-      skill_name: 'dida-task-sync',
+      skill_name: 'workspace-bootstrap',
       kind: 'user',
       managed: true,
       usage_count: 0,

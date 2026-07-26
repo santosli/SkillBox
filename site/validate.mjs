@@ -21,8 +21,12 @@ const requiredFiles = [
   "docs/promo/skillbox-intro/skillbox-promo.mp4",
   "docs/promo/skillbox-intro/skillbox-promo-poster.jpg",
   "docs/promo/skillbox-intro/assets/skillbox-dashboard.png",
-  "docs/promo/skillbox-intro/assets/skillbox-import-review-crop.png",
+  "docs/promo/skillbox-intro/assets/skillbox-workspaces.png",
+  "docs/promo/skillbox-intro/assets/skillbox-rankings.png",
+  "docs/promo/skillbox-intro/assets/skillbox-rankings-coverage.png",
   "docs/promo/skillbox-intro/assets/skillbox-history.png",
+  "docs/promo/skillbox-intro/assets/skillbox-skill-detail.png",
+  "docs/promo/skillbox-intro/assets/skillbox-github-install-review.png",
   "docs/promo/skillbox-intro/assets/skillbox-app-icon.png"
 ];
 
@@ -59,8 +63,8 @@ const website = graph.find((entry) => entry?.["@type"] === "WebSite");
 expect("SEO title uses searchable macOS agent intent", /<title>SkillBox - Local AI Agent Skill Manager for macOS<\/title>/.test(html));
 expect("robots meta allows indexing", /<meta name="robots" content="index, follow">/.test(html));
 expect(
-  "description mentions SkillBox, local-first agents, Codex, Claude, SKILL.md, and GitHub updates",
-  /<meta name="description" content="[^"]*SkillBox[^"]*local-first[^"]*Codex[^"]*Claude[^"]*SKILL\.md[^"]*GitHub[^"]*">/.test(html)
+  "description mentions SkillBox, local-first agents, runtime profiles, SKILL.md, and reviewed GitHub installs",
+  /<meta name="description" content="[^"]*SkillBox[^"]*local-first[^"]*Codex[^"]*Claude Code[^"]*Cursor[^"]*SKILL\.md[^"]*GitHub[^"]*">/.test(html)
 );
 expect("canonical URL present", /<link rel="canonical" href="https:\/\/santosli\.github\.io\/SkillBox\/">/.test(html));
 expect("Open Graph image present", /<meta property="og:image" content="https:\/\/santosli\.github\.io\/SkillBox\/assets\/skillbox-promo-poster\.jpg">/.test(html));
@@ -119,6 +123,21 @@ expect(
     && softwareApplication?.offers?.price === 0
 );
 expect("JSON-LD does not hardcode softwareVersion", !/"softwareVersion"\s*:/.test(html));
+expect(
+  "homepage uses current canonical product visuals",
+  /assets\/skillbox-dashboard\.png/.test(html)
+    && /assets\/skillbox-workspaces\.png/.test(html)
+    && /assets\/skillbox-rankings-coverage\.png/.test(html)
+    && /assets\/skillbox-history\.png/.test(html)
+    && /assets\/skillbox-github-install-review\.png/.test(html)
+);
+expect(
+  "homepage explains evidence-aware local metrics",
+  /locally confirmed and defensible inferred invocations/.test(html)
+    && /History references stay separate/.test(html)
+    && /without claiming account analytics/.test(html)
+);
+expect("homepage has no stale versioned visual references", !/v0?41|v041|skillbox-import-review-crop/.test(html));
 expect("video embed uses controls and metadata preload", /<video controls preload="metadata" poster="assets\/skillbox-promo-poster\.jpg"/.test(html));
 expect("download CTA uses latest release", /https:\/\/github\.com\/santosli\/SkillBox\/releases\/latest/.test(html));
 expect("Homebrew command present", /brew install --cask skillbox/.test(html));

@@ -91,7 +91,10 @@ test('sidebar brand does not render a subtitle', () => {
   const brandTextRule = css.match(/\.brandName\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const brandTitleRule = css.match(/\.brand strong\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
 
-  assert.match(appSource, /const APP_DISPLAY_NAME = import\.meta\.env\.DEV \? 'SkillBox Dev' : 'SkillBox';/);
+  assert.match(
+    appSource,
+    /const APP_DISPLAY_NAME = import\.meta\.env\.DEV && !publicPreview \? 'SkillBox Dev' : 'SkillBox';/
+  );
   assert.match(appSource, /<strong>\{APP_DISPLAY_NAME\}<\/strong>/);
   assert.doesNotMatch(appSource, /Local skill manager/);
   assert.doesNotMatch(css, /\.brand span/);
