@@ -1,5 +1,5 @@
-import React from 'react';
-import { HardDriveDownload, RefreshCw } from 'lucide-react';
+import React, { useState } from 'react';
+import { AlertTriangle, ChevronDown, HardDriveDownload, Info, RefreshCw } from 'lucide-react';
 import { formatOperationTimestamp } from '../remoteSkills.js';
 import { numberOrZero } from '../skills.js';
 import {
@@ -35,6 +35,7 @@ export function UsageRankingsPage({
   onOpenSkill,
   onRefresh
 }) {
+  const [coverageExpanded, setCoverageExpanded] = useState(false);
   const rows = ranking.rows || [];
   const topRows = usageRankingTopRows(rows);
   const maxUsageCount = topRows.reduce(
@@ -141,7 +142,13 @@ export function UsageRankingsPage({
           </label>
         </div>
 
-        <UsageCoverageSummary coverage={ranking.coverage} />
+        <UsageCoverageDisclosure
+          coverage={ranking.coverage}
+          expanded={coverageExpanded}
+          totalObservedCalls={ranking.totalObservedCalls}
+          warning={Boolean(error)}
+          onToggle={() => setCoverageExpanded((current) => !current)}
+        />
 
         {error ? <div className="panelNotice notice">{error}</div> : null}
         {notice ? (
@@ -351,57 +358,104 @@ function UsageRankingTopCard({ maxUsageCount, onOpenSkill, row }) {
   );
 }
 
-function UsageCoverageSummary({ coverage = {} }) {
+function UsageCoverageDisclosure({
+  coverage = {},
+  expanded,
+  onToggle,
+  totalObservedCalls,
+  warning
+}) {
   const earliest = coverage.earliestEventAt || '';
   const latest = coverage.latestEventAt || '';
   const eventWindow = earliest && latest
+    ? `${formatOperationTimestamp(earliest)}–${formatOperationTimestamp(latest)}`
+    : 'No local observations in this range';
+  const detailedEventWindow = earliest && latest
     ? `Earliest ${formatOperationTimestamp(earliest)} · Latest ${formatOperationTimestamp(latest)}`
-    : 'No local events in this range';
+    : 'No local observations in this range';
 
   return (
-    <section className="usageCoverageSummary" aria-label="Local usage data coverage">
-      <div className="usageCoverageHeader">
-        <div>
-          <strong>Local data coverage</strong>
-          <span>Auditable events only; counts use the current filters.</span>
+    <div className="usageCoverageDisclosure">
+      <button
+        aria-controls="usage-coverage-details"
+        aria-expanded={expanded}
+        className="usageCoverageToggle"
+        type="button"
+        onClick={onToggle}
+      >
+        <Info aria-hidden="true" className="usageCoverageInfoIcon" />
+        <span className="usageCoverageSummaryText">
+          <span>{numberOrZero(totalObservedCalls)} locally observed calls</span>
+          <span aria-hidden="true">·</span>
+          <span className="usageCoverageWindow">{eventWindow}</span>
+        </span>
+        {warning ? (
+          <span
+            className="usageCoverageWarning"
+            title="Coverage or ranking refresh needs attention"
+          >
+            <AlertTriangle aria-hidden="true" />
+            Warning
+          </span>
+        ) : null}
+        <span className="usageCoverageAction">
+          {expanded ? 'Hide coverage' : 'View coverage'}
+          <ChevronDown
+            aria-hidden="true"
+            className={expanded ? 'usageCoverageChevron expanded' : 'usageCoverageChevron'}
+          />
+        </span>
+      </button>
+
+      <section
+        aria-label="Local usage data coverage"
+        className="usageCoverageDetails"
+        hidden={!expanded}
+        id="usage-coverage-details"
+      >
+        <div className="usageCoverageDetailsHeader">
+          <h2>Local data coverage</h2>
+          <div>
+            <span>Auditable events only; counts use the current filters.</span>
+            <span className="usageCoverageWindow">{detailedEventWindow}</span>
+          </div>
         </div>
-        <span className="usageCoverageWindow">{eventWindow}</span>
-      </div>
-      <dl className="usageCoverageMetrics">
-        <div>
-          <dt>Hook observations</dt>
-          <dd>{numberOrZero(coverage.agentHookCalls)}</dd>
-        </div>
-        <div>
-          <dt>Codex history observations</dt>
-          <dd>{numberOrZero(coverage.codexSessionBackfillCalls)}</dd>
-        </div>
-        <div>
-          <dt>Claude Code history observations</dt>
-          <dd>{numberOrZero(coverage.claudeCodeSessionBackfillCalls)}</dd>
-        </div>
-        <div>
-          <dt>Cursor history observations</dt>
-          <dd>{numberOrZero(coverage.cursorSessionBackfillCalls)}</dd>
-        </div>
-        <div>
-          <dt>Other local observations</dt>
-          <dd>{numberOrZero(coverage.otherObservedCalls)}</dd>
-        </div>
-        <div>
-          <dt>History sessions scanned</dt>
-          <dd>
-            {numberOrZero(coverage.scannedCodexSessionFiles)
-              + numberOrZero(coverage.scannedClaudeCodeSessionFiles)
-              + numberOrZero(coverage.scannedCursorSessions)}
-          </dd>
-        </div>
-      </dl>
-      <p>
-        Locally observed calls are recorded on this Mac from supported hooks and imported local
-        histories. They are not Codex or Claude account analytics; provider-reported runs use
-        separate metrics and are never added to this ranking.
-      </p>
-    </section>
+        <dl className="usageCoverageMetrics">
+          <div>
+            <dt>Hook observations</dt>
+            <dd>{numberOrZero(coverage.agentHookCalls)}</dd>
+          </div>
+          <div>
+            <dt>Codex history observations</dt>
+            <dd>{numberOrZero(coverage.codexSessionBackfillCalls)}</dd>
+          </div>
+          <div>
+            <dt>Claude Code history observations</dt>
+            <dd>{numberOrZero(coverage.claudeCodeSessionBackfillCalls)}</dd>
+          </div>
+          <div>
+            <dt>Cursor history observations</dt>
+            <dd>{numberOrZero(coverage.cursorSessionBackfillCalls)}</dd>
+          </div>
+          <div>
+            <dt>Other local observations</dt>
+            <dd>{numberOrZero(coverage.otherObservedCalls)}</dd>
+          </div>
+          <div>
+            <dt>History sessions scanned</dt>
+            <dd>
+              {numberOrZero(coverage.scannedCodexSessionFiles)
+                + numberOrZero(coverage.scannedClaudeCodeSessionFiles)
+                + numberOrZero(coverage.scannedCursorSessions)}
+            </dd>
+          </div>
+        </dl>
+        <p>
+          Locally observed calls are recorded on this Mac from supported hooks and imported local
+          histories. They are not Codex or Claude account analytics; provider-reported runs use
+          separate metrics and are never added to this ranking.
+        </p>
+      </section>
+    </div>
   );
 }
