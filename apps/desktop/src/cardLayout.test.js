@@ -951,7 +951,7 @@ test('rankings is an accessible top-level page separate from history', () => {
   assert.match(rankingsPageSource, /DashboardStatusNotice/);
   assert.match(
     rankingsPageSource,
-    /usageRankingControls[\s\S]*panelNotice notice[\s\S]*Top skills by calls/
+    /usageRankingControls[\s\S]*UsageCoverageDisclosure[\s\S]*Top skills by calls[\s\S]*Full ranking/
   );
   assert.doesNotMatch(
     rankingsPageSource,
@@ -995,13 +995,34 @@ test('rankings is an accessible top-level page separate from history', () => {
   assert.match(appSource, /<th scope="col">Rank<\/th>/);
   assert.match(appSource, /<th scope="col">Skill<\/th>/);
   assert.match(appSource, /<th scope="col">Calls<\/th>/);
+  assert.match(rankingsPageSource, /useState\(false\)/);
+  assert.match(rankingsPageSource, /aria-controls="usage-coverage-details"/);
+  assert.match(rankingsPageSource, /aria-expanded=\{expanded\}/);
+  assert.match(rankingsPageSource, /hidden=\{!expanded\}/);
+  assert.match(
+    rankingsPageSource,
+    /\{numberOrZero\(totalObservedCalls\)\} locally observed calls/
+  );
+  assert.match(rankingsPageSource, /\{expanded \? 'Hide coverage' : 'View coverage'\}/);
+  assert.match(rankingsPageSource, /Coverage or ranking refresh needs attention/);
+  assert.doesNotMatch(rankingsPageSource, /className="usageCoverageSummary"/);
   assert.match(rankingsPageSource, /Local data coverage/);
+  assert.match(
+    rankingsPageSource,
+    /Earliest \$\{formatOperationTimestamp\(earliest\)\} · Latest \$\{formatOperationTimestamp\(latest\)\}/
+  );
   assert.match(rankingsPageSource, /Hook observations/);
   assert.match(rankingsPageSource, /Codex history observations/);
   assert.match(rankingsPageSource, /Claude Code history observations/);
   assert.match(rankingsPageSource, /Cursor history observations/);
   assert.match(rankingsPageSource, /History sessions scanned/);
   assert.match(rankingsPageSource, /provider-reported runs/i);
+  assert.match(css, /\.usageCoverageToggle\s*\{[^}]*background:\s*transparent;/s);
+  assert.match(css, /\.usageCoverageDetails\[hidden\]\s*\{[^}]*display:\s*none;/s);
+  assert.match(
+    css,
+    /\.usageCoverageSummaryText\s*\{[^}]*flex-wrap:\s*wrap;/s
+  );
   assert.match(appSource, /<th scope="col">Last observed<\/th>/);
   assert.match(rankingsPageSource, /Sync histories/);
   assert.match(rankingsPageSource, /onSyncHistories/);
