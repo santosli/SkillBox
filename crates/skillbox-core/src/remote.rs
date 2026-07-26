@@ -511,6 +511,9 @@ fn install_github_remote_skill_inner(
                     .to_string(),
             );
         }
+        let deployment_target = compatibility
+            .as_ref()
+            .map(|report| report.target_root.clone());
         let remote_root = paths.remote_skills_root.join(&skill.name);
         let version_path = remote_root.join("versions").join(&installed_sha);
 
@@ -560,8 +563,7 @@ fn install_github_remote_skill_inner(
             return Err(error);
         }
 
-        let deployment = request
-            .target_root
+        let deployment = deployment_target
             .map(|target_root| deploy_skill(&skill.name, managed_root, target_root))
             .transpose()?;
 

@@ -6603,7 +6603,10 @@ fn install_github_root_skill_previews_installs_indexes_and_deploys_sanitized_wor
         fs::canonicalize(&version_path).unwrap()
     );
     let deployment = result.deployment.unwrap();
-    assert_eq!(deployment.target_root, target_root);
+    assert_eq!(
+        deployment.target_root,
+        fs::canonicalize(&target_root).unwrap()
+    );
     assert_eq!(
         fs::canonicalize(deployment.target_path).unwrap(),
         fs::canonicalize(remote_root.join("current")).unwrap()
@@ -6814,12 +6817,161 @@ tools:
         &managed_root,
     )
     .unwrap();
-    assert_eq!(result.deployment.as_ref().unwrap().target_root, target_root);
+    assert_eq!(
+        result.deployment.as_ref().unwrap().target_root,
+        fs::canonicalize(&target_root).unwrap()
+    );
     assert!(result.version_path.join("SKILL.md").exists());
     assert!(fs::symlink_metadata(result.deployment.unwrap().target_path)
         .unwrap()
         .file_type()
         .is_symlink());
+}
+
+#[test]
+fn install_github_alias_target_deploys_and_indexes_only_canonical_root() {
+    let root = temp_dir("install-github-canonical-alias-target");
+    let managed_root = root.join("SkillBox");
+    let canonical_root = root.join("shared/skills");
+    let alias_root = root.join("project/.agents/skills");
+    fs::create_dir_all(&canonical_root).unwrap();
+    fs::create_dir_all(alias_root.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&canonical_root, &alias_root).unwrap();
+    let workspace = add_workspace(
+        WorkspaceAddRequest {
+            path: alias_root.clone(),
+            kind: WorkspaceKind::User,
+        },
+        &managed_root,
+    )
+    .unwrap();
+    let canonical_root = fs::canonicalize(canonical_root).unwrap();
+    assert_eq!(workspace.canonical_path, canonical_root);
+    assert_eq!(workspace.profile_id, "custom-skill-md");
+    assert_eq!(workspace.root_key, "exact");
+
+    let remote = bare_remote_with_skill_content(
+        "install-github-canonical-alias-target-origin",
+        "demo",
+        "Demo skill",
+        "",
+    );
+    let _rewrite = github_repo_rewrite("acme", "install-github-canonical-alias-target", &remote);
+    let source_url = github_source_url("acme", "install-github-canonical-alias-target", "demo");
+    let preview = github_install_preview(&source_url, Some(alias_root.clone()), &managed_root);
+    let compatibility = preview.compatibility.as_ref().unwrap();
+    assert_eq!(compatibility.profile.id, "custom-skill-md");
+    assert_eq!(compatibility.root_key, "exact");
+    assert_eq!(compatibility.target_root, canonical_root);
+
+    let installed = install_github_remote_skill(
+        InstallGithubRemoteSkillRequest {
+            source_url,
+            target_root: Some(alias_root),
+            preview_id: Some(preview.preview_id),
+            confirm_warnings: false,
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+    let deployment = installed.deployment.unwrap();
+    assert_eq!(deployment.target_root, canonical_root);
+    assert_eq!(deployment.target_path, canonical_root.join("demo"));
+
+    let connection = open_database(&managed_paths(&managed_root).database_path).unwrap();
+    let (indexed_root, indexed_path): (String, String) = connection
+        .query_row(
+            "
+            SELECT target_root, target_path
+            FROM deployments
+            WHERE skill_name = 'demo'
+            ",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(indexed_root, canonical_root.to_string_lossy());
+    assert_eq!(indexed_path, canonical_root.join("demo").to_string_lossy());
+}
+
+#[test]
+fn install_github_alias_retarget_rejects_stale_preview_without_install_state() {
+    let root = temp_dir("install-github-alias-retarget");
+    let managed_root = root.join("SkillBox");
+    let first_root = root.join("shared-a/skills");
+    let second_root = root.join("shared-b/skills");
+    let alias_root = root.join("project/.agents/skills");
+    fs::create_dir_all(&first_root).unwrap();
+    fs::create_dir_all(&second_root).unwrap();
+    fs::create_dir_all(alias_root.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&first_root, &alias_root).unwrap();
+    for target_root in [&first_root, &second_root] {
+        let workspace = add_workspace(
+            WorkspaceAddRequest {
+                path: target_root.clone(),
+                kind: WorkspaceKind::User,
+            },
+            &managed_root,
+        )
+        .unwrap();
+        assert_eq!(workspace.profile_id, "custom-skill-md");
+        assert_eq!(workspace.root_key, "exact");
+    }
+
+    let remote = bare_remote_with_skill_content(
+        "install-github-alias-retarget-origin",
+        "demo",
+        "Demo skill",
+        "",
+    );
+    let _rewrite = github_repo_rewrite("acme", "install-github-alias-retarget", &remote);
+    let source_url = github_source_url("acme", "install-github-alias-retarget", "demo");
+    let preview = github_install_preview(&source_url, Some(alias_root.clone()), &managed_root);
+    assert_eq!(
+        preview.compatibility.as_ref().unwrap().target_root,
+        fs::canonicalize(&first_root).unwrap()
+    );
+
+    fs::remove_file(&alias_root).unwrap();
+    std::os::unix::fs::symlink(&second_root, &alias_root).unwrap();
+    let error = install_github_remote_skill(
+        InstallGithubRemoteSkillRequest {
+            source_url,
+            target_root: Some(alias_root),
+            preview_id: Some(preview.preview_id),
+            confirm_warnings: false,
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+    assert!(error.contains("Remote install preview is stale"));
+
+    let paths = managed_paths(&managed_root);
+    let remote_root = paths.remote_skills_root.join("demo");
+    assert!(!remote_root.join("versions").exists());
+    assert!(!remote_root.join("current").exists());
+    assert!(!remote_root.join("source.json").exists());
+    assert!(!first_root.join("demo").exists());
+    assert!(!second_root.join("demo").exists());
+    let connection = open_database(&paths.database_path).unwrap();
+    let indexed_skill = connection
+        .query_row("SELECT name FROM skills WHERE name = 'demo'", [], |row| {
+            row.get::<_, String>(0)
+        })
+        .optional()
+        .unwrap();
+    let indexed_deployment = connection
+        .query_row(
+            "SELECT skill_name FROM deployments WHERE skill_name = 'demo'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .unwrap();
+    assert_eq!(indexed_skill, None);
+    assert_eq!(indexed_deployment, None);
 }
 
 #[test]
@@ -7143,7 +7295,10 @@ fn install_github_remote_skill_deploys_to_target_root() {
     .unwrap();
 
     let deployment = result.deployment.unwrap();
-    assert_eq!(deployment.target_root, target_root);
+    assert_eq!(
+        deployment.target_root,
+        fs::canonicalize(&target_root).unwrap()
+    );
     assert!(fs::symlink_metadata(&deployment.target_path)
         .unwrap()
         .file_type()

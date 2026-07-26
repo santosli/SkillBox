@@ -58,6 +58,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 导入分组候选时，只对 primary source 执行备份、symlink 部署和 import-record 写入；additional sources 保持原状，避免隐式创建多个无法单独 revert 的 active imports。
 - remote skill 复制到 `~/.skillbox/remote-skills/<name>/versions/manual-<contentHash12>`，并更新 `current` symlink。
 - 如果用户选择 deploy back to source，先把原 runtime 目录移动到 `~/.skillbox/backups/imports/<name>-<contentHash12>`，再在原位置创建指向 managed target 的 symlink。
+- deploy back 是对已 review、完整 snapshot 相同的导入来源执行 ownership transfer，并通过 backup/import record 支持保守 revert；它不是普通 workspace deployment，不运行 runtime-profile compatibility preview。普通 deploy 和 GitHub install-to-target 仍必须通过 compatibility preview。
 - 写入 SQLite `skills`，必要时写入 `deployments`。
 - deploy back 成功后，为每个 imported skill 写一条 `import_records` active 记录，保存 source path、managed target、backup path 和 content hash，供后续 revert 使用。
 - 扫描 import candidates 时，只有 runtime skill 是指向 SkillBox managed root 的 symlink 时才显示为 imported；仅 content hash 已存在于 managed store 不代表该 runtime 位置仍被 SkillBox 管理。
@@ -167,7 +168,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
   warning 还需要 `--confirm-warnings`。
 - Rust CLI 执行 `undeploy <skill-name> --target <path>`。
 - 桌面详情页打开 Deploy workspace 弹窗，勾选 workspace 执行 deploy，取消已勾选 workspace 执行单 workspace remove/undeploy。
-- import workflow 选择 deploy back to source。
+- import workflow 的 deploy back to source 属于上文 Import Existing Skills 定义的 reviewed ownership transfer，不走本节的 compatibility preview。
 
 步骤：
 
