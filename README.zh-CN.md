@@ -12,7 +12,7 @@
 ![Rust](https://img.shields.io/badge/Rust-core-B7410E)
 ![Frontend](https://img.shields.io/badge/Frontend-React%20%2B%20Vite-61DAFB)
 
-![SkillBox dashboard](docs/screenshots/skillbox-dashboard-v041.jpg)
+![SkillBox dashboard](docs/screenshots/skillbox-dashboard.png)
 
 SkillBox 是一个 local-first 的 macOS 桌面应用，带 Rust core/CLI，用来管理基于 `SKILL.md` 的 skill 与能力包，同时避免把任一受支持的 agent runtime 当作唯一真相源。
 
@@ -22,7 +22,7 @@ SkillBox 是一个 local-first 的 macOS 桌面应用，带 Rust core/CLI，用�
 
 [![观看 SkillBox 宣传视频](docs/promo/skillbox-intro/skillbox-promo-poster.jpg)](docs/promo/skillbox-intro/skillbox-promo.mp4)
 
-30 秒快速了解 SkillBox：本地优先的 skill 管理、导入前审核、远程更新、使用历史和 GitHub 发布。
+30 秒快速了解 SkillBox：runtime-aware workspaces、写入前 review、按证据分类的 Calls、透明 coverage 和 local-first 部署。
 
 ## 为什么
 
@@ -37,27 +37,29 @@ SkillBox 是一个 local-first 的 macOS 桌面应用，带 Rust core/CLI，用�
 
 ## 截图
 
-![SkillBox skill detail](docs/screenshots/skillbox-skill-detail-v041.jpg)
+![SkillBox skill detail](docs/screenshots/skillbox-skill-detail.png)
 
 Dashboard 支持本地搜索、类型/更新/tag/favorite 过滤以及 grid/list 切换，并用状态优先的卡片展示结果。详情页集中展示 workspace 部署、调用统计、版本历史、source 绑定、rollback、标签、类型迁移和经审查的删除操作。
 
-![SkillBox workspaces](docs/screenshots/skillbox-workspaces-v041.jpg)
+![SkillBox workspaces](docs/screenshots/skillbox-workspaces.png)
 
 Workspaces 视图会按 profile 跟踪 Agents、Codex、Claude Code、Cursor 和 exact custom folder 的全局/项目局部 `SKILL.md` roots。可以按 workspace 名称、路径或 profile 搜索，并与 Global/Project 类型筛选组合使用。
 
-![SkillBox history](docs/screenshots/skillbox-history-v041.jpg)
+![SkillBox rankings](docs/screenshots/skillbox-rankings.png)
+
+Rankings 优先展示 Top skills 与完整排名。可展开的 coverage disclosure 会把 confirmed / 可辩护 inferred Calls 与低信号 History references 分开，并说明本机 provider scan 的统计边界，不把它包装成账户 analytics。
+
+![SkillBox ranking coverage](docs/screenshots/skillbox-rankings-coverage.png)
+
+![SkillBox history](docs/screenshots/skillbox-history.png)
 
 History 会分开展示 Calls、History references 和管理操作。独立的一级 Rankings 页面可查看 7 天、30 天或全部 **Calls**，并按 skill type（User、Remote、System）、Agent 或 Workspace 过滤。Calls 由本机 confirmed execution 与可辩护的 structured per-turn invocation 组成；reference 不增加 Calls，也不提升默认排名。同名普通/System skill 会保持独立，并在准备导入时使用该行实际观测到的来源。覆盖范围会展示 confirmed、inferred、reference totals、各自时间范围、保留的 provenance sources，以及最近一次 provider scan totals。
 
 `Sync histories` 会从 Codex、Claude Code 和 Cursor 导入可审计的 usage evidence，但不复制聊天正文。Codex user turn 中含绝对路径的 `<skill>` 块或 `[$skill](.../SKILL.md)` 属于 inferred Calls，而不是 provider-confirmed run；catalog、普通 prose、shell/tool payload 和 output 都会排除。Claude Code 原生 Skill tool/command attribution 在解析到真实 `SKILL.md` 后属于 confirmed。Cursor state 的 `context.cursorRules` 只是 reference。有界 Cursor agent transcript 中 assistant 对绝对本机 `SKILL.md` 的结构化 `Read` 属于 inferred Call，并按 transcript user turn + skill 去重。文件后来移动或删除时，经过安全词法边界校验的历史路径仍可作为审计 evidence，但绝不成为文件系统或部署权限；`ReadFile` 仅进入诊断，在语义完成 qualification 前不计 Calls。重复扫描保持幂等，更强 evidence 会升级同一 event 并保留 provenance。Codex 本地 stores 没有稳定的 provider-native run total，因此 Calls 是已知可能 undercount 的本机下界，不是账户 analytics。migration 不会自动重扫 history；用户显式 sync 时可以恢复或升级 evidence。
 
-![SkillBox managed store health](docs/screenshots/skillbox-settings-health-v041.jpg)
+![SkillBox GitHub install review](docs/screenshots/skillbox-github-install-review.png)
 
-Doctor 会检查 SQLite schema 与完整性、managed skills、deployments、workspaces 和 import backups。诊断是只读操作，清理 stale deployment records 需要用户显式执行 repair。
-
-![SkillBox import review](docs/screenshots/skillbox-import-review.jpg)
-
-Import review 让本地扫描结果保持显式可审查：候选项会先完成分类，然后 SkillBox 才会把它们复制进 managed store。多个 runtime root 中导入内容完全一致的副本会合并为一条 review 记录并保留所有来源位置，但本次只导入 primary，其他副本保持不变；脚本或资源不同的 skill 会继续分开显示。
+GitHub install 与 workspace deploy 都先 preview。SkillBox 会在写入 managed state 前展示文件变化和 runtime-profile compatibility；blocked target 无法继续，warning 需要显式确认。
 
 ## SkillBox 管什么
 

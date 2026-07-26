@@ -78,9 +78,11 @@ import {
   previewHistory,
   previewImportCandidates,
   previewPaths,
+  previewSkills,
   previewUsageRankings,
   previewUserSkillsGitChanges,
-  previewWorkspaces
+  previewWorkspaces,
+  publicPreviewRequested
 } from './previewData.js';
 import {
   normalizeRemoteSourceCandidates,
@@ -251,7 +253,10 @@ function normalizeImportRecord(record = {}) {
   };
 }
 
-const APP_DISPLAY_NAME = import.meta.env.DEV ? 'SkillBox Dev' : 'SkillBox';
+const publicPreview = import.meta.env.DEV
+  && !window.__TAURI_INTERNALS__
+  && publicPreviewRequested(window.location.search);
+const APP_DISPLAY_NAME = import.meta.env.DEV && !publicPreview ? 'SkillBox Dev' : 'SkillBox';
 
 export default function App() {
   const [skills, setSkills] = useState([]);
@@ -663,7 +668,7 @@ export default function App() {
       );
       setStatus('ready');
     } catch (scanError) {
-      setSkills([]);
+      setSkills(publicPreview ? previewSkills.map(normalizeSkill) : []);
       setWorkspaces(normalizeWorkspaces(previewWorkspaces));
       setPaths(previewPaths);
       setPreferences(readPreviewPreferences());
@@ -671,10 +676,25 @@ export default function App() {
       setUsageHooks(normalizeUsageHookStatuses(null));
       setRemoteSkillUpdates(normalizeRemoteSkillUpdates(null));
       setLastStatusCheckedAt('');
-      setIsFirstUse(true);
+      setIsFirstUse(!publicPreview);
+      if (publicPreview) {
+        setFavoriteNames(['release-helper', 'design-audit']);
+        setDashboardTagOverrides({
+          'release-helper': ['release'],
+          'docs-reviewer': ['docs'],
+          'design-audit': ['design', 'accessibility'],
+          'research-digest': ['research'],
+          'test-writer': ['testing'],
+          'local-notes-sync': ['sync']
+        });
+      }
       setSelectedName('');
       setError('');
-      setNotice(scanError.message || 'Browser preview is mocking an empty managed store.');
+      setNotice(
+        publicPreview
+          ? ''
+          : scanError.message || 'Browser preview is mocking an empty managed store.'
+      );
       setStatus('prototype');
     }
   }

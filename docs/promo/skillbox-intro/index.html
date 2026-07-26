@@ -478,7 +478,7 @@
         width: 100%;
         height: 336px;
         border-radius: 22px;
-        background: url("assets/skillbox-dashboard-card.png") 50% 50% / cover no-repeat;
+        background: url("assets/skillbox-skill-detail.png") 50% 24% / 118% auto no-repeat;
       }
 
       .evidence-chips {
@@ -504,6 +504,18 @@
       #scene-3 {
         z-index: 3;
         opacity: 0;
+      }
+
+      .workspace-shot {
+        width: 1040px;
+        height: 690px;
+        flex: 0 0 1040px;
+        border-radius: 32px;
+      }
+
+      .workspace-shot img {
+        object-position: 52% 40%;
+        transform: scale(1.08) translateZ(0);
       }
 
       .store-map {
@@ -626,14 +638,13 @@
       }
 
       .import-shot {
-        height: 590px;
+        height: 620px;
         border-radius: 30px;
       }
 
       .import-shot img {
-        object-position: 0% 50%;
-        transform-origin: left center;
-        transform: scale(1.04) translateZ(0);
+        object-position: 50% 48%;
+        transform: scale(1.08) translateZ(0);
       }
 
       .update-motif {
@@ -725,13 +736,13 @@
       }
 
       .card-detail-shot img {
-        object-position: 50% 45%;
-        transform: scale(1.12) translateZ(0);
+        object-position: 50% 34%;
+        transform: scale(1.08) translateZ(0);
       }
 
       .history-shot img {
-        object-position: 50% 34%;
-        transform: scale(1.16) translateZ(0);
+        object-position: 51% 38%;
+        transform: scale(1.08) translateZ(0);
       }
 
       .stat-callout {
@@ -853,17 +864,17 @@
       <audio
         id="narration"
         data-start="0.4"
-        data-duration="26.6"
+        data-duration="26.52"
         data-track-index="3"
-        src="assets/narration-v2.wav"
-        data-volume="0.74"
+        src="assets/narration-v3.wav"
+        data-volume="0.86"
       ></audio>
       <audio
         id="ambient-bed"
         data-start="0"
         data-duration="30"
         data-track-index="4"
-        src="assets/ambient-bed.wav"
+        src="assets/ambient-bed-v2.wav"
         data-volume="1"
       ></audio>
       <audio id="whoosh-1" data-start="4.42" data-duration="0.65" data-track-index="5" src="assets/transition-whoosh.wav" data-volume="0.8"></audio>
@@ -875,7 +886,7 @@
       <audio id="ui-click-safety" data-start="15.76" data-duration="0.09" data-track-index="6" src="assets/ui-click.wav" data-volume="0.75"></audio>
       <audio id="ui-click-usage" data-start="21.92" data-duration="0.09" data-track-index="6" src="assets/ui-click.wav" data-volume="0.75"></audio>
       <audio id="ui-click-cta" data-start="27.44" data-duration="0.09" data-track-index="6" src="assets/ui-click.wav" data-volume="0.75"></audio>
-      <audio id="cta-tail" data-start="26" data-duration="4" data-track-index="7" src="assets/cta-tail.wav" data-volume="1"></audio>
+      <audio id="cta-tail" data-start="26" data-duration="4" data-track-index="7" src="assets/cta-tail-v2.wav" data-volume="1"></audio>
       <div class="bg-grid" data-layout-ignore></div>
       <div class="ambient-line line-a" data-layout-ignore></div>
       <div class="ambient-line line-b" data-layout-ignore></div>
@@ -884,21 +895,21 @@
       <section id="scene-1" class="scene clip" data-start="0" data-duration="4.5" data-track-index="1">
         <div class="scene-content split">
           <div class="scene-copy">
-            <div class="eyebrow">Problem</div>
-            <h1>Your agent skills are scattered.</h1>
-            <p class="lead">Codex, Claude, project folders, remote installs.</p>
+            <div class="eyebrow">Local first</div>
+            <h1>One local home for agent skills.</h1>
+            <p class="lead">Keep the source of truth clear across every runtime.</p>
           </div>
           <div class="scatter-wrap" aria-label="Scattered skill cards">
             <div class="skill-card card-a">
-              <strong>open-source-readme</strong>
+              <strong>release-helper</strong>
               <span class="path">~/.codex/skills</span>
             </div>
             <div class="skill-card card-b">
-              <strong>frontend-design</strong>
+              <strong>design-audit</strong>
               <span class="path">~/.claude/skills</span>
             </div>
             <div class="skill-card card-c">
-              <strong>git-merge-to-main</strong>
+              <strong>test-writer</strong>
               <span class="path">project/.agents/skills</span>
             </div>
             <div class="connector conn-a"></div>
@@ -918,16 +929,16 @@
               <div class="logo-mark app-icon" role="img" aria-label="SkillBox app icon"></div>
               <h2>SkillBox</h2>
             </div>
-            <p class="lead">Manage agent skills across local runtimes.</p>
+            <p class="lead">Manage SKILL.md libraries across local runtimes.</p>
           </div>
           <div class="screenshot-frame browser-frame dashboard-shot" data-layout-allow-overflow>
-            <img src="assets/skillbox-dashboard.png" alt="SkillBox dashboard showing local skills" />
+            <img src="assets/skillbox-dashboard.png" alt="Current SkillBox dashboard showing Calls and History references" />
             <div class="dashboard-closeup" data-layout-allow-overflow>
               <div class="dashboard-card-visual" role="img" aria-label="SkillBox usage and update card close-up"></div>
               <div class="evidence-chips">
-                <span class="evidence-chip">Usage count</span>
+                <span class="evidence-chip">Calls</span>
+                <span class="evidence-chip">History references</span>
                 <span class="evidence-chip">Update state</span>
-                <span class="evidence-chip">Runtime target</span>
               </div>
             </div>
           </div>
@@ -937,27 +948,16 @@
       <section id="scene-3" class="scene clip" data-start="9" data-duration="5.5" data-track-index="1">
         <div class="scene-content split">
           <div class="scene-copy">
-            <div class="eyebrow">Local first</div>
-            <h2>One managed store. Deploy anywhere.</h2>
-            <p class="lead">SkillBox keeps durable state in <span class="path">~/.skillbox</span>, then deploys to runtime folders through symlinks.</p>
+            <div class="eyebrow">Runtime profiles</div>
+            <h2>Discover every supported root.</h2>
+            <p class="lead">Agents, Codex, Claude Code, Cursor, and exact custom <span class="path">SKILL.md</span> roots stay explicit.</p>
             <div class="chip-row">
-              <span class="chip blue">source of truth</span>
-              <span class="chip green">symlink deploy</span>
+              <span class="chip blue">profile-aware</span>
+              <span class="chip green">project + global</span>
             </div>
           </div>
-          <div class="store-map" aria-label="Managed store deployment map">
-            <div class="runtime r1">Codex<span class="path">~/.codex/skills</span></div>
-            <div class="runtime r2">Codex CLI<span class="path">~/.agents/skills</span></div>
-            <div class="runtime r3">Claude<span class="path">~/.claude/skills</span></div>
-            <div class="runtime r4">Projects<span class="path">./.agents/skills</span></div>
-            <div class="map-line ml1"></div>
-            <div class="map-line ml2"></div>
-            <div class="map-line ml3"></div>
-            <div class="map-line ml4"></div>
-            <div class="store-core">
-              <div class="path">~/.skillbox</div>
-              <p>managed store for local and remote skills</p>
-            </div>
+          <div class="screenshot-frame browser-frame workspace-shot" data-layout-allow-overflow>
+            <img src="assets/skillbox-workspaces.png" alt="SkillBox Workspaces showing runtime profiles, scope, roots, Calls, and History references" />
           </div>
         </div>
       </section>
@@ -966,24 +966,24 @@
         <div class="scene-content split">
           <div class="scene-copy">
             <div class="eyebrow">Safety</div>
-            <h2>Review before import. Preview before update.</h2>
-            <p class="lead">Runtime folders, GitHub URLs, and existing skills are treated as untrusted input.</p>
+            <h2>Review before write.</h2>
+            <p class="lead">Preview GitHub files and runtime compatibility before managed state or deployment changes.</p>
             <div class="safety-panel">
-              <div class="safety-row"><span class="check-dot"></span> classify before copying</div>
-              <div class="safety-row"><span class="check-dot"></span> preview remote diffs</div>
-              <div class="safety-row"><span class="check-dot"></span> roll back versions</div>
+              <div class="safety-row"><span class="check-dot"></span> preview incoming files</div>
+              <div class="safety-row"><span class="check-dot"></span> check runtime profile</div>
+              <div class="safety-row"><span class="check-dot"></span> confirm warnings</div>
             </div>
           </div>
           <div class="review-stack">
             <div class="screenshot-frame import-shot" data-layout-allow-overflow>
-              <img src="assets/skillbox-import-review-crop.png" alt="SkillBox import review dialog" />
+              <img src="assets/skillbox-github-install-review.png" alt="SkillBox GitHub install review with file diff and compatibility warning" />
             </div>
             <div class="update-motif">
               <div>
-                <strong>Remote update ready to review</strong>
-                <span>Preview changes before applying.</span>
+                <strong>Compatibility checked before install</strong>
+                <span>Blocked targets stop. Warnings require confirmation.</span>
               </div>
-              <div class="review-button">Review update</div>
+              <div class="review-button">Review install</div>
             </div>
           </div>
         </div>
@@ -993,18 +993,18 @@
         <div class="scene-content column">
           <div class="usage-layout">
             <div>
-              <div class="eyebrow">Maintenance</div>
-              <h2>Know what is used. Keep skills current.</h2>
+              <div class="eyebrow">Local evidence</div>
+              <h2>Calls and references stay separate.</h2>
               <div class="screenshot-frame card-detail-shot" data-layout-allow-overflow>
-                <img src="assets/skillbox-dashboard-card.png" alt="SkillBox card showing usage count" />
+                <img src="assets/skillbox-skill-detail.png" alt="SkillBox detail showing Calls and History references" />
               </div>
               <div class="stat-callout">
-                <strong>8 calls</strong>
-                <span>Usage stats from supported agent hooks.</span>
+                <strong>Calls</strong>
+                <span>Confirmed + defensible inferred local evidence.</span>
               </div>
             </div>
             <div class="screenshot-frame browser-frame history-shot" data-layout-allow-overflow>
-              <img src="assets/skillbox-history.png" alt="SkillBox history showing skill calls and operations" />
+              <img src="assets/skillbox-rankings-coverage.png" alt="SkillBox Rankings with expanded confirmed, inferred, and reference coverage" />
             </div>
           </div>
         </div>
@@ -1017,7 +1017,7 @@
             <h1>SkillBox</h1>
           </div>
           <h2 class="final-action">Get SkillBox on GitHub</h2>
-          <p class="cta-copy">Local skill management for agent builders.</p>
+          <p class="cta-copy">Review first. Keep your source of truth local.</p>
           <div class="chip-row">
             <span class="chip blue">macOS</span>
             <span class="chip green">open source</span>
@@ -1115,9 +1115,8 @@
       tl.from("#scene-3 h2", { x: -54, opacity: 0, duration: 0.62, ease: "expo.out" }, 9.44);
       tl.from("#scene-3 .lead", { y: 40, opacity: 0, duration: 0.54, ease: "power3.out" }, 9.74);
       tl.from("#scene-3 .chip", { y: 22, opacity: 0, duration: 0.38, stagger: 0.08, ease: "back.out(1.3)" }, 10.1);
-      tl.from(".store-core", { scale: 0.78, opacity: 0, duration: 0.62, ease: "elastic.out(1, 0.7)" }, 9.62);
-      tl.from(".runtime", { y: 42, opacity: 0, duration: 0.5, stagger: 0.09, ease: "power2.out" }, 10.12);
-      tl.from(".map-line", { scaleX: 0, opacity: 0, duration: 0.48, stagger: 0.06, ease: "power4.out" }, 10.58);
+      tl.from(".workspace-shot", { x: 72, scale: 0.94, opacity: 0, duration: 0.72, ease: "power3.out" }, 9.62);
+      tl.to(".workspace-shot", { scale: 1.025, duration: 1.3, ease: "sine.inOut" }, 11.2);
 
       tl.from("#scene-4 .eyebrow", { y: 26, opacity: 0, duration: 0.4, ease: "power2.out" }, 14.8);
       tl.from("#scene-4 h2", { x: -50, opacity: 0, duration: 0.62, ease: "expo.out" }, 14.98);

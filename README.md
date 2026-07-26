@@ -12,7 +12,7 @@ English | [简体中文](README.zh-CN.md)
 ![Rust](https://img.shields.io/badge/Rust-core-B7410E)
 ![Frontend](https://img.shields.io/badge/Frontend-React%20%2B%20Vite-61DAFB)
 
-![SkillBox dashboard](docs/screenshots/skillbox-dashboard-v041.jpg)
+![SkillBox dashboard](docs/screenshots/skillbox-dashboard.png)
 
 SkillBox is a local-first macOS desktop app with a Rust core and CLI for managing `SKILL.md`-based skill and capability packages without treating any supported agent runtime as the source of truth.
 
@@ -22,7 +22,7 @@ Current release: `v0.6.1`. SkillBox is useful today for local skill management, 
 
 [![Watch the SkillBox promo video](docs/promo/skillbox-intro/skillbox-promo-poster.jpg)](docs/promo/skillbox-intro/skillbox-promo.mp4)
 
-A 30-second overview of SkillBox: local-first skill management, review-before-import, remote updates, usage history, and GitHub-backed releases.
+A 30-second overview of SkillBox: runtime-aware workspaces, review-before-write safety, evidence-aware Calls, transparent coverage, and local-first deployment.
 
 ## Why
 
@@ -37,27 +37,29 @@ A 30-second overview of SkillBox: local-first skill management, review-before-im
 
 ## Screenshots
 
-![SkillBox skill detail](docs/screenshots/skillbox-skill-detail-v041.jpg)
+![SkillBox skill detail](docs/screenshots/skillbox-skill-detail.png)
 
 The dashboard provides local search, type/update/tag/favorite filters, grid and list views, and status-focused cards. The skill detail view collects workspace deployment, usage, version history, source binding, rollback, tags, type changes, and reviewed deletion in one place.
 
-![SkillBox workspaces](docs/screenshots/skillbox-workspaces-v041.jpg)
+![SkillBox workspaces](docs/screenshots/skillbox-workspaces.png)
 
 The Workspaces view tracks profile-aware global and project-local `SKILL.md` roots for Agents, Codex, Claude Code, Cursor, and exact custom folders. Search by workspace name, path, or profile and combine the query with the existing scope filters.
 
-![SkillBox history](docs/screenshots/skillbox-history-v041.jpg)
+![SkillBox rankings](docs/screenshots/skillbox-rankings.png)
+
+Rankings keeps Top skills and the full ranking primary. Its optional coverage disclosure separates confirmed and defensible inferred Calls from lower-signal History references, and reports the local provider scan boundary without presenting account analytics.
+
+![SkillBox ranking coverage](docs/screenshots/skillbox-rankings-coverage.png)
+
+![SkillBox history](docs/screenshots/skillbox-history.png)
 
 History separates Calls, history references, and management operations. The standalone Rankings page shows 7-day, 30-day, or all-time **Calls** filtered by skill type (User, Remote, or System), Agent, or Workspace. Calls combine locally confirmed executions with defensible structured per-turn invocations; references never increase Calls or default ranking order. Rankings keep same-name regular and System skills separate and use the observed source when preparing an import. Coverage reports confirmed, inferred, and reference totals, their time ranges, retained provenance sources, and the latest provider scan totals.
 
 `Sync histories` imports auditable usage evidence from Codex, Claude Code, and Cursor without copying chat bodies. Codex per-turn `<skill>` blocks or `[$skill](.../SKILL.md)` links with an absolute path are inferred Calls, not provider-confirmed runs; catalog entries, prose, shell/tool payloads, and outputs are excluded. Claude Code native Skill tool/command attribution is confirmed after resolving a real `SKILL.md`. Cursor state `context.cursorRules` entries are references. A structured assistant `Read` of an absolute local `SKILL.md` in a bounded Cursor agent transcript is an inferred Call, deduplicated once per transcript user turn and skill. Safe historical paths remain auditable after the file is moved or deleted, but never become filesystem or deployment authority; `ReadFile` candidates are reported diagnostically and excluded from Calls until their semantics are qualified. Repeated scans are idempotent and stronger evidence upgrades an existing event without losing provenance. Codex local stores do not expose a stable provider-native run total, so local Calls remain a known undercount rather than account analytics. An explicit sync can recover or upgrade evidence; database migration itself does not rescan histories.
 
-![SkillBox managed store health](docs/screenshots/skillbox-settings-health-v041.jpg)
+![SkillBox GitHub install review](docs/screenshots/skillbox-github-install-review.png)
 
-Doctor checks the SQLite schema and integrity, managed skills, deployments, workspaces, and import backups. Diagnostics are read-only; stale deployment records require an explicit repair action.
-
-![SkillBox import review](docs/screenshots/skillbox-import-review.jpg)
-
-Import review keeps local scans explicit: candidates are classified before SkillBox copies them into the managed store. Copies with identical imported contents across multiple runtime roots are grouped into one review row while retaining every source location for review; only the primary source is imported, other copies remain unchanged, and skills with different scripts or assets remain separate.
+GitHub installs and workspace deployments use a preview-first flow. SkillBox shows incoming file changes and runtime-profile compatibility before writing managed state; blocked targets cannot proceed, and warnings require explicit confirmation.
 
 ## What SkillBox Manages
 

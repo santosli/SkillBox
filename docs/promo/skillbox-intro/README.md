@@ -1,8 +1,10 @@
 # SkillBox Intro Promo
 
-Source for the approved 30-second horizontal SkillBox promotional video.
+Source for the 30-second horizontal SkillBox promotional video refreshed for the v0.6.1 product surface.
 
-The composition is a HyperFrames HTML artifact. It introduces the SkillBox problem/solution arc: scattered agent skills, product reveal, managed local store, review/update safety, usage/history, and GitHub CTA.
+The composition is a HyperFrames HTML artifact. It introduces one local home for agent skills, runtime-profile-aware Workspaces, reviewed GitHub installs and deployment compatibility, evidence-aware Calls with separate History references, and the GitHub CTA.
+
+All product screenshots come from the deterministic browser preview fixture. They contain generic paths, skill names, and counts rather than local user data.
 
 ## Preview
 
@@ -15,10 +17,14 @@ Open the Studio URL reported by the command for the `skillbox-intro` project.
 ## Render
 
 ```sh
-npx hyperframes render --output /tmp/skillbox-promo-v3.mp4 --quality high
+npx hyperframes render --output /tmp/skillbox-promo-v061-render.mp4 --quality high
+ffmpeg -i /tmp/skillbox-promo-v061-render.mp4 \
+  -c:v copy -af loudnorm=I=-16:TP=-1:LRA=11 \
+  -c:a aac -b:a 192k -ar 48000 -t 30 \
+  /tmp/skillbox-promo-v061.mp4
 ```
 
-The render command writes the review output to `/tmp/skillbox-promo-v3.mp4`.
+The first command renders the deterministic composition. The second normalizes the public audio master and writes `/tmp/skillbox-promo-v061.mp4`.
 
 The public README uses these committed media files from this folder:
 
@@ -35,16 +41,15 @@ Current verification commands:
 npx hyperframes lint
 npx hyperframes validate
 npx hyperframes inspect --json
-ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height,r_frame_rate,duration -of default=noprint_wrappers=1 /tmp/skillbox-promo-v3.mp4
-ffprobe -v error -select_streams a:0 -show_entries stream=codec_name,channels,sample_rate,duration -of default=noprint_wrappers=1 /tmp/skillbox-promo-v3.mp4
-ffmpeg -hide_banner -nostats -i /tmp/skillbox-promo-v3.mp4 -af volumedetect -f null -
-ffmpeg -hide_banner -nostats -i /tmp/skillbox-promo-v3.mp4 -af silencedetect=noise=-45dB:d=0.5 -f null -
+ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height,r_frame_rate,duration -of default=noprint_wrappers=1 /tmp/skillbox-promo-v061.mp4
+ffprobe -v error -select_streams a:0 -show_entries stream=codec_name,channels,sample_rate,duration -of default=noprint_wrappers=1 /tmp/skillbox-promo-v061.mp4
+ffmpeg -hide_banner -nostats -i /tmp/skillbox-promo-v061.mp4 -af loudnorm=I=-16:TP=-1:LRA=11:print_format=summary -f null -
+ffmpeg -hide_banner -nostats -i /tmp/skillbox-promo-v061.mp4 -af silencedetect=noise=-45dB:d=0.5 -f null -
 ```
 
-Known accepted lint warnings:
+Known accepted lint warning:
 
-- `gsap_studio_edit_blocked`: the composition intentionally uses a registered GSAP timeline for deterministic rendered animation. Removing timeline ownership would break the HyperFrames animation contract and the approved motion.
-- `composition_file_too_large`: this is a single 30-second promo composition. Splitting into sub-compositions would be a larger refactor after visual approval and is not needed for this packaged candidate.
+- `composition_file_too_large`: this is a single 30-second promo composition with one registered deterministic GSAP timeline. Splitting it into sub-compositions would add cross-file timing ownership without improving the public artifact, so the source remains intentionally self-contained.
 
 Animation map status:
 

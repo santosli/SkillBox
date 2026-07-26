@@ -19,8 +19,12 @@ for (const [from, to] of [
   ["skillbox-promo.mp4", "skillbox-promo.mp4"],
   ["skillbox-promo-poster.jpg", "skillbox-promo-poster.jpg"],
   ["assets/skillbox-dashboard.png", "skillbox-dashboard.png"],
-  ["assets/skillbox-import-review-crop.png", "skillbox-import-review-crop.png"],
+  ["assets/skillbox-workspaces.png", "skillbox-workspaces.png"],
+  ["assets/skillbox-rankings.png", "skillbox-rankings.png"],
+  ["assets/skillbox-rankings-coverage.png", "skillbox-rankings-coverage.png"],
   ["assets/skillbox-history.png", "skillbox-history.png"],
+  ["assets/skillbox-skill-detail.png", "skillbox-skill-detail.png"],
+  ["assets/skillbox-github-install-review.png", "skillbox-github-install-review.png"],
   ["assets/skillbox-app-icon.png", "skillbox-app-icon.png"]
 ]) {
   await cp(path.join(promo, from), path.join(assets, to));
