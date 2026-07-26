@@ -46,7 +46,8 @@ managed store 是跨 agent 的真相源，不绑定 Codex、Claude、Cursor、Co
 - 已存在的数据库进入新 schema migration 前，通过 SQLite 一致性快照生成一次 `pre-migration` backup；同一 schema version 不重复备份。初始化会先获取 per-database process-safe migration lock，再判断是否需要 backup/migration，确保并发 desktop/CLI caller 只生成一份 backup 并执行一次有序迁移。
 - 一个有效 skill 目录必须包含 `SKILL.md`。
 - workspace 表记录 skills 所在工程目录或 runtime skills root，用于后续部署目标选择；workspace path 指向
-  `.../.agents/skills`、`.../.codex/skills` 或 `.../.claude/skills` 这类 skills root，而不是单个 skill 目录。
+  `.../.agents/skills`、`.../.codex/skills`、`.../.claude/skills`、
+  `.../.cursor/skills` 或手动登记的 exact `SKILL.md` root，而不是单个 skill 目录。
 - 整体删除 skill 时只清理 `skills`、该 skill 的 `deployments`、`skill_user_metadata` 和 remote update cache 中的当前状态；保留 `workspaces`、`operations`、usage history 以及已结束的 import history。存在 active import record 时拒绝删除。
 
 当前实现仍以 `SKILL.md` 目录作为可读写单位。Claude、OpenClaw、Cursor、Claude Code、Copilot 等 agent 可能使用不同的原生文件格式；
@@ -144,6 +145,9 @@ workspaces
   kind TEXT NOT NULL
   source TEXT NOT NULL
   agent_id TEXT
+  profile_id TEXT NOT NULL DEFAULT 'custom-skill-md'
+  root_key TEXT NOT NULL DEFAULT 'exact'
+  format TEXT NOT NULL DEFAULT 'skill_md'
   display_name TEXT NOT NULL
   skill_count INTEGER NOT NULL DEFAULT 0
   imported_skill_count INTEGER NOT NULL DEFAULT 0
@@ -212,7 +216,7 @@ skill_user_metadata
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 ```
 
-`schema_migrations` 是 Rust schema 的唯一版本历史。migration 按 version 顺序在独立 transaction 中执行；已有数据库在首次执行待处理 migration 前生成一致性 backup，全部 migration 完成后运行 SQLite integrity check。新建空数据库不生成 backup。backup decision 和 migration application 由同一个进程安全文件锁串行化，锁随文件句柄释放，即使进程异常退出也不会留下永久锁状态。
+`schema_migrations` 是 Rust schema 的唯一版本历史。migration 按 version 顺序在独立 transaction 中执行；已有数据库在首次执行待处理 migration 前生成一致性 backup，全部 migration 完成后运行 SQLite integrity check。新建空数据库不生成 backup。backup decision 和 migration application 由同一个进程安全文件锁串行化，锁随文件句柄释放，即使进程异常退出也不会留下永久锁状态。schema v6 增加 workspace runtime profile identity，并按 component suffix backfill：`.agents/skills` -> `agents`、`.codex/skills` -> `codex`、`.claude/skills` -> `claude-code`、`.cursor/skills` -> `cursor`；其它已登记 root -> `custom-skill-md`。全部现有 row 使用 `format=skill_md`，不要求重新 scan。
 
 `skill_user_metadata` 保存用户显式设置的 favorite 和 tags。桌面首次读取该表时会把旧 `localStorage` 中仍存在的 metadata 通过 `INSERT OR IGNORE` 迁入，因此 SQLite 中已有值不会被旧浏览器状态覆盖；迁移成功后删除旧 key。
 
@@ -227,7 +231,23 @@ plugin 校验 updater asset 签名。后三者分别保存最近一次 Codex、C
 usage history sync 扫描的 rollout/project JSONL 文件数或 composer session 数，作为操作覆盖信息；
 它们不随 Rankings 的时间、skill type、Agent 或 Workspace 过滤器变化。
 
-`workspaces.display_name` 由 path 推导：home-level global roots 使用 agent 名（例如 `Codex`、`Claude`），项目局部 roots 使用项目目录名（例如 `demo-vault`）。`global` / `user` 不拼进名称，由 `kind` 字段表达。`imported_skill_count` 使用 import candidate 的同一套 imported 判定：workspace skill 必须是指向 SkillBox managed root 的 symlink；仅内容 hash 匹配 managed store 不再表示该 runtime 位置仍被 SkillBox 管理。
+`workspaces.profile_id/root_key/format` 是 deployment target identity。registry v1
+包含 `agents`、`codex`、`claude-code`、`cursor` 和
+`custom-skill-md`；built-in roots 使用 `root_key=skills`，手动 exact root 使用
+`root_key=exact`。`agent_id` 暂时保留供旧数据库/调用方兼容，不能替代 profile，也不与
+usage event 的 `agent_id` 合并。`workspaces.display_name` 由 path 推导：home-level
+global roots 使用 profile 名，项目局部 roots 使用项目目录名（例如
+`demo-vault`）。`global` / `user` 不拼进名称，由 `kind` 字段表达。
+`imported_skill_count` 使用 import candidate 的同一套 imported 判定：workspace
+skill 必须是指向 SkillBox managed root 的 symlink；仅内容 hash 匹配 managed store
+不再表示该 runtime 位置仍被 SkillBox 管理。
+
+Runtime profile registry 不存为用户可编辑 JSON。profile 声明 roots、precedence、
+`skill_md` format、frontmatter policy 和当前 `symlink` deployment mode。
+compatibility preview 是派生的只读结果，不另建持久表；其 `preview_id` 绑定 skill
+完整目录 snapshot、target canonical path/state、profile registry version、
+`profile_id/root_key/format` 和 deployment mode。unknown optional frontmatter
+保留在原始 `SKILL.md` 中并返回 warning，compatibility engine 不 rewrite source。
 
 `operations` 记录会改变用户 skill 内容、managed store、runtime、Git state、workspace registry 或 hook 配置的主要动作。Rust core 统一写入，UI 只能读取展示或通过结构化命令触发新记录；记录从 UI 视角 append-only，MVP 不做自动清理。`payload_json` 保存操作细节，例如 from/to version、changed paths、backup path、affected deployments、commit SHA 或失败恢复状态，但不保存 Git credentials 或 hook 配置正文。低风险 UI metadata、自动 cache/index refresh 和纯读取操作不写 operation history。
 
@@ -280,11 +300,15 @@ deployments
 
 当前已实现的 `workspaces` registry 是 `runtime_targets` 的前置模型：
 
-- `kind=global` 表示 agent 自带或 home-level skills root，例如 `~/.codex/skills`、`~/.agents/skills`、`~/.claude/skills`。
+- `kind=global` 表示 home-level skills root，例如 `~/.agents/skills`、
+  `~/.codex/skills`、`~/.claude/skills`、`~/.cursor/skills`。
 - `kind=user` 表示用户项目局部 skills root，例如 `<project>/.agents/skills`。
 - `source=auto` 表示由 scan 自动发现；`source=manual` 表示用户显式添加。
 - `source=manual` 可以来自现有 skills-root 注册，也可以来自 desktop workspace setup 的 preview-confirmed project-local root 初始化。UI 的 `Project` 仍写入 `kind=user`，因此不改变现有 enum 或 schema。
-- 初始化只允许 `<project>/.agents/skills`、`<project>/.codex/skills`、`<project>/.claude/skills`；preview 不写磁盘，apply 每次最多创建一个选中的 root。删除 manual workspace 只删除 registry 记录，不删除文件。
+- 初始化只允许 registry v1 的 `<project>/.agents/skills`、
+  `<project>/.codex/skills`、`<project>/.claude/skills`、
+  `<project>/.cursor/skills`；preview 不写磁盘，apply 每次最多创建一个选中的
+  root。删除 manual workspace 只删除 registry 记录，不删除文件。
 - `canonical_path` 用于去重，`path` 保留展示路径。
 
 Node MVP 旧表差异：

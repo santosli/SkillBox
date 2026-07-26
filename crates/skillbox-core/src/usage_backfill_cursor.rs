@@ -514,8 +514,8 @@ fn cursor_runtime_roots<'a>(
 ) -> Vec<PathBuf> {
     let mut roots = runtime_roots_under(home);
     for workspace in workspaces {
-        for runtime_parent in [".agents", ".codex", ".claude", ".cursor"] {
-            roots.push(workspace.join(runtime_parent).join("skills"));
+        for (_, root) in project_runtime_roots() {
+            roots.push(workspace.join(root.relative_path));
         }
         roots.push(workspace.join(".cursor").join("rules"));
     }

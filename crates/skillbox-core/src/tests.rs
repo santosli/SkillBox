@@ -47,6 +47,53 @@ version: 0.1.0
 }
 
 #[test]
+fn structured_frontmatter_preserves_unknown_optional_fields() {
+    let document = parse_skill_frontmatter_document(
+        "---
+name: demo
+description: Demo
+allowed-tools:
+  - Bash
+metadata:
+  owner: example
+---
+",
+    )
+    .expect("frontmatter should parse");
+
+    assert_eq!(document.metadata.name, "demo");
+    assert_eq!(
+        document.unknown_fields,
+        vec!["allowed-tools".to_string(), "metadata".to_string()]
+    );
+    assert!(document.fields.contains_key("allowed-tools"));
+    assert!(document.fields.contains_key("metadata"));
+}
+
+#[test]
+fn structured_frontmatter_rejects_malformed_or_typed_known_fields() {
+    assert!(parse_skill_frontmatter_document(
+        "---
+name: [demo
+---
+"
+    )
+    .unwrap_err()
+    .starts_with("Invalid SKILL.md frontmatter:"));
+    assert_eq!(
+        parse_skill_frontmatter_document(
+            "---
+name:
+  - demo
+---
+"
+        )
+        .unwrap_err(),
+        "SKILL.md frontmatter field 'name' must be a string."
+    );
+}
+
+#[test]
 fn database_initialization_configures_busy_timeout_and_wal() {
     let source = include_str!("db.rs");
 
@@ -76,7 +123,8 @@ fn database_initialization_records_ordered_schema_migrations() {
             (2, "legacy_compatibility".to_string()),
             (3, "skill_user_metadata".to_string()),
             (4, "skill_usage_ranking_indexes".to_string()),
-            (5, "canonical_usage_agent_ids".to_string())
+            (5, "canonical_usage_agent_ids".to_string()),
+            (6, "runtime_profiles".to_string())
         ]
     );
     assert_eq!(
@@ -86,6 +134,11 @@ fn database_initialization_records_ordered_schema_migrations() {
     assert!(table_column_names(&connection, "skill_user_metadata")
         .unwrap()
         .contains(&"tags_json".to_string()));
+    for column in ["profile_id", "root_key", "format"] {
+        assert!(table_column_names(&connection, "workspaces")
+            .unwrap()
+            .contains(&column.to_string()));
+    }
     for index in [
         "skill_usage_events_rank_time",
         "skill_usage_events_rank_agent_time",
@@ -101,6 +154,109 @@ fn database_initialization_records_ordered_schema_migrations() {
             .unwrap();
         assert!(exists, "missing ranking index {index}");
     }
+}
+
+#[test]
+fn runtime_profile_migration_backfills_canonical_and_custom_workspace_roots() {
+    let root = temp_dir("runtime-profile-backfill");
+    let managed_root = root.join("SkillBox");
+    fs::create_dir_all(&managed_root).unwrap();
+    let database_path = managed_root.join("skillbox.sqlite");
+    let connection = rusqlite::Connection::open(&database_path).unwrap();
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE schema_migrations (
+              version INTEGER PRIMARY KEY,
+              name TEXT NOT NULL,
+              applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO schema_migrations (version, name) VALUES
+              (1, 'baseline'),
+              (2, 'legacy_compatibility'),
+              (3, 'skill_user_metadata'),
+              (4, 'skill_usage_ranking_indexes'),
+              (5, 'canonical_usage_agent_ids');
+            CREATE TABLE workspaces (
+              canonical_path TEXT PRIMARY KEY,
+              path TEXT NOT NULL,
+              kind TEXT NOT NULL,
+              source TEXT NOT NULL,
+              agent_id TEXT,
+              display_name TEXT NOT NULL,
+              skill_count INTEGER NOT NULL DEFAULT 0,
+              imported_skill_count INTEGER NOT NULL DEFAULT 0,
+              last_scan_error_count INTEGER NOT NULL DEFAULT 0,
+              last_scan_error TEXT,
+              last_scanned_at TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO workspaces (
+              canonical_path, path, kind, source, agent_id, display_name
+            ) VALUES
+              ('/tmp/project/.agents/skills', '/tmp/project/.agents/skills', 'user', 'manual', 'agents', 'Agents'),
+              ('/tmp/project/.codex/skills', '/tmp/project/.codex/skills', 'user', 'manual', 'codex', 'Codex'),
+              ('/tmp/project/.claude/skills', '/tmp/project/.claude/skills', 'user', 'manual', 'claude', 'Claude'),
+              ('/tmp/project/.cursor/skills', '/tmp/project/.cursor/skills', 'user', 'manual', 'cursor', 'Cursor'),
+              ('/tmp/custom-skills', '/tmp/custom-skills', 'user', 'manual', NULL, 'Custom');
+            ",
+        )
+        .unwrap();
+    drop(connection);
+
+    let mut connection = rusqlite::Connection::open(&database_path).unwrap();
+    run_database_migrations(&mut connection).unwrap();
+    let rows = connection
+        .prepare("SELECT path, profile_id, root_key, format FROM workspaces ORDER BY path")
+        .unwrap()
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })
+        .unwrap()
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .unwrap();
+
+    assert_eq!(
+        rows,
+        vec![
+            (
+                "/tmp/custom-skills".to_string(),
+                "custom-skill-md".to_string(),
+                "exact".to_string(),
+                "skill_md".to_string(),
+            ),
+            (
+                "/tmp/project/.agents/skills".to_string(),
+                "agents".to_string(),
+                "skills".to_string(),
+                "skill_md".to_string(),
+            ),
+            (
+                "/tmp/project/.claude/skills".to_string(),
+                "claude-code".to_string(),
+                "skills".to_string(),
+                "skill_md".to_string(),
+            ),
+            (
+                "/tmp/project/.codex/skills".to_string(),
+                "codex".to_string(),
+                "skills".to_string(),
+                "skill_md".to_string(),
+            ),
+            (
+                "/tmp/project/.cursor/skills".to_string(),
+                "cursor".to_string(),
+                "skills".to_string(),
+                "skill_md".to_string(),
+            ),
+        ]
+    );
 }
 
 #[test]
@@ -171,7 +327,10 @@ fn schema_v4_ranking_index_migration_preserves_usage_events() {
     ensure_managed_layout(&managed_root).unwrap();
 
     let connection = rusqlite::Connection::open(&paths.database_path).unwrap();
-    assert_eq!(current_database_schema_version(&connection).unwrap(), 5);
+    assert_eq!(
+        current_database_schema_version(&connection).unwrap(),
+        LATEST_DATABASE_SCHEMA_VERSION
+    );
     let event_count: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM skill_usage_events WHERE id = 'usage-before-v4'",
@@ -4181,6 +4340,383 @@ fn imports_user_skill_and_deploys_symlink() {
 }
 
 #[test]
+fn deployment_compatibility_preview_is_read_only_and_apply_requires_fresh_confirmation() {
+    let root = temp_dir("deployment-compatibility");
+    let source = root.join("source").join("demo");
+    let managed_root = root.join("SkillBox");
+    let target_root = root.join("project/.codex/skills");
+    fs::create_dir_all(&target_root).unwrap();
+    fs::create_dir_all(&source).unwrap();
+    fs::write(
+        source.join("SKILL.md"),
+        "---
+name: demo
+description: Demo skill
+optional-runtime-field: preserved
+---
+# Demo
+",
+    )
+    .unwrap();
+    fs::write(source.join("asset.txt"), "before").unwrap();
+    import_skill(&source, SkillKind::User, &managed_root).unwrap();
+    let workspace = add_workspace(
+        WorkspaceAddRequest {
+            path: target_root.clone(),
+            kind: WorkspaceKind::User,
+        },
+        &managed_root,
+    )
+    .unwrap();
+    assert_eq!(workspace.profile_id, "codex");
+
+    let preview = preview_skill_deployment(
+        DeploymentCompatibilityPreviewRequest {
+            skill_name: "demo".to_string(),
+            target_root: target_root.clone(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+    assert_eq!(preview.status, CompatibilityStatus::Warnings);
+    assert_eq!(preview.profile.id, "codex");
+    assert_eq!(preview.root_key, "skills");
+    assert_eq!(preview.issues.len(), 1);
+    assert_eq!(preview.issues[0].code, "unknown_optional_frontmatter");
+    assert!(!target_root.join("demo").exists());
+
+    let warning_error = apply_skill_deployment(
+        DeploymentCompatibilityApplyRequest {
+            skill_name: "demo".to_string(),
+            target_root: target_root.clone(),
+            preview_id: preview.preview_id.clone(),
+            confirm_warnings: false,
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+    assert!(warning_error.contains("Confirm the warnings"));
+    assert!(!target_root.join("demo").exists());
+
+    fs::write(
+        managed_root.join("user-skills/demo/asset.txt"),
+        "changed after preview",
+    )
+    .unwrap();
+    let stale_error = apply_skill_deployment(
+        DeploymentCompatibilityApplyRequest {
+            skill_name: "demo".to_string(),
+            target_root: target_root.clone(),
+            preview_id: preview.preview_id,
+            confirm_warnings: true,
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+    assert!(stale_error.contains("preview is stale"));
+    assert!(!target_root.join("demo").exists());
+
+    let fresh = preview_skill_deployment(
+        DeploymentCompatibilityPreviewRequest {
+            skill_name: "demo".to_string(),
+            target_root: target_root.clone(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+    let deployment = apply_skill_deployment(
+        DeploymentCompatibilityApplyRequest {
+            skill_name: "demo".to_string(),
+            target_root,
+            preview_id: fresh.preview_id,
+            confirm_warnings: true,
+        },
+        &managed_root,
+    )
+    .unwrap();
+    assert!(fs::symlink_metadata(deployment.target_path)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+}
+
+#[test]
+fn deployment_compatibility_blocks_invalid_frontmatter_and_existing_content() {
+    let root = temp_dir("deployment-compatibility-blocked");
+    let source = root.join("source").join("demo");
+    let managed_root = root.join("SkillBox");
+    let target_root = root.join("project/.agents/skills");
+    make_skill(&source, "demo", "Demo skill");
+    import_skill(&source, SkillKind::User, &managed_root).unwrap();
+    fs::create_dir_all(target_root.join("demo")).unwrap();
+    add_workspace(
+        WorkspaceAddRequest {
+            path: target_root.clone(),
+            kind: WorkspaceKind::User,
+        },
+        &managed_root,
+    )
+    .unwrap();
+    fs::write(
+        managed_root.join("user-skills/demo/SKILL.md"),
+        "---
+name: [demo
+---
+",
+    )
+    .unwrap();
+
+    let preview = preview_skill_deployment(
+        DeploymentCompatibilityPreviewRequest {
+            skill_name: "demo".to_string(),
+            target_root,
+        },
+        &managed_root,
+    )
+    .unwrap();
+    assert_eq!(preview.status, CompatibilityStatus::Blocked);
+    assert!(preview
+        .issues
+        .iter()
+        .any(|issue| issue.code == "invalid_frontmatter"));
+    assert!(preview
+        .issues
+        .iter()
+        .any(|issue| issue.code == "existing_non_symlink_target"));
+    assert!(apply_skill_deployment(
+        DeploymentCompatibilityApplyRequest {
+            skill_name: "demo".to_string(),
+            target_root: preview.target_root.clone(),
+            preview_id: preview.preview_id,
+            confirm_warnings: true,
+        },
+        &managed_root,
+    )
+    .unwrap_err()
+    .contains("blocked"));
+}
+
+#[test]
+fn every_runtime_profile_has_valid_warning_blocked_and_malformed_fixtures() {
+    let profiles = [
+        ("agents", ".agents/skills"),
+        ("codex", ".codex/skills"),
+        ("claude-code", ".claude/skills"),
+        ("cursor", ".cursor/skills"),
+        ("custom-skill-md", "custom-skills"),
+    ];
+    let fixtures = [
+        (
+            "valid",
+            "---\nname: demo\ndescription: Demo skill\n---\n# Demo\n",
+            CompatibilityStatus::Compatible,
+            None,
+        ),
+        (
+            "warning",
+            "---\nname: demo\ndescription: Demo skill\ntools:\n  - shell\n---\n# Demo\n",
+            CompatibilityStatus::Warnings,
+            Some("unknown_optional_frontmatter"),
+        ),
+        (
+            "blocked",
+            "---\nname: another-skill\ndescription: Demo skill\n---\n# Demo\n",
+            CompatibilityStatus::Blocked,
+            Some("skill_name_mismatch"),
+        ),
+        (
+            "malformed",
+            "---\nname: [demo\n---\n# Demo\n",
+            CompatibilityStatus::Blocked,
+            Some("invalid_frontmatter"),
+        ),
+    ];
+
+    for (profile_id, relative_root) in profiles {
+        for (fixture, content, expected_status, expected_issue) in fixtures {
+            let root = temp_dir(&format!("compatibility-{profile_id}-{fixture}"));
+            let managed_root = root.join("SkillBox");
+            let source = root.join("source/demo");
+            let target_root = root.join("project").join(relative_root);
+            fs::create_dir_all(&source).unwrap();
+            fs::create_dir_all(&target_root).unwrap();
+            fs::write(
+                source.join("SKILL.md"),
+                "---\nname: demo\ndescription: Demo skill\n---\n# Demo\n",
+            )
+            .unwrap();
+            import_skill(&source, SkillKind::User, &managed_root).unwrap();
+            fs::write(managed_root.join("user-skills/demo/SKILL.md"), content).unwrap();
+            let workspace = add_workspace(
+                WorkspaceAddRequest {
+                    path: target_root.clone(),
+                    kind: WorkspaceKind::User,
+                },
+                &managed_root,
+            )
+            .unwrap();
+            assert_eq!(workspace.profile_id, profile_id);
+
+            let report = preview_skill_deployment(
+                DeploymentCompatibilityPreviewRequest {
+                    skill_name: "demo".to_string(),
+                    target_root,
+                },
+                &managed_root,
+            )
+            .unwrap();
+            assert_eq!(
+                report.status, expected_status,
+                "{profile_id} {fixture} status"
+            );
+            if let Some(expected_issue) = expected_issue {
+                assert!(
+                    report
+                        .issues
+                        .iter()
+                        .any(|issue| issue.code == expected_issue),
+                    "{profile_id} {fixture} should report {expected_issue}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn deployment_compatibility_preview_rejects_target_state_changes() {
+    let root = temp_dir("deployment-target-state-stale");
+    let source = root.join("source/demo");
+    let managed_root = root.join("SkillBox");
+    let target_root = root.join("project/.cursor/skills");
+    make_skill(&source, "demo", "Demo skill");
+    fs::create_dir_all(&target_root).unwrap();
+    import_skill(&source, SkillKind::User, &managed_root).unwrap();
+    add_workspace(
+        WorkspaceAddRequest {
+            path: target_root.clone(),
+            kind: WorkspaceKind::User,
+        },
+        &managed_root,
+    )
+    .unwrap();
+    let preview = preview_skill_deployment(
+        DeploymentCompatibilityPreviewRequest {
+            skill_name: "demo".to_string(),
+            target_root: target_root.clone(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    fs::create_dir_all(target_root.join("demo")).unwrap();
+    let error = apply_skill_deployment(
+        DeploymentCompatibilityApplyRequest {
+            skill_name: "demo".to_string(),
+            target_root,
+            preview_id: preview.preview_id,
+            confirm_warnings: false,
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+    assert!(error.contains("preview is stale"));
+}
+
+#[test]
+fn deployment_compatibility_preview_rejects_workspace_profile_changes() {
+    let root = temp_dir("deployment-profile-stale");
+    let source = root.join("source/demo");
+    let managed_root = root.join("SkillBox");
+    let target_root = root.join("project/.codex/skills");
+    make_skill(&source, "demo", "Demo skill");
+    fs::create_dir_all(&target_root).unwrap();
+    import_skill(&source, SkillKind::User, &managed_root).unwrap();
+    add_workspace(
+        WorkspaceAddRequest {
+            path: target_root.clone(),
+            kind: WorkspaceKind::User,
+        },
+        &managed_root,
+    )
+    .unwrap();
+    let preview = preview_skill_deployment(
+        DeploymentCompatibilityPreviewRequest {
+            skill_name: "demo".to_string(),
+            target_root: target_root.clone(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+    let database_path = managed_paths(managed_root.clone()).database_path;
+    rusqlite::Connection::open(database_path)
+        .unwrap()
+        .execute(
+            "UPDATE workspaces SET profile_id = 'agents' WHERE canonical_path = ?1",
+            [fs::canonicalize(&target_root)
+                .unwrap()
+                .to_string_lossy()
+                .to_string()],
+        )
+        .unwrap();
+
+    let error = apply_skill_deployment(
+        DeploymentCompatibilityApplyRequest {
+            skill_name: "demo".to_string(),
+            target_root,
+            preview_id: preview.preview_id,
+            confirm_warnings: false,
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+    assert!(error.contains("preview is stale"));
+}
+
+#[test]
+fn deployment_compatibility_blocks_unsupported_persisted_format() {
+    let root = temp_dir("deployment-format-blocked");
+    let source = root.join("source/demo");
+    let managed_root = root.join("SkillBox");
+    let target_root = root.join("project/.claude/skills");
+    make_skill(&source, "demo", "Demo skill");
+    fs::create_dir_all(&target_root).unwrap();
+    import_skill(&source, SkillKind::User, &managed_root).unwrap();
+    add_workspace(
+        WorkspaceAddRequest {
+            path: target_root.clone(),
+            kind: WorkspaceKind::User,
+        },
+        &managed_root,
+    )
+    .unwrap();
+    rusqlite::Connection::open(managed_paths(managed_root.clone()).database_path)
+        .unwrap()
+        .execute(
+            "UPDATE workspaces SET format = 'native_rules' WHERE canonical_path = ?1",
+            [fs::canonicalize(&target_root)
+                .unwrap()
+                .to_string_lossy()
+                .to_string()],
+        )
+        .unwrap();
+
+    let preview = preview_skill_deployment(
+        DeploymentCompatibilityPreviewRequest {
+            skill_name: "demo".to_string(),
+            target_root,
+        },
+        &managed_root,
+    )
+    .unwrap();
+    assert_eq!(preview.status, CompatibilityStatus::Blocked);
+    assert_eq!(preview.format, RuntimeFormat::Unsupported);
+    assert!(preview
+        .issues
+        .iter()
+        .any(|issue| issue.code == "format_mismatch"));
+}
+
+#[test]
 fn deploys_remote_skill_to_current_symlink() {
     let root = temp_dir("remote-deploy-current");
     let source = root.join("source").join("remote-demo");
@@ -5877,7 +6413,16 @@ fn install_github_remote_skill_writes_version_current_metadata_and_index() {
 fn install_github_root_skill_previews_installs_indexes_and_deploys_sanitized_worktree() {
     let root = temp_dir("install-github-root-skill");
     let managed_root = root.join("SkillBox");
-    let target_root = root.join("runtime");
+    let target_root = root.join("project/.agents/skills");
+    fs::create_dir_all(&target_root).unwrap();
+    add_workspace(
+        WorkspaceAddRequest {
+            path: target_root.clone(),
+            kind: WorkspaceKind::User,
+        },
+        &managed_root,
+    )
+    .unwrap();
     let (remote, _work) = bare_remote_with_root_skill_content(
         "install-github-root-skill-origin",
         "humanizer-zh",
@@ -5904,8 +6449,12 @@ fn install_github_root_skill_previews_installs_indexes_and_deploys_sanitized_wor
         .files
         .iter()
         .any(|file| file.path == ".git" || file.path.starts_with(".git/")));
-    assert!(!managed_root.exists());
-    assert!(!target_root.exists());
+    assert_eq!(
+        preview.compatibility.as_ref().unwrap().status,
+        CompatibilityStatus::Compatible
+    );
+    assert!(!managed_root.join("remote-skills/humanizer-zh").exists());
+    assert!(!target_root.join("humanizer-zh").exists());
 
     let result = install_github_remote_skill(
         InstallGithubRemoteSkillRequest {
@@ -6298,7 +6847,16 @@ fn install_github_remote_skill_rejects_preview_after_branch_advances() {
 fn install_github_remote_skill_deploys_to_target_root() {
     let root = temp_dir("install-github-deploy");
     let managed_root = root.join("SkillBox");
-    let target_root = root.join("runtime");
+    let target_root = root.join("project/.claude/skills");
+    fs::create_dir_all(&target_root).unwrap();
+    add_workspace(
+        WorkspaceAddRequest {
+            path: target_root.clone(),
+            kind: WorkspaceKind::User,
+        },
+        &managed_root,
+    )
+    .unwrap();
     let remote = bare_remote_with_skill_content(
         "install-github-deploy-origin",
         "find-skills",
@@ -6309,7 +6867,11 @@ fn install_github_remote_skill_deploys_to_target_root() {
     let source_url = github_source_url("acme", "install-github-deploy", "find-skills");
     let preview = github_install_preview(&source_url, Some(target_root.clone()), &managed_root);
 
-    assert!(!target_root.exists());
+    assert_eq!(
+        preview.compatibility.as_ref().unwrap().status,
+        CompatibilityStatus::Compatible
+    );
+    assert!(!target_root.join("find-skills").exists());
 
     let result = install_github_remote_skill(
         InstallGithubRemoteSkillRequest {

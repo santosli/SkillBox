@@ -375,8 +375,9 @@ pub fn install_github_remote_skill(
 
 pub fn preview_github_remote_skill_install(
     request: PreviewGithubRemoteSkillInstallRequest,
-    _managed_root: impl AsRef<Path>,
+    managed_root: impl AsRef<Path>,
 ) -> Result<GithubRemoteSkillInstallPreview> {
+    let managed_root = managed_root.as_ref().to_path_buf();
     let source = skillbox_github::parse_github_skill_url(&request.source_url)?;
     let temp = temporary_work_dir("github-install-preview");
 
@@ -397,12 +398,31 @@ pub fn preview_github_remote_skill_install(
             .into_iter()
             .map(|file| remote_diff_file(&empty, &skill_source_path, file))
             .collect::<Result<Vec<_>>>()?;
+        let compatibility = request
+            .target_root
+            .as_deref()
+            .map(|target_root| {
+                let paths = managed_paths(managed_root.clone());
+                let expected_deployment_path = resolve_managed_skill_path(&paths, &skill.name)
+                    .unwrap_or_else(|_| skill_source_path.clone());
+                preview_skill_path_deployment(
+                    &skill.name,
+                    &skill_source_path,
+                    &expected_deployment_path,
+                    target_root,
+                    &managed_root,
+                )
+            })
+            .transpose()?;
         let preview_id = github_remote_skill_install_preview_id(
             &source,
             &skill.name,
             &installed_sha,
             &ref_kind,
             request.target_root.as_deref(),
+            compatibility
+                .as_ref()
+                .map(|report| report.preview_id.as_str()),
         );
 
         Ok(GithubRemoteSkillInstallPreview {
@@ -420,6 +440,7 @@ pub fn preview_github_remote_skill_install(
             installed_sha,
             files,
             target_root: request.target_root,
+            compatibility,
         })
     })();
 
@@ -446,12 +467,39 @@ fn install_github_remote_skill_inner(
         validate_skill_name(&skill.name)?;
         let ref_kind = resolve_ref_kind(&source.repo_url, &source.reference)?;
         let tracking = ref_kind == "branch";
+        let compatibility = request
+            .target_root
+            .as_deref()
+            .map(|target_root| {
+                let expected_deployment_path = resolve_managed_skill_path(&paths, &skill.name)
+                    .unwrap_or_else(|_| skill_source_path.clone());
+                preview_skill_path_deployment(
+                    &skill.name,
+                    &skill_source_path,
+                    &expected_deployment_path,
+                    target_root,
+                    managed_root,
+                )
+            })
+            .transpose()?;
+        if compatibility
+            .as_ref()
+            .is_some_and(|report| report.status == CompatibilityStatus::Blocked)
+        {
+            return Err(
+                "Remote skill deployment is blocked by runtime compatibility issues. Review the install preview."
+                    .to_string(),
+            );
+        }
         validate_github_remote_skill_install_preview_id(
             &request,
             &source,
             &skill.name,
             &installed_sha,
             &ref_kind,
+            compatibility
+                .as_ref()
+                .map(|report| report.preview_id.as_str()),
         )?;
         let remote_root = paths.remote_skills_root.join(&skill.name);
         let version_path = remote_root.join("versions").join(&installed_sha);
@@ -1717,13 +1765,15 @@ pub(crate) fn github_remote_skill_install_preview_id(
     installed_sha: &str,
     ref_kind: &str,
     target_root: Option<&Path>,
+    compatibility_preview_id: Option<&str>,
 ) -> String {
     let target_root = target_root
         .map(|path| path.to_string_lossy().to_string())
         .unwrap_or_default();
+    let compatibility_preview_id = compatibility_preview_id.unwrap_or_default();
     if source.is_root {
         return content_hash_text(&format!(
-            "github-install:{skill_name}:{}:{}:{}:{}:repository-root:{}:{}:{}:{}",
+            "github-install:{skill_name}:{}:{}:{}:{}:repository-root:{}:{}:{}:{}:{}",
             source.url,
             source.repo_url,
             source.owner,
@@ -1731,11 +1781,12 @@ pub(crate) fn github_remote_skill_install_preview_id(
             source.reference,
             ref_kind,
             installed_sha,
-            target_root
+            target_root,
+            compatibility_preview_id
         ));
     }
     content_hash_text(&format!(
-        "github-install:{skill_name}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+        "github-install:{skill_name}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
         source.url,
         source.repo_url,
         source.owner,
@@ -1744,7 +1795,8 @@ pub(crate) fn github_remote_skill_install_preview_id(
         source.reference,
         ref_kind,
         installed_sha,
-        target_root
+        target_root,
+        compatibility_preview_id
     ))
 }
 
@@ -1770,6 +1822,7 @@ pub(crate) fn validate_github_remote_skill_install_preview_id(
     skill_name: &str,
     installed_sha: &str,
     ref_kind: &str,
+    compatibility_preview_id: Option<&str>,
 ) -> Result<()> {
     require_github_remote_skill_install_preview_id(request)?;
     let expected = github_remote_skill_install_preview_id(
@@ -1778,6 +1831,7 @@ pub(crate) fn validate_github_remote_skill_install_preview_id(
         installed_sha,
         ref_kind,
         request.target_root.as_deref(),
+        compatibility_preview_id,
     );
     if request.preview_id.as_deref().unwrap_or_default() != expected {
         return Err(

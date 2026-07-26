@@ -1,80 +1,81 @@
 use crate::*;
 
 pub fn parse_skill_frontmatter(input: &str) -> SkillMetadata {
-    let mut metadata = SkillMetadata {
+    parse_skill_frontmatter_document(input)
+        .map(|document| document.metadata)
+        .unwrap_or_else(|_| SkillMetadata {
+            name: String::new(),
+            description: String::new(),
+            version: String::new(),
+        })
+}
+
+pub fn parse_skill_frontmatter_document(input: &str) -> Result<SkillFrontmatterDocument> {
+    const MAX_FRONTMATTER_BYTES: usize = 64 * 1024;
+    let empty = || SkillMetadata {
         name: String::new(),
         description: String::new(),
         version: String::new(),
     };
-    let mut lines = input.lines().peekable();
-    if lines.next() != Some("---") {
-        return metadata;
+    let Some(rest) = input.strip_prefix("---\n") else {
+        return Ok(SkillFrontmatterDocument {
+            present: false,
+            metadata: empty(),
+            fields: BTreeMap::new(),
+            unknown_fields: Vec::new(),
+        });
+    };
+    let Some(end) = rest.find("\n---") else {
+        return Err("SKILL.md frontmatter is missing its closing delimiter.".to_string());
+    };
+    if end > MAX_FRONTMATTER_BYTES {
+        return Err(format!(
+            "SKILL.md frontmatter exceeds the {MAX_FRONTMATTER_BYTES}-byte safety limit."
+        ));
     }
-
-    while let Some(line) = lines.next() {
-        if line == "---" {
-            break;
+    let yaml = &rest[..end];
+    let value = if yaml.trim().is_empty() {
+        serde_yaml_ng::Value::Mapping(Default::default())
+    } else {
+        serde_yaml_ng::from_str::<serde_yaml_ng::Value>(yaml)
+            .map_err(|error| format!("Invalid SKILL.md frontmatter: {error}"))?
+    };
+    let serde_yaml_ng::Value::Mapping(mapping) = value else {
+        return Err("SKILL.md frontmatter must be a YAML mapping.".to_string());
+    };
+    let mut fields = BTreeMap::new();
+    for (key, value) in mapping {
+        let serde_yaml_ng::Value::String(key) = key else {
+            return Err("SKILL.md frontmatter field names must be strings.".to_string());
+        };
+        let value = serde_json::to_value(value)
+            .map_err(|error| format!("Unable to preserve frontmatter field {key}: {error}"))?;
+        fields.insert(key, value);
+    }
+    let string_field = |key: &str| -> Result<String> {
+        match fields.get(key) {
+            None | Some(serde_json::Value::Null) => Ok(String::new()),
+            Some(serde_json::Value::String(value)) => Ok(value.trim_end().to_string()),
+            Some(_) => Err(format!(
+                "SKILL.md frontmatter field '{key}' must be a string."
+            )),
         }
-        if line.starts_with(' ') || line.starts_with('\t') {
-            continue;
-        }
-        if let Some((key, value)) = line.split_once(':') {
-            let value = parse_frontmatter_value(value.trim(), &mut lines);
-            match key.trim() {
-                "name" => metadata.name = value,
-                "description" => metadata.description = value,
-                "version" => metadata.version = value,
-                _ => {}
-            }
-        }
-    }
-
-    metadata
-}
-
-pub(crate) fn parse_frontmatter_value<'a, I>(
-    value: &str,
-    lines: &mut std::iter::Peekable<I>,
-) -> String
-where
-    I: Iterator<Item = &'a str>,
-{
-    if value.starts_with('>') {
-        return frontmatter_block_lines(lines)
-            .into_iter()
-            .filter(|line| !line.is_empty())
-            .collect::<Vec<_>>()
-            .join(" ");
-    }
-    if value.starts_with('|') {
-        return frontmatter_block_lines(lines).join("\n");
-    }
-
-    unquote(value)
-}
-
-pub(crate) fn frontmatter_block_lines<'a, I>(lines: &mut std::iter::Peekable<I>) -> Vec<String>
-where
-    I: Iterator<Item = &'a str>,
-{
-    let mut block_lines = Vec::new();
-
-    while let Some(line) = lines.peek().copied() {
-        if line == "---" {
-            break;
-        }
-        if !line.is_empty() && !line.starts_with(' ') && !line.starts_with('\t') {
-            break;
-        }
-        block_lines.push(line.trim().to_string());
-        lines.next();
-    }
-
-    while block_lines.last().is_some_and(|line| line.is_empty()) {
-        block_lines.pop();
-    }
-
-    block_lines
+    };
+    let unknown_fields = fields
+        .keys()
+        .filter(|key| !matches!(key.as_str(), "name" | "description" | "version"))
+        .cloned()
+        .collect();
+    Ok(SkillFrontmatterDocument {
+        present: true,
+        metadata: SkillMetadata {
+            name: string_field("name")?,
+            description: string_field("description")?,
+            version: string_field("version")?,
+        },
+        fields,
+        unknown_fields,
+    })
 }
 
 pub fn read_skill(path: impl AsRef<Path>) -> Result<Skill> {
@@ -585,7 +586,7 @@ fn symlink_targets_any_path(symlink: &Path, expected_paths: &[PathBuf]) -> Resul
     Ok(expected_paths.contains(&target))
 }
 
-pub fn deploy_skill(
+pub(crate) fn deploy_skill(
     skill_name: &str,
     managed_root: impl AsRef<Path>,
     target_root: impl AsRef<Path>,

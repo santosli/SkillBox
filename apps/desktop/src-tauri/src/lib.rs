@@ -422,17 +422,36 @@ async fn change_skill_kind(
 }
 
 #[tauri::command]
-async fn deploy_skill(skill_name: String, target_root: String) -> Result<Value, String> {
+fn list_runtime_profiles() -> Result<Value, String> {
+    serde_json::to_value(skillbox_core::list_runtime_profiles()).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn preview_skill_deployment(
+    request: skillbox_core::DeploymentCompatibilityPreviewRequest,
+) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let result = skillbox_core::deploy_skill(
-            &skill_name,
+        let result = skillbox_core::preview_skill_deployment(
+            request,
             skillbox_core::default_managed_root(),
-            target_root,
         )?;
         serde_json::to_value(result).map_err(|error| error.to_string())
     })
     .await
-    .map_err(|error| format!("Skill deploy task failed: {error}"))?
+    .map_err(|error| format!("Skill compatibility preview task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn apply_skill_deployment(
+    request: skillbox_core::DeploymentCompatibilityApplyRequest,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result =
+            skillbox_core::apply_skill_deployment(request, skillbox_core::default_managed_root())?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Skill deployment task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -1047,7 +1066,9 @@ pub fn run() {
             list_import_records,
             revert_import,
             change_skill_kind,
-            deploy_skill,
+            list_runtime_profiles,
+            preview_skill_deployment,
+            apply_skill_deployment,
             undeploy_skill,
             preview_delete_skill,
             delete_skill,

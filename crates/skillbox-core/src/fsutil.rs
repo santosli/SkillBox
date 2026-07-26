@@ -277,17 +277,6 @@ pub(crate) fn home_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/"))
 }
 
-pub(crate) fn unquote(value: &str) -> String {
-    if value.len() >= 2
-        && ((value.starts_with('"') && value.ends_with('"'))
-            || (value.starts_with('\'') && value.ends_with('\'')))
-    {
-        value[1..value.len() - 1].to_string()
-    } else {
-        value.to_string()
-    }
-}
-
 pub(crate) fn sha256(content: &str) -> String {
     sha256_bytes(content.as_bytes())
 }

@@ -1,6 +1,6 @@
 use skillbox_core::{
-    default_managed_root, deploy_skill, ensure_managed_layout, global_runtime_roots, import_skill,
-    managed_paths, scan_skill_roots, undeploy_skill, SkillKind, WorkspaceAddRequest, WorkspaceKind,
+    default_managed_root, ensure_managed_layout, global_runtime_roots, import_skill, managed_paths,
+    scan_skill_roots, undeploy_skill, SkillKind, WorkspaceAddRequest, WorkspaceKind,
 };
 use skillbox_github::parse_github_skill_url;
 use std::io::Read;
@@ -44,6 +44,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 .ok_or_else(|| "Usage: skillbox parse-github-url <github-url>".to_string())?;
             print_json(&parse_github_skill_url(&url)?)
         }
+        "runtime-profiles" => print_json(&skillbox_core::list_runtime_profiles()),
         "install" => {
             let source_url = positional(command_args).into_iter().next().ok_or_else(|| {
                 "Usage: skillbox install <github-url> --preview-id <id> [--target <path>]"
@@ -84,17 +85,40 @@ fn run(args: Vec<String>) -> Result<(), String> {
             };
             print_json(&import_skill(source, kind, managed_root(command_args))?)
         }
-        "deploy" => {
-            let skill_name = positional(command_args)
-                .into_iter()
-                .next()
-                .ok_or_else(|| "Usage: skillbox deploy <skill-name> --target <path>".to_string())?;
-            let target = option(command_args, "--target")
-                .ok_or_else(|| "Usage: skillbox deploy <skill-name> --target <path>".to_string())?;
-            print_json(&deploy_skill(
-                &skill_name,
+        "deploy-preview" => {
+            let skill_name = positional(command_args).into_iter().next().ok_or_else(|| {
+                "Usage: skillbox deploy-preview <skill-name> --target <path>".to_string()
+            })?;
+            let target = option(command_args, "--target").ok_or_else(|| {
+                "Usage: skillbox deploy-preview <skill-name> --target <path>".to_string()
+            })?;
+            print_json(&skillbox_core::preview_skill_deployment(
+                skillbox_core::DeploymentCompatibilityPreviewRequest {
+                    skill_name,
+                    target_root: PathBuf::from(target),
+                },
                 managed_root(command_args),
-                target,
+            )?)
+        }
+        "deploy" => {
+            let skill_name = positional(command_args).into_iter().next().ok_or_else(|| {
+                "Usage: skillbox deploy <skill-name> --target <path> --preview-id <id>".to_string()
+            })?;
+            let target = option(command_args, "--target").ok_or_else(|| {
+                "Usage: skillbox deploy <skill-name> --target <path> --preview-id <id>".to_string()
+            })?;
+            let preview_id = option(command_args, "--preview-id").ok_or_else(|| {
+                "Deployment compatibility preview is required. Run `skillbox deploy-preview <skill-name> --target <path>` first."
+                    .to_string()
+            })?;
+            print_json(&skillbox_core::apply_skill_deployment(
+                skillbox_core::DeploymentCompatibilityApplyRequest {
+                    skill_name,
+                    target_root: PathBuf::from(target),
+                    preview_id,
+                    confirm_warnings: has_flag(command_args, "--confirm-warnings"),
+                },
+                managed_root(command_args),
             )?)
         }
         "undeploy" => {
@@ -542,10 +566,12 @@ Commands:
   skillbox paths [--managed-root <path>]
   skillbox scan [root ...] [--managed-root <path>]
   skillbox parse-github-url <github-url>
+  skillbox runtime-profiles
   skillbox install-preview <github-url> [--target <path>] [--managed-root <path>]
   skillbox install <github-url> --preview-id <id> [--target <path>] [--managed-root <path>]
   skillbox import <source-dir> --type user|remote [--managed-root <path>]
-  skillbox deploy <skill-name> --target <path> [--managed-root <path>]
+  skillbox deploy-preview <skill-name> --target <path> [--managed-root <path>]
+  skillbox deploy <skill-name> --target <path> --preview-id <id> [--confirm-warnings] [--managed-root <path>]
   skillbox undeploy <skill-name> --target <path> [--managed-root <path>]
   skillbox delete-preview <skill-name> [--managed-root <path>]
   skillbox delete <skill-name> --preview-id <id> --confirm <skill-name> [--managed-root <path>]
@@ -743,6 +769,9 @@ mod tests {
         let help = help_text();
 
         assert!(help.contains("skillbox init [--managed-root <path>]"));
+        assert!(help.contains("skillbox runtime-profiles"));
+        assert!(help.contains("skillbox deploy-preview <skill-name>"));
+        assert!(help.contains("skillbox deploy <skill-name> --target <path> --preview-id <id>"));
         assert!(help.contains("skillbox install-preview <github-url>"));
         assert!(help.contains("skillbox install <github-url> --preview-id <id>"));
         assert!(help.contains("skillbox check-updates [skill-name]"));
@@ -967,6 +996,75 @@ mod tests {
             .join("demo")
             .join("current")
             .exists());
+    }
+
+    #[test]
+    fn runtime_profiles_and_preview_confirmed_deploy_commands_route_to_core() {
+        let root = temp_dir("cli-runtime-profile-deploy");
+        let managed_root = root.join("SkillBox");
+        let source = root.join("source/demo");
+        let target_root = root.join("project/.cursor/skills");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir_all(&target_root).unwrap();
+        std::fs::write(
+            source.join("SKILL.md"),
+            "---\nname: demo\ndescription: Demo skill\n---\n",
+        )
+        .unwrap();
+        skillbox_core::import_skill(&source, SkillKind::User, &managed_root).unwrap();
+        skillbox_core::add_workspace(
+            skillbox_core::WorkspaceAddRequest {
+                path: target_root.clone(),
+                kind: skillbox_core::WorkspaceKind::User,
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        run(vec!["runtime-profiles".to_string()]).unwrap();
+        run(vec![
+            "deploy-preview".to_string(),
+            "demo".to_string(),
+            "--target".to_string(),
+            target_root.to_string_lossy().to_string(),
+            "--managed-root".to_string(),
+            managed_root.to_string_lossy().to_string(),
+        ])
+        .unwrap();
+        let missing_preview = run(vec![
+            "deploy".to_string(),
+            "demo".to_string(),
+            "--target".to_string(),
+            target_root.to_string_lossy().to_string(),
+            "--managed-root".to_string(),
+            managed_root.to_string_lossy().to_string(),
+        ])
+        .unwrap_err();
+        assert!(missing_preview.contains("Deployment compatibility preview is required"));
+
+        let preview = skillbox_core::preview_skill_deployment(
+            skillbox_core::DeploymentCompatibilityPreviewRequest {
+                skill_name: "demo".to_string(),
+                target_root: target_root.clone(),
+            },
+            &managed_root,
+        )
+        .unwrap();
+        run(vec![
+            "deploy".to_string(),
+            "demo".to_string(),
+            "--target".to_string(),
+            target_root.to_string_lossy().to_string(),
+            "--preview-id".to_string(),
+            preview.preview_id,
+            "--managed-root".to_string(),
+            managed_root.to_string_lossy().to_string(),
+        ])
+        .unwrap();
+        assert!(std::fs::symlink_metadata(target_root.join("demo"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
     }
 
     fn temp_dir(label: &str) -> PathBuf {
