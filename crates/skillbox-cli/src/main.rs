@@ -58,6 +58,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     source_url,
                     target_root: option(command_args, "--target").map(PathBuf::from),
                     preview_id: Some(preview_id),
+                    confirm_warnings: has_flag(command_args, "--confirm-warnings"),
                     actor: "cli".to_string(),
                 },
                 managed_root(command_args),
@@ -568,7 +569,7 @@ Commands:
   skillbox parse-github-url <github-url>
   skillbox runtime-profiles
   skillbox install-preview <github-url> [--target <path>] [--managed-root <path>]
-  skillbox install <github-url> --preview-id <id> [--target <path>] [--managed-root <path>]
+  skillbox install <github-url> --preview-id <id> [--target <path>] [--confirm-warnings] [--managed-root <path>]
   skillbox import <source-dir> --type user|remote [--managed-root <path>]
   skillbox deploy-preview <skill-name> --target <path> [--managed-root <path>]
   skillbox deploy <skill-name> --target <path> --preview-id <id> [--confirm-warnings] [--managed-root <path>]
@@ -999,6 +1000,66 @@ mod tests {
     }
 
     #[test]
+    fn install_warning_target_requires_confirm_warnings_flag() {
+        let root = temp_dir("cli-install-warning-target");
+        let managed_root = root.join("SkillBox");
+        let target_root = root.join("project/.agents/skills");
+        std::fs::create_dir_all(&target_root).unwrap();
+        skillbox_core::add_workspace(
+            skillbox_core::WorkspaceAddRequest {
+                path: target_root.clone(),
+                kind: skillbox_core::WorkspaceKind::User,
+            },
+            &managed_root,
+        )
+        .unwrap();
+        let remote =
+            bare_remote_with_warning_skill_content("cli-install-warning-origin", "warning-skill");
+        let _rewrite = github_repo_rewrite("acme", "cli-install-warning", &remote);
+        let source_url = github_source_url("acme", "cli-install-warning", "warning-skill");
+        let preview = skillbox_core::preview_github_remote_skill_install(
+            skillbox_core::PreviewGithubRemoteSkillInstallRequest {
+                source_url: source_url.clone(),
+                target_root: Some(target_root.clone()),
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        let error = run(vec![
+            "install".to_string(),
+            source_url.clone(),
+            "--preview-id".to_string(),
+            preview.preview_id.clone(),
+            "--target".to_string(),
+            target_root.to_string_lossy().to_string(),
+            "--managed-root".to_string(),
+            managed_root.to_string_lossy().to_string(),
+        ])
+        .unwrap_err();
+        assert!(error.contains("explicitly confirm warnings"));
+        assert!(!managed_root
+            .join("remote-skills/warning-skill/current")
+            .exists());
+
+        run(vec![
+            "install".to_string(),
+            source_url,
+            "--preview-id".to_string(),
+            preview.preview_id,
+            "--target".to_string(),
+            target_root.to_string_lossy().to_string(),
+            "--confirm-warnings".to_string(),
+            "--managed-root".to_string(),
+            managed_root.to_string_lossy().to_string(),
+        ])
+        .unwrap();
+        assert!(managed_root
+            .join("remote-skills/warning-skill/current")
+            .exists());
+    }
+
+    #[test]
     fn runtime_profiles_and_preview_confirmed_deploy_commands_route_to_core() {
         let root = temp_dir("cli-runtime-profile-deploy");
         let managed_root = root.join("SkillBox");
@@ -1103,6 +1164,52 @@ mod tests {
                 "commit",
                 "-m",
                 "Add skill",
+            ],
+        );
+        run_git(
+            &work,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
+        run_git(&work, &["push", "-u", "origin", "main"]);
+        remote
+    }
+
+    fn bare_remote_with_warning_skill_content(label: &str, skill_name: &str) -> PathBuf {
+        let remote = temp_dir(label).join("remote.git");
+        run_git(
+            remote.parent().unwrap(),
+            &["init", "--bare", remote.to_str().unwrap()],
+        );
+        let work = temp_dir(&format!("{label}-work"));
+        run_git(&work, &["init", "-b", "main"]);
+        let skill_dir = work.join("skills").join(skill_name);
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            format!(
+                "---
+name: {skill_name}
+description: Demo skill
+tools:
+  - shell
+---
+
+# {skill_name}
+"
+            ),
+        )
+        .unwrap();
+        run_git(&work, &["add", "."]);
+        run_git(
+            &work,
+            &[
+                "-c",
+                "user.name=SkillBox",
+                "-c",
+                "user.email=skillbox@example.invalid",
+                "commit",
+                "-m",
+                "Initial",
             ],
         );
         run_git(

@@ -213,7 +213,13 @@ export function RemoteSourceCandidateBindDialog({ dialog, skillName, onClose, on
   );
 }
 
-export function RemoteVersionReviewDialog({ dialog, onActivatePath, onApply, onClose }) {
+export function RemoteVersionReviewDialog({
+  dialog,
+  onActivatePath,
+  onApply,
+  onClose,
+  onConfirmWarningsChange
+}) {
   const preview = dialog.preview;
   const applyLabel =
     dialog.applyLabel || (preview?.action === 'rollback' ? 'Apply Rollback' : 'Apply Update');
@@ -231,9 +237,11 @@ export function RemoteVersionReviewDialog({ dialog, onActivatePath, onApply, onC
   const diffOmission = activeFile && !hasNoFileChanges ? remoteDiffOmissionNotice(activeFile) : null;
   const canApply = canApplyRemoteVersionChange({
     allowNoFileChanges,
+    compatibility: preview?.compatibility,
+    confirmWarnings: dialog.confirmWarnings,
     files: preview?.files || [],
     loading: dialog.loading || dialog.applying
-  }) && preview?.compatibility?.status !== 'blocked';
+  });
 
   return (
     <div
@@ -270,6 +278,17 @@ export function RemoteVersionReviewDialog({ dialog, onActivatePath, onApply, onC
                 </p>
               ))}
             </div>
+          ) : null}
+          {preview?.compatibility?.status === 'warnings' ? (
+            <label className="deployCompatibilityConfirm remoteCompatibilityConfirm">
+              <input
+                checked={Boolean(dialog.confirmWarnings)}
+                disabled={dialog.applying}
+                type="checkbox"
+                onChange={(event) => onConfirmWarningsChange?.(event.target.checked)}
+              />
+              Confirm compatibility warnings before installing
+            </label>
           ) : null}
           {preview ? (
             <div className="gitCommitReview">

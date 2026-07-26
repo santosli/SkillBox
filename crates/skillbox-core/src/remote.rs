@@ -501,6 +501,16 @@ fn install_github_remote_skill_inner(
                 .as_ref()
                 .map(|report| report.preview_id.as_str()),
         )?;
+        if compatibility
+            .as_ref()
+            .is_some_and(|report| report.status == CompatibilityStatus::Warnings)
+            && !request.confirm_warnings
+        {
+            return Err(
+                "Remote skill deployment has compatibility warnings. Review the install preview and explicitly confirm warnings before installing."
+                    .to_string(),
+            );
+        }
         let remote_root = paths.remote_skills_root.join(&skill.name);
         let version_path = remote_root.join("versions").join(&installed_sha);
 

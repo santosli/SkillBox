@@ -15,7 +15,8 @@ version tags such as `v0.3.0`.
   incompatibilities as blockers without rewriting source files.
 - Require a fresh compatibility preview before deployment across core, CLI,
   Tauri, and desktop; stale skill snapshots, targets, or profile metadata are
-  rejected before runtime writes.
+  rejected before runtime writes, and warning-level GitHub target installs
+  require explicit confirmation.
 - Show runtime profile identity and Compatible/Warning/Blocked results in
   Workspaces and deployment review, replacing React path-marker inference.
 

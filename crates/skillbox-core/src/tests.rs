@@ -199,6 +199,7 @@ fn runtime_profile_migration_backfills_canonical_and_custom_workspace_roots() {
               ('/tmp/project/.codex/skills', '/tmp/project/.codex/skills', 'user', 'manual', 'codex', 'Codex'),
               ('/tmp/project/.claude/skills', '/tmp/project/.claude/skills', 'user', 'manual', 'claude', 'Claude'),
               ('/tmp/project/.cursor/skills', '/tmp/project/.cursor/skills', 'user', 'manual', 'cursor', 'Cursor'),
+              ('/tmp/shared/skills', '/tmp/project/.agents/skills', 'user', 'manual', 'agents', 'Agents alias'),
               ('/tmp/custom-skills', '/tmp/custom-skills', 'user', 'manual', NULL, 'Custom');
             ",
         )
@@ -208,7 +209,9 @@ fn runtime_profile_migration_backfills_canonical_and_custom_workspace_roots() {
     let mut connection = rusqlite::Connection::open(&database_path).unwrap();
     run_database_migrations(&mut connection).unwrap();
     let rows = connection
-        .prepare("SELECT path, profile_id, root_key, format FROM workspaces ORDER BY path")
+        .prepare(
+            "SELECT path, profile_id, root_key, format FROM workspaces ORDER BY path, canonical_path",
+        )
         .unwrap()
         .query_map([], |row| {
             Ok((
@@ -238,6 +241,12 @@ fn runtime_profile_migration_backfills_canonical_and_custom_workspace_roots() {
                 "skill_md".to_string(),
             ),
             (
+                "/tmp/project/.agents/skills".to_string(),
+                "custom-skill-md".to_string(),
+                "exact".to_string(),
+                "skill_md".to_string(),
+            ),
+            (
                 "/tmp/project/.claude/skills".to_string(),
                 "claude-code".to_string(),
                 "skills".to_string(),
@@ -257,6 +266,94 @@ fn runtime_profile_migration_backfills_canonical_and_custom_workspace_roots() {
             ),
         ]
     );
+}
+
+#[test]
+fn v5_symlink_alias_migrates_as_custom_and_remains_deployable() {
+    let root = temp_dir("runtime-profile-v5-symlink-alias");
+    let managed_root = root.join("SkillBox");
+    let source = root.join("source/demo");
+    let actual_root = root.join("shared/skills");
+    let linked_root = root.join("project/.agents/skills");
+    make_skill(&source, "demo", "Demo skill");
+    fs::create_dir_all(&actual_root).unwrap();
+    fs::create_dir_all(linked_root.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&actual_root, &linked_root).unwrap();
+    import_skill(&source, SkillKind::User, &managed_root).unwrap();
+
+    let database_path = managed_paths(&managed_root).database_path;
+    let connection = rusqlite::Connection::open(&database_path).unwrap();
+    connection
+        .execute_batch(
+            "
+            DELETE FROM workspaces;
+            DELETE FROM schema_migrations WHERE version = 6;
+            ALTER TABLE workspaces DROP COLUMN profile_id;
+            ALTER TABLE workspaces DROP COLUMN root_key;
+            ALTER TABLE workspaces DROP COLUMN format;
+            ",
+        )
+        .unwrap();
+    connection
+        .execute(
+            "
+            INSERT INTO workspaces (
+              canonical_path, path, kind, source, agent_id, display_name
+            ) VALUES (?1, ?2, 'user', 'manual', 'agents', 'Agents alias')
+            ",
+            rusqlite::params![
+                fs::canonicalize(&actual_root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+                linked_root.to_string_lossy().to_string()
+            ],
+        )
+        .unwrap();
+    drop(connection);
+
+    let mut connection = rusqlite::Connection::open(&database_path).unwrap();
+    run_database_migrations(&mut connection).unwrap();
+    let (profile_id, root_key): (String, String) = connection
+        .query_row(
+            "SELECT profile_id, root_key FROM workspaces WHERE canonical_path = ?1",
+            [fs::canonicalize(&actual_root)
+                .unwrap()
+                .to_string_lossy()
+                .to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(profile_id, "custom-skill-md");
+    assert_eq!(root_key, "exact");
+    drop(connection);
+
+    let preview = preview_skill_deployment(
+        DeploymentCompatibilityPreviewRequest {
+            skill_name: "demo".to_string(),
+            target_root: linked_root.clone(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+    assert_eq!(preview.profile.id, "custom-skill-md");
+    assert_eq!(preview.root_key, "exact");
+    assert_eq!(preview.status, CompatibilityStatus::Compatible);
+
+    let deployment = apply_skill_deployment(
+        DeploymentCompatibilityApplyRequest {
+            skill_name: "demo".to_string(),
+            target_root: linked_root,
+            preview_id: preview.preview_id,
+            confirm_warnings: false,
+        },
+        &managed_root,
+    )
+    .unwrap();
+    assert!(fs::symlink_metadata(deployment.target_path)
+        .unwrap()
+        .file_type()
+        .is_symlink());
 }
 
 #[test]
@@ -1174,7 +1271,7 @@ fn workspace_setup_preserves_exact_symlinked_skills_root_registration() {
 
     let preview = preview_workspace_setup(
         WorkspaceSetupPreviewRequest {
-            selected_path: linked_root,
+            selected_path: linked_root.clone(),
             kind: WorkspaceKind::User,
         },
         &managed_root,
@@ -1186,6 +1283,21 @@ fn workspace_setup_preserves_exact_symlinked_skills_root_registration() {
         preview.roots[0].path,
         fs::canonicalize(actual_root).unwrap()
     );
+
+    let result = apply_workspace_setup(
+        WorkspaceSetupApplyRequest {
+            selected_path: linked_root,
+            kind: WorkspaceKind::User,
+            selected_root: preview.roots[0].path.clone(),
+            create_missing: false,
+            preview_id: preview.preview_id,
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    assert_eq!(result.workspace.profile_id, "custom-skill-md");
+    assert_eq!(result.workspace.root_key, "exact");
 }
 
 #[test]
@@ -4556,6 +4668,9 @@ fn every_runtime_profile_has_valid_warning_blocked_and_malformed_fixtures() {
             )
             .unwrap();
             assert_eq!(workspace.profile_id, profile_id);
+            if profile_id == "custom-skill-md" {
+                assert_eq!(workspace.root_key, "exact");
+            }
 
             let report = preview_skill_deployment(
                 DeploymentCompatibilityPreviewRequest {
@@ -4565,6 +4680,10 @@ fn every_runtime_profile_has_valid_warning_blocked_and_malformed_fixtures() {
                 &managed_root,
             )
             .unwrap();
+            if profile_id == "custom-skill-md" {
+                assert_eq!(report.profile.id, "custom-skill-md");
+                assert_eq!(report.root_key, "exact");
+            }
             assert_eq!(
                 report.status, expected_status,
                 "{profile_id} {fixture} status"
@@ -6366,6 +6485,7 @@ fn install_github_remote_skill_writes_version_current_metadata_and_index() {
             source_url,
             target_root: None,
             preview_id: Some(preview.preview_id),
+            confirm_warnings: false,
             actor: "cli".to_string(),
         },
         &managed_root,
@@ -6461,6 +6581,7 @@ fn install_github_root_skill_previews_installs_indexes_and_deploys_sanitized_wor
             source_url,
             target_root: Some(target_root.clone()),
             preview_id: Some(preview.preview_id),
+            confirm_warnings: false,
             actor: "cli".to_string(),
         },
         &managed_root,
@@ -6545,6 +6666,7 @@ fn install_github_root_skill_rejects_preview_after_branch_advances() {
             source_url,
             target_root: None,
             preview_id: Some(preview.preview_id),
+            confirm_warnings: false,
             actor: "cli".to_string(),
         },
         &managed_root,
@@ -6567,6 +6689,137 @@ fn install_github_root_skill_rejects_preview_after_branch_advances() {
         .optional()
         .unwrap();
     assert_eq!(indexed, None);
+}
+
+#[test]
+fn install_github_warning_target_requires_confirmation_before_any_install_state() {
+    let root = temp_dir("install-github-warning-confirmation");
+    let managed_root = root.join("SkillBox");
+    let target_root = root.join("project/.agents/skills");
+    fs::create_dir_all(&target_root).unwrap();
+    add_workspace(
+        WorkspaceAddRequest {
+            path: target_root.clone(),
+            kind: WorkspaceKind::User,
+        },
+        &managed_root,
+    )
+    .unwrap();
+    let (remote, work) = bare_remote_with_root_skill_content(
+        "install-github-warning-confirmation-origin",
+        "warning-skill",
+        "Warning skill",
+        "Original body\n",
+    );
+    fs::write(
+        work.join("SKILL.md"),
+        "---
+name: warning-skill
+description: Warning skill
+tools:
+  - shell
+---
+# Warning skill
+",
+    )
+    .unwrap();
+    run_git(&work, &["add", "SKILL.md"]);
+    run_git(
+        &work,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Add optional frontmatter",
+        ],
+    );
+    run_git(&work, &["push", "origin", "main"]);
+    let _rewrite = github_repo_rewrite("acme", "install-github-warning-confirmation", &remote);
+    let source_url =
+        "https://github.com/acme/install-github-warning-confirmation/blob/main/SKILL.md"
+            .to_string();
+    let preview = github_install_preview(&source_url, Some(target_root.clone()), &managed_root);
+    assert_eq!(
+        preview.compatibility.as_ref().unwrap().status,
+        CompatibilityStatus::Warnings
+    );
+    let legacy_request: InstallGithubRemoteSkillRequest =
+        serde_json::from_value(serde_json::json!({
+            "source_url": source_url.clone(),
+            "target_root": target_root.clone(),
+            "preview_id": preview.preview_id.clone(),
+            "actor": "desktop"
+        }))
+        .unwrap();
+    assert!(!legacy_request.confirm_warnings);
+
+    let assert_no_install_state = || {
+        let paths = managed_paths(&managed_root);
+        let remote_root = paths.remote_skills_root.join("warning-skill");
+        assert!(!remote_root.join("versions").exists());
+        assert!(!remote_root.join("current").exists());
+        assert!(!remote_root.join("source.json").exists());
+        assert!(!target_root.join("warning-skill").exists());
+        let connection = open_database(&paths.database_path).unwrap();
+        let indexed = connection
+            .query_row(
+                "SELECT name FROM skills WHERE name = 'warning-skill'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .unwrap();
+        assert_eq!(indexed, None);
+    };
+
+    let stale_error = install_github_remote_skill(
+        InstallGithubRemoteSkillRequest {
+            source_url: source_url.clone(),
+            target_root: Some(target_root.clone()),
+            preview_id: Some(format!("{}-stale", preview.preview_id)),
+            confirm_warnings: true,
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+    assert!(stale_error.contains("Remote install preview is stale"));
+    assert_no_install_state();
+
+    let confirmation_error = install_github_remote_skill(
+        InstallGithubRemoteSkillRequest {
+            source_url: source_url.clone(),
+            target_root: Some(target_root.clone()),
+            preview_id: Some(preview.preview_id.clone()),
+            confirm_warnings: false,
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+    assert!(confirmation_error.contains("explicitly confirm warnings"));
+    assert_no_install_state();
+
+    let result = install_github_remote_skill(
+        InstallGithubRemoteSkillRequest {
+            source_url,
+            target_root: Some(target_root.clone()),
+            preview_id: Some(preview.preview_id),
+            confirm_warnings: true,
+            actor: "cli".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+    assert_eq!(result.deployment.as_ref().unwrap().target_root, target_root);
+    assert!(result.version_path.join("SKILL.md").exists());
+    assert!(fs::symlink_metadata(result.deployment.unwrap().target_path)
+        .unwrap()
+        .file_type()
+        .is_symlink());
 }
 
 #[test]
@@ -6632,6 +6885,7 @@ fn github_root_skill_update_check_preview_and_apply_preserve_root_metadata() {
             source_url,
             target_root: None,
             preview_id: Some(install_preview.preview_id),
+            confirm_warnings: false,
             actor: "cli".to_string(),
         },
         &managed_root,
@@ -6724,6 +6978,7 @@ fn install_github_remote_skill_rejects_missing_preview_id() {
             source_url: "https://github.com/acme/repo/tree/main/skills/demo".to_string(),
             target_root: None,
             preview_id: None,
+            confirm_warnings: false,
             actor: "cli".to_string(),
         },
         &managed_root,
@@ -6753,6 +7008,7 @@ fn install_github_remote_skill_rejects_stale_preview_id() {
             source_url,
             target_root: None,
             preview_id: Some(format!("{}-stale", preview.preview_id)),
+            confirm_warnings: false,
             actor: "cli".to_string(),
         },
         &managed_root,
@@ -6819,6 +7075,7 @@ fn install_github_remote_skill_rejects_preview_after_branch_advances() {
             source_url,
             target_root: None,
             preview_id: Some(preview.preview_id),
+            confirm_warnings: false,
             actor: "cli".to_string(),
         },
         &managed_root,
@@ -6878,6 +7135,7 @@ fn install_github_remote_skill_deploys_to_target_root() {
             source_url,
             target_root: Some(target_root.clone()),
             preview_id: Some(preview.preview_id),
+            confirm_warnings: false,
             actor: "cli".to_string(),
         },
         &managed_root,
@@ -6915,6 +7173,7 @@ fn install_github_remote_skill_reuses_existing_version_snapshot() {
             source_url: source_url.clone(),
             target_root: None,
             preview_id: Some(first_preview.preview_id),
+            confirm_warnings: false,
             actor: "cli".to_string(),
         },
         &managed_root,
@@ -6929,6 +7188,7 @@ fn install_github_remote_skill_reuses_existing_version_snapshot() {
             source_url,
             target_root: None,
             preview_id: Some(second_preview.preview_id),
+            confirm_warnings: false,
             actor: "cli".to_string(),
         },
         &managed_root,
@@ -6966,6 +7226,7 @@ fn install_github_remote_skill_cleans_partial_version_on_copy_failure() {
             source_url,
             target_root: None,
             preview_id: Some(preview.preview_id),
+            confirm_warnings: false,
             actor: "cli".to_string(),
         },
         &managed_root,
@@ -6991,6 +7252,7 @@ fn install_github_remote_skill_rejects_traversal_url_without_creating_store() {
             source_url: "https://github.com/acme/repo/tree/main/skills/../../secret".to_string(),
             target_root: None,
             preview_id: Some("stale".to_string()),
+            confirm_warnings: false,
             actor: "cli".to_string(),
         },
         &managed_root,
@@ -7011,6 +7273,7 @@ fn install_github_remote_skill_rejects_non_github_url_without_creating_store() {
             source_url: "https://example.com/acme/repo/tree/main/skills/demo".to_string(),
             target_root: None,
             preview_id: Some("stale".to_string()),
+            confirm_warnings: false,
             actor: "cli".to_string(),
         },
         &managed_root,
@@ -7031,6 +7294,7 @@ fn install_github_remote_skill_rejects_invalid_ref_without_creating_store() {
             source_url: "https://github.com/acme/repo/tree/-bad/skills/demo".to_string(),
             target_root: None,
             preview_id: Some("stale".to_string()),
+            confirm_warnings: false,
             actor: "cli".to_string(),
         },
         &managed_root,
@@ -7065,6 +7329,7 @@ fn install_github_remote_skill_refuses_non_symlink_current_and_removes_new_versi
             source_url,
             target_root: None,
             preview_id: Some(preview.preview_id),
+            confirm_warnings: false,
             actor: "cli".to_string(),
         },
         &managed_root,

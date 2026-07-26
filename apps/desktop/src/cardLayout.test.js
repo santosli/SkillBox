@@ -587,12 +587,15 @@ test('remote skill URL import previews GitHub skills before install', () => {
   assert.doesNotMatch(appSource, /Repository-root SKILL\.md files are not supported\./);
 });
 
-test('remote install review displays Rust compatibility and blocks incompatible targets', () => {
-  assert.match(appSource, /preview\?\.compatibility\?\.status !== 'blocked'/);
+test('remote install review displays Rust compatibility and confirms warning targets', () => {
   assert.match(appSource, /remoteCompatibilitySummary/);
   assert.match(appSource, /preview\.compatibility\.profileName/);
   assert.match(appSource, /issue\.suggestedAction/);
+  assert.match(appSource, /Confirm compatibility warnings before installing/);
+  assert.match(appSource, /onConfirmWarningsChange/);
+  assert.match(appSource, /confirmWarnings:\s*dialog\.confirmWarnings/);
   assert.match(css, /\.remoteCompatibilitySummary\.blocked/);
+  assert.match(css, /\.remoteCompatibilityConfirm/);
 });
 
 test('remote skill URL import restores ready state when install fails', () => {
@@ -625,6 +628,10 @@ test('remote GitHub install confirmation passes the preview id', () => {
   assert.match(applyRemoteInstall, /invoke\('install_github_remote_skill'/);
   assert.match(applyRemoteInstall, /source_url:\s*preview\.sourceUrl/);
   assert.match(applyRemoteInstall, /preview_id:\s*preview\.previewId \|\| null/);
+  assert.match(
+    applyRemoteInstall,
+    /confirm_warnings:\s*Boolean\(remoteInstallDialog\.confirmWarnings\)/
+  );
   assert.match(applyRemoteInstall, /actor:\s*'desktop'/);
 });
 

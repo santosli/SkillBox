@@ -216,7 +216,7 @@ skill_user_metadata
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 ```
 
-`schema_migrations` 是 Rust schema 的唯一版本历史。migration 按 version 顺序在独立 transaction 中执行；已有数据库在首次执行待处理 migration 前生成一致性 backup，全部 migration 完成后运行 SQLite integrity check。新建空数据库不生成 backup。backup decision 和 migration application 由同一个进程安全文件锁串行化，锁随文件句柄释放，即使进程异常退出也不会留下永久锁状态。schema v6 增加 workspace runtime profile identity，并按 component suffix backfill：`.agents/skills` -> `agents`、`.codex/skills` -> `codex`、`.claude/skills` -> `claude-code`、`.cursor/skills` -> `cursor`；其它已登记 root -> `custom-skill-md`。全部现有 row 使用 `format=skill_md`，不要求重新 scan。
+`schema_migrations` 是 Rust schema 的唯一版本历史。migration 按 version 顺序在独立 transaction 中执行；已有数据库在首次执行待处理 migration 前生成一致性 backup，全部 migration 完成后运行 SQLite integrity check。新建空数据库不生成 backup。backup decision 和 migration application 由同一个进程安全文件锁串行化，锁随文件句柄释放，即使进程异常退出也不会留下永久锁状态。schema v6 增加 workspace runtime profile identity，并按 `canonical_path` 的 component suffix backfill：`.agents/skills` -> `agents`、`.codex/skills` -> `codex`、`.claude/skills` -> `claude-code`、`.cursor/skills` -> `cursor`；其它已登记 root -> `custom-skill-md`。因此，显示路径看似 built-in root、但 symlink 实际解析到其它位置的 legacy workspace 会按 canonical identity 迁移为 `custom-skill-md/exact`。全部现有 row 使用 `format=skill_md`，不要求重新 scan。
 
 `skill_user_metadata` 保存用户显式设置的 favorite 和 tags。桌面首次读取该表时会把旧 `localStorage` 中仍存在的 metadata 通过 `INSERT OR IGNORE` 迁入，因此 SQLite 中已有值不会被旧浏览器状态覆盖；迁移成功后删除旧 key。
 

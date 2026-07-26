@@ -196,8 +196,16 @@ export function remoteDiffOmissionNotice(file = null) {
   return null;
 }
 
-export function canApplyRemoteVersionChange({ allowNoFileChanges = false, files = [], loading = false } = {}) {
-  return !loading && (files.length > 0 || allowNoFileChanges);
+export function canApplyRemoteVersionChange({
+  allowNoFileChanges = false,
+  compatibility = null,
+  confirmWarnings = false,
+  files = [],
+  loading = false
+} = {}) {
+  if (loading || compatibility?.status === 'blocked') return false;
+  if (compatibility?.status === 'warnings' && !confirmWarnings) return false;
+  return files.length > 0 || allowNoFileChanges;
 }
 
 export function formatOperationTimestamp(timestamp = '') {

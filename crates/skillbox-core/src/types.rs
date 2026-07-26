@@ -720,6 +720,8 @@ pub struct InstallGithubRemoteSkillRequest {
     pub source_url: String,
     pub target_root: Option<PathBuf>,
     pub preview_id: Option<String>,
+    #[serde(default)]
+    pub confirm_warnings: bool,
     pub actor: String,
 }
 

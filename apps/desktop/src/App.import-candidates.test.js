@@ -878,6 +878,28 @@ test('remote version preview can apply metadata-only updates', () => {
   );
 });
 
+test('remote install warnings require explicit confirmation before apply', () => {
+  const files = [{ path: 'SKILL.md' }];
+  const compatibility = { status: 'warnings' };
+
+  assert.equal(
+    canApplyRemoteVersionChange({ files, compatibility, confirmWarnings: false }),
+    false
+  );
+  assert.equal(
+    canApplyRemoteVersionChange({ files, compatibility, confirmWarnings: true }),
+    true
+  );
+  assert.equal(
+    canApplyRemoteVersionChange({
+      files,
+      compatibility: { status: 'blocked' },
+      confirmWarnings: true
+    }),
+    false
+  );
+});
+
 test('formats operation timestamps for compact log rows', () => {
   const localTime = new Date('2026-05-27T09:08:07');
   const epochSeconds = String(Math.floor(localTime.getTime() / 1000));

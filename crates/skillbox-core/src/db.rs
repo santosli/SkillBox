@@ -316,17 +316,17 @@ fn apply_runtime_profiles_migration(connection: &Connection) -> Result<()> {
             "
             UPDATE workspaces
             SET profile_id = CASE
-                  WHEN path LIKE '%/.agents/skills' THEN 'agents'
-                  WHEN path LIKE '%/.codex/skills' THEN 'codex'
-                  WHEN path LIKE '%/.claude/skills' THEN 'claude-code'
-                  WHEN path LIKE '%/.cursor/skills' THEN 'cursor'
+                  WHEN canonical_path LIKE '%/.agents/skills' THEN 'agents'
+                  WHEN canonical_path LIKE '%/.codex/skills' THEN 'codex'
+                  WHEN canonical_path LIKE '%/.claude/skills' THEN 'claude-code'
+                  WHEN canonical_path LIKE '%/.cursor/skills' THEN 'cursor'
                   ELSE 'custom-skill-md'
                 END,
                 root_key = CASE
-                  WHEN path LIKE '%/.agents/skills'
-                    OR path LIKE '%/.codex/skills'
-                    OR path LIKE '%/.claude/skills'
-                    OR path LIKE '%/.cursor/skills'
+                  WHEN canonical_path LIKE '%/.agents/skills'
+                    OR canonical_path LIKE '%/.codex/skills'
+                    OR canonical_path LIKE '%/.claude/skills'
+                    OR canonical_path LIKE '%/.cursor/skills'
                   THEN 'skills'
                   ELSE 'exact'
                 END,

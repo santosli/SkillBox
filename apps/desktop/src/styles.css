@@ -5420,6 +5420,10 @@ dd {
   color: var(--skillbox-text-muted);
 }
 
+.remoteCompatibilityConfirm {
+  margin: 12px 16px 0;
+}
+
 .localImportBody {
   display: grid;
   gap: 16px;

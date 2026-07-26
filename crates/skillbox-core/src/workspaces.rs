@@ -617,7 +617,7 @@ pub(crate) fn upsert_workspace(
     let canonical_path = fs::canonicalize(&path).map_err(|error| error.to_string())?;
     let stats = scan_workspace_root(&path, paths)?;
     let agent_id = workspace_agent_id(&path);
-    let (profile, root) = resolve_runtime_profile_for_root(&path);
+    let (profile, root) = resolve_runtime_profile_for_root(&canonical_path);
     let display_name = workspace_display_name(&path, Some(&profile.display_name), kind);
     let connection = open_database(&paths.database_path).map_err(|error| error.to_string())?;
 

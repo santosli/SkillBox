@@ -369,6 +369,7 @@ export default function App() {
     applying: false,
     preview: null,
     activePath: '',
+    confirmWarnings: false,
     error: ''
   });
   const [remoteVersions, setRemoteVersions] = useState({});
@@ -1006,11 +1007,27 @@ export default function App() {
           skill_name: remoteImportCandidate(remoteImport.mode, value).name || 'remote-skill',
           source_url: value,
           installed_sha: '1234567890abcdef',
+          target_root: '/Users/demo/project/.agents/skills',
+          compatibility: {
+            preview_id: 'browser-compatibility-preview',
+            profile_id: 'agents',
+            profile_name: 'Agents',
+            target_root: '/Users/demo/project/.agents/skills',
+            status: 'warnings',
+            issues: [
+              {
+                code: 'unknown_optional_frontmatter',
+                severity: 'warning',
+                message: 'Optional frontmatter fields are not declared by this runtime profile.',
+                suggested_action: 'Review the fields before installing.'
+              }
+            ]
+          },
           files: [
             {
               path: 'SKILL.md',
               status: 'A',
-              diff: '@@\n+---\n+name: remote-skill\n+description: Preview skill\n+---\n'
+              diff: '@@\n+---\n+name: remote-skill\n+description: Preview skill\n+tools:\n+  - shell\n+---\n'
             }
           ]
         });
@@ -1020,6 +1037,7 @@ export default function App() {
           applying: false,
           preview,
           activePath: preview.activePath,
+          confirmWarnings: false,
           title: `Install ${preview.skillName}`,
           subtitle: 'Review the GitHub skill before SkillBox copies it into the managed store.',
           applyLabel: 'Install from GitHub',
@@ -1055,6 +1073,7 @@ export default function App() {
           applying: false,
           preview: null,
           activePath: '',
+          confirmWarnings: false,
           title: 'Review GitHub install',
           subtitle: 'Loading remote skill diff before anything is copied into SkillBox.',
           applyLabel: 'Install from GitHub',
@@ -1075,6 +1094,7 @@ export default function App() {
           applying: false,
           preview,
           activePath: preview.activePath,
+          confirmWarnings: false,
           title: `Install ${preview.skillName}`,
           subtitle: 'Review the GitHub skill before SkillBox copies it into the managed store.',
           applyLabel: 'Install from GitHub',
@@ -3118,6 +3138,10 @@ export default function App() {
     setRemoteInstallDialog((current) => ({ ...current, activePath: path }));
   }
 
+  function updateRemoteInstallWarningConfirmation(confirmed) {
+    setRemoteInstallDialog((current) => ({ ...current, confirmWarnings: confirmed, error: '' }));
+  }
+
   async function applyRemoteInstall() {
     const preview = remoteInstallDialog.preview;
     if (!preview) return;
@@ -3135,6 +3159,7 @@ export default function App() {
           source_url: preview.sourceUrl,
           target_root: preview.targetRoot || null,
           preview_id: preview.previewId || null,
+          confirm_warnings: Boolean(remoteInstallDialog.confirmWarnings),
           actor: 'desktop'
         }
       });
@@ -3890,6 +3915,7 @@ export default function App() {
           onActivatePath={activateRemoteInstallPath}
           onApply={applyRemoteInstall}
           onClose={closeRemoteInstallDialog}
+          onConfirmWarningsChange={updateRemoteInstallWarningConfirmation}
         />
       ) : null}
 
