@@ -9,6 +9,13 @@ version tags such as `v0.3.0`.
 
 - No unreleased changes.
 
+## 0.6.1
+
+- Classify local skill usage evidence as confirmed, inferred, or reference while keeping Calls focused on confirmed and defensible inferred invocations.
+- Improve Codex history reconciliation and aggregate-only usage auditing without treating low-signal catalogs, prose, shell payloads, or tool output as Calls.
+- Reconstruct Cursor Calls from structured transcript Read events, including safe historical skills that were later moved or removed, with one invocation per transcript user turn and skill.
+- Separate History references from Calls across Dashboard, Workspaces, History, Rankings, and skill details, with clearer local coverage diagnostics.
+
 ## 0.6.0
 
 - Add a versioned Rust runtime-profile registry for Agents, Codex, Claude Code, Cursor, and exact custom `SKILL.md` roots, with deterministic discovery precedence and schema-v6 workspace backfill that does not require a rescan.
