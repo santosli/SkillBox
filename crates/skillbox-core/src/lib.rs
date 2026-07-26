@@ -89,6 +89,7 @@ mod usage;
 mod usage_backfill;
 mod usage_backfill_claude;
 mod usage_backfill_cursor;
+mod usage_backfill_cursor_transcripts;
 mod workspaces;
 
 pub use compatibility::*;
@@ -111,6 +112,7 @@ pub use usage::*;
 pub use usage_backfill::*;
 pub use usage_backfill_claude::*;
 pub use usage_backfill_cursor::*;
+pub(crate) use usage_backfill_cursor_transcripts::*;
 pub use workspaces::*;
 
 #[cfg(test)]

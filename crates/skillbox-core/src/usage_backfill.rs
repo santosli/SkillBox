@@ -59,7 +59,8 @@ pub fn backfill_codex_session_usage_for_home(
     for path in files {
         result.scanned_files += 1;
         match extract_codex_session_skill_candidates(&path) {
-            Ok((candidates, parse_errors)) => {
+            Ok((candidates, parse_errors, scanned_turns)) => {
+                result.scanned_turns = result.scanned_turns.saturating_add(scanned_turns);
                 if parse_errors > 0 {
                     result.skipped += parse_errors;
                     push_backfill_error(
@@ -79,7 +80,9 @@ pub fn backfill_codex_session_usage_for_home(
                         &runtime_roots,
                     ) {
                         Ok(record) => {
-                            if record.deduplicated {
+                            if record.upgraded {
+                                result.upgraded += 1;
+                            } else if record.deduplicated {
                                 result.deduplicated += 1;
                             } else {
                                 result.recorded += 1;
@@ -111,6 +114,27 @@ pub fn backfill_codex_session_usage_for_home(
         push_backfill_error(
             &mut result.errors,
             format!("Unable to persist Codex scan coverage: {error}"),
+        );
+    }
+    if let Err(error) = write_u32_preference(
+        &paths.database_path,
+        "codex_usage_backfill_scanned_turns",
+        u32::try_from(result.scanned_turns).unwrap_or(u32::MAX),
+    ) {
+        push_backfill_error(
+            &mut result.errors,
+            format!("Unable to persist Codex turn coverage: {error}"),
+        );
+    }
+    if let Err(error) = persist_usage_backfill_audit(
+        &paths.database_path,
+        "codex_session_backfill",
+        result.scanned_files,
+        &result,
+    ) {
+        push_backfill_error(
+            &mut result.errors,
+            format!("Unable to persist Codex usage audit: {error}"),
         );
     }
 
@@ -147,7 +171,7 @@ fn record_codex_session_skill_candidate(
 
 fn extract_codex_session_skill_candidates(
     path: &Path,
-) -> Result<(Vec<CodexSessionSkillCandidate>, usize)> {
+) -> Result<(Vec<CodexSessionSkillCandidate>, usize, usize)> {
     let file = fs::File::open(path).map_err(|error| format!("Unable to read session: {error}"))?;
     let reader = BufReader::new(file);
     let mut session_id = session_id_from_rollout_path(path);
@@ -159,6 +183,7 @@ fn extract_codex_session_skill_candidates(
     let mut has_turn_context = false;
     let mut results = Vec::new();
     let mut parse_errors = 0usize;
+    let mut scanned_turns = 0usize;
 
     for line in reader.lines() {
         let line = line.map_err(|error| format!("Unable to read session line: {error}"))?;
@@ -192,6 +217,7 @@ fn extract_codex_session_skill_candidates(
                     .map(PathBuf::from);
             }
             Some("turn_context") => {
+                scanned_turns = scanned_turns.saturating_add(1);
                 flush_codex_session_turn(
                     &mut results,
                     &session_id,
@@ -230,6 +256,7 @@ fn extract_codex_session_skill_candidates(
                 }
                 collect_codex_user_input(&value, &mut turn_prompts, &mut turn_skills);
                 if task_complete_turn_id(&value).is_some() {
+                    scanned_turns = scanned_turns.saturating_add(1);
                     flush_codex_session_turn(
                         &mut results,
                         &session_id,
@@ -256,7 +283,7 @@ fn extract_codex_session_skill_candidates(
         &mut turn_prompts,
     );
 
-    Ok((results, parse_errors))
+    Ok((results, parse_errors, scanned_turns))
 }
 
 fn collect_codex_user_input(

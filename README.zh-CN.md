@@ -30,7 +30,7 @@ SkillBox 是一个 local-first 的 macOS 桌面应用，带 Rust core/CLI，用�
 - **完整生命周期都先 review。** 导入、部署、类型迁移、source 绑定、更新、回滚和删除都会先展示影响，再改 managed store 或 runtime 文件。
 - **远程 skill 版本管理。** SkillBox 打开期间检查 GitHub source，预览全文件 diff，应用更新，并回滚到不可变版本。
 - **Git 提交和推送也可审查。** 查看 user-skill diff、创建 Conventional Commit，并可选推送；远端历史分叉仍在 SkillBox 外按正常 Git 冲突处理。
-- **本机观测调用、本地排名与操作历史。** 通过支持的 agent hooks 记录 skill 调用，以 `Locally observed calls` 明确标注本机已观测使用量，并与管理操作统一展示，同时不保存完整聊天 transcript。
+- **按证据分类的 Calls、引用与操作历史。** Calls 只统计本机 confirmed execution 与可辩护的 structured invocation，低信号 history references 单独展示，并且不保存完整聊天 transcript。
 - **安全的存储与部署默认值。** 使用顺序 SQLite migrations、恢复备份、完整性检查和 ownership-checked symlink，不静默覆盖 runtime 内容。
 - **部署前检查 compatibility。** Rust-owned runtime profiles 标识 workspace，并在确认 symlink 部署前报告会原样保留的 frontmatter warnings 或 hard blockers。
 - **签名的 macOS 分发。** 可安装已公证 DMG 或 Homebrew cask，app 更新也只在用户确认后应用。
@@ -47,9 +47,9 @@ Workspaces 视图会按 profile 跟踪 Agents、Codex、Claude Code、Cursor 和
 
 ![SkillBox history](docs/screenshots/skillbox-history-v041.jpg)
 
-History 会把本机观测到的 skill 调用和管理操作合并展示。独立的一级 Rankings 页面可查看 7 天、30 天或全部 **Locally observed calls（本机观测调用）**，并按 skill type（User、Remote、System）、Agent 或 Workspace 过滤；同名普通/System skill 会保持独立，并在准备导入时使用该行实际观测到的来源。覆盖范围会展示最早/最新观测事件、hook 与各本地历史 provider 的调用数，以及最近一次扫描的 session 数量。
+History 会分开展示 Calls、History references 和管理操作。独立的一级 Rankings 页面可查看 7 天、30 天或全部 **Calls**，并按 skill type（User、Remote、System）、Agent 或 Workspace 过滤。Calls 由本机 confirmed execution 与可辩护的 structured per-turn invocation 组成；reference 不增加 Calls，也不提升默认排名。同名普通/System skill 会保持独立，并在准备导入时使用该行实际观测到的来源。覆盖范围会展示 confirmed、inferred、reference totals、各自时间范围、保留的 provenance sources，以及最近一次 provider scan totals。
 
-`Sync histories` 会从 Codex、Claude Code 和 Cursor 导入可审计的使用证据，但不复制聊天正文。Codex 只接受用户输入中包含绝对 `SKILL.md` 路径的 `<skill>` 块或 `[$skill](.../SKILL.md)`，粘贴的代码模板和占位符会被忽略；Claude Code 只接受结构化 Skill tool/command attribution，并解析到真实 `SKILL.md`；Cursor 只读取显式附加、指向真实 `SKILL.md` 的 `context.cursorRules`，其私有 SQLite schema 会先验证并以只读方式打开，不兼容时 fail closed。重复扫描保持幂等。这些本机观测不是全局热度或信任评分；provider reported analytics 永远独立展示，不并入本地 ranking、total 或 delta。
+`Sync histories` 会从 Codex、Claude Code 和 Cursor 导入可审计的 usage evidence，但不复制聊天正文。Codex user turn 中含绝对路径的 `<skill>` 块或 `[$skill](.../SKILL.md)` 属于 inferred Calls，而不是 provider-confirmed run；catalog、普通 prose、shell/tool payload 和 output 都会排除。Claude Code 原生 Skill tool/command attribution 在解析到真实 `SKILL.md` 后属于 confirmed。Cursor state 的 `context.cursorRules` 只是 reference；有界 agent transcript 中 assistant `Read` / `ReadFile` 读取绝对且通过安全校验的 `SKILL.md` 才属于 confirmed。重复扫描保持幂等，更强 evidence 会升级同一 event 并保留 provenance。Codex 本地 stores 没有稳定的 provider-native run total，因此 Calls 是已知可能 undercount 的本机下界，不是账户 analytics。migration 不会自动重扫 history；用户显式 sync 时可以恢复或升级 evidence。
 
 ![SkillBox managed store health](docs/screenshots/skillbox-settings-health-v041.jpg)
 
@@ -102,7 +102,7 @@ Runtime 目录只是部署目标：
 - 名称确认后，从 managed store 和全部关联 workspace 删除 skill，同时保留 recovery backup 和 workspace registrations。
 - Review user-skill Git diff、为选中文件创建 Conventional Commit，并可选推送，不尝试自动合并远端变更。
 - 按类型、更新状态、tag 或 favorite 搜索过滤 Dashboard，在 grid/list 间切换，并把 favorites 与 tags 持久化到 SQLite。
-- 记录受支持的 Codex App、Codex CLI 和 Claude Code CLI hook 调用；与管理操作一同浏览 `Locally observed calls（本机观测调用）`，并按时间范围、Agent 或 Workspace 做本地排名，不保存完整 transcript。
+- 记录受支持的 hooks 与 structured local-history evidence；分开展示 Calls 和 History references，按 confirmed 加可辩护 inferred Calls 排名，并提供不含正文的 aggregate-only coverage。
 - 执行顺序 SQLite migrations、迁移前备份和完整性检查；运行 Doctor 诊断并显式清理 stale deployment records。
 - 后台每天至多检查一次已签名的 GitHub Releases；发现新版时显示 Update 操作，并且只在用户点击后安装 macOS app 更新。
 
@@ -175,7 +175,7 @@ Homebrew uninstall 不会删除 `~/.skillbox`。
 3. 使用 `Import` 先 review 候选项，再让 SkillBox 复制到 `~/.skillbox`。
 4. 使用 `Install` 先预览 GitHub-backed remote skills，再确认是否复制到 managed store。SkillBox 支持根目录包含 `SKILL.md` 的 standalone repository URL、根目录 `SKILL.md` 文件 URL 和 skill directory URL；仓库根 snapshot 不包含 Git metadata。
 5. 把 managed skills 部署到选定 runtime workspaces。
-6. 可选：在 Settings 启用 usage hook injection，用来记录真实 skill 调用。
+6. 可选：在 Settings 启用 usage hook injection，补充 confirmed 本机执行证据。hook/provider 覆盖不完整时，Calls 仍是本机下界。
 
 ## 权限和本地变更
 

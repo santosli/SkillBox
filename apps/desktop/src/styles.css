@@ -982,6 +982,12 @@ button {
   white-space: nowrap;
 }
 
+.skillCardReference {
+  color: var(--skillbox-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .skillCardDescription {
   display: -webkit-box;
   min-width: 0;
@@ -1736,6 +1742,21 @@ button {
   font-weight: 720;
 }
 
+.usageCoverageSources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.usageCoverageSources span {
+  background: var(--skillbox-surface);
+  border: 1px solid var(--skillbox-border);
+  border-radius: 6px;
+  color: var(--skillbox-text-muted);
+  font-size: 12px;
+  padding: 5px 8px;
+}
+
 .usageCoverageDetails p {
   margin: 0;
   line-height: 1.45;
@@ -2412,6 +2433,12 @@ strong.usageRankingTopCardName {
   gap: 10px;
   border-top: 1px solid var(--skillbox-slate-bg);
   padding-top: 14px;
+}
+
+.workspaceCardBody > .workspaceReferenceCount {
+  color: var(--skillbox-text-muted);
+  display: block;
+  margin-top: 10px;
 }
 
 .workspaceCardMetric {
@@ -4013,6 +4040,10 @@ dd {
   gap: 12px;
 }
 
+.skillDetailUsageSummary.secondary {
+  color: var(--skillbox-text-muted);
+}
+
 .skillDetailDeploySummary > div,
 .skillDetailUsageSummary > div {
   display: grid;
@@ -4045,6 +4076,12 @@ dd {
   font-size: 18px;
   font-weight: 780;
   line-height: 1;
+}
+
+.skillDetailUsageSummary.secondary .skillDetailDeployMetric {
+  border-color: var(--skillbox-border);
+  background: var(--skillbox-slate-bg);
+  color: var(--skillbox-text-secondary);
 }
 
 .skillDetailDeploySummary strong,

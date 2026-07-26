@@ -22,12 +22,19 @@ export function HistoryPage({
     {
       id: 'all',
       label: 'All',
-      count: numberOrZero(history.skillUsageCount) + numberOrZero(history.operationCount)
+      count: numberOrZero(history.skillUsageCount)
+        + numberOrZero(history.skillReferenceCount)
+        + numberOrZero(history.operationCount)
     },
     {
       id: 'skill_usage',
       label: 'Calls',
       count: numberOrZero(history.skillUsageCount)
+    },
+    {
+      id: 'usage_reference',
+      label: 'References',
+      count: numberOrZero(history.skillReferenceCount)
     },
     { id: 'operation', label: 'Operations', count: numberOrZero(history.operationCount) }
   ];
@@ -87,8 +94,12 @@ export function HistoryPage({
         </div>
       ) : (
         <div className="emptyState dashboardEmptyState historyEmptyState">
-          <strong>No history yet</strong>
-          <span>Calls and SkillBox operations will appear here.</span>
+          <strong>{filter === 'all' ? 'No history yet' : `No ${tabs.find((tab) => tab.id === filter)?.label.toLowerCase() || 'history'} yet`}</strong>
+          <span>
+            {filter === 'all'
+              ? 'Calls, history references, and SkillBox operations will appear here.'
+              : 'Try another history filter or sync local histories.'}
+          </span>
         </div>
       )}
     </PageFrame>
@@ -100,15 +111,16 @@ function HistoryRow({ entry }) {
   const timestampParts = timestamp.split(' ');
   const timestampTime = timestampParts.length > 1 ? timestampParts.slice(1).join(' ') : timestamp;
   const isUsage = entry.kind === 'skill_usage';
-  const badgeLabel = isUsage ? 'Call' : entry.status || 'operation';
-  const badgeTone = isUsage ? 'blue' : operationStatusTone(entry.status);
-  const details = isUsage
+  const isReference = entry.kind === 'usage_reference';
+  const badgeLabel = isUsage ? 'Call' : isReference ? 'Reference' : entry.status || 'operation';
+  const badgeTone = isUsage ? 'blue' : isReference ? 'slate' : operationStatusTone(entry.status);
+  const details = isUsage || isReference
     ? [entry.agentId, compactPath(entry.runtimeRoot)].filter(Boolean)
     : [entry.operationType, entry.actor, entry.entityName].filter(Boolean);
-  const rowSubtitle = historyRowSubtitle(entry, isUsage);
+  const rowSubtitle = historyRowSubtitle(entry, isUsage || isReference);
 
   return (
-    <article className={isUsage ? 'historyRow usage' : 'historyRow operation'}>
+    <article className={isUsage ? 'historyRow usage' : isReference ? 'historyRow reference' : 'historyRow operation'}>
       <div className="historyRowTimeRail">
         {timestamp ? (
           <time className="historyRowTimestamp" dateTime={entry.timestamp}>
@@ -127,7 +139,7 @@ function HistoryRow({ entry }) {
           ))}
         </div>
         {rowSubtitle ? <p>{rowSubtitle}</p> : null}
-        {isUsage && entry.promptExcerpt ? (
+        {(isUsage || isReference) && entry.promptExcerpt ? (
           <div className="historyRowPrompt">
             <span>Prompt</span>
             <p>{entry.promptExcerpt}</p>

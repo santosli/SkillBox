@@ -190,12 +190,23 @@ pub fn list_history(filter: HistoryFilter, managed_root: impl AsRef<Path>) -> Re
     let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
     let connection = open_database(&paths.database_path).map_err(|error| error.to_string())?;
     let limit = usize::try_from(filter.limit.unwrap_or(100).clamp(1, 500)).unwrap_or(100);
-    let skill_usage_count = history_table_count(&connection, "skill_usage_events")?;
+    let skill_usage_count = history_usage_count(&connection, SkillUsageEvidenceClass::Confirmed)?;
+    let skill_reference_count =
+        history_usage_count(&connection, SkillUsageEvidenceClass::Reference)?;
     let operation_count = history_table_count(&connection, "operations")?;
     let mut entries = Vec::new();
 
     if filter.kind.is_none() || filter.kind == Some(HistoryEntryKind::SkillUsage) {
-        entries.extend(load_skill_usage_history_entries(&connection)?);
+        entries.extend(load_skill_usage_history_entries(
+            &connection,
+            SkillUsageEvidenceClass::Confirmed,
+        )?);
+    }
+    if filter.kind.is_none() || filter.kind == Some(HistoryEntryKind::UsageReference) {
+        entries.extend(load_skill_usage_history_entries(
+            &connection,
+            SkillUsageEvidenceClass::Reference,
+        )?);
     }
     if filter.kind.is_none() || filter.kind == Some(HistoryEntryKind::Operation) {
         entries.extend(load_operation_history_entries(&connection)?);
@@ -211,6 +222,7 @@ pub fn list_history(filter: HistoryFilter, managed_root: impl AsRef<Path>) -> Re
     Ok(HistoryList {
         entries,
         skill_usage_count,
+        skill_reference_count,
         operation_count,
     })
 }
@@ -263,18 +275,44 @@ pub(crate) fn history_table_count(connection: &Connection, table: &str) -> Resul
     Ok(usize::try_from(count.max(0)).unwrap_or_default())
 }
 
+fn history_usage_count(
+    connection: &Connection,
+    evidence_class: SkillUsageEvidenceClass,
+) -> Result<usize> {
+    let predicate = if evidence_class == SkillUsageEvidenceClass::Reference {
+        "evidence_class = 'reference'"
+    } else {
+        "evidence_class IN ('confirmed', 'inferred')"
+    };
+    let count: i64 = connection
+        .query_row(
+            &format!("SELECT COUNT(*) FROM skill_usage_events WHERE {predicate}"),
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(usize::try_from(count.max(0)).unwrap_or_default())
+}
+
 pub(crate) fn load_skill_usage_history_entries(
     connection: &Connection,
+    evidence_class: SkillUsageEvidenceClass,
 ) -> Result<Vec<HistoryEntry>> {
+    let predicate = if evidence_class == SkillUsageEvidenceClass::Reference {
+        "evidence_class = 'reference'"
+    } else {
+        "evidence_class IN ('confirmed', 'inferred')"
+    };
     let mut statement = connection
-        .prepare(
+        .prepare(&format!(
             "
             SELECT id, skill_name, agent_id, runtime_root, used_at, prompt_excerpt
             FROM skill_usage_events
+            WHERE {predicate}
             ORDER BY used_at DESC, id DESC
             LIMIT 500
-            ",
-        )
+            "
+        ))
         .map_err(|error| error.to_string())?;
     let rows = statement
         .query_map([], |row| {
@@ -283,9 +321,21 @@ pub(crate) fn load_skill_usage_history_entries(
             let runtime_root: String = row.get(3)?;
             Ok(HistoryEntry {
                 id: row.get(0)?,
-                kind: HistoryEntryKind::SkillUsage,
+                kind: match evidence_class {
+                    SkillUsageEvidenceClass::Confirmed | SkillUsageEvidenceClass::Inferred => {
+                        HistoryEntryKind::SkillUsage
+                    }
+                    SkillUsageEvidenceClass::Reference => HistoryEntryKind::UsageReference,
+                },
                 timestamp: row.get(4)?,
-                title: format!("Skill call: {skill_name}"),
+                title: match evidence_class {
+                    SkillUsageEvidenceClass::Confirmed | SkillUsageEvidenceClass::Inferred => {
+                        format!("Skill call: {skill_name}")
+                    }
+                    SkillUsageEvidenceClass::Reference => {
+                        format!("History reference: {skill_name}")
+                    }
+                },
                 subtitle: format!(
                     "{agent_id} in {}",
                     compact_home_path(&PathBuf::from(&runtime_root))

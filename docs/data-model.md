@@ -195,10 +195,15 @@ skill_usage_events
   recorded_at TEXT NOT NULL
   prompt_excerpt TEXT
   metadata_json TEXT NOT NULL DEFAULT '{}'
+  evidence_class TEXT NOT NULL DEFAULT 'reference'
+  evidence_sources_json TEXT NOT NULL DEFAULT '[]'
   INDEX (used_at, skill_name)
   INDEX (agent_id, used_at, skill_name)
   INDEX (runtime_root, used_at, skill_name)
   INDEX (agent_id, runtime_root, used_at, skill_name)
+  INDEX (evidence_class, used_at, skill_name)
+  INDEX (evidence_class, agent_id, used_at, skill_name)
+  INDEX (evidence_class, runtime_root, used_at, skill_name)
 
 skill_usage_stats
   skill_name TEXT NOT NULL
@@ -216,20 +221,24 @@ skill_user_metadata
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 ```
 
-`schema_migrations` 是 Rust schema 的唯一版本历史。migration 按 version 顺序在独立 transaction 中执行；已有数据库在首次执行待处理 migration 前生成一致性 backup，全部 migration 完成后运行 SQLite integrity check。新建空数据库不生成 backup。backup decision 和 migration application 由同一个进程安全文件锁串行化，锁随文件句柄释放，即使进程异常退出也不会留下永久锁状态。schema v6 增加 workspace runtime profile identity，并按 `canonical_path` 的 component suffix backfill：`.agents/skills` -> `agents`、`.codex/skills` -> `codex`、`.claude/skills` -> `claude-code`、`.cursor/skills` -> `cursor`；其它已登记 root -> `custom-skill-md`。因此，显示路径看似 built-in root、但 symlink 实际解析到其它位置的 legacy workspace 会按 canonical identity 迁移为 `custom-skill-md/exact`。全部现有 row 使用 `format=skill_md`，不要求重新 scan。
+`schema_migrations` 是 Rust schema 的唯一版本历史。migration 按 version 顺序在独立 transaction 中执行；已有数据库在首次执行待处理 migration 前生成一致性 backup，全部 migration 完成后运行 SQLite integrity check。新建空数据库不生成 backup。backup decision 和 migration application 由同一个进程安全文件锁串行化，锁随文件句柄释放，即使进程异常退出也不会留下永久锁状态。schema v6 增加 workspace runtime profile identity，并按 `canonical_path` 的 component suffix backfill：`.agents/skills` -> `agents`、`.codex/skills` -> `codex`、`.claude/skills` -> `claude-code`、`.cursor/skills` -> `cursor`；其它已登记 root -> `custom-skill-md`。因此，显示路径看似 built-in root、但 symlink 实际解析到其它位置的 legacy workspace 会按 canonical identity 迁移为 `custom-skill-md/exact`。全部现有 row 使用 `format=skill_md`，不要求重新 scan。schema v7 为 usage event 增加 evidence class 与有界 provenance：已有事件按可信 source 保守回填为 `confirmed`、`inferred` 或 `reference`，随后在同一 migration transaction 中幂等重建 `skill_usage_stats`，不删除 raw event，也不要求重新扫描本地 history。legacy Claude session rows 因缺少逐条 native Skill attribution 而先保守迁为 `inferred`；用户之后显式执行 `Sync histories` 时，才会从仍可用的本地 session 文件恢复或升级 native Skill tool/command evidence 为 `confirmed`。
 
 `skill_user_metadata` 保存用户显式设置的 favorite 和 tags。桌面首次读取该表时会把旧 `localStorage` 中仍存在的 metadata 通过 `INSERT OR IGNORE` 迁入，因此 SQLite 中已有值不会被旧浏览器状态覆盖；迁移成功后删除旧 key。
 
 当前 `preferences` key-value 表除用户设置和 remote skill update cache 外，还保存
 `app_update_check_cache`、`codex_usage_backfill_scanned_files`、
-`claude_code_usage_backfill_scanned_files` 和
-`cursor_usage_backfill_scanned_sessions`。前者只记录最近一次成功的 updater metadata check 展示快照
+`codex_usage_backfill_scanned_turns`、`claude_code_usage_backfill_scanned_files`、
+`cursor_usage_backfill_scanned_sessions`、
+`cursor_usage_backfill_scanned_transcript_files` 和
+`usage_backfill_audit_<source>`。`app_update_check_cache` 只记录最近一次成功的 updater metadata check 展示快照
 （current/available version、release date/body、checked time 和 message），用于 24 小时
 节流与跨启动恢复提醒。它不保存下载 URL、签名或安装授权；损坏、时间异常或 current
 version 不匹配时必须忽略并重新通过 Tauri updater plugin 检查；下载和安装阶段仍由
-plugin 校验 updater asset 签名。后三者分别保存最近一次 Codex、Claude Code 和 Cursor
-usage history sync 扫描的 rollout/project JSONL 文件数或 composer session 数，作为操作覆盖信息；
-它们不随 Rankings 的时间、skill type、Agent 或 Workspace 过滤器变化。
+plugin 校验 updater asset 签名。usage coverage keys 保存最近一次 Codex、Claude Code 和
+Cursor history sync 扫描的 rollout/project JSONL 文件数、Codex turn 数、Cursor composer
+session 数或 Cursor agent transcript 文件数；backfill audit 仅保存 aggregate
+discovered/recorded/deduplicated/upgraded/skipped/errors。它们不随 Rankings 的时间、
+skill type、Agent 或 Workspace 过滤器变化，也不包含聊天正文。
 
 `workspaces.profile_id/root_key/format` 是 deployment target identity。registry v1
 包含 `agents`、`codex`、`claude-code`、`cursor` 和
@@ -253,15 +262,32 @@ compatibility preview 是派生的只读结果，不另建持久表；其 `previ
 
 `import_records` 记录本地 import 且 deploy back 到 source 成功后的可恢复状态。每个 imported skill 一条记录，`source_path` 是被替换成 SkillBox symlink 的 runtime 原路径，`backup_path` 是 import 前移动到 `backups/imports` 的原目录。`status=active` 的记录可以通过 `revert_import` 恢复；`status=reverted` 表示 backup 已恢复回 source path。`legacy=1` 表示记录由旧 deployments/backups 证据链保守 reconcile 得到。
 
-`skill_usage_events` 记录真实 agent 调用事件，不记录 SkillBox 打开详情、部署、更新等管理行为。显式上报入口允许未导入 skill 写入；`event_id` 是可选幂等键，在同一 canonical `agent_id + runtime_root` 下重复上报不会递增统计（去重同时兼容遗留 `agents`/`claude`）。可信内部来源包括 Stop hook（`metadata.source=agent_hook`）、Codex 回填（`codex_session_backfill`）、Claude Code 回填（`claude_code_session_backfill`）和 Cursor 回填（`cursor_session_backfill`）；这些 source 值均为保留值，公开 `usage-record` 不得写入。hook/backfill 还写入 `metadata.skill_source_kind=regular|system`，让同一 runtime root 下的同名普通/System skill 保持独立身份。只有 core 内部的 trusted hook/backfill 路径可以在 runtime attribution 因部署变化而改变时，按 canonical agent aliases、`skill_name + event_id` 复用首次记录的 runtime root；公开 `usage-record` 的 metadata 不授予该能力。重复事件可补齐缺失的 source identity，但不会增加调用次数。
+`skill_usage_events` 保存本机 usage evidence，不假定每条 row 都是一次已确认执行，也不记录 SkillBox 打开详情、部署、更新等管理行为。schema v7 的 `evidence_class` 是该 canonical event 当前最强证据：`confirmed` 证明本机执行/加载，`inferred` 证明结构化逐回合调用意图，`reference` 只证明提及或上下文附加。用户可见 `Calls = confirmed + inferred`；reference 单独显示为 History references。`event_id` 是可选幂等键，在同一 canonical `agent_id + runtime_root` 下重复上报不会创建第二条 event（去重同时兼容遗留 `agents`/`claude`）。
 
-各 history provider 只接受结构化、可审计并能解析到真实 `SKILL.md` 的证据：Codex 只扫描 `rollout-*.jsonl`（不跟随 symlink）中的显式 user-input `<skill><name>/<path>` block 或 `[$skill](.../SKILL.md)` link，并要求绝对 `SKILL.md` 路径以排除粘贴的代码模板、格式占位符和其它假阳性；Claude Code 只扫描 project JSONL 的 Skill tool/command attribution；Cursor 只读打开本机 history SQLite，验证所需表/列类型后，仅接受非 subagent 的 human bubble 中 `addedWithoutMention=false` 的 `context.cursorRules[].filename`。Cursor database 额外启用 `query_only` 和短 busy timeout；未知 schema 或锁等待超时即 fail closed。所有 provider 均忽略 assistant/tool prose，不保存聊天或 rule 正文，并用稳定 provider/session/turn/path identity 幂等去重。Codex session metadata 的 `cwd`、Claude project path 和 Cursor composer workspace 用于恢复 workspace identity。`prompt_excerpt` 仅供可信实时 hook 或明确允许的 Codex 用户 prompt 摘要使用，必须剥离 skill XML 注入块、压缩空白并限制长度；Claude Code/Cursor 回填不写 prompt excerpt。`metadata_json` 只接受小型 JSON object，不保存 prompt、聊天正文、文件内容或 diff。schema v4 为按时间、agent 和 runtime root 聚合 ranking 的四种查询形态新增组合索引；schema v5 将遗留路径型 agent id 规范为 UI 契约 id、删除重复事件，并从规范化后的事件重建受影响 stats；不新增 ranking 表，也不复制事件内容。
+`evidence_sources_json` 是最多八项的有界 provenance list，每项保存 source 与该来源提供的 evidence class。相同 canonical event 收到更强信号时只执行 `reference -> inferred -> confirmed` 单向升级，不增加 event 数；较弱信号不能降级，所有已观测 source 继续保留。因而 event 的当前 evidence-class totals 是互斥 partition，而 provenance source counts 可以重叠，其总和不得被要求等于 Calls 或总事件数。hook/backfill 还写入 `metadata.skill_source_kind=regular|system`，让同一 runtime root 下的同名普通/System skill 保持独立身份。只有 core 内部 trusted 入口可以写保留 source，或在 deployment attribution 改变时按 canonical agent aliases、`skill_name + event_id` 复用首次 runtime root；公开 `usage-record` 默认写 `reference`，metadata 不能获得这些权限。
 
-`skill_usage_stats` 按 `skill_name + agent_id + runtime_root` 保存 all-time 聚合，继续服务详情页、skill card 和 workspace calls。7 天、30 天和带 skill type/Agent/Workspace 过滤的 Skill Usage Rankings 必须从 `skill_usage_events` 聚合，不能从 all-time stats 反推；用户可见指标统一称为 `Locally observed calls`。skill type 只包含 User、Remote、System：前两者按当前 managed store 类型匹配，System 按可信 `skill_source_kind=system` 匹配；类型过滤必须在 coverage 累计之前执行。排名读取 count、`used_at`、`agent_id`、`runtime_root` 和受限的 `skill_source_kind`，不返回 `prompt_excerpt` 或完整 `metadata_json`。同一过滤快照的 coverage 返回最早/最新事件时间，并按事件中 canonical 已存储的 `metadata.source` 分别统计 hook、Codex、Claude Code、Cursor 和 other；这些计数互斥且总和等于该快照的 locally observed total。最近一次三个 provider 的扫描覆盖分别来自上述 preferences，不随 ranking 时间/skill type/Agent/Workspace 过滤器变化。写入时把路径型 agent id（`agents`、`claude`）规范为 UI/filter 契约 id（`codex`、`claude-code`）；排名过滤同时兼容历史遗留 id。Ranking row 携带稳定的 `source_id`、`source_kind` 和排序后的 `source_runtime_roots`，用于列表 identity 和 source-aware Import；同名普通/System 副本即使位于同一 root 或普通副本已 managed 也不合并。没有 source metadata 的旧事件按当前观测 root 保守推断；同一 root 同时存在两类副本时归入 `unknown` 独立行，不猜测为普通或 System 来源，也不允许从该行导入。若普通 unmanaged 行在其观测到的 runtime roots 下已无可读 `SKILL.md`（含 broken symlink），标记 `source_missing`，桌面显示为 `Deleted`。
+来源证据按 [ADR 0005](decisions/0005-usage-evidence-classification.md) 分类：
 
-未来若接入 Codex reported runs，必须使用独立于 `skill_usage_events` / `skill_usage_stats` 的存储和读取模型，并保存 provider、subject kind、time window、scope 与 provenance。reported runs 只能作为独立指标展示，不能进入本地 ranking、total 或 delta，也不能通过换算、补差或去重与 `Locally observed calls` 合并。
+- Stop hook `agent_hook` 是 `confirmed`。
+- Codex `rollout-*.jsonl` 中完整 user-turn `<skill><name>/<path>` block 或 `[$skill](.../SKILL.md)` link，在绝对 `SKILL.md` 路径校验后是 `inferred`。它证明 per-turn invocation intent，但不是 provider-native execution result。
+- Claude Code project JSONL 中原生 Skill tool use / Skill command attribution，在真实 `SKILL.md` 校验后是 `confirmed`。
+- Cursor history SQLite 中 non-subagent human bubble 的 `addedWithoutMention=false context.cursorRules[].filename` 是 `reference`；它只证明 skill 被附加为上下文。
+- Cursor agent transcript 中 assistant `tool_use` 的 `Read` / `ReadFile`，只有绝对路径通过 traversal、symlink、allowed-root、regular-file、大小和 `SKILL.md` frontmatter 检查后，才写 `cursor_agent_transcript_read=confirmed`。
+- catalog、普通 user/assistant prose、裸 `SKILL.md` mention、`exec_command`、custom/dynamic tool payload、tool/shell output 均不进入 Calls。
 
-History 是只读聚合视图，不新增表。Rust core 从 `operations` 和 `skill_usage_events` 读取最近记录，按事件时间合并为桌面 History 页的时间线；History 只展示摘要字段，不向 React 暴露 operation payload 或 usage metadata。
+所有 history provider 都不保存聊天或 rule 正文，并用稳定 provider/session/turn/path identity 幂等去重。Codex session metadata 的 `cwd`、Claude project path 和 Cursor workspace 用于恢复 workspace identity。`prompt_excerpt` 仅供可信实时 hook 或明确允许的 Codex user prompt 摘要使用，必须剥离 skill carrier、压缩空白并限制长度；Claude Code/Cursor 回填不写 prompt excerpt。`metadata_json` 只接受小型 JSON object，不保存 prompt、聊天正文、文件内容或 diff。Cursor private SQLite 使用 `query_only` 和短 busy timeout，不兼容 schema fail closed；Cursor transcript reader 还有目录深度、文件/行大小、候选数和 allowed-root 上限。
+
+schema v4 增加 ranking 查询索引；schema v5 规范 legacy usage agent ids 并删除相同 event identity 的重复 row；schema v7 在 migration transaction 中保守回填 `evidence_class/evidence_sources_json`、增加 evidence indexes，并从 `confirmed + inferred` events 幂等重建 `skill_usage_stats`。迁移沿用升级前 backup 和 integrity check，不扫描 agent history，也不要求 rescan；用户之后显式运行 `Sync histories` 时，可按稳定 identity 恢复新 evidence 或升级旧 event。
+
+`skill_usage_stats` 按 `skill_name + agent_id + runtime_root` 保存 all-time Calls 聚合，只包含 `confirmed + inferred`，继续服务详情页、skill card 和 workspace Calls。History references 直接从 reference events 聚合，不进入 stats。7 天、30 天和带 skill type/Agent/Workspace 过滤的 Rankings 必须从 `skill_usage_events` 聚合；同一过滤快照返回 `total_calls`、confirmed/inferred/reference totals 和各自时间覆盖。skill type 只包含 User、Remote、System，且必须在 coverage 累计前过滤。排名不返回 `prompt_excerpt` 或完整 `metadata_json`。
+
+coverage 的 evidence-class totals 按 event 当前最强 class 互斥：`confirmed + inferred = Calls`，reference 单列。`source_counts` 按 `evidence_sources_json` 统计 provenance，因此同一升级事件可同时出现在 Codex inferred 与 hook confirmed source 下；source counts 不是互斥 Calls 分解。最近一次 provider scan 文件/session/turn 数是独立操作覆盖，不随 ranking filters 改变。Ranking row 继续携带稳定 `source_id`、`source_kind` 和排序后的 `source_runtime_roots` 供 source-aware Import；同名普通/System/unknown source 和 deleted source 的现有隔离规则不变。
+
+Codex 当前本地 stores 不提供稳定、专用的 provider-native skill-run total。因此 Codex Calls 是 hook-confirmed 加结构化 per-turn inferred invocation 的本机下界，已知可能 undercount；SkillBox 不从 catalog、prose、shell/tool payload 或 output 补数。未来若接入 Codex reported runs，必须使用独立于 `skill_usage_events` / `skill_usage_stats` 的存储和读取模型，并保存 provider、subject kind、time window、scope 与 provenance；不得写入本地 ranking、total 或 delta，也不能与 Calls 换算、补差或去重。
+
+History 是只读聚合视图，不新增表。Rust core 从 `operations` 和 `skill_usage_events` 读取最近记录，按事件时间合并为桌面时间线；Calls 和 History references 使用独立 count/filter/kind，reference 不得显示为 Call。History 只展示摘要字段，不向 React 暴露 operation payload、usage metadata 或 evidence provenance body。
+
+`usage-audit` 同样不新增表。它只读取 event class/provenance 与 provider scan/backfill preferences，返回 confirmed/inferred/reference totals、时间覆盖、source counts、扫描文件/session/turn 数，以及最近 backfill 的 discovered/recorded/deduplicated/upgraded/skipped/errors。响应不得包含 prompt、chat body、tool payload/output、credentials 或完整 metadata；Codex provider-native total 不可用时显式返回 limitation，而不是推导补数。
 
 usage hook 注入状态不写入 SQLite。SkillBox 设置页读取并更新各 agent 自己的 hook 配置文件。注入命令由 SkillBox 生成，固定指向 `~/.skillbox/bin/skillbox-usage-hook <agent>`。这个 wrapper 由 SkillBox 写入，并调用同目录的 `skillbox-usage-hook-runner`；安装或重新注入时会刷新 runner，避免 hook 配置依赖开发态 `target/debug` 路径或 legacy Node CLI：
 

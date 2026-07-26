@@ -5,6 +5,50 @@ use std::os::unix::fs::PermissionsExt;
 use std::sync::{Arc, Barrier};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+fn record_test_call(
+    mut request: RecordSkillUsageRequest,
+    managed_root: impl AsRef<Path>,
+) -> Result<SkillUsageRecordResult> {
+    let source = request
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get("source"))
+        .and_then(|value| value.as_str());
+    let source = source.map(str::to_string);
+    if !matches!(
+        source.as_deref(),
+        Some(
+            "agent_hook"
+                | "codex_session_backfill"
+                | "claude_code_session_backfill"
+                | "cursor_agent_transcript_read"
+        )
+    ) {
+        let metadata = request
+            .metadata
+            .get_or_insert_with(|| serde_json::json!({}));
+        if let Some(object) = metadata.as_object_mut() {
+            object.insert(
+                "source".to_string(),
+                serde_json::Value::String("agent_hook".to_string()),
+            );
+        }
+    }
+    if source.as_deref() == Some("claude_code_session_backfill") {
+        if let Some(object) = request
+            .metadata
+            .as_mut()
+            .and_then(|value| value.as_object_mut())
+        {
+            object.insert(
+                "evidence_signal".to_string(),
+                serde_json::Value::String("native_skill_tool".to_string()),
+            );
+        }
+    }
+    record_trusted_generated_skill_usage(request, managed_root)
+}
+
 #[test]
 fn parses_basic_skill_frontmatter() {
     let metadata = parse_skill_frontmatter(
@@ -124,7 +168,8 @@ fn database_initialization_records_ordered_schema_migrations() {
             (3, "skill_user_metadata".to_string()),
             (4, "skill_usage_ranking_indexes".to_string()),
             (5, "canonical_usage_agent_ids".to_string()),
-            (6, "runtime_profiles".to_string())
+            (6, "runtime_profiles".to_string()),
+            (7, "usage_evidence_classification".to_string())
         ]
     );
     assert_eq!(
@@ -154,6 +199,225 @@ fn database_initialization_records_ordered_schema_migrations() {
             .unwrap();
         assert!(exists, "missing ranking index {index}");
     }
+}
+
+#[test]
+fn usage_evidence_migration_preserves_events_and_rebuilds_call_stats() {
+    let root = temp_dir("usage-evidence-v7-migration");
+    let managed_root = root.join("SkillBox");
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    let connection = rusqlite::Connection::open(&paths.database_path).unwrap();
+    connection
+        .execute_batch(
+            "
+            DELETE FROM skill_usage_stats;
+            DELETE FROM skill_usage_events;
+            DELETE FROM schema_migrations WHERE version = 7;
+            DROP INDEX IF EXISTS skill_usage_events_evidence_time;
+            DROP INDEX IF EXISTS skill_usage_events_evidence_agent_time;
+            DROP INDEX IF EXISTS skill_usage_events_evidence_runtime_time;
+            ALTER TABLE skill_usage_events DROP COLUMN evidence_sources_json;
+            ALTER TABLE skill_usage_events DROP COLUMN evidence_class;
+            INSERT INTO skill_usage_events (
+              id, event_id, skill_name, agent_id, runtime_root,
+              used_at, recorded_at, metadata_json
+            ) VALUES
+              ('hook', 'hook', 'demo', 'codex', '/tmp/runtime',
+               '2026-07-01T00:00:00+00:00', '2026-07-01T00:00:01+00:00',
+               '{\"source\":\"agent_hook\"}'),
+              ('codex', 'codex', 'demo', 'codex', '/tmp/runtime',
+               '2026-07-02T00:00:00+00:00', '2026-07-02T00:00:01+00:00',
+               '{\"source\":\"codex_session_backfill\"}'),
+              ('claude', 'claude', 'demo', 'claude-code', '/tmp/runtime',
+               '2026-07-03T00:00:00+00:00', '2026-07-03T00:00:01+00:00',
+               '{\"source\":\"claude_code_session_backfill\"}'),
+              ('cursor', 'cursor', 'demo', 'cursor', '/tmp/runtime',
+               '2026-07-04T00:00:00+00:00', '2026-07-04T00:00:01+00:00',
+               '{\"source\":\"cursor_session_backfill\"}'),
+              ('manual', 'manual', 'demo', 'codex', '/tmp/runtime',
+               '2026-07-05T00:00:00+00:00', '2026-07-05T00:00:01+00:00',
+               '{\"source\":\"/Users/alice/private-client\"}');
+            INSERT INTO skill_usage_stats (
+              skill_name, agent_id, runtime_root, usage_count, last_used_at
+            ) VALUES ('demo', 'codex', '/tmp/runtime', 5, '2026-07-05T00:00:00+00:00');
+            ",
+        )
+        .unwrap();
+    drop(connection);
+
+    ensure_managed_layout(&managed_root).unwrap();
+    let connection = rusqlite::Connection::open(&paths.database_path).unwrap();
+    let classes = connection
+        .prepare("SELECT id, evidence_class FROM skill_usage_events ORDER BY id")
+        .unwrap()
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .unwrap()
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(
+        classes,
+        vec![
+            ("claude".to_string(), "inferred".to_string()),
+            ("codex".to_string(), "inferred".to_string()),
+            ("cursor".to_string(), "reference".to_string()),
+            ("hook".to_string(), "confirmed".to_string()),
+            ("manual".to_string(), "reference".to_string()),
+        ]
+    );
+    let raw_count: i64 = connection
+        .query_row("SELECT COUNT(*) FROM skill_usage_events", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    let call_count: i64 = connection
+        .query_row(
+            "SELECT SUM(usage_count) FROM skill_usage_stats",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(raw_count, 5);
+    assert_eq!(call_count, 3);
+    let evidence_sources_json: String = connection
+        .query_row(
+            "SELECT evidence_sources_json FROM skill_usage_events WHERE id = 'codex'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&evidence_sources_json).unwrap(),
+        serde_json::json!([{
+            "source": "codex_session_backfill",
+            "evidence_class": "inferred"
+        }])
+    );
+    drop(connection);
+
+    let replayed_claude = record_trusted_generated_skill_usage(
+        RecordSkillUsageRequest {
+            skill_name: "demo".to_string(),
+            agent_id: "claude-code".to_string(),
+            runtime_root: PathBuf::from("/tmp/runtime"),
+            event_id: Some("claude".to_string()),
+            used_at: Some("2026-07-03T00:00:00+00:00".to_string()),
+            prompt_excerpt: None,
+            metadata: Some(serde_json::json!({
+                "source": "claude_code_session_backfill",
+                "evidence_signal": "native_skill_tool"
+            })),
+        },
+        &managed_root,
+    )
+    .unwrap();
+    assert!(replayed_claude.deduplicated);
+    assert!(replayed_claude.upgraded);
+    assert_eq!(
+        replayed_claude.evidence_class,
+        SkillUsageEvidenceClass::Confirmed
+    );
+    assert_eq!(replayed_claude.usage_count, 1);
+
+    ensure_managed_layout(&managed_root).unwrap();
+    let connection = rusqlite::Connection::open(&paths.database_path).unwrap();
+    let call_count: i64 = connection
+        .query_row(
+            "SELECT SUM(usage_count) FROM skill_usage_stats",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(call_count, 3);
+    let (raw_count, claude_class): (i64, String) = (
+        connection
+            .query_row("SELECT COUNT(*) FROM skill_usage_events", [], |row| {
+                row.get(0)
+            })
+            .unwrap(),
+        connection
+            .query_row(
+                "SELECT evidence_class FROM skill_usage_events WHERE id = 'claude'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap(),
+    );
+    assert_eq!(raw_count, 5);
+    assert_eq!(claude_class, "confirmed");
+    drop(connection);
+    let audit_json = serde_json::to_string(&usage_audit(&managed_root).unwrap()).unwrap();
+    assert!(!audit_json.contains("/Users/alice/private-client"));
+    assert!(audit_json.contains("\"source\":\"manual\""));
+}
+
+#[test]
+fn usage_evidence_repair_recovers_pre_release_v7_rows_with_missing_provenance() {
+    let root = temp_dir("usage-evidence-v7-repair");
+    let managed_root = root.join("SkillBox");
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    let connection = rusqlite::Connection::open(&paths.database_path).unwrap();
+    connection
+        .execute_batch(
+            "
+            DELETE FROM skill_usage_stats;
+            DELETE FROM skill_usage_events;
+            INSERT INTO skill_usage_events (
+              id, event_id, skill_name, agent_id, runtime_root,
+              used_at, recorded_at, metadata_json, evidence_class, evidence_sources_json
+            ) VALUES
+              ('hook', 'hook', 'demo', 'codex', '/tmp/runtime',
+               '2026-07-01T00:00:00+00:00', '2026-07-01T00:00:01+00:00',
+               '{\"source\":\"agent_hook\"}', 'reference', '[\"agent_hook\"]'),
+              ('codex', 'codex', 'demo', 'codex', '/tmp/runtime',
+               '2026-07-02T00:00:00+00:00', '2026-07-02T00:00:01+00:00',
+               '{\"source\":\"codex_session_backfill\"}', 'reference', '[\"codex_session_backfill\"]'),
+              ('cursor', 'cursor', 'demo', 'cursor', '/tmp/runtime',
+               '2026-07-03T00:00:00+00:00', '2026-07-03T00:00:01+00:00',
+               '{\"source\":\"cursor_session_backfill\"}', 'reference', '[]');
+            INSERT INTO skill_usage_stats (
+              skill_name, agent_id, runtime_root, usage_count, last_used_at
+            ) VALUES ('demo', 'codex', '/tmp/runtime', 1, '2026-07-01T00:00:00+00:00');
+            ",
+        )
+        .unwrap();
+    drop(connection);
+
+    ensure_managed_layout(&managed_root).unwrap();
+    let audit = usage_audit(&managed_root).unwrap();
+    assert_eq!(audit.total_calls, 2);
+    assert_eq!(audit.confirmed_calls, 1);
+    assert_eq!(audit.inferred_calls, 1);
+    assert_eq!(audit.history_references, 1);
+    let connection = rusqlite::Connection::open(&paths.database_path).unwrap();
+    let call_count: i64 = connection
+        .query_row(
+            "SELECT SUM(usage_count) FROM skill_usage_stats",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(call_count, 2);
+    let missing_provenance: i64 = connection
+        .query_row(
+            "
+            SELECT COUNT(*)
+            FROM skill_usage_events
+            WHERE evidence_sources_json = '[]'
+               OR evidence_sources_json LIKE '[\"%'
+            ",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(missing_provenance, 0);
+
+    drop(connection);
+    ensure_managed_layout(&managed_root).unwrap();
+    let audit = usage_audit(&managed_root).unwrap();
+    assert_eq!(audit.total_calls, 2);
+    assert_eq!(audit.history_references, 1);
 }
 
 #[test]
@@ -1763,18 +2027,58 @@ fn record_skill_usage_allows_unmanaged_skill_and_dedupes_event_ids() {
     )
     .unwrap();
 
-    assert_eq!(first.usage_count, 1);
+    assert_eq!(first.usage_count, 0);
+    assert_eq!(first.evidence_class, SkillUsageEvidenceClass::Reference);
     assert!(!first.deduplicated);
     assert_eq!(first.used_at, "2026-06-02T10:15:00+00:00");
-    assert_eq!(second.usage_count, 1);
+    assert_eq!(second.usage_count, 0);
     assert!(second.deduplicated);
     assert_eq!(second.last_used_at, "2026-06-02T10:15:00+00:00");
 
     let history = list_history(HistoryFilter::default(), &managed_root).unwrap();
+    assert_eq!(history.skill_usage_count, 0);
+    assert_eq!(history.skill_reference_count, 1);
     assert_eq!(
         history.entries[0].prompt_excerpt.as_deref(),
         Some("Second prompt should backfill the existing event")
     );
+}
+
+#[test]
+fn usage_audit_is_aggregate_only_and_keeps_event_content_private() {
+    let root = temp_dir("usage-audit-private");
+    let managed_root = root.join("SkillBox");
+    let runtime_root = root.join(".codex").join("skills");
+    let event_id = "private-event-id";
+    let prompt = "private prompt content";
+
+    record_skill_usage(
+        RecordSkillUsageRequest {
+            skill_name: "private-skill".to_string(),
+            agent_id: "codex".to_string(),
+            runtime_root,
+            event_id: Some(event_id.to_string()),
+            used_at: Some("2026-06-02T10:15:00Z".to_string()),
+            prompt_excerpt: Some(prompt.to_string()),
+            metadata: Some(serde_json::json!({ "source": "manual" })),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    let audit = usage_audit(&managed_root).unwrap();
+    assert_eq!(audit.total_calls, 0);
+    assert_eq!(audit.confirmed_calls, 0);
+    assert_eq!(audit.inferred_calls, 0);
+    assert_eq!(audit.history_references, 1);
+    assert_eq!(audit.codex_provider_reported_total, None);
+    assert_eq!(audit.codex_remaining_gap, None);
+    assert_eq!(audit.known_limitations.len(), 1);
+    assert!(audit.known_limitations[0].contains("may still undercount Codex usage"));
+    let json = serde_json::to_string(&audit).unwrap();
+    assert!(!json.contains("private-skill"));
+    assert!(!json.contains(event_id));
+    assert!(!json.contains(prompt));
 }
 
 #[test]
@@ -1787,7 +2091,7 @@ fn managed_state_includes_skill_usage_summary() {
     make_skill(&source, "alpha", "Alpha skill");
     import_skill(&source, SkillKind::User, &managed_root).unwrap();
 
-    record_skill_usage(
+    record_test_call(
         RecordSkillUsageRequest {
             skill_name: "alpha".to_string(),
             agent_id: "codex".to_string(),
@@ -1800,7 +2104,7 @@ fn managed_state_includes_skill_usage_summary() {
         &managed_root,
     )
     .unwrap();
-    record_skill_usage(
+    record_test_call(
         RecordSkillUsageRequest {
             skill_name: "alpha".to_string(),
             agent_id: "agents".to_string(),
@@ -1858,7 +2162,7 @@ fn usage_rankings_include_managed_zero_rows_and_apply_time_range_ordering() {
         if request.metadata.is_some() {
             record_trusted_generated_skill_usage(request, &managed_root).unwrap();
         } else {
-            record_skill_usage(request, &managed_root).unwrap();
+            record_test_call(request, &managed_root).unwrap();
         }
     }
 
@@ -1889,9 +2193,9 @@ fn usage_rankings_include_managed_zero_rows_and_apply_time_range_ordering() {
         last_seven.coverage.latest_event_at.as_deref(),
         Some("2026-06-29T12:00:00+00:00")
     );
-    assert_eq!(last_seven.coverage.agent_hook_calls, 1);
+    assert_eq!(last_seven.coverage.agent_hook_calls, 3);
     assert_eq!(last_seven.coverage.codex_session_backfill_calls, 0);
-    assert_eq!(last_seven.coverage.other_observed_calls, 2);
+    assert_eq!(last_seven.coverage.other_observed_calls, 0);
     assert_eq!(last_seven.coverage.scanned_codex_session_files, 0);
     assert_eq!(
         last_seven
@@ -1961,7 +2265,7 @@ fn usage_rankings_filter_agent_and_workspace_and_optionally_include_unmanaged() 
             "2026-06-29T09:00:00Z",
         ),
     ] {
-        record_skill_usage(
+        record_test_call(
             RecordSkillUsageRequest {
                 skill_name: skill_name.to_string(),
                 agent_id: agent_id.to_string(),
@@ -2108,7 +2412,7 @@ fn usage_rankings_filter_user_remote_and_system_with_scoped_coverage() {
         if matches!(source, "agent_hook" | "codex_session_backfill") {
             record_trusted_generated_skill_usage(request, &managed_root).unwrap();
         } else {
-            record_skill_usage(request, &managed_root).unwrap();
+            record_test_call(request, &managed_root).unwrap();
         }
     }
 
@@ -2143,9 +2447,9 @@ fn usage_rankings_filter_user_remote_and_system_with_scoped_coverage() {
         user.coverage.latest_event_at.as_deref(),
         Some("2026-06-29T11:00:00+00:00")
     );
-    assert_eq!(user.coverage.agent_hook_calls, 1);
+    assert_eq!(user.coverage.agent_hook_calls, 2);
     assert_eq!(user.coverage.codex_session_backfill_calls, 0);
-    assert_eq!(user.coverage.other_observed_calls, 1);
+    assert_eq!(user.coverage.other_observed_calls, 0);
 
     let remote = list_skill_usage_rankings_at(
         SkillUsageRankingRequest {
@@ -2235,7 +2539,7 @@ fn usage_rankings_mark_codex_system_skills_as_non_importable() {
         ("skill-creator", "2026-06-29T10:00:00Z"),
         ("draft-helper", "2026-06-29T09:00:00Z"),
     ] {
-        record_skill_usage(
+        record_test_call(
             RecordSkillUsageRequest {
                 skill_name: skill_name.to_string(),
                 agent_id: "codex".to_string(),
@@ -2303,7 +2607,7 @@ fn usage_rankings_mark_missing_unmanaged_sources_as_deleted() {
     )
     .unwrap();
 
-    record_skill_usage(
+    record_test_call(
         RecordSkillUsageRequest {
             skill_name: "ghost-skill".to_string(),
             agent_id: "codex".to_string(),
@@ -2420,7 +2724,7 @@ fn usage_rankings_system_and_deleted_flags_stay_scoped_to_observed_roots() {
         "Still present elsewhere",
     );
 
-    record_skill_usage(
+    record_test_call(
         RecordSkillUsageRequest {
             skill_name: "shared-skill".to_string(),
             agent_id: "codex".to_string(),
@@ -2433,7 +2737,7 @@ fn usage_rankings_system_and_deleted_flags_stay_scoped_to_observed_roots() {
         &managed_root,
     )
     .unwrap();
-    record_skill_usage(
+    record_test_call(
         RecordSkillUsageRequest {
             skill_name: "ghost".to_string(),
             agent_id: "codex".to_string(),
@@ -2495,7 +2799,7 @@ fn usage_rankings_split_regular_and_system_rows_with_same_skill_name() {
         "System",
     );
 
-    record_skill_usage(
+    record_test_call(
         RecordSkillUsageRequest {
             skill_name: "shared-skill".to_string(),
             agent_id: "codex".to_string(),
@@ -2508,7 +2812,7 @@ fn usage_rankings_split_regular_and_system_rows_with_same_skill_name() {
         &managed_root,
     )
     .unwrap();
-    record_skill_usage(
+    record_test_call(
         RecordSkillUsageRequest {
             skill_name: "shared-skill".to_string(),
             agent_id: "codex".to_string(),
@@ -2578,7 +2882,7 @@ fn usage_rankings_keep_managed_and_system_calls_separate_in_one_runtime() {
         ("managed-system-regular", "regular", "2026-06-29T10:00:00Z"),
         ("managed-system-system", "system", "2026-06-29T11:00:00Z"),
     ] {
-        record_skill_usage(
+        record_test_call(
             RecordSkillUsageRequest {
                 skill_name: "shared-skill".to_string(),
                 agent_id: "codex".to_string(),
@@ -2638,7 +2942,7 @@ fn usage_rankings_do_not_guess_ambiguous_legacy_sources() {
         "shared-skill",
         "System",
     );
-    record_skill_usage(
+    record_test_call(
         RecordSkillUsageRequest {
             skill_name: "shared-skill".to_string(),
             agent_id: "codex".to_string(),
@@ -2699,7 +3003,7 @@ fn usage_preview_import_selects_the_requested_regular_source() {
         (&first_root, "source-aware-system", "system"),
         (&second_root, "source-aware-regular", "regular"),
     ] {
-        record_skill_usage(
+        record_test_call(
             RecordSkillUsageRequest {
                 skill_name: "shared-skill".to_string(),
                 agent_id: "codex".to_string(),
@@ -2842,7 +3146,7 @@ fn usage_record_dedupes_legacy_agent_ids_against_canonical_writes() {
         "legacy-event-1",
     );
 
-    let first = record_skill_usage(
+    let first = record_test_call(
         RecordSkillUsageRequest {
             skill_name: "probe".to_string(),
             agent_id: "codex".to_string(),
@@ -2951,6 +3255,135 @@ fn usage_record_enriches_duplicate_event_source_identity_without_incrementing() 
 }
 
 #[test]
+fn usage_evidence_upgrades_reference_to_inferred_to_confirmed_without_double_counting() {
+    let root = temp_dir("usage-evidence-upgrade");
+    let managed_root = root.join("SkillBox");
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    let runtime_root = root.join("project/.codex/skills");
+    fs::create_dir_all(&runtime_root).unwrap();
+    let base = RecordSkillUsageRequest {
+        skill_name: "probe".to_string(),
+        agent_id: "codex".to_string(),
+        runtime_root,
+        event_id: Some("shared-invocation".to_string()),
+        used_at: Some("2026-07-01T10:00:00Z".to_string()),
+        prompt_excerpt: None,
+        metadata: None,
+    };
+
+    let reference = record_skill_usage(base.clone(), &managed_root).unwrap();
+    assert_eq!(reference.evidence_class, SkillUsageEvidenceClass::Reference);
+    assert_eq!(reference.usage_count, 0);
+
+    let inferred = record_trusted_generated_skill_usage(
+        RecordSkillUsageRequest {
+            metadata: Some(serde_json::json!({ "source": "codex_session_backfill" })),
+            ..base.clone()
+        },
+        &managed_root,
+    )
+    .unwrap();
+    assert!(inferred.upgraded);
+    assert_eq!(inferred.evidence_class, SkillUsageEvidenceClass::Inferred);
+    assert_eq!(inferred.usage_count, 1);
+
+    let confirmed = record_trusted_generated_skill_usage(
+        RecordSkillUsageRequest {
+            metadata: Some(serde_json::json!({ "source": "agent_hook" })),
+            ..base
+        },
+        &managed_root,
+    )
+    .unwrap();
+    assert!(confirmed.upgraded);
+    assert_eq!(confirmed.evidence_class, SkillUsageEvidenceClass::Confirmed);
+    assert_eq!(confirmed.usage_count, 1);
+
+    let connection = open_database(&paths.database_path).unwrap();
+    let (event_count, call_count): (i64, i64) = (
+        connection
+            .query_row("SELECT COUNT(*) FROM skill_usage_events", [], |row| {
+                row.get(0)
+            })
+            .unwrap(),
+        connection
+            .query_row(
+                "SELECT SUM(usage_count) FROM skill_usage_stats",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap(),
+    );
+    assert_eq!(event_count, 1);
+    assert_eq!(call_count, 1);
+    let sources_json: String = connection
+        .query_row(
+            "SELECT evidence_sources_json FROM skill_usage_events WHERE event_id = 'shared-invocation'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&sources_json).unwrap(),
+        serde_json::json!([
+            { "source": "manual", "evidence_class": "reference" },
+            { "source": "codex_session_backfill", "evidence_class": "inferred" },
+            { "source": "agent_hook", "evidence_class": "confirmed" }
+        ])
+    );
+    let rankings = list_skill_usage_rankings_at(
+        SkillUsageRankingRequest {
+            range: SkillUsageRankingRange::AllTime,
+            include_unmanaged: true,
+            ..SkillUsageRankingRequest::default()
+        },
+        &managed_root,
+        DateTime::parse_from_rfc3339("2026-07-02T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc),
+    )
+    .unwrap();
+    assert_eq!(rankings.total_calls, 1);
+    assert_eq!(rankings.total_confirmed_calls, 1);
+    assert_eq!(rankings.total_inferred_calls, 0);
+    assert_eq!(rankings.total_history_references, 0);
+    assert_eq!(rankings.coverage.agent_hook_calls, 1);
+    assert_eq!(rankings.coverage.codex_session_backfill_calls, 0);
+    assert_eq!(rankings.coverage.other_observed_calls, 0);
+    assert_eq!(rankings.coverage.source_counts.len(), 3);
+}
+
+#[test]
+fn usage_evidence_never_downgrades_confirmed_events() {
+    let root = temp_dir("usage-evidence-no-downgrade");
+    let managed_root = root.join("SkillBox");
+    let runtime_root = root.join("project/.codex/skills");
+    fs::create_dir_all(&runtime_root).unwrap();
+    let base = RecordSkillUsageRequest {
+        skill_name: "probe".to_string(),
+        agent_id: "codex".to_string(),
+        runtime_root,
+        event_id: Some("confirmed-first".to_string()),
+        used_at: Some("2026-07-01T10:00:00Z".to_string()),
+        prompt_excerpt: None,
+        metadata: Some(serde_json::json!({ "source": "agent_hook" })),
+    };
+    let first = record_trusted_generated_skill_usage(base.clone(), &managed_root).unwrap();
+    let second = record_trusted_generated_skill_usage(
+        RecordSkillUsageRequest {
+            metadata: Some(serde_json::json!({ "source": "codex_session_backfill" })),
+            ..base
+        },
+        &managed_root,
+    )
+    .unwrap();
+    assert_eq!(first.evidence_class, SkillUsageEvidenceClass::Confirmed);
+    assert_eq!(second.evidence_class, SkillUsageEvidenceClass::Confirmed);
+    assert!(!second.upgraded);
+    assert_eq!(second.usage_count, 1);
+}
+
+#[test]
 fn usage_record_dedupes_generated_event_after_runtime_attribution_changes() {
     let root = temp_dir("usage-event-runtime-change");
     let managed_root = root.join("SkillBox");
@@ -3052,7 +3485,7 @@ fn usage_record_rolls_back_event_when_stats_write_fails() {
     let runtime_root = root.join("project").join(".codex").join("skills");
     fs::create_dir_all(&runtime_root).unwrap();
 
-    let error = record_skill_usage(
+    let error = record_test_call(
         RecordSkillUsageRequest {
             skill_name: "probe".to_string(),
             agent_id: "codex".to_string(),
@@ -3092,17 +3525,23 @@ fn schema_v5_canonicalizes_legacy_usage_agent_ids() {
               id, event_id, skill_name, agent_id, runtime_root, used_at, recorded_at, metadata_json
             ) VALUES
               ('legacy-agents', 'evt-1', 'probe', 'agents', '/tmp/runtime',
-               '2026-06-01T00:00:00+00:00', '2026-06-01T00:00:01+00:00', '{}'),
+               '2026-06-01T00:00:00+00:00', '2026-06-01T00:00:01+00:00',
+               '{\"source\":\"agent_hook\"}'),
               ('canonical-codex', 'evt-1', 'probe', 'codex', '/tmp/runtime',
-               '2026-06-01T00:00:00+00:00', '2026-06-01T00:00:01+00:00', '{}'),
+               '2026-06-01T00:00:00+00:00', '2026-06-01T00:00:01+00:00',
+               '{\"source\":\"agent_hook\"}'),
               ('legacy-agents-unique', 'evt-unique', 'probe', 'agents', '/tmp/runtime',
-               '2026-06-01T02:00:00+00:00', '2026-06-01T02:00:01+00:00', '{}'),
+               '2026-06-01T02:00:00+00:00', '2026-06-01T02:00:01+00:00',
+               '{\"source\":\"agent_hook\"}'),
               ('legacy-agents-null', NULL, 'probe', 'agents', '/tmp/runtime',
-               '2026-06-01T03:00:00+00:00', '2026-06-01T03:00:01+00:00', '{}'),
+               '2026-06-01T03:00:00+00:00', '2026-06-01T03:00:01+00:00',
+               '{\"source\":\"agent_hook\"}'),
               ('canonical-codex-null', NULL, 'probe', 'codex', '/tmp/runtime',
-               '2026-06-01T04:00:00+00:00', '2026-06-01T04:00:01+00:00', '{}'),
+               '2026-06-01T04:00:00+00:00', '2026-06-01T04:00:01+00:00',
+               '{\"source\":\"agent_hook\"}'),
               ('legacy-claude', 'evt-2', 'helper', 'claude', '/tmp/claude',
-               '2026-06-01T00:00:00+00:00', '2026-06-01T00:00:01+00:00', '{}');
+               '2026-06-01T00:00:00+00:00', '2026-06-01T00:00:01+00:00',
+               '{\"source\":\"agent_hook\"}');
             INSERT INTO skill_usage_stats (
               skill_name, agent_id, runtime_root, usage_count, last_used_at
             ) VALUES
@@ -3239,7 +3678,7 @@ fn workspace_and_import_candidates_include_usage_counts() {
     let workspace_root = root.join("project").join(".agents").join("skills");
     make_skill(&workspace_root.join("alpha"), "alpha", "Alpha skill");
 
-    record_skill_usage(
+    record_test_call(
         RecordSkillUsageRequest {
             skill_name: "alpha".to_string(),
             agent_id: "agents".to_string(),
@@ -3252,7 +3691,7 @@ fn workspace_and_import_candidates_include_usage_counts() {
         &managed_root,
     )
     .unwrap();
-    record_skill_usage(
+    record_test_call(
         RecordSkillUsageRequest {
             skill_name: "alpha".to_string(),
             agent_id: "agents".to_string(),
@@ -3265,12 +3704,26 @@ fn workspace_and_import_candidates_include_usage_counts() {
         &managed_root,
     )
     .unwrap();
+    record_skill_usage(
+        RecordSkillUsageRequest {
+            skill_name: "alpha".to_string(),
+            agent_id: "agents".to_string(),
+            runtime_root: workspace_root.clone(),
+            event_id: Some("history-reference-alpha".to_string()),
+            used_at: Some("2026-06-02T12:02:00Z".to_string()),
+            prompt_excerpt: None,
+            metadata: Some(serde_json::json!({ "source": "manual" })),
+        },
+        &managed_root,
+    )
+    .unwrap();
 
     let candidates =
         scan_import_candidates(std::slice::from_ref(&workspace_root), &managed_root).unwrap();
     let workspaces = list_workspaces(&managed_root).unwrap();
 
     assert_eq!(workspace(&workspaces, &workspace_root).usage_count, 2);
+    assert_eq!(workspace(&workspaces, &workspace_root).reference_count, 1);
     assert_eq!(candidate(&candidates.candidates, "alpha").usage_count, 2);
 }
 
@@ -3286,7 +3739,7 @@ fn workspace_usage_counts_symlinked_runtime_skill_calls() {
     make_skill(&agents_skill, "lark-mail", "Lark mail skill");
     fs::create_dir_all(&claude_root).unwrap();
     symlink_dir(&agents_skill, &claude_skill).unwrap();
-    record_skill_usage(
+    record_test_call(
         RecordSkillUsageRequest {
             skill_name: "lark-mail".to_string(),
             agent_id: "agents".to_string(),
@@ -3312,7 +3765,7 @@ fn record_skill_usage_rejects_content_metadata() {
     let managed_root = root.join("SkillBox");
     let runtime_root = root.join(".codex").join("skills");
 
-    let error = record_skill_usage(
+    let error = record_test_call(
         RecordSkillUsageRequest {
             skill_name: "alpha".to_string(),
             agent_id: "codex".to_string(),
@@ -3863,6 +4316,13 @@ fn usage_backfill_imports_codex_session_skills_with_dedupe() {
         .find(|row| row.skill_name == "probe")
         .expect("probe row");
     assert_eq!(probe.usage_count, 3);
+    assert_eq!(probe.confirmed_count, 0);
+    assert_eq!(probe.inferred_count, 3);
+    assert_eq!(probe.reference_count, 0);
+    assert_eq!(rankings.total_calls, 3);
+    assert_eq!(rankings.total_confirmed_calls, 0);
+    assert_eq!(rankings.total_inferred_calls, 3);
+    assert_eq!(rankings.total_history_references, 0);
     assert_eq!(rankings.coverage.agent_hook_calls, 0);
     assert_eq!(rankings.coverage.codex_session_backfill_calls, 3);
     assert_eq!(rankings.coverage.other_observed_calls, 0);
@@ -3970,6 +4430,11 @@ fn usage_backfill_uses_session_cwd_for_managed_workspace_identity() {
     let hook_record = record_trusted_generated_skill_usage(hook_request, &managed_root).unwrap();
 
     assert!(hook_record.deduplicated);
+    assert!(hook_record.upgraded);
+    assert_eq!(
+        hook_record.evidence_class,
+        SkillUsageEvidenceClass::Confirmed
+    );
     assert_eq!(
         hook_record.runtime_root,
         fs::canonicalize(&second_runtime).unwrap()
@@ -3988,6 +4453,21 @@ fn usage_backfill_uses_session_cwd_for_managed_workspace_identity() {
             .usage_count,
         1
     );
+    let audit = usage_audit(&managed_root).unwrap();
+    assert_eq!(audit.total_calls, 1);
+    assert_eq!(audit.confirmed_calls, 1);
+    assert_eq!(audit.inferred_calls, 0);
+    assert_eq!(audit.history_references, 0);
+    assert!(audit.source_counts.iter().any(|source| {
+        source.source == "codex_session_backfill"
+            && source.evidence_class == SkillUsageEvidenceClass::Inferred
+            && source.count == 1
+    }));
+    assert!(audit.source_counts.iter().any(|source| {
+        source.source == "agent_hook"
+            && source.evidence_class == SkillUsageEvidenceClass::Confirmed
+            && source.count == 1
+    }));
 }
 
 #[test]
@@ -4106,7 +4586,7 @@ fn usage_preview_import_resolves_unmanaged_skill_from_runtime_root() {
     let skill_root = runtime_root.join("probe");
     make_skill(&skill_root, "probe", "Probe skill");
 
-    record_skill_usage(
+    record_test_call(
         RecordSkillUsageRequest {
             skill_name: "probe".to_string(),
             agent_id: "codex".to_string(),
@@ -4148,7 +4628,7 @@ fn usage_preview_import_recovers_from_deletion_backup_when_runtime_root_is_gone(
     let version_dir = backup_root.join("versions").join("manual-abc");
     make_skill(&version_dir, "probe", "Recovered probe");
 
-    record_skill_usage(
+    record_test_call(
         RecordSkillUsageRequest {
             skill_name: "probe".to_string(),
             agent_id: "codex".to_string(),
@@ -4187,7 +4667,7 @@ fn usage_preview_import_prefers_deletion_backup_current_over_other_versions() {
     make_skill(&stale_version, "probe", "Stale probe");
     make_skill(&current, "probe", "Current probe");
 
-    record_skill_usage(
+    record_test_call(
         RecordSkillUsageRequest {
             skill_name: "probe".to_string(),
             agent_id: "codex".to_string(),
@@ -4390,7 +4870,7 @@ fn scan_import_candidates_includes_symlinks_to_discovered_runtime_roots() {
     make_skill(&agents_skill, "lark-mail", "Lark mail skill");
     fs::create_dir_all(&claude_root).unwrap();
     symlink_dir(&agents_skill, &claude_skill).unwrap();
-    record_skill_usage(
+    record_test_call(
         RecordSkillUsageRequest {
             skill_name: "lark-mail".to_string(),
             agent_id: "agents".to_string(),
@@ -5994,7 +6474,7 @@ fn history_lists_skill_usage_and_operations_together() {
     let managed_root = temp_dir("history-combined").join("SkillBox");
     let runtime_root = temp_dir("history-runtime").join(".codex").join("skills");
     fs::create_dir_all(&runtime_root).unwrap();
-    record_skill_usage(
+    record_test_call(
         RecordSkillUsageRequest {
             skill_name: "grill-me".to_string(),
             agent_id: "codex".to_string(),
@@ -9832,7 +10312,7 @@ fn scan_import_candidates_uses_total_usage_for_imported_skills() {
     fs::create_dir_all(&second_root).unwrap();
     symlink_dir(&result.imported[0].managed_path, &second_source).unwrap();
 
-    record_skill_usage(
+    record_test_call(
         RecordSkillUsageRequest {
             skill_name: "demo".to_string(),
             agent_id: "codex".to_string(),
@@ -9845,7 +10325,7 @@ fn scan_import_candidates_uses_total_usage_for_imported_skills() {
         &managed_root,
     )
     .unwrap();
-    record_skill_usage(
+    record_test_call(
         RecordSkillUsageRequest {
             skill_name: "demo".to_string(),
             agent_id: "codex".to_string(),
@@ -10075,9 +10555,16 @@ fn insert_legacy_usage_event(
               used_at,
               recorded_at,
               prompt_excerpt,
-              metadata_json
+              metadata_json,
+              evidence_class,
+              evidence_sources_json
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, '{}')
+            VALUES (
+              ?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL,
+              '{\"source\":\"agent_hook\"}',
+              'confirmed',
+              '[{\"source\":\"agent_hook\",\"evidence_class\":\"confirmed\"}]'
+            )
             ",
             rusqlite::params![
                 format!("legacy-{event_id}"),
@@ -10088,6 +10575,20 @@ fn insert_legacy_usage_event(
                 used_at,
                 used_at,
             ],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "
+            INSERT INTO skill_usage_stats (
+              skill_name, agent_id, runtime_root, usage_count, last_used_at
+            )
+            VALUES (?1, ?2, ?3, 1, ?4)
+            ON CONFLICT(skill_name, agent_id, runtime_root) DO UPDATE SET
+              usage_count = skill_usage_stats.usage_count + 1,
+              last_used_at = MAX(skill_usage_stats.last_used_at, excluded.last_used_at)
+            ",
+            rusqlite::params![skill_name, agent_id, runtime_root_value, used_at],
         )
         .unwrap();
 }

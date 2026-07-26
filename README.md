@@ -30,7 +30,7 @@ A 30-second overview of SkillBox: local-first skill management, review-before-im
 - **Review the whole lifecycle.** Inspect imports, deployments, type changes, source bindings, updates, rollbacks, and deletion before SkillBox changes managed or runtime files.
 - **Versioned remote skills.** Check GitHub sources while SkillBox is open, preview all-file diffs, apply updates, and roll back to immutable versions.
 - **Reviewed Git commit and push.** Inspect user-skill diffs, create a Conventional Commit, and optionally push it; inbound divergence remains a normal Git conflict to resolve outside SkillBox.
-- **Locally observed calls, local rankings, and operation history.** Record supported agent hook calls, rank skills by the calls SkillBox can observe on this Mac, and show those calls beside management operations without storing full chat transcripts.
+- **Evidence-aware Calls, references, and operation history.** Count locally confirmed executions plus defensible structured invocations as Calls, keep lower-signal history references separate, and explain coverage without storing full chat transcripts.
 - **Safe storage and deployment defaults.** Use ordered SQLite migrations, recovery backups, integrity checks, and ownership-checked symlinks instead of silently overwriting runtime content.
 - **Compatibility before deployment.** Rust-owned runtime profiles identify each workspace and report preserved frontmatter warnings or hard blockers before a confirmed symlink deployment.
 - **Signed macOS distribution.** Install a notarized DMG or Homebrew cask and apply signed app updates only after confirmation.
@@ -47,9 +47,9 @@ The Workspaces view tracks profile-aware global and project-local `SKILL.md` roo
 
 ![SkillBox history](docs/screenshots/skillbox-history-v041.jpg)
 
-History combines locally observed skill calls and management operations. The standalone Rankings page shows 7-day, 30-day, or all-time **Locally observed calls** filtered by skill type (User, Remote, or System), Agent, or Workspace. Rankings keep same-name regular and System skills separate and use the observed source when preparing an import. Coverage reports the earliest and latest observed event, canonical stored-origin counts for hooks and each supported local-history provider, plus the session count from the latest scans.
+History separates Calls, history references, and management operations. The standalone Rankings page shows 7-day, 30-day, or all-time **Calls** filtered by skill type (User, Remote, or System), Agent, or Workspace. Calls combine locally confirmed executions with defensible structured per-turn invocations; references never increase Calls or default ranking order. Rankings keep same-name regular and System skills separate and use the observed source when preparing an import. Coverage reports confirmed, inferred, and reference totals, their time ranges, retained provenance sources, and the latest provider scan totals.
 
-`Sync histories` imports auditable usage evidence from Codex, Claude Code, and Cursor without copying chat bodies. Codex accepts explicit user-input `<skill>` blocks or `[$skill](.../SKILL.md)` links only when they contain an absolute `SKILL.md` path, so pasted code templates and placeholders are ignored. Claude Code accepts its structured Skill tool/command attribution and resolves it to a real `SKILL.md`. Cursor uses only explicitly attached `context.cursorRules` entries pointing to a real `SKILL.md`; its private SQLite schema is validated and opened read-only, and unsupported versions fail closed. Repeated scans are idempotent. These local observations are not a global popularity or trust score. Provider-reported analytics remain separate and are never merged into local ranking, total, or delta values.
+`Sync histories` imports auditable usage evidence from Codex, Claude Code, and Cursor without copying chat bodies. Codex per-turn `<skill>` blocks or `[$skill](.../SKILL.md)` links with an absolute path are inferred Calls, not provider-confirmed runs; catalog entries, prose, shell/tool payloads, and outputs are excluded. Claude Code native Skill tool/command attribution is confirmed after resolving a real `SKILL.md`. Cursor state `context.cursorRules` entries are references, while an assistant `Read` / `ReadFile` of an absolute, validated `SKILL.md` in a bounded agent transcript is confirmed. Repeated scans are idempotent and stronger evidence upgrades an existing event without losing provenance. Codex local stores do not expose a stable provider-native run total, so local Calls remain a known undercount rather than account analytics. An explicit sync can recover or upgrade evidence; database migration itself does not rescan histories.
 
 ![SkillBox managed store health](docs/screenshots/skillbox-settings-health-v041.jpg)
 
@@ -102,7 +102,7 @@ Longer-term support for native Claude, OpenClaw, Cursor, Claude Code, Copilot, a
 - Delete a skill from the managed store and all associated workspaces after a name-confirmed preview, while retaining a recovery backup and workspace registrations.
 - Review user-skill Git diffs, create selected-file Conventional Commits, and optionally push without attempting an inbound auto-merge.
 - Search and filter the dashboard by type, update status, tag, or favorite; switch between grid and list views, with favorites and tags persisted in SQLite.
-- Record supported Codex App, Codex CLI, and Claude Code CLI hook calls; browse **Locally observed calls** beside management operations and rank skills locally by time range, Agent, or Workspace without storing full transcripts.
+- Record supported hooks and structured local-history evidence; browse Calls separately from History references, rank by confirmed plus defensible inferred Calls, and inspect aggregate-only coverage without storing full transcripts.
 - Apply ordered SQLite migrations with pre-migration backups and integrity checks; run Doctor diagnostics and explicitly clean up stale deployment records.
 - Check signed GitHub Releases in the background at most once per day, show an Update action when a new macOS build is available, and install only after the user clicks it.
 
@@ -176,7 +176,7 @@ Homebrew uninstall does not delete `~/.skillbox`.
 3. Use `Import` to review candidates before SkillBox copies them into `~/.skillbox`.
 4. Use `Install` to preview GitHub-backed remote skills, then confirm before SkillBox copies them into the managed store. SkillBox accepts standalone repository URLs with a root `SKILL.md`, root `SKILL.md` file URLs, and skill directory URLs. Repository-root snapshots exclude Git metadata.
 5. Deploy managed skills to selected runtime workspaces when you want an agent to use them.
-6. Optional: enable usage hook injection in Settings to record real skill calls.
+6. Optional: enable usage hook injection in Settings to add confirmed local execution evidence. Without complete hook/provider coverage, Calls remain a local lower bound.
 
 ## Permissions And Local Changes
 

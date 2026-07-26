@@ -750,6 +750,16 @@ async fn list_skill_usage_rankings(
 }
 
 #[tauri::command]
+async fn usage_audit() -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = skillbox_core::usage_audit(skillbox_core::default_managed_root())?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Usage audit task failed: {error}"))?
+}
+
+#[tauri::command]
 async fn preview_usage_skill_import(
     request: skillbox_core::PreviewUsageSkillImportRequest,
 ) -> Result<Value, String> {
@@ -1094,6 +1104,7 @@ pub fn run() {
             repair_stale_deployment_records,
             list_history,
             list_skill_usage_rankings,
+            usage_audit,
             preview_usage_skill_import,
             backfill_codex_session_usage,
             backfill_claude_code_session_usage,

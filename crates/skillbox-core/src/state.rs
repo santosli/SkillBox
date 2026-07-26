@@ -18,6 +18,10 @@ pub fn managed_state(managed_root: impl AsRef<Path>) -> Result<ManagedState> {
         if let Some(usage) = usage_by_skill.get(&skill.name) {
             skill.usage_count = usage.usage_count;
             skill.last_used_at = usage.last_used_at.clone();
+            skill.confirmed_count = usage.confirmed_count;
+            skill.inferred_count = usage.inferred_count;
+            skill.reference_count = usage.reference_count;
+            skill.last_referenced_at = usage.last_referenced_at.clone();
         }
     }
 

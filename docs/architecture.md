@@ -76,8 +76,11 @@ React UI
 - `list_history` -> `skillbox_core::list_history`
 - `record_skill_usage` -> `skillbox_core::record_skill_usage`
 - `list_skill_usage_rankings` -> `skillbox_core::list_skill_usage_rankings`
+- `usage_audit` -> `skillbox_core::usage_audit`
 - `preview_usage_skill_import` -> `skillbox_core::preview_usage_skill_import_for_source`
 - `backfill_codex_session_usage` -> `skillbox_core::backfill_codex_session_usage`
+- `backfill_claude_code_session_usage` -> `skillbox_core::backfill_claude_code_session_usage`
+- `backfill_cursor_session_usage` -> `skillbox_core::backfill_cursor_session_usage`
 - `usage_hook_statuses` -> `skillbox_core::usage_hook_statuses`
 - `install_usage_hook` -> `skillbox_core::install_usage_hook`
 - `check_app_update(force)` -> Tauri updater plugin HTTPS metadata check，非 force 请求复用 24 小时内、当前 app version 匹配的 SQLite 或进程内展示缓存
@@ -106,10 +109,11 @@ cargo run -p skillbox-cli --offline -- <command>
 - `remote.rs` GitHub install preview/apply、remote source 绑定、update check、diff 预览、版本切换
 - `marketplace.rs` Claude marketplace 候选搜索
 - `git_sync.rs` user-skills Git 同步编排
-- `usage.rs` usage 事件规范化、source identity、`Locally observed calls` 聚合、覆盖范围统计和 source-aware Import preview；覆盖范围按 canonical 存储来源拆分 hook、Codex、Claude Code、Cursor 和 other
-- `usage_backfill.rs` 只从本机 Codex session rollout 的显式用户输入载体解析完整 `<skill>` 块或 `[$skill](.../SKILL.md)` 链接，忽略 assistant/tool 输出，按 turn + 规范化 name/path 去重，并用 session `cwd` 恢复 workspace identity
-- `usage_backfill_claude.rs` 只从本机 Claude Code project JSONL 的结构化 Skill tool/command attribution 恢复使用事件，解析真实 `SKILL.md`，不复制消息正文
-- `usage_backfill_cursor.rs` 只读打开并验证 Cursor 本机 history SQLite schema，仅从 human bubble 中显式附加且解析到真实 `SKILL.md` 的 `context.cursorRules` 恢复事件；不兼容 schema fail closed
+- `usage.rs` usage 事件规范化、`confirmed/inferred/reference` evidence、单向升级与有界 provenance、Calls/stats、coverage、aggregate-only `usage-audit` 和 source-aware Import preview
+- `usage_backfill.rs` 只从本机 Codex session rollout 的显式用户输入载体解析完整 `<skill>` 块或 `[$skill](.../SKILL.md)` 链接，作为逐回合 `inferred` invocation；忽略 catalog、普通 prose、assistant/tool/shell payload 与 output，按 turn + 规范化 name/path 去重，并用 session `cwd` 恢复 workspace identity
+- `usage_backfill_claude.rs` 只从本机 Claude Code project JSONL 的原生 Skill tool/command attribution 恢复 `confirmed` 事件，解析真实 `SKILL.md`，不复制消息正文
+- `usage_backfill_cursor.rs` 只读打开并验证 Cursor 本机 history SQLite schema；human bubble 中显式附加且解析到真实 `SKILL.md` 的 `context.cursorRules` 只记录为 `reference`，不兼容 schema fail closed
+- `usage_backfill_cursor_transcripts.rs` 有界读取 Cursor agent transcript；只有 assistant `Read` / `ReadFile` tool use 的绝对路径通过 traversal、symlink、allowed-root、regular-file、大小和 `SKILL.md` 解析检查后，才记录 `confirmed` event
 - `hooks.rs` agent hook 注入、transcript 解析，以及基于结构化 runtime context 的 workspace 归属
 - `operations.rs` operation 与 history 记录
 - `metadata.rs` 用户 favorites/tags 的 SQLite 持久化和 legacy desktop metadata 迁移
@@ -133,7 +137,8 @@ cargo run -p skillbox-cli --offline -- <command>
 - 用户 favorites/tags 的 SQLite 持久化和桌面 legacy local-storage 迁移。
 - managed store、deployment、workspace、import backup 和 metadata 的只读 Doctor 检查。
 - 用户偏好读取与写入。
-- skill usage 事件记录、普通/System source identity、workspace-aware 聚合统计和 agent hook 注入配置。
+- skill usage 事件记录、evidence/provenance 升级、普通/System source identity、
+  workspace-aware Calls/reference 聚合、aggregate-only diagnostics 和 agent hook 注入配置。
 - 未来在 runtime profile 之上承载 native agent adapter 和跨 format 的规范化扫描/部署编排。
 
 `skillbox-github` 负责：
@@ -210,11 +215,12 @@ GitHub remote source 可以是仓库中的 skill 子目录，也可以是根目�
   `deploy-preview`、preview-confirmed `deploy`、`user-skills-status`、
   `sync-user-skills`、`check-remote-updates`，并保留 `check-updates` 和
   `rollback` 兼容别名。
-- Rust CLI 有 `remote-source-candidates`、`remote-source-preview`、`bind-remote-source`、`remote-versions`、`remote-preview-change`、`remote-apply-change`、`usage-record`、`usage-hook`、`usage-hook-status`、`usage-hook-install`、`doctor` 和 `operations`。
+- Rust CLI 有 `remote-source-candidates`、`remote-source-preview`、`bind-remote-source`、`remote-versions`、`remote-preview-change`、`remote-apply-change`、`usage-record`、`usage-rankings`、`usage-audit`、各 provider history backfill、`usage-hook`、`usage-hook-status`、`usage-hook-install`、`doctor` 和 `operations`。
 - Rust CLI 有 `workspaces`、`workspace-scan`、`workspace-add`、`workspace-forget` 来管理 workspace registry。
 - Rust core 和 Tauri 已覆盖 `~/.skillbox/user-skills` 的共享 remote Git 同步。
 - Rust core 已覆盖 remote skill 的 GitHub install preview/apply、GitHub update check、source binding、diff preview、update/rollback apply 和 operation log。
-- Rust core 和 Tauri 已覆盖 usage stats 显式上报，以及 Codex App、Codex CLI、Claude Code CLI 的 Stop hook 注入入口。Rankings 对外统一称为 `Locally observed calls`，支持 time range、User/Remote/System skill type、Agent 和 Workspace 的结构化过滤，并返回同一过滤快照内的最早/最新事件、canonical 存储来源计数，以及 Codex、Claude Code、Cursor 最近一次 history scan 的文件/session 数。桌面 `Sync histories` 顺序调用三个 provider；单个 provider 失败不会撤销其他 provider 已成功写入的幂等事件。
+- Rust core 和 Tauri 已覆盖 usage stats 显式上报，以及 Codex App、Codex CLI、Claude Code CLI 的 Stop hook 注入入口。schema v7 把本机 evidence 分为 `confirmed`、`inferred` 和 `reference`；用户可见 `Calls` 只包含前两类，History references 单独展示。Rankings 支持 time range、User/Remote/System skill type、Agent 和 Workspace 的结构化过滤，并返回同一过滤快照内的 evidence totals、时间覆盖和可重叠 provenance source counts，以及 Codex、Claude Code、Cursor 最近一次 history scan 的文件/session 数。桌面 `Sync histories` 顺序调用三个 provider；单个 provider 失败不会撤销其他 provider 已成功写入或升级的幂等事件。
+- Codex 本地 store 没有稳定的 provider-native skill-run total。Codex 结构化逐回合 skill carrier 只能作为 defensible `inferred` Calls；`usage-audit` 明确报告这个已知 undercount，不读取或返回聊天正文。
 - 未来若接入 Codex reported runs，它属于独立的 provider-reported analytics 边界，必须携带 provider、subject kind、time window、scope 和 provenance；不得写入 `skill_usage_events`，也不得参与本地 ranking、total 或 delta。
 - Tauri desktop 已覆盖 macOS app update check 和用户确认后的 install/restart；React 不直接处理 updater asset URL、签名或安装。
 - SQLite schema 已由有序 transaction migrations 管理；已有数据库升级前生成一次一致性 backup，升级后执行 integrity check。

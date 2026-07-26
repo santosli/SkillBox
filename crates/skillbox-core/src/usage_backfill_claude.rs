@@ -18,6 +18,7 @@ struct ClaudeSkillSignal {
     runtime_context: Option<PathBuf>,
     turn_key: String,
     used_at: Option<String>,
+    evidence_signal: &'static str,
 }
 
 #[derive(Debug, Clone)]
@@ -28,6 +29,7 @@ struct ClaudeSessionSkillCandidate {
     used_at: Option<String>,
     runtime_context: Option<PathBuf>,
     skill: HookSkillRef,
+    evidence_signal: &'static str,
 }
 
 #[derive(Debug, Default)]
@@ -86,7 +88,9 @@ pub(crate) fn backfill_claude_code_session_usage_for_home(
                         &runtime_roots,
                     ) {
                         Ok(record) => {
-                            if record.deduplicated {
+                            if record.upgraded {
+                                result.upgraded = result.upgraded.saturating_add(1);
+                            } else if record.deduplicated {
                                 result.deduplicated = result.deduplicated.saturating_add(1);
                             } else {
                                 result.recorded = result.recorded.saturating_add(1);
@@ -118,6 +122,17 @@ pub(crate) fn backfill_claude_code_session_usage_for_home(
         push_backfill_error(
             &mut result.errors,
             format!("Unable to persist Claude Code scan coverage: {error}"),
+        );
+    }
+    if let Err(error) = persist_usage_backfill_audit(
+        &paths.database_path,
+        "claude_code_session_backfill",
+        result.scanned_files,
+        &result,
+    ) {
+        push_backfill_error(
+            &mut result.errors,
+            format!("Unable to persist Claude Code usage audit: {error}"),
         );
     }
 
@@ -168,6 +183,10 @@ fn record_claude_session_skill_candidate(
         metadata.insert(
             "sidechain".to_string(),
             serde_json::Value::Bool(candidate.sidechain_id != "main"),
+        );
+        metadata.insert(
+            "evidence_signal".to_string(),
+            serde_json::Value::String(candidate.evidence_signal.to_string()),
         );
     }
     record_skill_usage_on_connection(request, connection, true)
@@ -225,6 +244,7 @@ fn extract_claude_session_skill_candidates(
                             runtime_context: runtime_context.clone(),
                             turn_key: turn_key.clone(),
                             used_at: used_at.clone(),
+                            evidence_signal: "native_skill_command",
                         });
                     }
                 }
@@ -237,6 +257,7 @@ fn extract_claude_session_skill_candidates(
                         runtime_context: runtime_context.clone(),
                         turn_key: turn_key.clone(),
                         used_at: used_at.clone(),
+                        evidence_signal: "native_skill_tool",
                     });
                 }
             }
@@ -280,6 +301,7 @@ fn extract_claude_session_skill_candidates(
                 path: skill_path,
                 prompt_excerpt: None,
             },
+            evidence_signal: signal.evidence_signal,
         });
     }
 

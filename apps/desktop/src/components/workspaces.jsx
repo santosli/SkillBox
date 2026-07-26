@@ -155,6 +155,14 @@ function WorkspaceCard({ isBusy, workspace, onForget, onOpenSkills }) {
               </span>
             ))}
           </div>
+          {workspace.referenceCount > 0 ? (
+            <small
+              className="workspaceReferenceCount"
+              title="Explicit skill mentions found in imported local histories; not included in Calls."
+            >
+              {workspace.referenceCount} history reference{workspace.referenceCount === 1 ? '' : 's'}
+            </small>
+          ) : null}
         </div>
       </button>
       {workspace.source === 'manual' ? (

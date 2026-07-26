@@ -651,8 +651,17 @@ export function SkillDetailDialog({
                     <span className="skillDetailDeployMetric">{skill.usageCount || 0}</span>
                     <div>
                       <strong>Usage</strong>
-                      <small title="Locally observed calls recorded by SkillBox, not Codex or Claude account analytics.">
+                      <small title="Calls combine locally confirmed executions and high-confidence inferred invocations. They are not Codex or Claude account analytics.">
                         Calls
+                      </small>
+                    </div>
+                  </div>
+                  <div className="skillDetailUsageSummary secondary">
+                    <span className="skillDetailDeployMetric">{skill.referenceCount || 0}</span>
+                    <div>
+                      <strong>History references</strong>
+                      <small title="Explicit mentions found in imported local histories. They are not counted as Calls or account analytics.">
+                        Mentions only
                       </small>
                     </div>
                   </div>

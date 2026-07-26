@@ -293,6 +293,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             usage_ranking_request(command_args)?,
             managed_root(command_args),
         )?),
+        "usage-audit" => print_json(&skillbox_core::usage_audit(managed_root(command_args))?),
         "usage-backfill-codex" => print_json(&skillbox_core::backfill_codex_session_usage(
             skillbox_core::BackfillCodexSessionUsageRequest {
                 include_archived: has_flag(command_args, "--include-archived"),
@@ -313,6 +314,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         "usage-backfill-cursor" => print_json(&skillbox_core::backfill_cursor_session_usage(
             skillbox_core::BackfillCursorSessionUsageRequest {
                 database_path: option(command_args, "--database-path").map(PathBuf::from),
+                projects_root: option(command_args, "--projects-root").map(PathBuf::from),
             },
             managed_root(command_args),
         )?),
@@ -588,9 +590,10 @@ Commands:
   skillbox rollback <skill-name> --to <version> [--managed-root <path>]
   skillbox usage-record --skill <name> --agent <id> --runtime-root <path> [--event-id <id>] [--used-at <rfc3339>] [--prompt-excerpt <text>] [--metadata-json <json>] [--managed-root <path>]
   skillbox usage-rankings [--range 7d|30d|all] [--type user|remote|system] [--agent <id>] [--workspace <path>] [--include-unmanaged] [--managed-root <path>]
+  skillbox usage-audit [--managed-root <path>]
   skillbox usage-backfill-codex [--include-archived] [--sessions-root <path>] [--archived-sessions-root <path>] [--managed-root <path>]
   skillbox usage-backfill-claude-code [--projects-root <path>] [--managed-root <path>]
-  skillbox usage-backfill-cursor [--database-path <path>] [--managed-root <path>]
+  skillbox usage-backfill-cursor [--database-path <path>] [--projects-root <path>] [--managed-root <path>]
   skillbox usage-hook codex|claude-code [--managed-root <path>]
   skillbox usage-hook-status
   skillbox usage-hook-install <target>
@@ -721,6 +724,7 @@ mod tests {
 
         assert!(error.contains("7d, 30d, or all"));
         assert!(help_text().contains("skillbox usage-rankings"));
+        assert!(help_text().contains("skillbox usage-audit"));
         assert!(help_text().contains("skillbox usage-backfill-codex"));
         assert!(help_text().contains("skillbox usage-backfill-claude-code"));
         assert!(help_text().contains("skillbox usage-backfill-cursor"));
@@ -743,6 +747,20 @@ mod tests {
             "usage-rankings".to_string(),
             "--range".to_string(),
             "all".to_string(),
+            "--managed-root".to_string(),
+            managed_root.to_string_lossy().to_string(),
+        ])
+        .unwrap();
+
+        assert!(managed_root.join("skillbox.sqlite").is_file());
+    }
+
+    #[test]
+    fn usage_audit_command_routes_to_aggregate_core_report() {
+        let managed_root = temp_dir("cli-usage-audit").join("SkillBox");
+
+        run(vec![
+            "usage-audit".to_string(),
             "--managed-root".to_string(),
             managed_root.to_string_lossy().to_string(),
         ])

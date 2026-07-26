@@ -2,6 +2,12 @@ use crate::*;
 
 type UsageRankingRootAggregates = HashMap<(String, String, SkillUsageSourceKind), UsageSummary>;
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct UsageEvidenceSource {
+    source: String,
+    evidence_class: SkillUsageEvidenceClass,
+}
+
 pub fn record_skill_usage(
     request: RecordSkillUsageRequest,
     managed_root: impl AsRef<Path>,
@@ -25,6 +31,7 @@ fn reject_reserved_usage_source(request: &RecordSkillUsageRequest) -> Result<()>
                 | "codex_session_backfill"
                 | "claude_code_session_backfill"
                 | "cursor_session_backfill"
+                | "cursor_agent_transcript_read"
         )
     ) {
         return Err(
@@ -73,6 +80,8 @@ fn record_skill_usage_in_transaction(
     let recorded_at = current_rfc3339_timestamp();
     let prompt_excerpt = normalize_usage_prompt_excerpt(request.prompt_excerpt.as_deref());
     let metadata_json = normalize_usage_metadata(request.metadata)?;
+    let (incoming_evidence_class, incoming_evidence_source) =
+        classify_usage_evidence(&metadata_json, trusted_generated_source);
     if let Some(existing_runtime_root) = generated_usage_event_runtime(
         connection,
         &skill_name,
@@ -96,6 +105,8 @@ fn record_skill_usage_in_transaction(
                 existing_recorded_at,
                 existing_prompt_excerpt,
                 existing_metadata_json,
+                existing_evidence_class,
+                existing_evidence_sources_json,
             ) = existing;
             if existing_agent_id != agent_id {
                 connection
@@ -166,6 +177,66 @@ fn record_skill_usage_in_transaction(
                     )
                     .map_err(|error| error.to_string())?;
             }
+            let merged_evidence_sources_json = merge_usage_evidence_sources(
+                &existing_evidence_sources_json,
+                &incoming_evidence_source,
+                incoming_evidence_class,
+            )?;
+            if merged_evidence_sources_json != existing_evidence_sources_json {
+                connection
+                    .execute(
+                        "
+                        UPDATE skill_usage_events
+                        SET evidence_sources_json = ?1
+                        WHERE agent_id = ?2
+                          AND runtime_root = ?3
+                          AND event_id = ?4
+                        ",
+                        params![
+                            merged_evidence_sources_json,
+                            &agent_id,
+                            &runtime_root_value,
+                            event_id_value,
+                        ],
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
+            let existing_evidence_class = parse_usage_evidence_class(&existing_evidence_class)?;
+            let upgraded = usage_evidence_rank(incoming_evidence_class)
+                > usage_evidence_rank(existing_evidence_class);
+            let evidence_class = if upgraded {
+                connection
+                    .execute(
+                        "
+                        UPDATE skill_usage_events
+                        SET evidence_class = ?1
+                        WHERE agent_id = ?2
+                          AND runtime_root = ?3
+                          AND event_id = ?4
+                        ",
+                        params![
+                            incoming_evidence_class.as_str(),
+                            &agent_id,
+                            &runtime_root_value,
+                            event_id_value
+                        ],
+                    )
+                    .map_err(|error| error.to_string())?;
+                if !usage_evidence_counts_toward_calls(existing_evidence_class)
+                    && usage_evidence_counts_toward_calls(incoming_evidence_class)
+                {
+                    increment_call_usage_stat(
+                        connection,
+                        &skill_name,
+                        &agent_id,
+                        &runtime_root_value,
+                        &existing_used_at,
+                    )?;
+                }
+                incoming_evidence_class
+            } else {
+                existing_evidence_class
+            };
             let usage =
                 load_usage_stat_for_key(connection, &skill_name, &agent_id, &runtime_root_value)?;
             return Ok(SkillUsageRecordResult {
@@ -178,6 +249,8 @@ fn record_skill_usage_in_transaction(
                 usage_count: usage.usage_count,
                 last_used_at: usage.last_used_at.unwrap_or(existing_used_at),
                 deduplicated: true,
+                evidence_class,
+                upgraded,
             });
         }
     }
@@ -194,9 +267,11 @@ fn record_skill_usage_in_transaction(
               used_at,
               recorded_at,
               prompt_excerpt,
-              metadata_json
+              metadata_json,
+              evidence_class,
+              evidence_sources_json
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
             ",
             params![
                 usage_event_row_id(),
@@ -208,9 +283,48 @@ fn record_skill_usage_in_transaction(
                 &recorded_at,
                 prompt_excerpt.as_deref(),
                 &metadata_json,
+                incoming_evidence_class.as_str(),
+                serde_json::to_string(&vec![UsageEvidenceSource {
+                    source: incoming_evidence_source,
+                    evidence_class: incoming_evidence_class,
+                }])
+                .map_err(|error| error.to_string())?,
             ],
         )
         .map_err(|error| error.to_string())?;
+    if usage_evidence_counts_toward_calls(incoming_evidence_class) {
+        increment_call_usage_stat(
+            connection,
+            &skill_name,
+            &agent_id,
+            &runtime_root_value,
+            &used_at,
+        )?;
+    }
+
+    let usage = load_usage_stat_for_key(connection, &skill_name, &agent_id, &runtime_root_value)?;
+    Ok(SkillUsageRecordResult {
+        skill_name,
+        agent_id,
+        runtime_root,
+        event_id,
+        used_at,
+        recorded_at,
+        usage_count: usage.usage_count,
+        last_used_at: usage.last_used_at.unwrap_or_default(),
+        deduplicated: false,
+        evidence_class: incoming_evidence_class,
+        upgraded: false,
+    })
+}
+
+fn increment_call_usage_stat(
+    connection: &Connection,
+    skill_name: &str,
+    agent_id: &str,
+    runtime_root: &str,
+    used_at: &str,
+) -> Result<()> {
     connection
         .execute(
             "
@@ -231,22 +345,10 @@ fn record_skill_usage_in_transaction(
               END,
               updated_at = CURRENT_TIMESTAMP
             ",
-            params![&skill_name, &agent_id, &runtime_root_value, &used_at],
+            params![skill_name, agent_id, runtime_root, used_at],
         )
         .map_err(|error| error.to_string())?;
-
-    let usage = load_usage_stat_for_key(connection, &skill_name, &agent_id, &runtime_root_value)?;
-    Ok(SkillUsageRecordResult {
-        skill_name,
-        agent_id,
-        runtime_root,
-        event_id,
-        used_at,
-        recorded_at,
-        usage_count: usage.usage_count,
-        last_used_at: usage.last_used_at.unwrap_or_default(),
-        deduplicated: false,
-    })
+    Ok(())
 }
 
 pub fn list_skill_usage_rankings(
@@ -577,6 +679,9 @@ pub(crate) fn list_skill_usage_rankings_at(
     coverage.scanned_codex_session_files =
         read_u32_preference(&paths.database_path, "codex_usage_backfill_scanned_files")?
             .unwrap_or_default() as usize;
+    coverage.scanned_codex_turns =
+        read_u32_preference(&paths.database_path, "codex_usage_backfill_scanned_turns")?
+            .unwrap_or_default() as usize;
     coverage.scanned_claude_code_session_files = read_u32_preference(
         &paths.database_path,
         "claude_code_usage_backfill_scanned_files",
@@ -585,6 +690,11 @@ pub(crate) fn list_skill_usage_rankings_at(
     coverage.scanned_cursor_sessions = read_u32_preference(
         &paths.database_path,
         "cursor_usage_backfill_scanned_sessions",
+    )?
+    .unwrap_or_default() as usize;
+    coverage.scanned_cursor_transcript_files = read_u32_preference(
+        &paths.database_path,
+        "cursor_usage_backfill_scanned_transcript_files",
     )?
     .unwrap_or_default() as usize;
     let mut system_aggregates: HashMap<String, UsageSummary> = HashMap::new();
@@ -637,6 +747,10 @@ pub(crate) fn list_skill_usage_rankings_at(
                 source_runtime_roots: sorted_usage_roots(roots),
                 usage_count: summary.usage_count,
                 last_used_at: summary.last_used_at,
+                confirmed_count: summary.confirmed_count,
+                inferred_count: summary.inferred_count,
+                reference_count: summary.reference_count,
+                last_referenced_at: summary.last_referenced_at,
             }
         })
         .collect::<Vec<_>>();
@@ -659,6 +773,10 @@ pub(crate) fn list_skill_usage_rankings_at(
                 source_runtime_roots: sorted_usage_roots(roots),
                 usage_count: summary.usage_count,
                 last_used_at: summary.last_used_at,
+                confirmed_count: summary.confirmed_count,
+                inferred_count: summary.inferred_count,
+                reference_count: summary.reference_count,
+                last_referenced_at: summary.last_referenced_at,
             }
         }));
         rows.extend(system_aggregates.into_iter().map(|(skill_name, summary)| {
@@ -678,6 +796,10 @@ pub(crate) fn list_skill_usage_rankings_at(
                 source_runtime_roots: sorted_usage_roots(roots),
                 usage_count: summary.usage_count,
                 last_used_at: summary.last_used_at,
+                confirmed_count: summary.confirmed_count,
+                inferred_count: summary.inferred_count,
+                reference_count: summary.reference_count,
+                last_referenced_at: summary.last_referenced_at,
             }
         }));
         rows.extend(unknown_aggregates.into_iter().map(|(skill_name, summary)| {
@@ -696,6 +818,10 @@ pub(crate) fn list_skill_usage_rankings_at(
                 source_runtime_roots: sorted_usage_roots(roots),
                 usage_count: summary.usage_count,
                 last_used_at: summary.last_used_at,
+                confirmed_count: summary.confirmed_count,
+                inferred_count: summary.inferred_count,
+                reference_count: summary.reference_count,
+                last_referenced_at: summary.last_referenced_at,
             }
         }));
     }
@@ -711,7 +837,10 @@ pub(crate) fn list_skill_usage_rankings_at(
     for (index, row) in rows.iter_mut().enumerate() {
         row.rank = index + 1;
     }
-    let total_observed_calls = rows.iter().map(|row| row.usage_count).sum();
+    let total_calls = rows.iter().map(|row| row.usage_count).sum();
+    let total_confirmed_calls = rows.iter().map(|row| row.confirmed_count).sum();
+    let total_inferred_calls = rows.iter().map(|row| row.inferred_count).sum();
+    let total_history_references = rows.iter().map(|row| row.reference_count).sum();
 
     Ok(SkillUsageRankingResult {
         generated_at: range_end.clone(),
@@ -721,10 +850,163 @@ pub(crate) fn list_skill_usage_rankings_at(
         agent_id,
         skill_type: request.skill_type,
         workspace_root,
-        total_observed_calls,
+        total_calls,
+        total_observed_calls: total_calls,
+        total_confirmed_calls,
+        total_inferred_calls,
+        total_history_references,
         coverage,
         rows,
     })
+}
+
+pub fn usage_audit(managed_root: impl AsRef<Path>) -> Result<SkillUsageAudit> {
+    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let connection = open_database(&paths.database_path).map_err(|error| error.to_string())?;
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT evidence_class, evidence_sources_json, used_at
+            FROM skill_usage_events
+            ORDER BY used_at, id
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+    let mut audit = SkillUsageAudit::default();
+    let mut source_counts: HashMap<(String, SkillUsageEvidenceClass), usize> = HashMap::new();
+    for row in rows {
+        let (evidence_class, evidence_sources_json, used_at) =
+            row.map_err(|error| error.to_string())?;
+        let evidence_class = parse_usage_evidence_class(&evidence_class)?;
+        match evidence_class {
+            SkillUsageEvidenceClass::Confirmed => {
+                audit.confirmed_calls = audit.confirmed_calls.saturating_add(1);
+                update_coverage_timestamp(
+                    &mut audit.earliest_confirmed_at,
+                    &mut audit.latest_confirmed_at,
+                    &used_at,
+                );
+            }
+            SkillUsageEvidenceClass::Inferred => {
+                audit.inferred_calls = audit.inferred_calls.saturating_add(1);
+                update_coverage_timestamp(
+                    &mut audit.earliest_inferred_at,
+                    &mut audit.latest_inferred_at,
+                    &used_at,
+                );
+            }
+            SkillUsageEvidenceClass::Reference => {
+                audit.history_references = audit.history_references.saturating_add(1);
+                update_coverage_timestamp(
+                    &mut audit.earliest_reference_at,
+                    &mut audit.latest_reference_at,
+                    &used_at,
+                );
+            }
+        }
+        for source in parse_usage_evidence_sources(&evidence_sources_json).unwrap_or_default() {
+            *source_counts
+                .entry((
+                    usage_evidence_source_bucket(&source.source).to_string(),
+                    source.evidence_class,
+                ))
+                .or_default() += 1;
+        }
+    }
+    audit.source_counts = source_counts
+        .into_iter()
+        .map(
+            |((source, evidence_class), count)| SkillUsageEvidenceSourceCount {
+                source,
+                evidence_class,
+                count,
+            },
+        )
+        .collect();
+    audit.source_counts.sort_by(|left, right| {
+        left.source.cmp(&right.source).then_with(|| {
+            left.evidence_class
+                .as_str()
+                .cmp(right.evidence_class.as_str())
+        })
+    });
+    audit.scanned_codex_session_files =
+        read_u32_preference(&paths.database_path, "codex_usage_backfill_scanned_files")?
+            .unwrap_or_default() as usize;
+    audit.scanned_codex_turns =
+        read_u32_preference(&paths.database_path, "codex_usage_backfill_scanned_turns")?
+            .unwrap_or_default() as usize;
+    audit.scanned_claude_code_session_files = read_u32_preference(
+        &paths.database_path,
+        "claude_code_usage_backfill_scanned_files",
+    )?
+    .unwrap_or_default() as usize;
+    audit.scanned_cursor_sessions = read_u32_preference(
+        &paths.database_path,
+        "cursor_usage_backfill_scanned_sessions",
+    )?
+    .unwrap_or_default() as usize;
+    audit.scanned_cursor_transcript_files = read_u32_preference(
+        &paths.database_path,
+        "cursor_usage_backfill_scanned_transcript_files",
+    )?
+    .unwrap_or_default() as usize;
+    audit.confirmed_cursor_transcript_reads = audit
+        .source_counts
+        .iter()
+        .find(|item| item.source == "cursor_agent_transcript_read")
+        .map(|item| item.count)
+        .unwrap_or_default();
+    audit.total_calls = audit.confirmed_calls.saturating_add(audit.inferred_calls);
+    audit.known_limitations.push(
+        "Codex local stores do not expose a stable provider-reported skill-run total. Calls include confirmed hooks and structured per-turn inferred invocations, but may still undercount Codex usage."
+            .to_string(),
+    );
+    for source in [
+        "codex_session_backfill",
+        "claude_code_session_backfill",
+        "cursor_session_backfill",
+        "cursor_agent_transcript_read",
+    ] {
+        if let Some(backfill) = read_json_preference::<UsageBackfillAudit>(
+            &paths.database_path,
+            &format!("usage_backfill_audit_{source}"),
+        )? {
+            audit.last_backfills.push(backfill);
+        }
+    }
+    Ok(audit)
+}
+
+pub(crate) fn persist_usage_backfill_audit(
+    database_path: &Path,
+    source: &str,
+    scanned: usize,
+    result: &BackfillCodexSessionUsageResult,
+) -> Result<()> {
+    write_json_preference(
+        database_path,
+        &format!("usage_backfill_audit_{source}"),
+        &UsageBackfillAudit {
+            source: source.to_string(),
+            scanned,
+            discovered: result.discovered,
+            recorded: result.recorded,
+            deduplicated: result.deduplicated,
+            upgraded: result.upgraded,
+            skipped: result.skipped,
+            errors: result.errors.len(),
+        },
+    )
 }
 
 fn usage_ranking_range_start(
@@ -752,12 +1034,24 @@ fn load_managed_skill_kinds(paths: &ManagedPaths) -> Result<HashMap<String, Skil
 
 fn merge_usage_summary(target: &mut UsageSummary, other: &UsageSummary) {
     target.usage_count = target.usage_count.saturating_add(other.usage_count);
+    target.confirmed_count = target.confirmed_count.saturating_add(other.confirmed_count);
+    target.inferred_count = target.inferred_count.saturating_add(other.inferred_count);
+    target.reference_count = target.reference_count.saturating_add(other.reference_count);
     match (&target.last_used_at, &other.last_used_at) {
         (Some(left), Some(right)) if right > left => {
             target.last_used_at = Some(right.clone());
         }
         (None, Some(right)) => {
             target.last_used_at = Some(right.clone());
+        }
+        _ => {}
+    }
+    match (&target.last_referenced_at, &other.last_referenced_at) {
+        (Some(left), Some(right)) if right > left => {
+            target.last_referenced_at = Some(right.clone());
+        }
+        (None, Some(right)) => {
+            target.last_referenced_at = Some(right.clone());
         }
         _ => {}
     }
@@ -773,24 +1067,48 @@ fn load_usage_ranking_root_aggregates(
     let (sql, values) = ranking_filter_sql(
         RankingFilterSqlTemplates {
             no_filter: "
-            SELECT skill_name, runtime_root, metadata_json, used_at
+            SELECT
+              skill_name,
+              runtime_root,
+              metadata_json,
+              used_at,
+              evidence_class,
+              evidence_sources_json
             FROM skill_usage_events
             WHERE used_at >= ?1 AND used_at <= ?2
             ",
             workspace_only: "
-            SELECT skill_name, runtime_root, metadata_json, used_at
+            SELECT
+              skill_name,
+              runtime_root,
+              metadata_json,
+              used_at,
+              evidence_class,
+              evidence_sources_json
             FROM skill_usage_events
             WHERE used_at >= ?1 AND used_at <= ?2
               AND runtime_root = ?3
             ",
             agent_only: "
-            SELECT skill_name, runtime_root, metadata_json, used_at
+            SELECT
+              skill_name,
+              runtime_root,
+              metadata_json,
+              used_at,
+              evidence_class,
+              evidence_sources_json
             FROM skill_usage_events
             WHERE used_at >= ?1 AND used_at <= ?2
               AND agent_id IN ({agent_ids})
             ",
             agent_and_workspace: "
-            SELECT skill_name, runtime_root, metadata_json, used_at
+            SELECT
+              skill_name,
+              runtime_root,
+              metadata_json,
+              used_at,
+              evidence_class,
+              evidence_sources_json
             FROM skill_usage_events
             WHERE used_at >= ?1 AND used_at <= ?2
               AND runtime_root = ?3
@@ -809,14 +1127,24 @@ fn load_usage_ranking_root_aggregates(
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
             ))
         })
         .map_err(|error| error.to_string())?;
     let mut usage = HashMap::new();
     let mut coverage = SkillUsageCoverage::default();
+    let mut source_counts: HashMap<(String, SkillUsageEvidenceClass), usize> = HashMap::new();
     for row in rows {
-        let (skill_name, runtime_root, metadata_json, used_at) =
-            row.map_err(|error| error.to_string())?;
+        let (
+            skill_name,
+            runtime_root,
+            metadata_json,
+            used_at,
+            evidence_class,
+            evidence_sources_json,
+        ) = row.map_err(|error| error.to_string())?;
+        let evidence_class = parse_usage_evidence_class(&evidence_class)?;
         let source_kind = usage_source_kind_for_event(&skill_name, &runtime_root, &metadata_json);
         let is_managed_regular =
             source_kind == SkillUsageSourceKind::Regular && managed.contains_key(&skill_name);
@@ -839,40 +1167,144 @@ fn load_usage_ranking_root_aggregates(
         {
             coverage.latest_event_at = Some(used_at.clone());
         }
-        match usage_event_observation_source(&metadata_json) {
-            Some("agent_hook") => {
-                coverage.agent_hook_calls = coverage.agent_hook_calls.saturating_add(1);
+        let evidence_sources =
+            parse_usage_evidence_sources(&evidence_sources_json).unwrap_or_else(|_| {
+                vec![UsageEvidenceSource {
+                    source: usage_event_observation_source(&metadata_json)
+                        .unwrap_or("manual")
+                        .to_string(),
+                    evidence_class,
+                }]
+            });
+        let canonical_source = evidence_sources
+            .iter()
+            .find(|source| source.evidence_class == evidence_class)
+            .map(|source| usage_evidence_source_bucket(&source.source))
+            .unwrap_or("manual");
+        if usage_evidence_counts_toward_calls(evidence_class) {
+            match canonical_source {
+                "agent_hook" => {
+                    coverage.agent_hook_calls = coverage.agent_hook_calls.saturating_add(1);
+                }
+                "codex_session_backfill" => {
+                    coverage.codex_session_backfill_calls =
+                        coverage.codex_session_backfill_calls.saturating_add(1);
+                }
+                "claude_code_session_backfill" => {
+                    coverage.claude_code_session_backfill_calls = coverage
+                        .claude_code_session_backfill_calls
+                        .saturating_add(1);
+                }
+                "cursor_session_backfill" => {
+                    coverage.cursor_session_backfill_calls =
+                        coverage.cursor_session_backfill_calls.saturating_add(1);
+                }
+                _ => {
+                    coverage.other_observed_calls = coverage.other_observed_calls.saturating_add(1);
+                }
             }
-            Some("codex_session_backfill") => {
-                coverage.codex_session_backfill_calls =
-                    coverage.codex_session_backfill_calls.saturating_add(1);
-            }
-            Some("claude_code_session_backfill") => {
-                coverage.claude_code_session_backfill_calls = coverage
-                    .claude_code_session_backfill_calls
-                    .saturating_add(1);
-            }
-            Some("cursor_session_backfill") => {
-                coverage.cursor_session_backfill_calls =
-                    coverage.cursor_session_backfill_calls.saturating_add(1);
-            }
-            _ => {
-                coverage.other_observed_calls = coverage.other_observed_calls.saturating_add(1);
-            }
+        }
+        for source in evidence_sources {
+            *source_counts
+                .entry((
+                    usage_evidence_source_bucket(&source.source).to_string(),
+                    source.evidence_class,
+                ))
+                .or_default() += 1;
         }
         let summary = usage
             .entry((skill_name, runtime_root, source_kind))
             .or_insert_with(UsageSummary::default);
-        summary.usage_count = summary.usage_count.saturating_add(1);
-        if summary
-            .last_used_at
-            .as_ref()
-            .is_none_or(|last| &used_at > last)
-        {
-            summary.last_used_at = Some(used_at);
+        match evidence_class {
+            SkillUsageEvidenceClass::Confirmed => {
+                coverage.confirmed_calls = coverage.confirmed_calls.saturating_add(1);
+                update_coverage_timestamp(
+                    &mut coverage.earliest_confirmed_at,
+                    &mut coverage.latest_confirmed_at,
+                    &used_at,
+                );
+                summary.usage_count = summary.usage_count.saturating_add(1);
+                summary.confirmed_count = summary.confirmed_count.saturating_add(1);
+                if summary
+                    .last_used_at
+                    .as_ref()
+                    .is_none_or(|last| &used_at > last)
+                {
+                    summary.last_used_at = Some(used_at);
+                }
+            }
+            SkillUsageEvidenceClass::Inferred => {
+                coverage.inferred_calls = coverage.inferred_calls.saturating_add(1);
+                update_coverage_timestamp(
+                    &mut coverage.earliest_inferred_at,
+                    &mut coverage.latest_inferred_at,
+                    &used_at,
+                );
+                summary.usage_count = summary.usage_count.saturating_add(1);
+                summary.inferred_count = summary.inferred_count.saturating_add(1);
+                if summary
+                    .last_used_at
+                    .as_ref()
+                    .is_none_or(|last| &used_at > last)
+                {
+                    summary.last_used_at = Some(used_at);
+                }
+            }
+            SkillUsageEvidenceClass::Reference => {
+                coverage.history_references = coverage.history_references.saturating_add(1);
+                update_coverage_timestamp(
+                    &mut coverage.earliest_reference_at,
+                    &mut coverage.latest_reference_at,
+                    &used_at,
+                );
+                summary.reference_count = summary.reference_count.saturating_add(1);
+                if summary
+                    .last_referenced_at
+                    .as_ref()
+                    .is_none_or(|last| &used_at > last)
+                {
+                    summary.last_referenced_at = Some(used_at);
+                }
+            }
         }
     }
+    coverage.source_counts = source_counts
+        .into_iter()
+        .map(
+            |((source, evidence_class), count)| SkillUsageEvidenceSourceCount {
+                source,
+                evidence_class,
+                count,
+            },
+        )
+        .collect();
+    coverage.source_counts.sort_by(|left, right| {
+        left.source.cmp(&right.source).then_with(|| {
+            left.evidence_class
+                .as_str()
+                .cmp(right.evidence_class.as_str())
+        })
+    });
     Ok((usage, coverage))
+}
+
+fn update_coverage_timestamp(
+    earliest: &mut Option<String>,
+    latest: &mut Option<String>,
+    timestamp: &str,
+) {
+    if earliest
+        .as_ref()
+        .is_none_or(|current| timestamp < current.as_str())
+    {
+        *earliest = Some(timestamp.to_string());
+    }
+    if latest
+        .as_ref()
+        .is_none_or(|current| timestamp > current.as_str())
+    {
+        *latest = Some(timestamp.to_string());
+    }
 }
 
 fn usage_ranking_matches_skill_type(
@@ -1144,6 +1576,129 @@ fn merge_usage_source_identity(existing: &str, incoming: &str) -> Result<Option<
     normalize_usage_metadata(Some(existing)).map(Some)
 }
 
+fn classify_usage_evidence(
+    metadata_json: &str,
+    trusted_generated_source: bool,
+) -> (SkillUsageEvidenceClass, String) {
+    if !trusted_generated_source {
+        return (SkillUsageEvidenceClass::Reference, "manual".to_string());
+    }
+    let metadata = serde_json::from_str::<serde_json::Value>(metadata_json).ok();
+    let source = metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get("source"))
+        .and_then(|value| value.as_str())
+        .filter(|source| is_trusted_generated_usage_source(source))
+        .unwrap_or("manual")
+        .to_string();
+    let evidence_class = match source.as_str() {
+        "agent_hook" | "cursor_agent_transcript_read" => SkillUsageEvidenceClass::Confirmed,
+        "codex_session_backfill" => SkillUsageEvidenceClass::Inferred,
+        "claude_code_session_backfill"
+            if metadata
+                .as_ref()
+                .and_then(|metadata| metadata.get("evidence_signal"))
+                .and_then(|value| value.as_str())
+                .is_some_and(|signal| {
+                    matches!(signal, "native_skill_tool" | "native_skill_command")
+                }) =>
+        {
+            SkillUsageEvidenceClass::Confirmed
+        }
+        _ => SkillUsageEvidenceClass::Reference,
+    };
+    (evidence_class, source)
+}
+
+fn usage_evidence_source_bucket(source: &str) -> &'static str {
+    match source {
+        "agent_hook" => "agent_hook",
+        "codex_session_backfill" => "codex_session_backfill",
+        "claude_code_session_backfill" => "claude_code_session_backfill",
+        "cursor_session_backfill" => "cursor_session_backfill",
+        "cursor_agent_transcript_read" => "cursor_agent_transcript_read",
+        _ => "manual",
+    }
+}
+
+fn parse_usage_evidence_class(value: &str) -> Result<SkillUsageEvidenceClass> {
+    match value {
+        "confirmed" => Ok(SkillUsageEvidenceClass::Confirmed),
+        "inferred" => Ok(SkillUsageEvidenceClass::Inferred),
+        "reference" => Ok(SkillUsageEvidenceClass::Reference),
+        _ => Err(format!("Invalid stored usage evidence class: {value}")),
+    }
+}
+
+fn usage_evidence_rank(evidence_class: SkillUsageEvidenceClass) -> u8 {
+    match evidence_class {
+        SkillUsageEvidenceClass::Reference => 0,
+        SkillUsageEvidenceClass::Inferred => 1,
+        SkillUsageEvidenceClass::Confirmed => 2,
+    }
+}
+
+fn usage_evidence_counts_toward_calls(evidence_class: SkillUsageEvidenceClass) -> bool {
+    evidence_class != SkillUsageEvidenceClass::Reference
+}
+
+fn merge_usage_evidence_sources(
+    existing_json: &str,
+    incoming: &str,
+    incoming_class: SkillUsageEvidenceClass,
+) -> Result<String> {
+    const MAX_EVIDENCE_SOURCES: usize = 8;
+    let mut sources = parse_usage_evidence_sources(existing_json)?;
+    if let Some(existing) = sources.iter_mut().find(|item| item.source == incoming) {
+        if usage_evidence_rank(incoming_class) > usage_evidence_rank(existing.evidence_class) {
+            existing.evidence_class = incoming_class;
+        }
+    } else if sources.len() < MAX_EVIDENCE_SOURCES {
+        sources.push(UsageEvidenceSource {
+            source: incoming.to_string(),
+            evidence_class: incoming_class,
+        });
+    }
+    serde_json::to_string(&sources).map_err(|error| error.to_string())
+}
+
+fn parse_usage_evidence_sources(value: &str) -> Result<Vec<UsageEvidenceSource>> {
+    let raw = serde_json::from_str::<Vec<serde_json::Value>>(value)
+        .map_err(|error| format!("Invalid stored usage evidence sources: {error}"))?;
+    let mut sources = Vec::new();
+    for item in raw {
+        match item {
+            serde_json::Value::String(source) => sources.push(UsageEvidenceSource {
+                source,
+                evidence_class: SkillUsageEvidenceClass::Reference,
+            }),
+            serde_json::Value::Object(object) => {
+                let source = object
+                    .get("source")
+                    .and_then(|value| value.as_str())
+                    .ok_or_else(|| {
+                        "Invalid stored usage evidence source: missing source.".to_string()
+                    })?;
+                let evidence_class = object
+                    .get("evidence_class")
+                    .and_then(|value| value.as_str())
+                    .ok_or_else(|| {
+                        "Invalid stored usage evidence source: missing evidence_class.".to_string()
+                    })
+                    .and_then(parse_usage_evidence_class)?;
+                sources.push(UsageEvidenceSource {
+                    source: source.to_string(),
+                    evidence_class,
+                });
+            }
+            _ => {
+                return Err("Invalid stored usage evidence source entry.".to_string());
+            }
+        }
+    }
+    Ok(sources)
+}
+
 pub(crate) fn normalize_usage_prompt_excerpt(value: Option<&str>) -> Option<String> {
     let stripped = strip_skill_blocks(value?);
     let stripped = strip_skill_markdown_links(&stripped);
@@ -1316,6 +1871,7 @@ pub(crate) fn load_usage_by_skill(database_path: &Path) -> Result<HashMap<String
                 UsageSummary {
                     usage_count: usize::try_from(usage_count.max(0)).unwrap_or_default(),
                     last_used_at: row.get(2)?,
+                    ..UsageSummary::default()
                 },
             ))
         })
@@ -1325,6 +1881,8 @@ pub(crate) fn load_usage_by_skill(database_path: &Path) -> Result<HashMap<String
         let (skill_name, summary) = row.map_err(|error| error.to_string())?;
         usage.insert(skill_name, summary);
     }
+    enrich_call_evidence_by_skill(&connection, &mut usage)?;
+    enrich_reference_usage_by_skill(&connection, &mut usage)?;
     Ok(usage)
 }
 
@@ -1347,6 +1905,7 @@ pub(crate) fn load_usage_by_runtime(database_path: &Path) -> Result<HashMap<Stri
                 UsageSummary {
                     usage_count: usize::try_from(usage_count.max(0)).unwrap_or_default(),
                     last_used_at: row.get(2)?,
+                    ..UsageSummary::default()
                 },
             ))
         })
@@ -1356,6 +1915,8 @@ pub(crate) fn load_usage_by_runtime(database_path: &Path) -> Result<HashMap<Stri
         let (runtime_root, summary) = row.map_err(|error| error.to_string())?;
         usage.insert(runtime_root, summary);
     }
+    enrich_call_evidence_by_runtime(&connection, &mut usage)?;
+    enrich_reference_usage_by_runtime(&connection, &mut usage)?;
     Ok(usage)
 }
 
@@ -1379,6 +1940,7 @@ pub(crate) fn load_usage_by_skill_runtime(
                 UsageSummary {
                     usage_count: usize::try_from(usage_count.max(0)).unwrap_or_default(),
                     last_used_at: row.get(3)?,
+                    ..UsageSummary::default()
                 },
             ))
         })
@@ -1388,10 +1950,219 @@ pub(crate) fn load_usage_by_skill_runtime(
         let (key, summary) = row.map_err(|error| error.to_string())?;
         usage.insert(key, summary);
     }
+    enrich_call_evidence_by_skill_runtime(&connection, &mut usage)?;
+    enrich_reference_usage_by_skill_runtime(&connection, &mut usage)?;
     Ok(usage)
 }
 
-type ExistingUsageEventRow = (String, String, String, Option<String>, String);
+fn enrich_call_evidence_by_skill(
+    connection: &Connection,
+    usage: &mut HashMap<String, UsageSummary>,
+) -> Result<()> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT skill_name, evidence_class, COUNT(*)
+            FROM skill_usage_events
+            WHERE evidence_class IN ('confirmed', 'inferred')
+            GROUP BY skill_name, evidence_class
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                usize::try_from(row.get::<_, i64>(2)?.max(0)).unwrap_or_default(),
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+    for row in rows {
+        let (key, evidence_class, count) = row.map_err(|error| error.to_string())?;
+        apply_call_evidence_count(usage.entry(key).or_default(), &evidence_class, count)?;
+    }
+    Ok(())
+}
+
+fn enrich_call_evidence_by_runtime(
+    connection: &Connection,
+    usage: &mut HashMap<String, UsageSummary>,
+) -> Result<()> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT runtime_root, evidence_class, COUNT(*)
+            FROM skill_usage_events
+            WHERE evidence_class IN ('confirmed', 'inferred')
+            GROUP BY runtime_root, evidence_class
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                usize::try_from(row.get::<_, i64>(2)?.max(0)).unwrap_or_default(),
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+    for row in rows {
+        let (key, evidence_class, count) = row.map_err(|error| error.to_string())?;
+        apply_call_evidence_count(usage.entry(key).or_default(), &evidence_class, count)?;
+    }
+    Ok(())
+}
+
+fn enrich_call_evidence_by_skill_runtime(
+    connection: &Connection,
+    usage: &mut HashMap<(String, String), UsageSummary>,
+) -> Result<()> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT skill_name, runtime_root, evidence_class, COUNT(*)
+            FROM skill_usage_events
+            WHERE evidence_class IN ('confirmed', 'inferred')
+            GROUP BY skill_name, runtime_root, evidence_class
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                (row.get::<_, String>(0)?, row.get::<_, String>(1)?),
+                row.get::<_, String>(2)?,
+                usize::try_from(row.get::<_, i64>(3)?.max(0)).unwrap_or_default(),
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+    for row in rows {
+        let (key, evidence_class, count) = row.map_err(|error| error.to_string())?;
+        apply_call_evidence_count(usage.entry(key).or_default(), &evidence_class, count)?;
+    }
+    Ok(())
+}
+
+fn apply_call_evidence_count(
+    summary: &mut UsageSummary,
+    evidence_class: &str,
+    count: usize,
+) -> Result<()> {
+    match parse_usage_evidence_class(evidence_class)? {
+        SkillUsageEvidenceClass::Confirmed => summary.confirmed_count = count,
+        SkillUsageEvidenceClass::Inferred => summary.inferred_count = count,
+        SkillUsageEvidenceClass::Reference => {}
+    }
+    Ok(())
+}
+
+fn enrich_reference_usage_by_skill(
+    connection: &Connection,
+    usage: &mut HashMap<String, UsageSummary>,
+) -> Result<()> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT skill_name, COUNT(*), MAX(used_at)
+            FROM skill_usage_events
+            WHERE evidence_class = 'reference'
+            GROUP BY skill_name
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                usize::try_from(row.get::<_, i64>(1)?.max(0)).unwrap_or_default(),
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+    for row in rows {
+        let (key, reference_count, last_referenced_at) = row.map_err(|error| error.to_string())?;
+        let summary = usage.entry(key).or_default();
+        summary.reference_count = reference_count;
+        summary.last_referenced_at = last_referenced_at;
+    }
+    Ok(())
+}
+
+fn enrich_reference_usage_by_runtime(
+    connection: &Connection,
+    usage: &mut HashMap<String, UsageSummary>,
+) -> Result<()> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT runtime_root, COUNT(*), MAX(used_at)
+            FROM skill_usage_events
+            WHERE evidence_class = 'reference'
+            GROUP BY runtime_root
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                usize::try_from(row.get::<_, i64>(1)?.max(0)).unwrap_or_default(),
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+    for row in rows {
+        let (key, reference_count, last_referenced_at) = row.map_err(|error| error.to_string())?;
+        let summary = usage.entry(key).or_default();
+        summary.reference_count = reference_count;
+        summary.last_referenced_at = last_referenced_at;
+    }
+    Ok(())
+}
+
+fn enrich_reference_usage_by_skill_runtime(
+    connection: &Connection,
+    usage: &mut HashMap<(String, String), UsageSummary>,
+) -> Result<()> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT skill_name, runtime_root, COUNT(*), MAX(used_at)
+            FROM skill_usage_events
+            WHERE evidence_class = 'reference'
+            GROUP BY skill_name, runtime_root
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                (row.get::<_, String>(0)?, row.get::<_, String>(1)?),
+                usize::try_from(row.get::<_, i64>(2)?.max(0)).unwrap_or_default(),
+                row.get::<_, Option<String>>(3)?,
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+    for row in rows {
+        let (key, reference_count, last_referenced_at) = row.map_err(|error| error.to_string())?;
+        let summary = usage.entry(key).or_default();
+        summary.reference_count = reference_count;
+        summary.last_referenced_at = last_referenced_at;
+    }
+    Ok(())
+}
+
+type ExistingUsageEventRow = (
+    String,
+    String,
+    String,
+    Option<String>,
+    String,
+    String,
+    String,
+);
 
 fn generated_usage_event_runtime(
     connection: &Connection,
@@ -1471,6 +2242,7 @@ fn is_trusted_generated_usage_source(source: &str) -> bool {
             | "codex_session_backfill"
             | "claude_code_session_backfill"
             | "cursor_session_backfill"
+            | "cursor_agent_transcript_read"
     )
 }
 
@@ -1511,6 +2283,86 @@ fn canonicalize_runtime_usage_agent_aliases(
     }
 
     for alias in &aliases {
+        let duplicate_events = {
+            let mut statement = connection
+                .prepare(
+                    "
+                    SELECT
+                      legacy.event_id,
+                      legacy.evidence_class,
+                      legacy.evidence_sources_json
+                    FROM skill_usage_events AS legacy
+                    WHERE legacy.agent_id = ?1
+                      AND legacy.runtime_root = ?2
+                      AND legacy.event_id IS NOT NULL
+                      AND EXISTS (
+                        SELECT 1
+                        FROM skill_usage_events AS canonical
+                        WHERE canonical.agent_id = ?3
+                          AND canonical.runtime_root = legacy.runtime_root
+                          AND canonical.event_id = legacy.event_id
+                      )
+                    ",
+                )
+                .map_err(|error| error.to_string())?;
+            let rows = statement
+                .query_map(params![alias, runtime_root, canonical_agent_id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })
+                .map_err(|error| error.to_string())?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(|error| error.to_string())?
+        };
+        for (event_id, alias_class, alias_sources_json) in duplicate_events {
+            let (canonical_class, canonical_sources_json) = connection
+                .query_row(
+                    "
+                    SELECT evidence_class, evidence_sources_json
+                    FROM skill_usage_events
+                    WHERE agent_id = ?1 AND runtime_root = ?2 AND event_id = ?3
+                    ",
+                    params![canonical_agent_id, runtime_root, &event_id],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                )
+                .map_err(|error| error.to_string())?;
+            let mut merged_sources = canonical_sources_json;
+            for source in parse_usage_evidence_sources(&alias_sources_json).unwrap_or_default() {
+                merged_sources = merge_usage_evidence_sources(
+                    &merged_sources,
+                    &source.source,
+                    source.evidence_class,
+                )?;
+            }
+            let alias_class = parse_usage_evidence_class(&alias_class)?;
+            let canonical_class = parse_usage_evidence_class(&canonical_class)?;
+            let merged_class =
+                if usage_evidence_rank(alias_class) > usage_evidence_rank(canonical_class) {
+                    alias_class
+                } else {
+                    canonical_class
+                };
+            connection
+                .execute(
+                    "
+                    UPDATE skill_usage_events
+                    SET evidence_class = ?1,
+                        evidence_sources_json = ?2
+                    WHERE agent_id = ?3 AND runtime_root = ?4 AND event_id = ?5
+                    ",
+                    params![
+                        merged_class.as_str(),
+                        merged_sources,
+                        canonical_agent_id,
+                        runtime_root,
+                        event_id
+                    ],
+                )
+                .map_err(|error| error.to_string())?;
+        }
         connection
             .execute(
                 "
@@ -1575,7 +2427,9 @@ fn canonicalize_runtime_usage_agent_aliases(
               COUNT(*),
               MAX(used_at)
             FROM skill_usage_events
-            WHERE agent_id = ?1 AND runtime_root = ?2
+            WHERE agent_id = ?1
+              AND runtime_root = ?2
+              AND evidence_class IN ('confirmed', 'inferred')
             GROUP BY skill_name, agent_id, runtime_root
             ",
             params![canonical_agent_id, runtime_root],
@@ -1593,7 +2447,14 @@ fn find_existing_usage_event(
     let canonical = connection
         .query_row(
             "
-            SELECT agent_id, used_at, recorded_at, prompt_excerpt, metadata_json
+            SELECT
+              agent_id,
+              used_at,
+              recorded_at,
+              prompt_excerpt,
+              metadata_json,
+              evidence_class,
+              evidence_sources_json
             FROM skill_usage_events
             WHERE agent_id = ?1 AND runtime_root = ?2 AND event_id = ?3
             ",
@@ -1605,17 +2466,64 @@ fn find_existing_usage_event(
                     row.get::<_, String>(2)?,
                     row.get::<_, Option<String>>(3)?,
                     row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
                 ))
             },
         )
         .optional()
         .map_err(|error| error.to_string())?;
     if canonical.is_some() {
-        // Drop any leftover legacy alias rows for the same event.
+        // Merge any leftover legacy alias evidence before removing duplicate rows.
         let aliases = usage_ranking_agent_filter_ids(canonical_agent_id);
         for alias in aliases {
             if alias == canonical_agent_id {
                 continue;
+            }
+            if let Some((alias_class, alias_sources)) = connection
+                .query_row(
+                    "
+                    SELECT evidence_class, evidence_sources_json
+                    FROM skill_usage_events
+                    WHERE agent_id = ?1 AND runtime_root = ?2 AND event_id = ?3
+                    ",
+                    params![alias, runtime_root, event_id],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                )
+                .optional()
+                .map_err(|error| error.to_string())?
+            {
+                let mut merged = canonical.clone().expect("canonical event exists");
+                let mut sources = parse_usage_evidence_sources(&alias_sources).unwrap_or_default();
+                for source in sources.drain(..) {
+                    merged.6 = merge_usage_evidence_sources(
+                        &merged.6,
+                        &source.source,
+                        source.evidence_class,
+                    )?;
+                }
+                let alias_class = parse_usage_evidence_class(&alias_class)?;
+                let canonical_class = parse_usage_evidence_class(&merged.5)?;
+                if usage_evidence_rank(alias_class) > usage_evidence_rank(canonical_class) {
+                    merged.5 = alias_class.as_str().to_string();
+                }
+                connection
+                    .execute(
+                        "
+                        UPDATE skill_usage_events
+                        SET evidence_class = ?1,
+                            evidence_sources_json = ?2
+                        WHERE agent_id = ?3 AND runtime_root = ?4 AND event_id = ?5
+                        ",
+                        params![
+                            &merged.5,
+                            &merged.6,
+                            canonical_agent_id,
+                            runtime_root,
+                            event_id
+                        ],
+                    )
+                    .map_err(|error| error.to_string())?;
             }
             connection
                 .execute(
@@ -1627,7 +2535,35 @@ fn find_existing_usage_event(
                 )
                 .map_err(|error| error.to_string())?;
         }
-        return Ok(canonical);
+        return connection
+            .query_row(
+                "
+                SELECT
+                  agent_id,
+                  used_at,
+                  recorded_at,
+                  prompt_excerpt,
+                  metadata_json,
+                  evidence_class,
+                  evidence_sources_json
+                FROM skill_usage_events
+                WHERE agent_id = ?1 AND runtime_root = ?2 AND event_id = ?3
+                ",
+                params![canonical_agent_id, runtime_root, event_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|error| error.to_string());
     }
 
     let aliases = usage_ranking_agent_filter_ids(canonical_agent_id)
@@ -1645,7 +2581,14 @@ fn find_existing_usage_event(
         .query_row(
             &format!(
                 "
-        SELECT agent_id, used_at, recorded_at, prompt_excerpt, metadata_json
+                SELECT
+                  agent_id,
+                  used_at,
+                  recorded_at,
+                  prompt_excerpt,
+                  metadata_json,
+                  evidence_class,
+                  evidence_sources_json
                 FROM skill_usage_events
                 WHERE agent_id IN ({placeholders})
                   AND runtime_root = ?{}
@@ -1662,6 +2605,8 @@ fn find_existing_usage_event(
                     row.get::<_, String>(2)?,
                     row.get::<_, Option<String>>(3)?,
                     row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
                 ))
             },
         )
@@ -1778,6 +2723,7 @@ pub(crate) fn load_usage_stat_for_key(
                 Ok(UsageSummary {
                     usage_count: usize::try_from(usage_count.max(0)).unwrap_or_default(),
                     last_used_at: Some(row.get(1)?),
+                    ..UsageSummary::default()
                 })
             },
         )

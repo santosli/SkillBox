@@ -7,7 +7,19 @@ version tags such as `v0.3.0`.
 
 ## Unreleased
 
-- No unreleased changes.
+- Add schema-v7 usage evidence classification with `confirmed`, `inferred`, and
+  `reference` events. Calls now equal confirmed executions plus defensible
+  structured invocations; history references remain separate.
+- Treat Stop hooks, Claude Code native Skill attribution, and validated Cursor
+  agent transcript `Read` / `ReadFile` events as confirmed; treat Codex
+  structured per-turn skill carriers as inferred Calls and Cursor state
+  attachments or public `usage-record` events as references.
+- Upgrade duplicate events only toward stronger evidence while retaining bounded
+  provenance, and idempotently rebuild all-time Calls stats without requiring a
+  rescan. Explicit `Sync histories` can recover or upgrade evidence later.
+- Add aggregate-only `usage-audit` coverage and backfill diagnostics. Codex
+  provider-native skill-run totals remain unavailable, so local Calls are an
+  explicit known undercount rather than account analytics.
 
 ## 0.6.0
 
