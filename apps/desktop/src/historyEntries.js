@@ -22,6 +22,9 @@ export function normalizeHistory(result = {}) {
   return {
     entries,
     skillUsageCount: numberOrZero(result?.skillUsageCount ?? result?.skill_usage_count),
+    skillReferenceCount: numberOrZero(
+      result?.skillReferenceCount ?? result?.skill_reference_count
+    ),
     operationCount: numberOrZero(result?.operationCount ?? result?.operation_count)
   };
 }

@@ -29,18 +29,31 @@ test('normalizes ranking rows and snake case result metadata', () => {
       range_start: '2026-06-22T10:00:00Z',
       range_end: '2026-07-22T10:00:00Z',
       skill_type: 'remote',
+      total_calls: 12,
       total_observed_calls: 12,
+      total_confirmed_calls: 5,
+      total_inferred_calls: 7,
+      total_history_references: 1,
       coverage: {
         earliest_event_at: '2026-07-01T09:00:00Z',
         latest_event_at: '2026-07-21T08:00:00Z',
+        confirmed_calls: 5,
+        inferred_calls: 7,
+        history_references: 1,
+        source_counts: [
+          { source: 'agent_hook', evidence_class: 'confirmed', count: 5 },
+          { source: 'codex_session_backfill', evidence_class: 'inferred', count: 7 }
+        ],
         agent_hook_calls: 5,
         codex_session_backfill_calls: 7,
         claude_code_session_backfill_calls: 2,
         cursor_session_backfill_calls: 1,
         other_observed_calls: 0,
         scanned_codex_session_files: 12,
+        scanned_codex_turns: 42,
         scanned_claude_code_session_files: 8,
-        scanned_cursor_sessions: 4
+        scanned_cursor_sessions: 4,
+        scanned_cursor_transcript_files: 3
       },
       rows: [
         {
@@ -52,7 +65,11 @@ test('normalizes ranking rows and snake case result metadata', () => {
           source_id: 'regular:abc123',
           source_runtime_roots: ['/tmp/project/.codex/skills'],
           usage_count: 12,
-          last_used_at: '2026-07-21T08:00:00Z'
+          last_used_at: '2026-07-21T08:00:00Z',
+          confirmed_count: 5,
+          inferred_count: 7,
+          reference_count: 1,
+          last_referenced_at: '2026-07-20T08:00:00Z'
         }
       ]
     }),
@@ -65,17 +82,36 @@ test('normalizes ranking rows and snake case result metadata', () => {
       skillType: 'remote',
       workspaceRoot: '',
       totalObservedCalls: 12,
+      totalCalls: 12,
+      totalConfirmedCalls: 5,
+      totalInferredCalls: 7,
+      totalHistoryReferences: 1,
       coverage: {
         earliestEventAt: '2026-07-01T09:00:00Z',
         latestEventAt: '2026-07-21T08:00:00Z',
+        earliestConfirmedAt: '',
+        latestConfirmedAt: '',
+        earliestInferredAt: '',
+        latestInferredAt: '',
+        earliestReferenceAt: '',
+        latestReferenceAt: '',
+        confirmedCalls: 5,
+        inferredCalls: 7,
+        historyReferences: 1,
+        sourceCounts: [
+          { source: 'agent_hook', evidenceClass: 'confirmed', count: 5 },
+          { source: 'codex_session_backfill', evidenceClass: 'inferred', count: 7 }
+        ],
         agentHookCalls: 5,
         codexSessionBackfillCalls: 7,
         claudeCodeSessionBackfillCalls: 2,
         cursorSessionBackfillCalls: 1,
         otherObservedCalls: 0,
         scannedCodexSessionFiles: 12,
+        scannedCodexTurns: 42,
         scannedClaudeCodeSessionFiles: 8,
-        scannedCursorSessions: 4
+        scannedCursorSessions: 4,
+        scannedCursorTranscriptFiles: 3
       },
       rows: [
         {
@@ -89,7 +125,11 @@ test('normalizes ranking rows and snake case result metadata', () => {
           sourceId: 'regular:abc123',
           sourceRuntimeRoots: ['/tmp/project/.codex/skills'],
           usageCount: 12,
-          lastUsedAt: '2026-07-21T08:00:00Z'
+          lastUsedAt: '2026-07-21T08:00:00Z',
+          confirmedCount: 5,
+          inferredCount: 7,
+          referenceCount: 1,
+          lastReferencedAt: '2026-07-20T08:00:00Z'
         }
       ]
     }
@@ -196,21 +236,39 @@ test('summarizes Codex usage backfill results', () => {
       discovered: 40,
       recorded: 28,
       deduplicated: 10,
+      upgraded: 0,
       skipped: 2,
+      scannedCursorStateSessions: 0,
+      cursorStateReferences: 0,
+      scannedCursorTranscriptFiles: 0,
+      inferredCursorTranscriptCalls: 0,
       errors: ['probe: bad path']
     }),
     {
       scannedFiles: 12,
+      scannedTurns: 0,
       discovered: 40,
       recorded: 28,
       deduplicated: 10,
+      upgraded: 0,
       skipped: 2,
+      scannedCursorStateSessions: 0,
+      cursorStateReferences: 0,
+      scannedCursorTranscriptFiles: 0,
+      inferredCursorTranscriptCalls: 0,
+      cursorTranscriptReadCandidates: 0,
+      cursorTranscriptReadFileCandidates: 0,
+      cursorTranscriptTurnDuplicates: 0,
+      cursorTranscriptDuplicateFiles: 0,
+      cursorTranscriptHistoricalMissing: 0,
+      cursorTranscriptUnsafeRejected: 0,
       errors: ['probe: bad path']
     }
   );
   assert.equal(
     codexUsageBackfillNotice({
       scannedFiles: 12,
+      scannedTurns: 0,
       recorded: 28,
       deduplicated: 10,
       skipped: 2
@@ -242,10 +300,21 @@ test('syncs Codex, Claude Code, and Cursor histories with one provider-aware not
         scanned_files: 5,
         recorded: 1,
         deduplicated: 2,
+        upgraded: 1,
+        scanned_cursor_state_sessions: 3,
+        cursor_state_references: 2,
+        scanned_cursor_transcript_files: 2,
+        inferred_cursor_transcript_calls: 4,
+        cursor_transcript_read_candidates: 7,
+        cursor_transcript_read_file_candidates: 1,
+        cursor_transcript_turn_duplicates: 2,
+        cursor_transcript_duplicate_files: 1,
+        cursor_transcript_historical_missing: 3,
+        cursor_transcript_unsafe_rejected: 1,
         errors: ['unsupported record']
       }
     ]),
-    'Scanned 11 local history sessions, recorded 6 new observations, 3 already recorded, by provider: Codex 3 new, Claude Code 2 new, Cursor 1 new (1 error).'
+    'Scanned 11 local history sources, recorded 6 new observations, 3 already recorded, 1 evidence upgrade, by provider: Codex 3 new, Claude Code 2 new, Cursor 1 new; scanned 2 transcript files and 3 state sessions; 4 inferred transcript calls from 7 Read candidates, 2 state references; 2 same-turn duplicates, 1 duplicate files, 3 historical missing paths accepted, 1 ReadFile candidates excluded, 1 unsafe paths rejected (1 error).'
   );
 });
 

@@ -150,6 +150,7 @@ export function previewHistory() {
   const now = Date.now();
   return {
     skill_usage_count: 3,
+    skill_reference_count: 1,
     operation_count: 2,
     entries: [
       {
@@ -176,6 +177,16 @@ export function previewHistory() {
         entity_name: 'find-skills'
       },
       {
+        id: 'preview-reference-last30days',
+        kind: 'usage_reference',
+        timestamp: new Date(now - 70 * 60 * 1000).toISOString(),
+        title: 'History reference: last30days',
+        subtitle: 'cursor in ~/.cursor/skills',
+        skill_name: 'last30days',
+        agent_id: 'cursor',
+        runtime_root: '~/.cursor/skills'
+      },
+      {
         id: 'preview-usage-frontend',
         kind: 'skill_usage',
         timestamp: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
@@ -198,6 +209,9 @@ export function previewUsageRankings(filters = {}) {
       kind: 'user',
       managed: true,
       usage_count: 4,
+      confirmed_count: 1,
+      inferred_count: 3,
+      reference_count: 2,
       last_used_at: '2026-07-10T21:12:00Z'
     },
     {
@@ -206,6 +220,9 @@ export function previewUsageRankings(filters = {}) {
       kind: 'user',
       managed: true,
       usage_count: 3,
+      confirmed_count: 2,
+      inferred_count: 1,
+      reference_count: 0,
       last_used_at: '2026-07-22T19:02:00Z'
     },
     {
@@ -214,6 +231,9 @@ export function previewUsageRankings(filters = {}) {
       kind: null,
       managed: false,
       usage_count: 2,
+      confirmed_count: 0,
+      inferred_count: 2,
+      reference_count: 1,
       last_used_at: '2026-07-18T11:20:00Z'
     },
     {
@@ -223,6 +243,9 @@ export function previewUsageRankings(filters = {}) {
       managed: false,
       system: true,
       usage_count: 1,
+      confirmed_count: 1,
+      inferred_count: 0,
+      reference_count: 0,
       last_used_at: '2026-07-18T11:18:00Z'
     },
     {
@@ -231,6 +254,9 @@ export function previewUsageRankings(filters = {}) {
       kind: 'remote',
       managed: true,
       usage_count: 1,
+      confirmed_count: 1,
+      inferred_count: 0,
+      reference_count: 2,
       last_used_at: '2026-06-27T23:21:00Z'
     },
     {
@@ -239,6 +265,9 @@ export function previewUsageRankings(filters = {}) {
       kind: 'user',
       managed: true,
       usage_count: 0,
+      confirmed_count: 0,
+      inferred_count: 0,
+      reference_count: 3,
       last_used_at: ''
     },
     {
@@ -247,6 +276,9 @@ export function previewUsageRankings(filters = {}) {
       kind: 'user',
       managed: true,
       usage_count: 0,
+      confirmed_count: 0,
+      inferred_count: 0,
+      reference_count: 0,
       last_used_at: ''
     }
   ];
@@ -282,21 +314,57 @@ export function previewUsageRankings(filters = {}) {
     agent_id: filters.agentId || null,
     skill_type: filters.skillType || null,
     workspace_root: filters.workspaceRoot || null,
+    total_calls: filteredRows.reduce(
+      (total, row) => total + row.usage_count,
+      0
+    ),
     total_observed_calls: filteredRows.reduce(
       (total, row) => total + row.usage_count,
+      0
+    ),
+    total_confirmed_calls: filteredRows.reduce(
+      (total, row) => total + row.confirmed_count,
+      0
+    ),
+    total_inferred_calls: filteredRows.reduce(
+      (total, row) => total + row.inferred_count,
+      0
+    ),
+    total_history_references: filteredRows.reduce(
+      (total, row) => total + row.reference_count,
       0
     ),
     coverage: {
       earliest_event_at: '2026-06-24T09:15:00Z',
       latest_event_at: '2026-07-21T08:00:00Z',
+      confirmed_calls: filteredRows.reduce(
+        (total, row) => total + row.confirmed_count,
+        0
+      ),
+      inferred_calls: filteredRows.reduce(
+        (total, row) => total + row.inferred_count,
+        0
+      ),
+      history_references: filteredRows.reduce(
+        (total, row) => total + row.reference_count,
+        0
+      ),
+      source_counts: [
+        { source: 'agent_hook', evidence_class: 'confirmed', count: 4 },
+        { source: 'codex_session_backfill', evidence_class: 'inferred', count: 7 },
+        { source: 'cursor_agent_transcript_read', evidence_class: 'inferred', count: 2 },
+        { source: 'cursor_session_backfill', evidence_class: 'reference', count: 8 }
+      ],
       agent_hook_calls: 4,
       codex_session_backfill_calls: 18,
       claude_code_session_backfill_calls: 3,
       cursor_session_backfill_calls: 2,
       other_observed_calls: 0,
       scanned_codex_session_files: 12,
+      scanned_codex_turns: 84,
       scanned_claude_code_session_files: 8,
-      scanned_cursor_sessions: 6
+      scanned_cursor_sessions: 6,
+      scanned_cursor_transcript_files: 12
     },
     rows: filteredRows
   };

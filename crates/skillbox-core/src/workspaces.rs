@@ -803,6 +803,7 @@ pub(crate) fn load_workspace_by_canonical_path(
     Ok(workspace.map(|mut workspace| {
         if let Some(usage) = usage_by_runtime.get(&usage_runtime_key(&workspace.canonical_path)) {
             workspace.usage_count = usage.usage_count;
+            workspace.reference_count = usage.reference_count;
         }
         workspace
     }))
@@ -815,10 +816,11 @@ pub(crate) fn load_workspace_by_canonical_path_with_visible_usage(
     let mut workspace = load_workspace_by_canonical_path(&paths.database_path, canonical_path)?;
     if let Some(workspace) = workspace.as_mut() {
         let usage_by_skill_runtime = load_usage_by_skill_runtime(&paths.database_path)?;
-        if let Ok(usage_count) =
-            workspace_visible_usage_count(&workspace.path, paths, &usage_by_skill_runtime)
+        if let Ok(usage) =
+            workspace_visible_usage_summary(&workspace.path, paths, &usage_by_skill_runtime)
         {
-            workspace.usage_count = usage_count;
+            workspace.usage_count = usage.usage_count;
+            workspace.reference_count = usage.reference_count;
         }
     }
     Ok(workspace)
@@ -831,24 +833,25 @@ pub(crate) fn apply_visible_workspace_usage(
     let usage_by_skill_runtime = load_usage_by_skill_runtime(&paths.database_path)?;
 
     for workspace in workspaces {
-        if let Ok(usage_count) =
-            workspace_visible_usage_count(&workspace.path, paths, &usage_by_skill_runtime)
+        if let Ok(usage) =
+            workspace_visible_usage_summary(&workspace.path, paths, &usage_by_skill_runtime)
         {
-            workspace.usage_count = usage_count;
+            workspace.usage_count = usage.usage_count;
+            workspace.reference_count = usage.reference_count;
         }
     }
 
     Ok(())
 }
 
-pub(crate) fn workspace_visible_usage_count(
+pub(crate) fn workspace_visible_usage_summary(
     root: &Path,
     paths: &ManagedPaths,
     usage_by_skill_runtime: &HashMap<(String, String), UsageSummary>,
-) -> Result<usize> {
+) -> Result<UsageSummary> {
     let scan = scan_skill_roots_for_import(&[root.to_path_buf()], paths)?;
     let mut seen = HashSet::new();
-    let mut usage_count = 0;
+    let mut summary = UsageSummary::default();
 
     for skill in scan.skills {
         for runtime_key in skill_usage_runtime_keys(&skill, paths) {
@@ -856,12 +859,19 @@ pub(crate) fn workspace_visible_usage_count(
                 continue;
             }
             if let Some(usage) = usage_by_skill_runtime.get(&(skill.name.clone(), runtime_key)) {
-                usage_count += usage.usage_count;
+                merge_workspace_usage_summary(&mut summary, usage);
             }
         }
     }
 
-    Ok(usage_count)
+    Ok(summary)
+}
+
+fn merge_workspace_usage_summary(target: &mut UsageSummary, usage: &UsageSummary) {
+    target.usage_count = target.usage_count.saturating_add(usage.usage_count);
+    target.confirmed_count = target.confirmed_count.saturating_add(usage.confirmed_count);
+    target.inferred_count = target.inferred_count.saturating_add(usage.inferred_count);
+    target.reference_count = target.reference_count.saturating_add(usage.reference_count);
 }
 
 pub(crate) fn workspace_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Workspace> {
@@ -892,6 +902,7 @@ pub(crate) fn workspace_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Wo
         skill_count: usize::try_from(skill_count.max(0)).unwrap_or_default(),
         imported_skill_count: usize::try_from(imported_skill_count.max(0)).unwrap_or_default(),
         usage_count: 0,
+        reference_count: 0,
         last_scan_error_count: usize::try_from(last_scan_error_count.max(0)).unwrap_or_default(),
         last_scan_error: row.get(12)?,
         last_scanned_at: row.get(13)?,

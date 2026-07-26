@@ -901,6 +901,10 @@ pub(crate) fn managed_skill(skill: Skill, kind: SkillKind) -> ManagedSkill {
         deployments: Vec::new(),
         usage_count: 0,
         last_used_at: None,
+        confirmed_count: 0,
+        inferred_count: 0,
+        reference_count: 0,
+        last_referenced_at: None,
     }
 }
 

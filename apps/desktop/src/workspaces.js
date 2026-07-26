@@ -50,6 +50,7 @@ export function normalizeWorkspace(workspace = {}) {
     workspace.importedSkillCount ?? workspace.imported_skill_count
   );
   const usageCount = numberOrZero(workspace.usageCount ?? workspace.usage_count);
+  const referenceCount = numberOrZero(workspace.referenceCount ?? workspace.reference_count);
   const lastScanErrorCount = numberOrZero(
     workspace.lastScanErrorCount ?? workspace.last_scan_error_count
   );
@@ -74,6 +75,7 @@ export function normalizeWorkspace(workspace = {}) {
     skillCount,
     importedSkillCount,
     usageCount,
+    referenceCount,
     lastScanErrorCount,
     lastScanError: workspace.lastScanError || workspace.last_scan_error || '',
     lastScannedAt: workspace.lastScannedAt || workspace.last_scanned_at || ''

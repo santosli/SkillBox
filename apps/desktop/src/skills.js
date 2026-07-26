@@ -3,6 +3,9 @@ export function normalizeSkill(skill) {
   const isSymlink = skill.isSymlink || skill.is_symlink;
   const type = skill.type || 'remote';
   const usageCountValue = Number(skill.usageCount ?? skill.usage_count);
+  const confirmedCountValue = Number(skill.confirmedCount ?? skill.confirmed_count);
+  const inferredCountValue = Number(skill.inferredCount ?? skill.inferred_count);
+  const referenceCountValue = Number(skill.referenceCount ?? skill.reference_count);
 
   return {
     ...skill,
@@ -12,7 +15,17 @@ export function normalizeSkill(skill) {
     isSymlink,
     type,
     usageCount: Number.isFinite(usageCountValue) && usageCountValue > 0 ? usageCountValue : 0,
+    confirmedCount: Number.isFinite(confirmedCountValue) && confirmedCountValue > 0
+      ? confirmedCountValue
+      : 0,
+    inferredCount: Number.isFinite(inferredCountValue) && inferredCountValue > 0
+      ? inferredCountValue
+      : 0,
+    referenceCount: Number.isFinite(referenceCountValue) && referenceCountValue > 0
+      ? referenceCountValue
+      : 0,
     lastUsedAt: skill.lastUsedAt || skill.last_used_at || '',
+    lastReferencedAt: skill.lastReferencedAt || skill.last_referenced_at || '',
     status: skill.status || defaultSkillStatus(type)
   };
 }

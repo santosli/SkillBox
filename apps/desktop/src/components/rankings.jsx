@@ -46,7 +46,7 @@ export function UsageRankingsPage({
   const workspaceOptions = usageRankingWorkspaceOptions(workspaces);
   const rangeLabel = usageRankingRangeLabel(filters.range);
   const updateFilters = (patch) => onFilters({ ...filters, ...patch });
-  const hasObservedCalls = numberOrZero(ranking.totalObservedCalls) > 0;
+  const hasObservedCalls = numberOrZero(ranking.totalCalls) > 0;
   const busy = loading || backfilling || Boolean(importingSkillName);
 
   return (
@@ -145,7 +145,8 @@ export function UsageRankingsPage({
         <UsageCoverageDisclosure
           coverage={ranking.coverage}
           expanded={coverageExpanded}
-          totalObservedCalls={ranking.totalObservedCalls}
+          totalCalls={ranking.totalCalls}
+          totalHistoryReferences={ranking.totalHistoryReferences}
           warning={Boolean(error)}
           onToggle={() => setCoverageExpanded((current) => !current)}
         />
@@ -362,7 +363,8 @@ function UsageCoverageDisclosure({
   coverage = {},
   expanded,
   onToggle,
-  totalObservedCalls,
+  totalCalls,
+  totalHistoryReferences,
   warning
 }) {
   const earliest = coverage.earliestEventAt || '';
@@ -385,7 +387,9 @@ function UsageCoverageDisclosure({
       >
         <Info aria-hidden="true" className="usageCoverageInfoIcon" />
         <span className="usageCoverageSummaryText">
-          <span>{numberOrZero(totalObservedCalls)} locally observed calls</span>
+          <span>{numberOrZero(totalCalls)} locally observed calls</span>
+          <span aria-hidden="true">·</span>
+          <span>{numberOrZero(totalHistoryReferences)} history references</span>
           <span aria-hidden="true">·</span>
           <span className="usageCoverageWindow">{eventWindow}</span>
         </span>
@@ -422,40 +426,67 @@ function UsageCoverageDisclosure({
         </div>
         <dl className="usageCoverageMetrics">
           <div>
-            <dt>Hook observations</dt>
-            <dd>{numberOrZero(coverage.agentHookCalls)}</dd>
+            <dt>Confirmed calls</dt>
+            <dd>{numberOrZero(coverage.confirmedCalls)}</dd>
           </div>
           <div>
-            <dt>Codex history observations</dt>
-            <dd>{numberOrZero(coverage.codexSessionBackfillCalls)}</dd>
+            <dt>Inferred calls</dt>
+            <dd>{numberOrZero(coverage.inferredCalls)}</dd>
           </div>
           <div>
-            <dt>Claude Code history observations</dt>
-            <dd>{numberOrZero(coverage.claudeCodeSessionBackfillCalls)}</dd>
+            <dt>History references</dt>
+            <dd>{numberOrZero(coverage.historyReferences)}</dd>
           </div>
           <div>
-            <dt>Cursor history observations</dt>
-            <dd>{numberOrZero(coverage.cursorSessionBackfillCalls)}</dd>
+            <dt>Codex transcript files</dt>
+            <dd>{numberOrZero(coverage.scannedCodexSessionFiles)}</dd>
           </div>
           <div>
-            <dt>Other local observations</dt>
-            <dd>{numberOrZero(coverage.otherObservedCalls)}</dd>
+            <dt>Codex turns scanned</dt>
+            <dd>{numberOrZero(coverage.scannedCodexTurns)}</dd>
           </div>
           <div>
-            <dt>History sessions scanned</dt>
-            <dd>
-              {numberOrZero(coverage.scannedCodexSessionFiles)
-                + numberOrZero(coverage.scannedClaudeCodeSessionFiles)
-                + numberOrZero(coverage.scannedCursorSessions)}
-            </dd>
+            <dt>Claude Code transcript files</dt>
+            <dd>{numberOrZero(coverage.scannedClaudeCodeSessionFiles)}</dd>
+          </div>
+          <div>
+            <dt>Cursor transcript files</dt>
+            <dd>{numberOrZero(coverage.scannedCursorTranscriptFiles)}</dd>
+          </div>
+          <div>
+            <dt>Cursor state DB sessions</dt>
+            <dd>{numberOrZero(coverage.scannedCursorSessions)}</dd>
           </div>
         </dl>
+        {coverage.sourceCounts?.length ? (
+          <div className="usageCoverageSources" aria-label="Usage evidence sources">
+            {coverage.sourceCounts.map((source) => (
+              <span key={`${source.source}:${source.evidenceClass}`}>
+                {usageEvidenceSourceLabel(source.source)} · {source.evidenceClass} · {source.count}
+              </span>
+            ))}
+          </div>
+        ) : null}
         <p>
-          Locally observed calls are recorded on this Mac from supported hooks and imported local
-          histories. They are not Codex or Claude account analytics; provider-reported runs use
-          separate metrics and are never added to this ranking.
+          Calls combine locally confirmed executions with high-confidence inferred invocations
+          found in structured local histories. History references are explicit mentions that do
+          not prove an invocation and are never added to Calls. Neither metric is Codex or Claude
+          account analytics; provider-reported runs remain separate. Codex does not expose a
+          stable local provider total, so these auditable Calls may still undercount actual usage.
         </p>
       </section>
     </div>
   );
+}
+
+function usageEvidenceSourceLabel(source = '') {
+  const labels = {
+    agent_hook: 'Agent hooks',
+    codex_session_backfill: 'Codex structured history',
+    claude_code_session_backfill: 'Claude Code Skill tools',
+    cursor_agent_transcript_read: 'Cursor transcript reads',
+    cursor_session_backfill: 'Cursor state references',
+    manual: 'Manual records'
+  };
+  return labels[source] || String(source || 'Other').replaceAll('_', ' ');
 }

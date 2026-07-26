@@ -867,9 +867,11 @@ test('history page combines skill usage and operation logs', () => {
   assert.match(appSource, /page === 'history'/);
   assert.match(appSource, /function normalizeHistory/);
   assert.match(appSource, /skillUsageCount/);
+  assert.match(appSource, /skillReferenceCount/);
   assert.match(appSource, /operationCount/);
   assert.match(appSource, /entry\.kind === 'skill_usage'/);
-  assert.match(appSource, /const rowSubtitle = historyRowSubtitle\(entry, isUsage\);/);
+  assert.match(appSource, /entry\.kind === 'usage_reference'/);
+  assert.match(appSource, /const rowSubtitle = historyRowSubtitle\(entry, isUsage \|\| isReference\);/);
   assert.match(appSource, /function historyRowSubtitle\(entry, isUsage\)/);
   assert.match(appSource, /const defaultOperationSubtitle = entry\.operationType && entry\.actor/);
   assert.match(appSource, /const groupedEntries = groupHistoryEntriesByDay\(filteredEntries\)/);
@@ -913,8 +915,9 @@ test('compact call labels stay short while usage explanations retain local scope
   const skillCardSource = appSource.slice(skillCardStart, skillCardEnd);
 
   assert.match(historyPageSource, /id:\s*'skill_usage',[\s\S]*label:\s*'Calls'/);
+  assert.match(historyPageSource, /id:\s*'usage_reference',[\s\S]*label:\s*'References'/);
   assert.doesNotMatch(historyPageSource, /label:\s*'Locally observed calls'/);
-  assert.match(historyPageSource, /Calls and SkillBox operations will appear here\./);
+  assert.match(historyPageSource, /Calls, history references, and SkillBox operations will appear here\./);
   assert.match(skillCardSource, /\{skill\.usageCount\} calls/);
   assert.doesNotMatch(skillCardSource, /locally observed calls/i);
   assert.match(appSource, /className="candidateUsage">[\s\S]*Calls \{candidate\.usageCount \|\| 0\}/);
@@ -923,12 +926,13 @@ test('compact call labels stay short while usage explanations retain local scope
   assert.match(appSource, /<caption className="srOnly">Skills ranked by calls<\/caption>/);
   assert.match(
     appSource,
-    /Locally observed calls are recorded on this Mac[\s\S]*not Codex or Claude account analytics/
+    /Calls combine locally confirmed executions with high-confidence inferred invocations[\s\S]*not Codex or Claude[\s\S]*account analytics/
   );
   assert.match(
     appSource,
-    /title="Locally observed calls recorded by SkillBox, not Codex or Claude account analytics\."/
+    /title="Calls combine locally confirmed executions and high-confidence inferred invocations\. They are not Codex or Claude account analytics\."/
   );
+  assert.match(appSource, /History references are explicit mentions[\s\S]*never added to Calls/);
   assert.match(appSource, /Record locally observed agent skill calls from runtime hooks\./);
 });
 
@@ -1001,8 +1005,9 @@ test('rankings is an accessible top-level page separate from history', () => {
   assert.match(rankingsPageSource, /hidden=\{!expanded\}/);
   assert.match(
     rankingsPageSource,
-    /\{numberOrZero\(totalObservedCalls\)\} locally observed calls/
+    /\{numberOrZero\(totalCalls\)\} locally observed calls/
   );
+  assert.match(rankingsPageSource, /\{numberOrZero\(totalHistoryReferences\)\} history references/);
   assert.match(rankingsPageSource, /\{expanded \? 'Hide coverage' : 'View coverage'\}/);
   assert.match(rankingsPageSource, /Coverage or ranking refresh needs attention/);
   assert.doesNotMatch(rankingsPageSource, /className="usageCoverageSummary"/);
@@ -1011,12 +1016,16 @@ test('rankings is an accessible top-level page separate from history', () => {
     rankingsPageSource,
     /Earliest \$\{formatOperationTimestamp\(earliest\)\} · Latest \$\{formatOperationTimestamp\(latest\)\}/
   );
-  assert.match(rankingsPageSource, /Hook observations/);
-  assert.match(rankingsPageSource, /Codex history observations/);
-  assert.match(rankingsPageSource, /Claude Code history observations/);
-  assert.match(rankingsPageSource, /Cursor history observations/);
-  assert.match(rankingsPageSource, /History sessions scanned/);
-  assert.match(rankingsPageSource, /provider-reported runs/i);
+  assert.match(rankingsPageSource, /Confirmed calls/);
+  assert.match(rankingsPageSource, /Inferred calls/);
+  assert.match(rankingsPageSource, /History references/);
+  assert.match(rankingsPageSource, /Cursor transcript files/);
+  assert.match(rankingsPageSource, /Cursor state DB sessions/);
+  assert.match(rankingsPageSource, /provider-reported runs remain separate/i);
+  assert.match(
+    rankingsPageSource,
+    /Codex does not expose a\s+stable local provider total, so these auditable Calls may still undercount actual usage\./
+  );
   assert.match(css, /\.usageCoverageToggle\s*\{[^}]*background:\s*transparent;/s);
   assert.match(css, /\.usageCoverageDetails\[hidden\]\s*\{[^}]*display:\s*none;/s);
   assert.match(
@@ -1034,6 +1043,8 @@ test('rankings is an accessible top-level page separate from history', () => {
   assert.match(tauriSource, /skillbox_core::backfill_codex_session_usage/);
   assert.match(tauriSource, /async fn backfill_claude_code_session_usage/);
   assert.match(tauriSource, /async fn backfill_cursor_session_usage/);
+  assert.match(tauriSource, /async fn usage_audit/);
+  assert.match(tauriSource, /skillbox_core::usage_audit/);
   assert.match(appSource, /includeArchived:\s*true/);
   assert.match(appSource, /Open usage hook settings/);
   assert.match(appSource, /<th scope="col">Actions<\/th>/);
@@ -1139,7 +1150,8 @@ test('skill detail metadata starts with deploy workspace', () => {
   assert.match(appSource, /className="skillDetailDeployMetric"[\s\S]*\{skill\.installedAgents\.length \|\| 0\}/);
   assert.match(appSource, /<strong>Active workspaces<\/strong>/);
   assert.match(appSource, /className="skillDetailUsageSummary"[\s\S]*\{skill\.usageCount \|\| 0\}[\s\S]*<strong>Usage<\/strong>/);
-  assert.match(appSource, /title="Locally observed calls recorded by SkillBox, not Codex or Claude account analytics\."[\s\S]*Calls/);
+  assert.match(appSource, /title="Calls combine locally confirmed executions and high-confidence inferred invocations\. They are not Codex or Claude account analytics\."[\s\S]*Calls/);
+  assert.match(appSource, /<strong>History references<\/strong>[\s\S]*Mentions only/);
   assert.match(appSource, /labelPrefix="Deploy workspaces"/);
   assert.match(css, /\.skillDetailDeploySurface\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
   assert.match(css, /\.skillDetailDeployMetric\s*\{/);

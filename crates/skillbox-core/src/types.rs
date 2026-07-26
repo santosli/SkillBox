@@ -135,6 +135,10 @@ pub struct ManagedSkill {
     pub deployments: Vec<ManagedSkillDeployment>,
     pub usage_count: usize,
     pub last_used_at: Option<String>,
+    pub confirmed_count: usize,
+    pub inferred_count: usize,
+    pub reference_count: usize,
+    pub last_referenced_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -265,6 +269,7 @@ pub struct Workspace {
     pub skill_count: usize,
     pub imported_skill_count: usize,
     pub usage_count: usize,
+    pub reference_count: usize,
     pub last_scan_error_count: usize,
     pub last_scan_error: Option<String>,
     pub last_scanned_at: Option<String>,
@@ -508,6 +513,7 @@ pub struct OperationList {
 #[serde(rename_all = "snake_case")]
 pub enum HistoryEntryKind {
     SkillUsage,
+    UsageReference,
     Operation,
 }
 
@@ -540,6 +546,7 @@ pub struct HistoryEntry {
 pub struct HistoryList {
     pub entries: Vec<HistoryEntry>,
     pub skill_usage_count: usize,
+    pub skill_reference_count: usize,
     pub operation_count: usize,
 }
 
@@ -1068,6 +1075,27 @@ pub struct SkillUsageRecordResult {
     pub usage_count: usize,
     pub last_used_at: String,
     pub deduplicated: bool,
+    pub evidence_class: SkillUsageEvidenceClass,
+    pub upgraded: bool,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillUsageEvidenceClass {
+    Confirmed,
+    Inferred,
+    #[default]
+    Reference,
+}
+
+impl SkillUsageEvidenceClass {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SkillUsageEvidenceClass::Confirmed => "confirmed",
+            SkillUsageEvidenceClass::Inferred => "inferred",
+            SkillUsageEvidenceClass::Reference => "reference",
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -1145,6 +1173,10 @@ pub struct SkillUsageRankingRow {
     pub source_runtime_roots: Vec<PathBuf>,
     pub usage_count: usize,
     pub last_used_at: Option<String>,
+    pub confirmed_count: usize,
+    pub inferred_count: usize,
+    pub reference_count: usize,
+    pub last_referenced_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1156,7 +1188,12 @@ pub struct SkillUsageRankingResult {
     pub agent_id: Option<String>,
     pub skill_type: Option<SkillUsageRankingSkillType>,
     pub workspace_root: Option<PathBuf>,
+    pub total_calls: usize,
+    /// Backward-compatible alias for total_calls.
     pub total_observed_calls: usize,
+    pub total_confirmed_calls: usize,
+    pub total_inferred_calls: usize,
+    pub total_history_references: usize,
     pub coverage: SkillUsageCoverage,
     pub rows: Vec<SkillUsageRankingRow>,
 }
@@ -1165,14 +1202,77 @@ pub struct SkillUsageRankingResult {
 pub struct SkillUsageCoverage {
     pub earliest_event_at: Option<String>,
     pub latest_event_at: Option<String>,
+    pub earliest_confirmed_at: Option<String>,
+    pub latest_confirmed_at: Option<String>,
+    pub earliest_inferred_at: Option<String>,
+    pub latest_inferred_at: Option<String>,
+    pub earliest_reference_at: Option<String>,
+    pub latest_reference_at: Option<String>,
+    pub confirmed_calls: usize,
+    pub inferred_calls: usize,
+    pub history_references: usize,
+    pub source_counts: Vec<SkillUsageEvidenceSourceCount>,
+    /// Backward-compatible source totals. Use source_counts for evidence-aware UI.
     pub agent_hook_calls: usize,
     pub codex_session_backfill_calls: usize,
     pub claude_code_session_backfill_calls: usize,
     pub cursor_session_backfill_calls: usize,
     pub other_observed_calls: usize,
     pub scanned_codex_session_files: usize,
+    pub scanned_codex_turns: usize,
     pub scanned_claude_code_session_files: usize,
     pub scanned_cursor_sessions: usize,
+    pub scanned_cursor_transcript_files: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SkillUsageEvidenceSourceCount {
+    pub source: String,
+    pub evidence_class: SkillUsageEvidenceClass,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct UsageBackfillAudit {
+    pub source: String,
+    pub scanned: usize,
+    pub discovered: usize,
+    pub recorded: usize,
+    pub deduplicated: usize,
+    pub upgraded: usize,
+    pub skipped: usize,
+    pub errors: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
+pub struct SkillUsageAudit {
+    pub total_calls: usize,
+    pub confirmed_calls: usize,
+    pub inferred_calls: usize,
+    pub history_references: usize,
+    pub earliest_confirmed_at: Option<String>,
+    pub latest_confirmed_at: Option<String>,
+    pub earliest_inferred_at: Option<String>,
+    pub latest_inferred_at: Option<String>,
+    pub earliest_reference_at: Option<String>,
+    pub latest_reference_at: Option<String>,
+    pub source_counts: Vec<SkillUsageEvidenceSourceCount>,
+    pub scanned_codex_session_files: usize,
+    pub scanned_codex_turns: usize,
+    pub scanned_claude_code_session_files: usize,
+    pub scanned_cursor_sessions: usize,
+    pub scanned_cursor_transcript_files: usize,
+    pub inferred_cursor_transcript_calls: usize,
+    pub cursor_transcript_read_candidates: usize,
+    pub cursor_transcript_read_file_candidates: usize,
+    pub cursor_transcript_turn_duplicates: usize,
+    pub cursor_transcript_duplicate_files: usize,
+    pub cursor_transcript_historical_missing: usize,
+    pub cursor_transcript_unsafe_rejected: usize,
+    pub codex_provider_reported_total: Option<usize>,
+    pub codex_remaining_gap: Option<isize>,
+    pub known_limitations: Vec<String>,
+    pub last_backfills: Vec<UsageBackfillAudit>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1229,20 +1329,38 @@ pub struct BackfillClaudeCodeSessionUsageRequest {
 pub struct BackfillCursorSessionUsageRequest {
     #[serde(default, alias = "databasePath")]
     pub database_path: Option<PathBuf>,
+    #[serde(default, alias = "projectsRoot")]
+    pub projects_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
 pub struct BackfillCodexSessionUsageResult {
     pub scanned_files: usize,
+    pub scanned_turns: usize,
     pub discovered: usize,
     pub recorded: usize,
     pub deduplicated: usize,
+    pub upgraded: usize,
     pub skipped: usize,
     pub errors: Vec<String>,
+    pub scanned_cursor_state_sessions: usize,
+    pub cursor_state_references: usize,
+    pub scanned_cursor_transcript_files: usize,
+    pub inferred_cursor_transcript_calls: usize,
+    pub cursor_transcript_read_candidates: usize,
+    pub cursor_transcript_read_file_candidates: usize,
+    pub cursor_transcript_turn_duplicates: usize,
+    pub cursor_transcript_duplicate_files: usize,
+    pub cursor_transcript_historical_missing: usize,
+    pub cursor_transcript_unsafe_rejected: usize,
 }
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct UsageSummary {
     pub(crate) usage_count: usize,
     pub(crate) last_used_at: Option<String>,
+    pub(crate) confirmed_count: usize,
+    pub(crate) inferred_count: usize,
+    pub(crate) reference_count: usize,
+    pub(crate) last_referenced_at: Option<String>,
 }

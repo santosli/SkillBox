@@ -363,6 +363,14 @@ function SkillCard({ skill, onOpen, onToggleFavorite }) {
                 {skill.usageCount} calls
               </span>
             ) : null}
+            {skill.referenceCount > 0 ? (
+              <span
+                className="skillCardReference"
+                title="Explicit skill mentions found in imported local histories; not confirmed or inferred executions."
+              >
+                {skill.referenceCount} history ref{skill.referenceCount === 1 ? '' : 's'}
+              </span>
+            ) : null}
           </span>
           <AgentIconStack agents={skill.installedAgents} />
         </span>

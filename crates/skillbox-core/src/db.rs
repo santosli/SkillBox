@@ -2,7 +2,7 @@ use crate::*;
 use fs2::FileExt;
 use std::fs::{File, OpenOptions};
 
-pub(crate) const LATEST_DATABASE_SCHEMA_VERSION: i64 = 6;
+pub(crate) const LATEST_DATABASE_SCHEMA_VERSION: i64 = 7;
 
 pub(crate) fn open_database(database_path: &Path) -> Result<Connection> {
     let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
@@ -94,6 +94,7 @@ pub(crate) fn run_database_migrations(connection: &mut Connection) -> Result<()>
         (4_i64, "skill_usage_ranking_indexes"),
         (5_i64, "canonical_usage_agent_ids"),
         (6_i64, "runtime_profiles"),
+        (7_i64, "usage_evidence_classification"),
     ] {
         let applied: bool = connection
             .query_row(
@@ -116,6 +117,7 @@ pub(crate) fn run_database_migrations(connection: &mut Connection) -> Result<()>
             4 => apply_skill_usage_ranking_indexes_migration(&transaction)?,
             5 => apply_canonical_usage_agent_ids_migration(&transaction)?,
             6 => apply_runtime_profiles_migration(&transaction)?,
+            7 => apply_usage_evidence_classification_migration(&transaction)?,
             _ => return Err(format!("Unknown database migration version: {version}")),
         }
         transaction
@@ -124,6 +126,14 @@ pub(crate) fn run_database_migrations(connection: &mut Connection) -> Result<()>
                 params![version, name],
             )
             .map_err(|error| error.to_string())?;
+        transaction.commit().map_err(|error| error.to_string())?;
+    }
+
+    if usage_evidence_repair_required(connection)? {
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        backfill_missing_usage_evidence(&transaction)?;
         transaction.commit().map_err(|error| error.to_string())?;
     }
 
@@ -334,6 +344,244 @@ fn apply_runtime_profiles_migration(connection: &Connection) -> Result<()> {
             ",
         )
         .map_err(|error| error.to_string())
+}
+
+fn apply_usage_evidence_classification_migration(connection: &Connection) -> Result<()> {
+    let usage_table_exists: bool = connection
+        .query_row(
+            "SELECT EXISTS(
+               SELECT 1 FROM sqlite_master
+               WHERE type = 'table' AND name = 'skill_usage_events'
+             )",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if !usage_table_exists {
+        return Ok(());
+    }
+    ensure_database_column(
+        connection,
+        "skill_usage_events",
+        "evidence_class",
+        "TEXT NOT NULL DEFAULT 'reference'",
+    )?;
+    ensure_database_column(
+        connection,
+        "skill_usage_events",
+        "evidence_sources_json",
+        "TEXT NOT NULL DEFAULT '[]'",
+    )?;
+
+    connection
+        .execute_batch(
+            "
+            CREATE INDEX IF NOT EXISTS skill_usage_events_evidence_time
+            ON skill_usage_events (evidence_class, used_at, skill_name);
+
+            CREATE INDEX IF NOT EXISTS skill_usage_events_evidence_agent_time
+            ON skill_usage_events (evidence_class, agent_id, used_at, skill_name);
+
+            CREATE INDEX IF NOT EXISTS skill_usage_events_evidence_runtime_time
+            ON skill_usage_events (evidence_class, runtime_root, used_at, skill_name);
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    backfill_missing_usage_evidence(connection)
+}
+
+fn usage_evidence_repair_required(connection: &Connection) -> Result<bool> {
+    let table_exists: bool = connection
+        .query_row(
+            "SELECT EXISTS(
+               SELECT 1 FROM sqlite_master
+               WHERE type = 'table' AND name = 'skill_usage_events'
+             )",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if !table_exists {
+        return Ok(false);
+    }
+    let columns = table_column_names(connection, "skill_usage_events")?;
+    if !columns
+        .iter()
+        .any(|column| column == "evidence_sources_json")
+    {
+        return Ok(false);
+    }
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT metadata_json, evidence_class, evidence_sources_json
+            FROM skill_usage_events
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+    for row in rows {
+        let (metadata_json, evidence_class, evidence_sources_json) =
+            row.map_err(|error| error.to_string())?;
+        if stored_usage_evidence_needs_repair(
+            &metadata_json,
+            &evidence_class,
+            &evidence_sources_json,
+        ) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn backfill_missing_usage_evidence(connection: &Connection) -> Result<()> {
+    let events = {
+        let mut statement = connection
+            .prepare(
+                "
+                SELECT id, metadata_json, evidence_class, evidence_sources_json
+                FROM skill_usage_events
+                ",
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })
+            .map_err(|error| error.to_string())?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?
+    };
+    let events = events
+        .into_iter()
+        .filter(
+            |(_, metadata_json, evidence_class, evidence_sources_json)| {
+                stored_usage_evidence_needs_repair(
+                    metadata_json,
+                    evidence_class,
+                    evidence_sources_json,
+                )
+            },
+        )
+        .collect::<Vec<_>>();
+    if events.is_empty() {
+        return Ok(());
+    }
+    for (id, metadata_json, _, _) in events {
+        let source = migrated_usage_source(&metadata_json);
+        let evidence_class = migrated_usage_evidence_class(&source);
+        let sources_json = serde_json::to_string(&vec![serde_json::json!({
+            "source": source,
+            "evidence_class": evidence_class.as_str(),
+        })])
+        .map_err(|error| error.to_string())?;
+        connection
+            .execute(
+                "
+                UPDATE skill_usage_events
+                SET evidence_class = ?1,
+                    evidence_sources_json = ?2
+                WHERE id = ?3
+                ",
+                params![evidence_class.as_str(), sources_json, id],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+
+    connection
+        .execute_batch(
+            "
+            DELETE FROM skill_usage_stats;
+
+            INSERT INTO skill_usage_stats (
+              skill_name,
+              agent_id,
+              runtime_root,
+              usage_count,
+              last_used_at
+            )
+            SELECT
+              skill_name,
+              agent_id,
+              runtime_root,
+              COUNT(*),
+              MAX(used_at)
+            FROM skill_usage_events
+            WHERE evidence_class IN ('confirmed', 'inferred')
+            GROUP BY skill_name, agent_id, runtime_root;
+            ",
+        )
+        .map_err(|error| error.to_string())
+}
+
+fn stored_usage_evidence_needs_repair(
+    metadata_json: &str,
+    evidence_class: &str,
+    evidence_sources_json: &str,
+) -> bool {
+    let source = migrated_usage_source(metadata_json);
+    let expected_class = migrated_usage_evidence_class(&source).as_str();
+    let Ok(items) = serde_json::from_str::<Vec<serde_json::Value>>(evidence_sources_json) else {
+        return true;
+    };
+    if items.is_empty() || items.iter().any(|item| item.is_string()) {
+        return true;
+    }
+    let cursor_only = source == "cursor_agent_transcript_read"
+        && items.iter().all(|item| {
+            item.get("source").and_then(|value| value.as_str())
+                == Some("cursor_agent_transcript_read")
+        });
+    cursor_only
+        && (evidence_class != expected_class
+            || !items.iter().any(|item| {
+                item.get("evidence_class").and_then(|value| value.as_str()) == Some(expected_class)
+            }))
+}
+
+fn migrated_usage_evidence_class(source: &str) -> SkillUsageEvidenceClass {
+    match source {
+        "agent_hook" => SkillUsageEvidenceClass::Confirmed,
+        "codex_session_backfill"
+        | "claude_code_session_backfill"
+        | "cursor_agent_transcript_read" => SkillUsageEvidenceClass::Inferred,
+        _ => SkillUsageEvidenceClass::Reference,
+    }
+}
+
+fn migrated_usage_source(metadata_json: &str) -> String {
+    let source = serde_json::from_str::<serde_json::Value>(metadata_json)
+        .ok()
+        .and_then(|metadata| {
+            metadata
+                .get("source")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|source| !source.is_empty())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "manual".to_string());
+    match source.as_str() {
+        "agent_hook"
+        | "codex_session_backfill"
+        | "claude_code_session_backfill"
+        | "cursor_session_backfill"
+        | "cursor_agent_transcript_read" => source,
+        _ => "manual".to_string(),
+    }
 }
 
 fn canonicalize_stored_usage_agent_id(
@@ -668,6 +916,46 @@ pub(crate) fn write_u32_preference(database_path: &Path, key: &str, value: u32) 
               updated_at = CURRENT_TIMESTAMP
             ",
             params![key, value.to_string()],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+pub(crate) fn read_json_preference<T: serde::de::DeserializeOwned>(
+    database_path: &Path,
+    key: &str,
+) -> Result<Option<T>> {
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
+    let value: Option<String> = connection
+        .query_row(
+            "SELECT value FROM preferences WHERE key = ?1",
+            params![key],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    value
+        .map(|raw| serde_json::from_str(&raw).map_err(|error| error.to_string()))
+        .transpose()
+}
+
+pub(crate) fn write_json_preference<T: Serialize>(
+    database_path: &Path,
+    key: &str,
+    value: &T,
+) -> Result<()> {
+    let value = serde_json::to_string(value).map_err(|error| error.to_string())?;
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
+    connection
+        .execute(
+            "
+            INSERT INTO preferences (key, value)
+            VALUES (?1, ?2)
+            ON CONFLICT(key) DO UPDATE SET
+              value = excluded.value,
+              updated_at = CURRENT_TIMESTAMP
+            ",
+            params![key, value],
         )
         .map_err(|error| error.to_string())?;
     Ok(())

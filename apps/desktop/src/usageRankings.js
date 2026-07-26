@@ -72,7 +72,11 @@ export function normalizeUsageRankings(result = {}) {
     sourceId: row.sourceId || row.source_id || '',
     sourceRuntimeRoots: row.sourceRuntimeRoots || row.source_runtime_roots || [],
     usageCount: numberOrZero(row.usageCount ?? row.usage_count),
-    lastUsedAt: row.lastUsedAt || row.last_used_at || ''
+    lastUsedAt: row.lastUsedAt || row.last_used_at || '',
+    confirmedCount: numberOrZero(row.confirmedCount ?? row.confirmed_count),
+    inferredCount: numberOrZero(row.inferredCount ?? row.inferred_count),
+    referenceCount: numberOrZero(row.referenceCount ?? row.reference_count),
+    lastReferencedAt: row.lastReferencedAt || row.last_referenced_at || ''
   }));
 
   return {
@@ -84,11 +88,41 @@ export function normalizeUsageRankings(result = {}) {
     skillType: result?.skillType || result?.skill_type || '',
     workspaceRoot: result?.workspaceRoot || result?.workspace_root || '',
     totalObservedCalls: numberOrZero(
-      result?.totalObservedCalls ?? result?.total_observed_calls
+      result?.totalCalls ?? result?.total_calls
+        ?? result?.totalObservedCalls ?? result?.total_observed_calls
+    ),
+    totalCalls: numberOrZero(
+      result?.totalCalls ?? result?.total_calls
+        ?? result?.totalObservedCalls ?? result?.total_observed_calls
+    ),
+    totalConfirmedCalls: numberOrZero(
+      result?.totalConfirmedCalls ?? result?.total_confirmed_calls
+    ),
+    totalInferredCalls: numberOrZero(
+      result?.totalInferredCalls ?? result?.total_inferred_calls
+    ),
+    totalHistoryReferences: numberOrZero(
+      result?.totalHistoryReferences ?? result?.total_history_references
     ),
     coverage: {
       earliestEventAt: coverage.earliestEventAt || coverage.earliest_event_at || '',
       latestEventAt: coverage.latestEventAt || coverage.latest_event_at || '',
+      earliestConfirmedAt: coverage.earliestConfirmedAt || coverage.earliest_confirmed_at || '',
+      latestConfirmedAt: coverage.latestConfirmedAt || coverage.latest_confirmed_at || '',
+      earliestInferredAt: coverage.earliestInferredAt || coverage.earliest_inferred_at || '',
+      latestInferredAt: coverage.latestInferredAt || coverage.latest_inferred_at || '',
+      earliestReferenceAt: coverage.earliestReferenceAt || coverage.earliest_reference_at || '',
+      latestReferenceAt: coverage.latestReferenceAt || coverage.latest_reference_at || '',
+      confirmedCalls: numberOrZero(coverage.confirmedCalls ?? coverage.confirmed_calls),
+      inferredCalls: numberOrZero(coverage.inferredCalls ?? coverage.inferred_calls),
+      historyReferences: numberOrZero(
+        coverage.historyReferences ?? coverage.history_references
+      ),
+      sourceCounts: (coverage.sourceCounts || coverage.source_counts || []).map((source) => ({
+        source: source.source || '',
+        evidenceClass: source.evidenceClass || source.evidence_class || 'reference',
+        count: numberOrZero(source.count)
+      })),
       agentHookCalls: numberOrZero(coverage.agentHookCalls ?? coverage.agent_hook_calls),
       codexSessionBackfillCalls: numberOrZero(
         coverage.codexSessionBackfillCalls ?? coverage.codex_session_backfill_calls
@@ -106,12 +140,18 @@ export function normalizeUsageRankings(result = {}) {
       scannedCodexSessionFiles: numberOrZero(
         coverage.scannedCodexSessionFiles ?? coverage.scanned_codex_session_files
       ),
+      scannedCodexTurns: numberOrZero(
+        coverage.scannedCodexTurns ?? coverage.scanned_codex_turns
+      ),
       scannedClaudeCodeSessionFiles: numberOrZero(
         coverage.scannedClaudeCodeSessionFiles
           ?? coverage.scanned_claude_code_session_files
       ),
       scannedCursorSessions: numberOrZero(
         coverage.scannedCursorSessions ?? coverage.scanned_cursor_sessions
+      ),
+      scannedCursorTranscriptFiles: numberOrZero(
+        coverage.scannedCursorTranscriptFiles ?? coverage.scanned_cursor_transcript_files
       )
     },
     rows
@@ -161,10 +201,42 @@ export function usageRankingWorkspaceOptions(workspaces = []) {
 export function normalizeCodexUsageBackfill(result = {}) {
   return {
     scannedFiles: numberOrZero(result.scannedFiles ?? result.scanned_files),
+    scannedTurns: numberOrZero(result.scannedTurns ?? result.scanned_turns),
     discovered: numberOrZero(result.discovered),
     recorded: numberOrZero(result.recorded),
     deduplicated: numberOrZero(result.deduplicated),
+    upgraded: numberOrZero(result.upgraded),
     skipped: numberOrZero(result.skipped),
+    scannedCursorStateSessions: numberOrZero(
+      result.scannedCursorStateSessions ?? result.scanned_cursor_state_sessions
+    ),
+    cursorStateReferences: numberOrZero(
+      result.cursorStateReferences ?? result.cursor_state_references
+    ),
+    scannedCursorTranscriptFiles: numberOrZero(
+      result.scannedCursorTranscriptFiles ?? result.scanned_cursor_transcript_files
+    ),
+    inferredCursorTranscriptCalls: numberOrZero(
+      result.inferredCursorTranscriptCalls ?? result.inferred_cursor_transcript_calls
+    ),
+    cursorTranscriptReadCandidates: numberOrZero(
+      result.cursorTranscriptReadCandidates ?? result.cursor_transcript_read_candidates
+    ),
+    cursorTranscriptReadFileCandidates: numberOrZero(
+      result.cursorTranscriptReadFileCandidates ?? result.cursor_transcript_read_file_candidates
+    ),
+    cursorTranscriptTurnDuplicates: numberOrZero(
+      result.cursorTranscriptTurnDuplicates ?? result.cursor_transcript_turn_duplicates
+    ),
+    cursorTranscriptDuplicateFiles: numberOrZero(
+      result.cursorTranscriptDuplicateFiles ?? result.cursor_transcript_duplicate_files
+    ),
+    cursorTranscriptHistoricalMissing: numberOrZero(
+      result.cursorTranscriptHistoricalMissing ?? result.cursor_transcript_historical_missing
+    ),
+    cursorTranscriptUnsafeRejected: numberOrZero(
+      result.cursorTranscriptUnsafeRejected ?? result.cursor_transcript_unsafe_rejected
+    ),
     errors: Array.isArray(result.errors) ? result.errors.map(String) : []
   };
 }
@@ -201,18 +273,23 @@ export function usageHistorySyncNotice(results = []) {
     (total, result) => total + result.deduplicated,
     0
   );
+  const upgraded = normalizedResults.reduce((total, result) => total + result.upgraded, 0);
   const providerSummary = normalizedResults
     .map((result) => {
       const errorLabel = result.errors.length > 0
         ? ` (${result.errors.length} error${result.errors.length === 1 ? '' : 's'})`
         : '';
-      return `${result.provider} ${result.recorded} new${errorLabel}`;
+      const cursorDetail = result.provider === 'Cursor'
+        ? `; scanned ${result.scannedCursorTranscriptFiles} transcript files and ${result.scannedCursorStateSessions} state sessions; ${result.inferredCursorTranscriptCalls} inferred transcript calls from ${result.cursorTranscriptReadCandidates} Read candidates, ${result.cursorStateReferences} state references; ${result.cursorTranscriptTurnDuplicates} same-turn duplicates, ${result.cursorTranscriptDuplicateFiles} duplicate files, ${result.cursorTranscriptHistoricalMissing} historical missing paths accepted, ${result.cursorTranscriptReadFileCandidates} ReadFile candidates excluded, ${result.cursorTranscriptUnsafeRejected} unsafe paths rejected`
+        : '';
+      return `${result.provider} ${result.recorded} new${cursorDetail}${errorLabel}`;
     })
     .join(', ');
   const parts = [
-    `Scanned ${scanned} local history sessions`,
+    `Scanned ${scanned} local history sources`,
     `recorded ${recorded} new observations`,
-    `${deduplicated} already recorded`
+    `${deduplicated} already recorded`,
+    `${upgraded} evidence upgrade${upgraded === 1 ? '' : 's'}`
   ];
   if (providerSummary) {
     parts.push(`by provider: ${providerSummary}`);
