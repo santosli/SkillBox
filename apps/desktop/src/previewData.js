@@ -57,6 +57,10 @@ export const previewWorkspaces = [
     kind: 'global',
     source: 'auto',
     agent_id: 'codex',
+    profile_id: 'codex',
+    profile_name: 'Codex',
+    root_key: 'skills',
+    format: 'skill_md',
     display_name: 'Codex',
     skill_count: 4,
     imported_skill_count: 2,
@@ -71,6 +75,10 @@ export const previewWorkspaces = [
     kind: 'user',
     source: 'manual',
     agent_id: 'agents',
+    profile_id: 'agents',
+    profile_name: 'Agents',
+    root_key: 'skills',
+    format: 'skill_md',
     display_name: 'demo-vault',
     skill_count: 2,
     imported_skill_count: 1,
@@ -295,7 +303,6 @@ export function previewUsageRankings(filters = {}) {
 }
 
 export function previewCandidatesForWorkspace(workspace) {
-  const agentNeedle = workspace.agentId === 'agents' ? '.agents' : `.${workspace.agentId}`;
   const roots = [
     workspace.path,
     workspace.compactPath,
@@ -310,7 +317,7 @@ export function previewCandidatesForWorkspace(workspace) {
       return true;
     }
 
-    return agentNeedle && (sourcePath.includes(agentNeedle) || sourceRoot.includes(agentNeedle));
+    return false;
   });
 }
 

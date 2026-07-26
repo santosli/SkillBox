@@ -8,11 +8,19 @@ pub struct ManagedPaths {
     pub database_path: PathBuf,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SkillMetadata {
     pub name: String,
     pub description: String,
     pub version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkillFrontmatterDocument {
+    pub present: bool,
+    pub metadata: SkillMetadata,
+    pub fields: BTreeMap<String, serde_json::Value>,
+    pub unknown_fields: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -249,6 +257,10 @@ pub struct Workspace {
     pub kind: WorkspaceKind,
     pub source: WorkspaceSource,
     pub agent_id: Option<String>,
+    pub profile_id: String,
+    pub profile_name: String,
+    pub root_key: String,
+    pub format: RuntimeFormat,
     pub display_name: String,
     pub skill_count: usize,
     pub imported_skill_count: usize,
@@ -256,6 +268,107 @@ pub struct Workspace {
     pub last_scan_error_count: usize,
     pub last_scan_error: Option<String>,
     pub last_scanned_at: Option<String>,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeFormat {
+    SkillMd,
+    Unsupported,
+}
+
+impl RuntimeFormat {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RuntimeFormat::SkillMd => "skill_md",
+            RuntimeFormat::Unsupported => "unsupported",
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeRootScope {
+    Project,
+    Exact,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeRootSpec {
+    pub key: String,
+    pub relative_path: String,
+    pub scope: RuntimeRootScope,
+    pub precedence: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FrontmatterPolicy {
+    pub supported_fields: Vec<String>,
+    pub required_fields: Vec<String>,
+    pub preserve_unknown_fields: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeProfile {
+    pub id: String,
+    pub registry_version: u32,
+    pub display_name: String,
+    pub format: RuntimeFormat,
+    pub roots: Vec<RuntimeRootSpec>,
+    pub deployment_modes: Vec<String>,
+    pub frontmatter_policy: FrontmatterPolicy,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CompatibilityStatus {
+    Compatible,
+    Warnings,
+    Blocked,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CompatibilityIssueSeverity {
+    Warning,
+    Blocked,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompatibilityIssue {
+    pub code: String,
+    pub severity: CompatibilityIssueSeverity,
+    pub field: Option<String>,
+    pub message: String,
+    pub suggested_action: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeploymentCompatibilityPreviewRequest {
+    pub skill_name: String,
+    pub target_root: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeploymentCompatibilityApplyRequest {
+    pub skill_name: String,
+    pub target_root: PathBuf,
+    pub preview_id: String,
+    #[serde(default)]
+    pub confirm_warnings: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompatibilityReport {
+    pub preview_id: String,
+    pub skill_name: String,
+    pub target_root: PathBuf,
+    pub profile: RuntimeProfile,
+    pub root_key: String,
+    pub format: RuntimeFormat,
+    pub deployment_mode: String,
+    pub status: CompatibilityStatus,
+    pub issues: Vec<CompatibilityIssue>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -283,6 +396,10 @@ pub struct WorkspaceSetupRootOption {
     pub path: PathBuf,
     pub relative_path: String,
     pub agent_id: String,
+    pub profile_id: String,
+    pub profile_name: String,
+    pub root_key: String,
+    pub format: RuntimeFormat,
     pub label: String,
     pub exists: bool,
     pub recommended: bool,
@@ -603,6 +720,8 @@ pub struct InstallGithubRemoteSkillRequest {
     pub source_url: String,
     pub target_root: Option<PathBuf>,
     pub preview_id: Option<String>,
+    #[serde(default)]
+    pub confirm_warnings: bool,
     pub actor: String,
 }
 
@@ -628,6 +747,7 @@ pub struct GithubRemoteSkillInstallPreview {
     pub installed_sha: String,
     pub files: Vec<RemoteDiffFile>,
     pub target_root: Option<PathBuf>,
+    pub compatibility: Option<CompatibilityReport>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

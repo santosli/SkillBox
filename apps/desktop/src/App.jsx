@@ -137,6 +137,7 @@ import {
   sidebarFooterItems,
   sidebarItems,
   workspaceCounts,
+  workspaceDeployCanSubmit,
   workspaceDeployChangeCount,
   workspaceDeploymentChanges,
   workspaceDeployPickerRows,
@@ -185,19 +186,28 @@ function prototypeWorkspaceSetupPreview(selectedPath, kind) {
     ? [{
         path,
         relative_path: 'skills',
-        agent_id: path.includes('/.codex/') ? 'codex' : path.includes('/.claude/') ? 'claude' : 'agents',
-        label: 'Skills folder',
+        agent_id: 'custom',
+        profile_id: 'custom-skill-md',
+        profile_name: 'Custom SKILL.md',
+        root_key: 'exact',
+        format: 'skill_md',
+        label: 'Custom SKILL.md',
         exists: true,
         recommended: true
       }]
     : [
         ['.agents/skills', 'agents', 'Agents'],
         ['.codex/skills', 'codex', 'Codex'],
-        ['.claude/skills', 'claude', 'Claude Code']
-      ].map(([relativePath, agentId, label], index) => ({
+        ['.claude/skills', 'claude-code', 'Claude Code'],
+        ['.cursor/skills', 'cursor', 'Cursor']
+      ].map(([relativePath, profileId, label], index) => ({
         path: `${path}/${relativePath}`,
         relative_path: relativePath,
-        agent_id: agentId,
+        agent_id: profileId === 'claude-code' ? 'claude' : profileId,
+        profile_id: profileId,
+        profile_name: label,
+        root_key: 'skills',
+        format: 'skill_md',
         label,
         exists: detectedRootFixture && index < 2,
         recommended: index === 0
@@ -359,6 +369,7 @@ export default function App() {
     applying: false,
     preview: null,
     activePath: '',
+    confirmWarnings: false,
     error: ''
   });
   const [remoteVersions, setRemoteVersions] = useState({});
@@ -996,11 +1007,27 @@ export default function App() {
           skill_name: remoteImportCandidate(remoteImport.mode, value).name || 'remote-skill',
           source_url: value,
           installed_sha: '1234567890abcdef',
+          target_root: '/Users/demo/project/.agents/skills',
+          compatibility: {
+            preview_id: 'browser-compatibility-preview',
+            profile_id: 'agents',
+            profile_name: 'Agents',
+            target_root: '/Users/demo/project/.agents/skills',
+            status: 'warnings',
+            issues: [
+              {
+                code: 'unknown_optional_frontmatter',
+                severity: 'warning',
+                message: 'Optional frontmatter fields are not declared by this runtime profile.',
+                suggested_action: 'Review the fields before installing.'
+              }
+            ]
+          },
           files: [
             {
               path: 'SKILL.md',
               status: 'A',
-              diff: '@@\n+---\n+name: remote-skill\n+description: Preview skill\n+---\n'
+              diff: '@@\n+---\n+name: remote-skill\n+description: Preview skill\n+tools:\n+  - shell\n+---\n'
             }
           ]
         });
@@ -1010,6 +1037,7 @@ export default function App() {
           applying: false,
           preview,
           activePath: preview.activePath,
+          confirmWarnings: false,
           title: `Install ${preview.skillName}`,
           subtitle: 'Review the GitHub skill before SkillBox copies it into the managed store.',
           applyLabel: 'Install from GitHub',
@@ -1045,6 +1073,7 @@ export default function App() {
           applying: false,
           preview: null,
           activePath: '',
+          confirmWarnings: false,
           title: 'Review GitHub install',
           subtitle: 'Loading remote skill diff before anything is copied into SkillBox.',
           applyLabel: 'Install from GitHub',
@@ -1065,6 +1094,7 @@ export default function App() {
           applying: false,
           preview,
           activePath: preview.activePath,
+          confirmWarnings: false,
           title: `Install ${preview.skillName}`,
           subtitle: 'Review the GitHub skill before SkillBox copies it into the managed store.',
           applyLabel: 'Install from GitHub',
@@ -2217,13 +2247,93 @@ export default function App() {
     }));
   }
 
-  function toggleDeployWorkspace(canonicalPath) {
+  async function toggleDeployWorkspace(canonicalPath) {
+    const row = deployDialog.rows.find((item) => item.canonicalPath === canonicalPath);
+    if (!row || row.compatibilityLoading) return;
+    if (row.isSelected || row.isDeployed) {
+      setDeployDialog((current) => ({
+        ...current,
+        rows: current.rows.map((item) =>
+          item.canonicalPath === canonicalPath ? { ...item, isSelected: !item.isSelected } : item
+        ),
+        confirmUndeploy: false,
+        error: ''
+      }));
+      return;
+    }
+
+    setDeployDialog((current) => ({
+      ...current,
+      rows: current.rows.map((item) =>
+        item.canonicalPath === canonicalPath
+          ? { ...item, compatibilityLoading: true, compatibilityError: '' }
+          : item
+      ),
+      error: ''
+    }));
+    try {
+      const compatibility = window.__TAURI_INTERNALS__
+        ? await invoke('preview_skill_deployment', {
+            request: {
+              skill_name: deployDialog.skillName,
+              target_root: row.path
+            }
+          })
+        : row.profileId === 'agents'
+          ? {
+              preview_id: `prototype:${deployDialog.skillName}:${row.canonicalPath}`,
+              status: 'warnings',
+              issues: [{
+                severity: 'warning',
+                code: 'unknown_optional_frontmatter',
+                message: 'Optional frontmatter field “author” will be preserved.',
+                suggested_action: 'Review the field before deployment.'
+              }],
+              profile: { id: row.profileId, display_name: row.profileName }
+            }
+          : {
+              preview_id: `prototype:${deployDialog.skillName}:${row.canonicalPath}`,
+              status: 'compatible',
+              issues: [],
+              profile: { id: row.profileId, display_name: row.profileName }
+            };
+      setDeployDialog((current) => ({
+        ...current,
+        rows: current.rows.map((item) =>
+          item.canonicalPath === canonicalPath
+            ? {
+                ...item,
+                compatibility,
+                compatibilityLoading: false,
+                compatibilityError: '',
+                isSelected: compatibility.status !== 'blocked',
+                confirmWarnings: false
+              }
+            : item
+        )
+      }));
+    } catch (previewError) {
+      setDeployDialog((current) => ({
+        ...current,
+        rows: current.rows.map((item) =>
+          item.canonicalPath === canonicalPath
+            ? {
+                ...item,
+                compatibilityLoading: false,
+                compatibilityError: previewError.message || String(previewError)
+              }
+            : item
+        )
+      }));
+    }
+  }
+
+  function updateDeployWarningConfirmation(canonicalPath, confirmed) {
     setDeployDialog((current) => ({
       ...current,
       rows: current.rows.map((row) =>
-        row.canonicalPath === canonicalPath ? { ...row, isSelected: !row.isSelected } : row
+        row.canonicalPath === canonicalPath ? { ...row, confirmWarnings: confirmed } : row
       ),
-      confirmUndeploy: false,
       error: ''
     }));
   }
@@ -2250,7 +2360,15 @@ export default function App() {
         .map((row) => ({ target_root: row.path }));
       const rows = workspaceDeployPickerRows(nextWorkspaces, deployedRows).map((row) => {
         const key = row.canonicalPath || row.path;
-        return selectedByPath.has(key) ? { ...row, isSelected: selectedByPath.get(key) } : row;
+        const previous = current.rows.find((item) => (item.canonicalPath || item.path) === key);
+        return selectedByPath.has(key)
+          ? {
+              ...row,
+              isSelected: selectedByPath.get(key),
+              compatibility: previous?.compatibility || null,
+              confirmWarnings: Boolean(previous?.confirmWarnings)
+            }
+          : row;
       });
 
       return { ...current, rows, confirmUndeploy: false, error: '' };
@@ -2271,6 +2389,13 @@ export default function App() {
       setDeployDialog((current) => ({
         ...current,
         error: 'Confirm unlinking before applying these deployment changes.'
+      }));
+      return;
+    }
+    if (!workspaceDeployCanSubmit(deployDialog.rows)) {
+      setDeployDialog((current) => ({
+        ...current,
+        error: 'Resolve blocked targets and confirm compatibility warnings before deploying.'
       }));
       return;
     }
@@ -2300,9 +2425,13 @@ export default function App() {
 
     try {
       for (const workspace of changes.deploy) {
-        await invoke('deploy_skill', {
-          skillName: deployDialog.skillName,
-          targetRoot: workspace.path
+        await invoke('apply_skill_deployment', {
+          request: {
+            skill_name: deployDialog.skillName,
+            target_root: workspace.path,
+            preview_id: workspace.compatibility?.preview_id,
+            confirm_warnings: Boolean(workspace.confirmWarnings)
+          }
         });
       }
       for (const workspace of changes.undeploy) {
@@ -3009,6 +3138,10 @@ export default function App() {
     setRemoteInstallDialog((current) => ({ ...current, activePath: path }));
   }
 
+  function updateRemoteInstallWarningConfirmation(confirmed) {
+    setRemoteInstallDialog((current) => ({ ...current, confirmWarnings: confirmed, error: '' }));
+  }
+
   async function applyRemoteInstall() {
     const preview = remoteInstallDialog.preview;
     if (!preview) return;
@@ -3026,6 +3159,7 @@ export default function App() {
           source_url: preview.sourceUrl,
           target_root: preview.targetRoot || null,
           preview_id: preview.previewId || null,
+          confirm_warnings: Boolean(remoteInstallDialog.confirmWarnings),
           actor: 'desktop'
         }
       });
@@ -3351,6 +3485,10 @@ export default function App() {
         kind: workspaceDialog.kind,
         source: 'manual',
         agent_id: selectedRoot.agentId,
+        profile_id: selectedRoot.profileId,
+        profile_name: selectedRoot.profileName,
+        root_key: selectedRoot.rootKey,
+        format: selectedRoot.format,
         skill_count: 0,
         last_scan_error_count: 0,
         last_scanned_at: new Date().toISOString()
@@ -3777,6 +3915,7 @@ export default function App() {
           onActivatePath={activateRemoteInstallPath}
           onApply={applyRemoteInstall}
           onClose={closeRemoteInstallDialog}
+          onConfirmWarningsChange={updateRemoteInstallWarningConfirmation}
         />
       ) : null}
 
@@ -3788,6 +3927,7 @@ export default function App() {
           onAddWorkspace={openWorkspaceDialog}
           onClose={closeDeployDialog}
           onConfirmUndeployChange={updateDeployUndeployConfirmation}
+          onConfirmWarningsChange={updateDeployWarningConfirmation}
           onSubmit={submitDeployDialog}
           onToggleWorkspace={toggleDeployWorkspace}
         />

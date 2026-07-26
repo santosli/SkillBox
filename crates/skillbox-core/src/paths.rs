@@ -15,12 +15,11 @@ pub(crate) fn legacy_managed_root() -> PathBuf {
 }
 
 pub fn default_runtime_roots() -> Vec<PathBuf> {
-    vec![
-        home_dir().join(".codex/skills"),
-        home_dir().join(".agents/skills"),
-        home_dir().join(".claude/skills"),
-        home_dir().join(".cursor/skills"),
-    ]
+    let home = home_dir();
+    project_runtime_roots()
+        .into_iter()
+        .map(|(_, root)| home.join(root.relative_path))
+        .collect()
 }
 
 pub fn global_runtime_roots() -> Vec<PathBuf> {
@@ -28,12 +27,10 @@ pub fn global_runtime_roots() -> Vec<PathBuf> {
 }
 
 pub(crate) fn runtime_roots_under(home: &Path) -> Vec<PathBuf> {
-    let mut roots = vec![
-        home.join(".codex/skills"),
-        home.join(".agents/skills"),
-        home.join(".claude/skills"),
-        home.join(".cursor/skills"),
-    ];
+    let mut roots = project_runtime_roots()
+        .into_iter()
+        .map(|(_, root)| home.join(root.relative_path))
+        .collect::<Vec<_>>();
     roots.extend(discover_runtime_roots_under(home));
     dedupe_runtime_roots(roots)
 }
@@ -82,7 +79,7 @@ pub(crate) fn discover_runtime_roots(
     }
 
     let mut has_direct_runtime_root = false;
-    for runtime_parent in [".agents", ".codex", ".claude", ".cursor"] {
+    for runtime_parent in project_runtime_parent_names() {
         let runtime_root = current.join(runtime_parent).join("skills");
         if runtime_root.is_dir() {
             roots.push(runtime_root);
@@ -117,13 +114,7 @@ pub(crate) fn discover_runtime_roots(
 }
 
 pub(crate) fn is_runtime_skill_root(path: &Path) -> bool {
-    path.file_name().and_then(|name| name.to_str()) == Some("skills")
-        && matches!(
-            path.parent()
-                .and_then(|parent| parent.file_name())
-                .and_then(|name| name.to_str()),
-            Some(".agents" | ".codex" | ".claude" | ".cursor")
-        )
+    resolve_runtime_profile_for_root(path).0.id != CUSTOM_SKILL_MD_PROFILE_ID
 }
 
 pub(crate) fn should_skip_runtime_root_search(path: &Path) -> bool {
@@ -131,7 +122,10 @@ pub(crate) fn should_skip_runtime_root_search(path: &Path) -> bool {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("");
-    if matches!(name, ".agents" | ".codex" | ".claude" | ".cursor") {
+    if project_runtime_parent_names()
+        .iter()
+        .any(|parent| parent == name)
+    {
         return false;
     }
     if name.starts_with('.') {

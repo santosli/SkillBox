@@ -22,6 +22,8 @@ import {
   canApplyRemoteVersionChange,
   formatOperationTimestamp,
   formatRemoteRefBehavior,
+  normalizeCompatibilityReport,
+  normalizeRemoteInstallPreview,
   normalizeRemoteSourceCandidates,
   normalizeRemoteSourceBindingPreview,
   normalizeRemoteVersionPreview,
@@ -80,6 +82,47 @@ test('normalizes symlink import candidate source metadata', () => {
   assert.equal(candidate.isSymlink, true);
   assert.equal(candidate.symlinkTargetPath, '/Users/example/.agents/skills/lark-mail');
   assert.equal(candidate.usageCount, 2);
+});
+
+test('normalizes remote install compatibility returned by Rust', () => {
+  const preview = normalizeRemoteInstallPreview({
+    preview_id: 'install-preview',
+    skill_name: 'demo',
+    installed_sha: 'abc123',
+    files: [{ path: 'SKILL.md', status: 'A', diff: '+name: demo' }],
+    compatibility: {
+      preview_id: 'compat-preview',
+      profile_id: 'claude-code',
+      profile_name: 'Claude Code',
+      target_root: '/tmp/project/.claude/skills',
+      status: 'warnings',
+      issues: [
+        {
+          code: 'unknown_optional_frontmatter',
+          severity: 'warning',
+          message: 'Unknown optional field: tools',
+          suggested_action: 'Review the field before deploying.'
+        }
+      ]
+    }
+  });
+
+  assert.deepEqual(preview.compatibility, {
+    previewId: 'compat-preview',
+    profileId: 'claude-code',
+    profileName: 'Claude Code',
+    targetRoot: '/tmp/project/.claude/skills',
+    status: 'warnings',
+    issues: [
+      {
+        code: 'unknown_optional_frontmatter',
+        severity: 'warning',
+        message: 'Unknown optional field: tools',
+        suggestedAction: 'Review the field before deploying.'
+      }
+    ]
+  });
+  assert.equal(normalizeCompatibilityReport(null), null);
 });
 
 test('normalizes grouped import candidate source paths', () => {
@@ -832,6 +875,28 @@ test('remote version preview can apply metadata-only updates', () => {
       loading: false
     }),
     true
+  );
+});
+
+test('remote install warnings require explicit confirmation before apply', () => {
+  const files = [{ path: 'SKILL.md' }];
+  const compatibility = { status: 'warnings' };
+
+  assert.equal(
+    canApplyRemoteVersionChange({ files, compatibility, confirmWarnings: false }),
+    false
+  );
+  assert.equal(
+    canApplyRemoteVersionChange({ files, compatibility, confirmWarnings: true }),
+    true
+  );
+  assert.equal(
+    canApplyRemoteVersionChange({
+      files,
+      compatibility: { status: 'blocked' },
+      confirmWarnings: true
+    }),
+    false
   );
 });
 

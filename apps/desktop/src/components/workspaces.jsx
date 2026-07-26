@@ -17,6 +17,7 @@ import {
 import { closeOnBackdropClick } from '../modalEvents.js';
 import {
   workspaceCardMetaLabels,
+  workspaceDeployCanSubmit,
   workspaceDeployChangeCount,
   workspaceDeploymentChanges,
   workspaceDeployRequiresConfirmation
@@ -139,7 +140,10 @@ function WorkspaceCard({ isBusy, workspace, onForget, onOpenSkills }) {
         <div className="workspaceCardBody">
           <div className="workspaceCardTitleRow">
             <strong>{workspace.displayName}</strong>
-            <AgentIconBadge agent={workspace.agentIcon} />
+            <span className="workspaceProfileIdentity">
+              <Badge tone="slate">{workspace.profileName}</Badge>
+              <AgentIconBadge agent={workspace.agentIcon} />
+            </span>
           </div>
           <code className="workspaceCardPath">{workspace.compactPath}</code>
           {workspace.lastScanError ? <small>{workspace.lastScanError}</small> : null}
@@ -355,6 +359,7 @@ export function DeployWorkspaceDialog({
   onAddWorkspace,
   onClose,
   onConfirmUndeployChange,
+  onConfirmWarningsChange,
   onSubmit,
   onToggleWorkspace
 }) {
@@ -362,7 +367,9 @@ export function DeployWorkspaceDialog({
   const changes = workspaceDeploymentChanges(dialog.rows);
   const requiresConfirmation = workspaceDeployRequiresConfirmation(changes);
   const changeCount = workspaceDeployChangeCount(changes);
-  const canSubmit = changeCount > 0 && (!requiresConfirmation || dialog.confirmUndeploy);
+  const canSubmit = changeCount > 0
+    && (!requiresConfirmation || dialog.confirmUndeploy)
+    && workspaceDeployCanSubmit(dialog.rows);
 
   return (
     <div
@@ -401,28 +408,58 @@ export function DeployWorkspaceDialog({
 
           {dialog.rows.length > 0 ? (
             <div className="deployWorkspaceList" aria-label="Workspace deploy targets">
-              {dialog.rows.map((workspace) => (
-                <label className={workspace.isDeployed ? 'deployWorkspaceRow deployed' : 'deployWorkspaceRow'} key={workspace.canonicalPath || workspace.path}>
-                  <input
-                    aria-label={`Deploy ${skill.name} to workspace ${workspace.displayName}`}
-                    checked={workspace.isSelected}
-                    disabled={isBusy}
-                    type="checkbox"
-                    onChange={() => onToggleWorkspace(workspace.canonicalPath)}
-                  />
-                  <span className="deployWorkspaceCheck" aria-hidden="true">
-                    <Check aria-hidden="true" />
-                  </span>
-                  <span className="deployWorkspaceMain">
-                    <span className="deployWorkspaceTitle">
-                      <strong>{workspace.displayName}</strong>
-                      <Badge tone={workspace.kind === 'global' ? 'blue' : 'green'}>{workspace.kindLabel}</Badge>
-                      {workspace.isDeployed ? <Badge tone="green">Linked</Badge> : null}
-                    </span>
-                    <code>{workspace.compactPath}</code>
-                  </span>
-                </label>
-              ))}
+              {dialog.rows.map((workspace) => {
+                const compatibility = workspace.compatibility;
+                const isBlocked = compatibility?.status === 'blocked';
+                return (
+                  <div className="deployWorkspaceItem" key={workspace.canonicalPath || workspace.path}>
+                    <label className={workspace.isDeployed ? 'deployWorkspaceRow deployed' : 'deployWorkspaceRow'}>
+                      <input
+                        aria-label={`Deploy ${skill.name} to workspace ${workspace.displayName}`}
+                        checked={workspace.isSelected}
+                        disabled={isBusy || workspace.compatibilityLoading || isBlocked}
+                        type="checkbox"
+                        onChange={() => onToggleWorkspace(workspace.canonicalPath)}
+                      />
+                      <span className="deployWorkspaceCheck" aria-hidden="true">
+                        {workspace.compatibilityLoading ? <LoaderCircle className="spin" aria-hidden="true" /> : <Check aria-hidden="true" />}
+                      </span>
+                      <span className="deployWorkspaceMain">
+                        <span className="deployWorkspaceTitle">
+                          <strong>{workspace.displayName}</strong>
+                          <Badge tone={workspace.kind === 'global' ? 'blue' : 'green'}>{workspace.kindLabel}</Badge>
+                          <Badge tone="slate">{workspace.profileName}</Badge>
+                          {workspace.isDeployed ? <Badge tone="green">Linked</Badge> : null}
+                          {compatibility?.status === 'compatible' ? <Badge tone="green">Compatible</Badge> : null}
+                          {compatibility?.status === 'warnings' ? <Badge tone="amber">Warning</Badge> : null}
+                          {isBlocked ? <Badge tone="red">Blocked</Badge> : null}
+                        </span>
+                        <code>{workspace.compactPath}</code>
+                      </span>
+                    </label>
+                    {workspace.compatibilityError ? <div className="deployCompatibilityError">{workspace.compatibilityError}</div> : null}
+                    {compatibility?.issues?.length ? (
+                      <div className={`deployCompatibilityDetails ${compatibility.status}`}>
+                        {compatibility.issues.map((issue) => (
+                          <span key={`${issue.code}:${issue.field || ''}`}>{issue.message}</span>
+                        ))}
+                        {compatibility.status === 'warnings' ? (
+                          <label className="deployCompatibilityConfirm">
+                            <input
+                              checked={workspace.confirmWarnings}
+                              disabled={isBusy}
+                              type="checkbox"
+                              onChange={(event) =>
+                                onConfirmWarningsChange(workspace.canonicalPath, event.target.checked)}
+                            />
+                            Confirm warnings for this target
+                          </label>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <div className="deployWorkspaceEmpty">

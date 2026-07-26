@@ -1,6 +1,5 @@
 import {
   agentWorkspaceIconForId,
-  agentWorkspaceIconForPath,
   workspaceAgentIcon
 } from './agentWorkspaceIcons.js';
 import { remoteSkillRowStatus } from './skillStatusRefresh.js';
@@ -150,8 +149,8 @@ function displayTagsForSkill(skill, tagOverrides) {
   return [];
 }
 
-function deriveAgentLabel(sourceRoot = '') {
-  return agentWorkspaceIconForPath(sourceRoot)?.label || 'Local';
+function deriveAgentLabel() {
+  return 'Local';
 }
 
 function compactSourceLabel(sourceRoot = '') {
@@ -274,13 +273,10 @@ function addAgentFromPath(agents, value = '') {
 }
 
 function normalizeAgent(value = '') {
-  const normalized = String(value).toLowerCase();
-
-  if (!normalized) {
+  if (!String(value).trim()) {
     return null;
   }
-
-  return agentWorkspaceIconForPath(value) || agentWorkspaceIconForId(value);
+  return agentWorkspaceIconForId(value);
 }
 
 function pushAgent(agents, agent) {

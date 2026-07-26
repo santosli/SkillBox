@@ -2,7 +2,7 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
@@ -69,6 +69,7 @@ const USAGE_METADATA_CONTENT_KEYS: &[&str] = &[
     "file_contents",
 ];
 
+mod compatibility;
 mod db;
 mod doctor;
 mod fsutil;
@@ -80,6 +81,7 @@ mod metadata;
 mod operations;
 mod paths;
 mod remote;
+mod runtime_profiles;
 mod skills;
 mod state;
 mod types;
@@ -89,6 +91,7 @@ mod usage_backfill_claude;
 mod usage_backfill_cursor;
 mod workspaces;
 
+pub use compatibility::*;
 pub(crate) use db::*;
 pub use doctor::*;
 pub(crate) use fsutil::*;
@@ -100,6 +103,7 @@ pub use metadata::*;
 pub use operations::*;
 pub use paths::*;
 pub use remote::*;
+pub use runtime_profiles::*;
 pub use skills::*;
 pub use state::*;
 pub use types::*;

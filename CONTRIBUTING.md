@@ -123,6 +123,12 @@ For UI changes, also run the app and verify the affected workflow manually.
   explicitly confirmed.
 - New agent ecosystems should go through an adapter or compatibility layer
   instead of hard-coding one agent format globally.
+- New `SKILL.md` roots and capability differences belong in the versioned Rust
+  runtime-profile registry. React must consume returned `profile_id`,
+  `root_key`, `format`, and compatibility reports instead of inferring runtime
+  identity from path strings or usage `agent_id`.
+- Profile changes require migration/backfill coverage, valid/warning/blocked/
+  malformed fixtures, CLI/Tauri parity, and stale-preview deployment tests.
 - Standard desktop top-level pages should use the shared `PageFrame` component.
   It fills the available content width by default; narrower page widths must be
   an explicit page-specific exception. Settings keeps its constrained workbench

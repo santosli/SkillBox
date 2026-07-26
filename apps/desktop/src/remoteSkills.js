@@ -118,7 +118,26 @@ export function normalizeRemoteInstallPreview(preview = {}) {
     refKind: preview.refKind || preview.ref_kind || '',
     tracking: Boolean(preview.tracking),
     installedSha: preview.installedSha || preview.installed_sha || normalized.toVersion,
-    targetRoot: preview.targetRoot || preview.target_root || null
+    targetRoot: preview.targetRoot || preview.target_root || null,
+    compatibility: normalizeCompatibilityReport(preview.compatibility)
+  };
+}
+
+export function normalizeCompatibilityReport(report = null) {
+  if (!report) return null;
+
+  return {
+    previewId: report.previewId || report.preview_id || '',
+    profileId: report.profileId || report.profile_id || '',
+    profileName: report.profileName || report.profile_name || '',
+    targetRoot: report.targetRoot || report.target_root || '',
+    status: report.status || 'blocked',
+    issues: (report.issues || []).map((issue) => ({
+      code: issue.code || '',
+      severity: issue.severity || 'blocked',
+      message: issue.message || '',
+      suggestedAction: issue.suggestedAction || issue.suggested_action || ''
+    }))
   };
 }
 
@@ -177,8 +196,16 @@ export function remoteDiffOmissionNotice(file = null) {
   return null;
 }
 
-export function canApplyRemoteVersionChange({ allowNoFileChanges = false, files = [], loading = false } = {}) {
-  return !loading && (files.length > 0 || allowNoFileChanges);
+export function canApplyRemoteVersionChange({
+  allowNoFileChanges = false,
+  compatibility = null,
+  confirmWarnings = false,
+  files = [],
+  loading = false
+} = {}) {
+  if (loading || compatibility?.status === 'blocked') return false;
+  if (compatibility?.status === 'warnings' && !confirmWarnings) return false;
+  return files.length > 0 || allowNoFileChanges;
 }
 
 export function formatOperationTimestamp(timestamp = '') {

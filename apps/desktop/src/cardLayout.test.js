@@ -587,6 +587,17 @@ test('remote skill URL import previews GitHub skills before install', () => {
   assert.doesNotMatch(appSource, /Repository-root SKILL\.md files are not supported\./);
 });
 
+test('remote install review displays Rust compatibility and confirms warning targets', () => {
+  assert.match(appSource, /remoteCompatibilitySummary/);
+  assert.match(appSource, /preview\.compatibility\.profileName/);
+  assert.match(appSource, /issue\.suggestedAction/);
+  assert.match(appSource, /Confirm compatibility warnings before installing/);
+  assert.match(appSource, /onConfirmWarningsChange/);
+  assert.match(appSource, /confirmWarnings:\s*dialog\.confirmWarnings/);
+  assert.match(css, /\.remoteCompatibilitySummary\.blocked/);
+  assert.match(css, /\.remoteCompatibilityConfirm/);
+});
+
 test('remote skill URL import restores ready state when install fails', () => {
   const submitRemoteImport = appSource.match(
     /async function submitRemoteImport\(event\)\s*\{(?<body>[\s\S]*?)\n  \}/
@@ -617,6 +628,10 @@ test('remote GitHub install confirmation passes the preview id', () => {
   assert.match(applyRemoteInstall, /invoke\('install_github_remote_skill'/);
   assert.match(applyRemoteInstall, /source_url:\s*preview\.sourceUrl/);
   assert.match(applyRemoteInstall, /preview_id:\s*preview\.previewId \|\| null/);
+  assert.match(
+    applyRemoteInstall,
+    /confirm_warnings:\s*Boolean\(remoteInstallDialog\.confirmWarnings\)/
+  );
   assert.match(applyRemoteInstall, /actor:\s*'desktop'/);
 });
 
@@ -1248,6 +1263,20 @@ test('deploy workspace dialog includes checked rows and removal confirmation war
   assert.match(appSource, /aria-label=\{`Deploy \$\{skill\.name\} to workspace/);
   assert.match(css, /\.deployWorkspaceDialog\s*\{/);
   assert.match(css, /\.deployWorkspaceWarning\s*\{[^}]*background:\s*var\(--skillbox-surface-orange\);/s);
+});
+
+test('desktop deployment uses Rust runtime profiles and preview-confirmed compatibility', () => {
+  assert.match(tauriSource, /fn list_runtime_profiles\(\)/);
+  assert.match(tauriSource, /async fn preview_skill_deployment\(/);
+  assert.match(tauriSource, /async fn apply_skill_deployment\(/);
+  assert.match(tauriSource, /list_runtime_profiles,/);
+  assert.match(tauriSource, /preview_skill_deployment,/);
+  assert.match(tauriSource, /apply_skill_deployment,/);
+  assert.doesNotMatch(tauriSource, /async fn deploy_skill\(/);
+  assert.match(appSource, /invoke\('preview_skill_deployment'/);
+  assert.match(appSource, /invoke\('apply_skill_deployment'/);
+  assert.match(appSource, /preview_id:\s*workspace\.compatibility\?\.preview_id/);
+  assert.match(appSource, /confirm_warnings:\s*Boolean\(workspace\.confirmWarnings\)/);
 });
 
 test('installed workspace icons use immediate custom tooltips instead of native title delay', () => {

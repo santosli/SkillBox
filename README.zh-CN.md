@@ -32,6 +32,7 @@ SkillBox 是一个 local-first 的 macOS 桌面应用，带 Rust core/CLI，用�
 - **Git 提交和推送也可审查。** 查看 user-skill diff、创建 Conventional Commit，并可选推送；远端历史分叉仍在 SkillBox 外按正常 Git 冲突处理。
 - **本机观测调用、本地排名与操作历史。** 通过支持的 agent hooks 记录 skill 调用，以 `Locally observed calls` 明确标注本机已观测使用量，并与管理操作统一展示，同时不保存完整聊天 transcript。
 - **安全的存储与部署默认值。** 使用顺序 SQLite migrations、恢复备份、完整性检查和 ownership-checked symlink，不静默覆盖 runtime 内容。
+- **部署前检查 compatibility。** Rust-owned runtime profiles 标识 workspace，并在确认 symlink 部署前报告会原样保留的 frontmatter warnings 或 hard blockers。
 - **签名的 macOS 分发。** 可安装已公证 DMG 或 Homebrew cask，app 更新也只在用户确认后应用。
 
 ## 截图
@@ -42,7 +43,7 @@ Dashboard 支持本地搜索、类型/更新/tag/favorite 过滤以及 grid/list
 
 ![SkillBox workspaces](docs/screenshots/skillbox-workspaces-v041.jpg)
 
-Workspaces 视图会跟踪全局和项目局部 `SKILL.md` roots，包括 Codex CLI、Codex App、Claude Code skill folders 和项目自己的 runtime。可以按 workspace 名称、路径或 agent 搜索，并与 Global/User 类型筛选组合使用。
+Workspaces 视图会按 profile 跟踪 Agents、Codex、Claude Code、Cursor 和 exact custom folder 的全局/项目局部 `SKILL.md` roots。可以按 workspace 名称、路径或 profile 搜索，并与 Global/Project 类型筛选组合使用。
 
 ![SkillBox history](docs/screenshots/skillbox-history-v041.jpg)
 
@@ -83,19 +84,21 @@ Runtime 目录只是部署目标：
 - `~/.codex/skills`
 - `~/.agents/skills`
 - `~/.claude/skills`
+- `~/.cursor/skills`
 - 项目局部 `.codex/skills`
 - 项目局部 `.agents/skills`
 - 项目局部 `.claude/skills`
+- 项目局部 `.cursor/skills`
 
 后续支持 Claude、OpenClaw、Cursor、Claude Code、Copilot 和其它非 `SKILL.md` 原生格式时，应通过明确的 agent adapter 表达，而不是把 agent-specific 行为硬编码在 UI 里。
 
 ## 功能
 
-- 扫描并登记受支持的全局或项目局部 `SKILL.md` workspaces。在打包后的 macOS app 中，可以通过原生单目录选择器或手动输入路径选择 project / 现有 skills folder；SkillBox 会立即执行只读 preview，并可在登记前显式创建一个选中的 `.agents/skills`、`.codex/skills` 或 `.claude/skills` root。取消选择不会改变当前状态，也不会一次创建所有 runtime roots。
+- 扫描并登记受支持的全局或项目局部 `SKILL.md` workspaces。在打包后的 macOS app 中，可以通过原生单目录选择器或手动输入路径选择 project / 现有 skills folder；SkillBox 会立即执行只读 preview，并可在登记前显式创建一个选中的 `.agents/skills`、`.codex/skills`、`.claude/skills` 或 `.cursor/skills` root。取消选择不会改变当前状态，也不会一次创建所有 runtime roots。
 - 在复制前 review user、remote 和 system import candidates；合并导入内容一致的多 root 副本但不丢失来源位置，并对符合条件的 deploy-back import 执行保守回退。
 - 通过 preview/apply 安装 GitHub-backed skill，并在不替换当前版本的情况下绑定识别到的 remote source candidate。
 - 检查 remote source、预览全文件 diff、应用更新，并回滚到不可变版本。
-- 通过 ownership-checked symlink 在单个 workspace 部署或移除 managed skill；经 review 迁移 User/Remote 类型并重定向 deployments。
+- 部署前 preview runtime profile 与 frontmatter compatibility；blocked target 不可选择，warning 需要确认，apply 会重新校验 skill/target/profile 是否 stale，再创建 ownership-checked symlink。
 - 名称确认后，从 managed store 和全部关联 workspace 删除 skill，同时保留 recovery backup 和 workspace registrations。
 - Review user-skill Git diff、为选中文件创建 Conventional Commit，并可选推送，不尝试自动合并远端变更。
 - 按类型、更新状态、tag 或 favorite 搜索过滤 Dashboard，在 grid/list 间切换，并把 favorites 与 tags 持久化到 SQLite。

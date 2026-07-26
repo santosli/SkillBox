@@ -2,7 +2,7 @@ use crate::*;
 use fs2::FileExt;
 use std::fs::{File, OpenOptions};
 
-pub(crate) const LATEST_DATABASE_SCHEMA_VERSION: i64 = 5;
+pub(crate) const LATEST_DATABASE_SCHEMA_VERSION: i64 = 6;
 
 pub(crate) fn open_database(database_path: &Path) -> Result<Connection> {
     let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
@@ -93,6 +93,7 @@ pub(crate) fn run_database_migrations(connection: &mut Connection) -> Result<()>
         (3_i64, "skill_user_metadata"),
         (4_i64, "skill_usage_ranking_indexes"),
         (5_i64, "canonical_usage_agent_ids"),
+        (6_i64, "runtime_profiles"),
     ] {
         let applied: bool = connection
             .query_row(
@@ -114,6 +115,7 @@ pub(crate) fn run_database_migrations(connection: &mut Connection) -> Result<()>
             3 => apply_skill_user_metadata_migration(&transaction)?,
             4 => apply_skill_usage_ranking_indexes_migration(&transaction)?,
             5 => apply_canonical_usage_agent_ids_migration(&transaction)?,
+            6 => apply_runtime_profiles_migration(&transaction)?,
             _ => return Err(format!("Unknown database migration version: {version}")),
         }
         transaction
@@ -164,6 +166,9 @@ fn apply_baseline_migration(connection: &Connection) -> Result<()> {
               kind TEXT NOT NULL,
               source TEXT NOT NULL,
               agent_id TEXT,
+              profile_id TEXT NOT NULL DEFAULT 'custom-skill-md',
+              root_key TEXT NOT NULL DEFAULT 'exact',
+              format TEXT NOT NULL DEFAULT 'skill_md',
               display_name TEXT NOT NULL,
               skill_count INTEGER NOT NULL DEFAULT 0,
               imported_skill_count INTEGER NOT NULL DEFAULT 0,
@@ -285,6 +290,50 @@ fn apply_canonical_usage_agent_ids_migration(connection: &Connection) -> Result<
     canonicalize_stored_usage_agent_id(connection, "agents", "codex")?;
     canonicalize_stored_usage_agent_id(connection, "claude", "claude-code")?;
     Ok(())
+}
+
+fn apply_runtime_profiles_migration(connection: &Connection) -> Result<()> {
+    ensure_database_column(
+        connection,
+        "workspaces",
+        "profile_id",
+        "TEXT NOT NULL DEFAULT 'custom-skill-md'",
+    )?;
+    ensure_database_column(
+        connection,
+        "workspaces",
+        "root_key",
+        "TEXT NOT NULL DEFAULT 'exact'",
+    )?;
+    ensure_database_column(
+        connection,
+        "workspaces",
+        "format",
+        "TEXT NOT NULL DEFAULT 'skill_md'",
+    )?;
+    connection
+        .execute_batch(
+            "
+            UPDATE workspaces
+            SET profile_id = CASE
+                  WHEN canonical_path LIKE '%/.agents/skills' THEN 'agents'
+                  WHEN canonical_path LIKE '%/.codex/skills' THEN 'codex'
+                  WHEN canonical_path LIKE '%/.claude/skills' THEN 'claude-code'
+                  WHEN canonical_path LIKE '%/.cursor/skills' THEN 'cursor'
+                  ELSE 'custom-skill-md'
+                END,
+                root_key = CASE
+                  WHEN canonical_path LIKE '%/.agents/skills'
+                    OR canonical_path LIKE '%/.codex/skills'
+                    OR canonical_path LIKE '%/.claude/skills'
+                    OR canonical_path LIKE '%/.cursor/skills'
+                  THEN 'skills'
+                  ELSE 'exact'
+                END,
+                format = 'skill_md';
+            ",
+        )
+        .map_err(|error| error.to_string())
 }
 
 fn canonicalize_stored_usage_agent_id(

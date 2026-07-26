@@ -1,7 +1,4 @@
-import {
-  agentWorkspaceLabel,
-  workspaceAgentIcon
-} from './agentWorkspaceIcons.js';
+import { workspaceAgentIcon } from './agentWorkspaceIcons.js';
 
 export const sidebarItems = [
   { id: 'dashboard', label: 'Dashboard', icon: 'gauge' },
@@ -28,13 +25,23 @@ export function normalizeWorkspace(workspace = {}) {
   const kind = String(workspace.kind || 'user').toLowerCase();
   const source = String(workspace.source || 'auto').toLowerCase();
   const agentId = workspace.agentId || workspace.agent_id || '';
+  const profileId = workspace.profileId || workspace.profile_id || 'custom-skill-md';
+  const profileName = workspace.profileName || workspace.profile_name || 'Custom SKILL.md';
+  const rootKey = workspace.rootKey || workspace.root_key || 'exact';
+  const format = workspace.format || 'skill_md';
   const compactPath = compactWorkspacePath(path || canonicalPath);
-  const displayName = workspaceDisplayName(path || canonicalPath, agentId, kind);
+  const displayName = workspace.displayName
+    || workspace.display_name
+    || workspaceDisplayName(path || canonicalPath, profileName, kind);
   const agentIcon = workspaceAgentIcon({
     canonicalPath,
     path,
     kind,
     agentId,
+    profileId,
+    profileName,
+    rootKey,
+    format,
     compactPath,
     displayName
   });
@@ -57,8 +64,12 @@ export function normalizeWorkspace(workspace = {}) {
     source,
     sourceLabel: labelize(source),
     agentId,
+    profileId,
+    profileName,
+    rootKey,
+    format,
     agentIcon,
-    agentLabel: agentWorkspaceLabel(agentId, labelize(agentId || 'local')),
+    agentLabel: profileName,
     displayName,
     skillCount,
     importedSkillCount,
@@ -88,6 +99,10 @@ export function normalizeWorkspaceSetupPreview(value = {}) {
       path: String(root.path || ''),
       relativePath: String(root.relative_path || root.relativePath || ''),
       agentId: String(root.agent_id || root.agentId || ''),
+      profileId: String(root.profile_id || root.profileId || 'custom-skill-md'),
+      profileName: String(root.profile_name || root.profileName || root.label || 'Custom SKILL.md'),
+      rootKey: String(root.root_key || root.rootKey || 'exact'),
+      format: String(root.format || 'skill_md'),
       label: String(root.label || 'Skills folder'),
       exists: Boolean(root.exists),
       recommended: Boolean(root.recommended)
@@ -180,7 +195,11 @@ export function workspaceDeployPickerRows(workspaces = [], deployments = []) {
     return {
       ...workspace,
       isDeployed,
-      isSelected: isDeployed
+      isSelected: isDeployed,
+      compatibility: null,
+      compatibilityLoading: false,
+      compatibilityError: '',
+      confirmWarnings: false
     };
   });
 }
@@ -207,6 +226,15 @@ export function workspaceDeployChangeCount(changes = {}) {
   return numberOrZero(changes.deploy?.length) + numberOrZero(changes.undeploy?.length);
 }
 
+export function workspaceDeployCanSubmit(rows = []) {
+  return rows.every((row) => {
+    if (!row.isSelected || row.isDeployed) return true;
+    if (row.compatibilityLoading || !row.compatibility) return false;
+    if (row.compatibility.status === 'blocked') return false;
+    return row.compatibility.status !== 'warnings' || row.confirmWarnings;
+  });
+}
+
 function deploymentRootValues(deployment) {
   if (!deployment) {
     return [];
@@ -230,24 +258,24 @@ function compactWorkspacePath(value = '') {
   return String(value || 'Not available').replace(/^\/Users\/[^/]+(?=\/|$)/, '~');
 }
 
-function workspaceDisplayName(path = '', agentId = '', kind = 'user') {
+function workspaceDisplayName(path = '', profileName = '', kind = 'user') {
   if (kind === 'global') {
-    return agentWorkspaceLabel(agentId, pathSegment(path) || 'Local');
+    return profileName || pathSegment(path) || 'Local';
   }
 
   const segments = String(path || '').split('/').filter(Boolean);
   const rootName = segments.at(-1) || '';
   const parentName = segments.at(-2) || '';
 
-  if (rootName === 'skills' && ['.codex', '.agents', '.claude'].includes(parentName)) {
-    return segments.at(-3) || agentWorkspaceLabel(agentId, 'Local');
+  if (rootName === 'skills' && parentName.startsWith('.')) {
+    return segments.at(-3) || profileName || 'Local';
   }
 
   if (rootName === 'skills') {
-    return parentName || agentWorkspaceLabel(agentId, 'Local');
+    return parentName || profileName || 'Local';
   }
 
-  return rootName || agentWorkspaceLabel(agentId, 'Local');
+  return rootName || profileName || 'Local';
 }
 
 function pathSegment(path = '') {

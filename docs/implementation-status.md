@@ -13,6 +13,11 @@
 - Implemented recursive skill scanning.
 - Implemented user and remote import storage.
 - Implemented symlink deployment with overwrite protection.
+- Implemented the versioned Rust runtime-profile registry for `.agents/skills`,
+  `.codex/skills`, `.claude/skills`, `.cursor/skills`, and exact custom
+  `SKILL.md` roots, including schema-v6 workspace backfill, structured
+  frontmatter preservation, compatibility previews, stale-preview deployment
+  confirmation, CLI/Tauri parity, and profile-aware desktop workspaces.
 - Implemented GitHub URL normalization for repository, tree, blob, raw, and contents API URLs, including sanitized standalone repository-root skill snapshots.
 - Implemented a first CLI surface for the planned commands.
 - Added a Tauri + React desktop shell with scan and path bridge commands.
@@ -38,29 +43,20 @@
 
 ## Next Implementation Targets
 
-The `0.5` implementation scope is complete; release status remains separate
+The `0.6` implementation scope is complete; release status remains separate
 from implementation status and is tracked in `docs/release.md`. The next milestones follow
 [the versioned evolution path](roadmap.md#versioned-evolution-path):
 
-### 0.5.x — Release Qualification
+### 0.6.x — Runtime Profile Qualification
 
-- Keep Usage Rankings coverage messaging and filter contracts aligned across
-  Rust core, CLI, Tauri, and desktop.
-- Keep Codex, Claude Code, and Cursor history sync auditable, deduplicated, and
-  tolerant of independent provider failures.
-- Keep daily updater checks rate-limited, signed, and free of automatic
-  downloads; installation remains an explicit user action.
-- Complete release automation and distribution read-back before marking 0.5 as
+- Keep Rust core, CLI, Tauri, and desktop compatibility results aligned.
+- Exercise schema-v6 backfill and profile detection against supported prior
+  databases without requiring a rescan.
+- Keep unknown optional frontmatter read-only and preserved; do not turn
+  warnings into automatic rewrites.
+- Keep native non-`SKILL.md` formats behind the future adapter boundary.
+- Complete release automation and distribution read-back before marking 0.6 as
   shipped.
-- Keep any future Codex reported-run analytics in an independent provider metric
-  model with provider, subject kind, time window, scope, and provenance; never
-  write them to usage events or include them in local ranking, total, or delta.
-
-### 0.6 — Runtime Profiles And Portability
-
-- Add Rust-owned runtime profiles for additional `SKILL.md` roots, precedence,
-  and frontmatter dialects.
-- Add portability checks and pre-deployment compatibility reporting.
 
 ### 0.7 And Later
 

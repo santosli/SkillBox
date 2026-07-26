@@ -1,13 +1,6 @@
 use crate::*;
 use std::os::unix::fs::MetadataExt;
 
-const PROJECT_WORKSPACE_ROOTS: [(&str, &str, &str); 4] = [
-    (".agents/skills", "agents", "Agents"),
-    (".codex/skills", "codex", "Codex"),
-    (".claude/skills", "claude", "Claude Code"),
-    (".cursor/skills", "cursor", "Cursor"),
-];
-
 pub fn list_workspaces(managed_root: impl AsRef<Path>) -> Result<Vec<Workspace>> {
     let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
     load_workspaces_with_visible_usage(&paths)
@@ -254,9 +247,8 @@ where
 }
 
 fn workspace_setup_exact_root(path: &Path) -> WorkspaceSetupRootOption {
+    let (profile, root) = resolve_runtime_profile_for_root(path);
     let agent_id = workspace_agent_id(path).unwrap_or_else(|| "custom".to_string());
-    let label =
-        workspace_agent_label(Some(&agent_id)).unwrap_or_else(|| "Skills folder".to_string());
     WorkspaceSetupRootOption {
         path: path.to_path_buf(),
         relative_path: path
@@ -265,7 +257,11 @@ fn workspace_setup_exact_root(path: &Path) -> WorkspaceSetupRootOption {
             .unwrap_or("skills")
             .to_string(),
         agent_id,
-        label,
+        profile_id: profile.id,
+        profile_name: profile.display_name.clone(),
+        root_key: root.key,
+        format: profile.format,
+        label: profile.display_name,
         exists: true,
         recommended: true,
     }
@@ -273,9 +269,10 @@ fn workspace_setup_exact_root(path: &Path) -> WorkspaceSetupRootOption {
 
 fn project_workspace_root_options(project: &Path) -> Result<Vec<WorkspaceSetupRootOption>> {
     let mut roots = Vec::new();
-    for (index, (relative_path, agent_id, label)) in PROJECT_WORKSPACE_ROOTS.iter().enumerate() {
-        let candidate = project.join(relative_path);
-        validate_project_workspace_root_chain(project, Path::new(relative_path))?;
+    for (index, (profile, root)) in project_runtime_roots().into_iter().enumerate() {
+        let relative_path = root.relative_path.clone();
+        let candidate = project.join(&relative_path);
+        validate_project_workspace_root_chain(project, Path::new(&relative_path))?;
         let exists = match fs::symlink_metadata(&candidate) {
             Ok(metadata) => {
                 if metadata.file_type().is_symlink() {
@@ -318,9 +315,13 @@ fn project_workspace_root_options(project: &Path) -> Result<Vec<WorkspaceSetupRo
         };
         roots.push(WorkspaceSetupRootOption {
             path: candidate,
-            relative_path: (*relative_path).to_string(),
-            agent_id: (*agent_id).to_string(),
-            label: (*label).to_string(),
+            relative_path,
+            agent_id: workspace_agent_id_for_profile(&profile.id).to_string(),
+            profile_id: profile.id,
+            profile_name: profile.display_name.clone(),
+            root_key: root.key,
+            format: profile.format,
+            label: profile.display_name,
             exists,
             recommended: index == 0,
         });
@@ -442,9 +443,9 @@ fn create_project_workspace_root(
     created: &mut Vec<PathBuf>,
 ) -> Result<PathBuf> {
     if option.exists
-        || !PROJECT_WORKSPACE_ROOTS
+        || !project_runtime_roots()
             .iter()
-            .any(|(relative, _, _)| *relative == option.relative_path)
+            .any(|(_, root)| root.relative_path == option.relative_path)
     {
         return Err("Unsupported workspace root choice.".to_string());
     }
@@ -616,7 +617,8 @@ pub(crate) fn upsert_workspace(
     let canonical_path = fs::canonicalize(&path).map_err(|error| error.to_string())?;
     let stats = scan_workspace_root(&path, paths)?;
     let agent_id = workspace_agent_id(&path);
-    let display_name = workspace_display_name(&path, agent_id.as_deref(), kind);
+    let (profile, root) = resolve_runtime_profile_for_root(&canonical_path);
+    let display_name = workspace_display_name(&path, Some(&profile.display_name), kind);
     let connection = open_database(&paths.database_path).map_err(|error| error.to_string())?;
 
     connection
@@ -628,6 +630,9 @@ pub(crate) fn upsert_workspace(
               kind,
               source,
               agent_id,
+              profile_id,
+              root_key,
+              format,
               display_name,
               skill_count,
               imported_skill_count,
@@ -635,7 +640,7 @@ pub(crate) fn upsert_workspace(
               last_scan_error,
               last_scanned_at
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, CURRENT_TIMESTAMP)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, CURRENT_TIMESTAMP)
             ON CONFLICT(canonical_path) DO UPDATE SET
               path = excluded.path,
               kind = CASE
@@ -649,6 +654,9 @@ pub(crate) fn upsert_workspace(
                 ELSE excluded.source
               END,
               agent_id = excluded.agent_id,
+              profile_id = excluded.profile_id,
+              root_key = excluded.root_key,
+              format = excluded.format,
               display_name = excluded.display_name,
               skill_count = excluded.skill_count,
               imported_skill_count = excluded.imported_skill_count,
@@ -663,6 +671,9 @@ pub(crate) fn upsert_workspace(
                 kind.as_str(),
                 source.as_str(),
                 agent_id,
+                profile.id,
+                root.key,
+                profile.format.as_str(),
                 display_name,
                 stats.skill_count as i64,
                 stats.imported_skill_count as i64,
@@ -720,6 +731,9 @@ pub(crate) fn load_workspaces(database_path: &Path) -> Result<Vec<Workspace>> {
               kind,
               source,
               agent_id,
+              profile_id,
+              root_key,
+              format,
               display_name,
               skill_count,
               imported_skill_count,
@@ -768,6 +782,9 @@ pub(crate) fn load_workspace_by_canonical_path(
               kind,
               source,
               agent_id,
+              profile_id,
+              root_key,
+              format,
               display_name,
               skill_count,
               imported_skill_count,
@@ -850,9 +867,14 @@ pub(crate) fn workspace_visible_usage_count(
 pub(crate) fn workspace_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Workspace> {
     let kind_raw: String = row.get(2)?;
     let source_raw: String = row.get(3)?;
-    let skill_count: i64 = row.get(6)?;
-    let imported_skill_count: i64 = row.get(7)?;
-    let last_scan_error_count: i64 = row.get(8)?;
+    let profile_id: String = row.get(5)?;
+    let format_raw: String = row.get(7)?;
+    let skill_count: i64 = row.get(9)?;
+    let imported_skill_count: i64 = row.get(10)?;
+    let last_scan_error_count: i64 = row.get(11)?;
+    let profile = runtime_profile(&profile_id).ok_or_else(|| {
+        rusqlite::Error::InvalidColumnType(5, "profile_id".to_string(), rusqlite::types::Type::Text)
+    })?;
 
     Ok(Workspace {
         canonical_path: PathBuf::from(row.get::<_, String>(0)?),
@@ -862,13 +884,17 @@ pub(crate) fn workspace_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Wo
         source: workspace_source_from_str(&source_raw)
             .map_err(rusqlite::Error::ToSqlConversionFailure)?,
         agent_id: row.get(4)?,
-        display_name: row.get(5)?,
+        profile_id,
+        profile_name: profile.display_name,
+        root_key: row.get(6)?,
+        format: runtime_format_from_str(&format_raw),
+        display_name: row.get(8)?,
         skill_count: usize::try_from(skill_count.max(0)).unwrap_or_default(),
         imported_skill_count: usize::try_from(imported_skill_count.max(0)).unwrap_or_default(),
         usage_count: 0,
         last_scan_error_count: usize::try_from(last_scan_error_count.max(0)).unwrap_or_default(),
-        last_scan_error: row.get(9)?,
-        last_scanned_at: row.get(10)?,
+        last_scan_error: row.get(12)?,
+        last_scanned_at: row.get(13)?,
     })
 }
 
@@ -889,6 +915,13 @@ pub(crate) fn workspace_source_from_str(
         "auto" => Ok(WorkspaceSource::Auto),
         "manual" => Ok(WorkspaceSource::Manual),
         other => Err(format!("Invalid workspace source: {other}").into()),
+    }
+}
+
+pub(crate) fn runtime_format_from_str(value: &str) -> RuntimeFormat {
+    match value {
+        "skill_md" => RuntimeFormat::SkillMd,
+        _ => RuntimeFormat::Unsupported,
     }
 }
 
@@ -993,8 +1026,8 @@ pub(crate) fn trusted_skill_symlink_roots(roots: &[PathBuf], paths: &ManagedPath
     for root in roots {
         trusted_roots.push(root.clone());
         if let Some(base) = runtime_workspace_base(root) {
-            for runtime_parent in [".agents", ".codex", ".claude", ".cursor"] {
-                let runtime_root = base.join(runtime_parent).join("skills");
+            for (_, root) in project_runtime_roots() {
+                let runtime_root = base.join(root.relative_path);
                 if runtime_root.is_dir() {
                     trusted_roots.push(runtime_root);
                 }
@@ -1006,16 +1039,7 @@ pub(crate) fn trusted_skill_symlink_roots(roots: &[PathBuf], paths: &ManagedPath
 }
 
 pub(crate) fn runtime_workspace_base(root: &Path) -> Option<PathBuf> {
-    let root_name = root.file_name()?.to_str()?;
-    let parent = root.parent()?;
-    let parent_name = parent.file_name()?.to_str()?;
-
-    if root_name == "skills" && matches!(parent_name, ".agents" | ".codex" | ".claude" | ".cursor")
-    {
-        parent.parent().map(Path::to_path_buf)
-    } else {
-        None
-    }
+    project_runtime_base(root)
 }
 
 pub(crate) fn find_trusted_skill_symlink_dirs(
@@ -1090,31 +1114,33 @@ pub(crate) fn infer_workspace_kind(root: &Path, home: &Path) -> WorkspaceKind {
 }
 
 pub(crate) fn direct_global_workspace_roots(home: &Path) -> Vec<PathBuf> {
-    vec![
-        home.join(".codex/skills"),
-        home.join(".agents/skills"),
-        home.join(".claude/skills"),
-        home.join(".cursor/skills"),
-    ]
+    project_runtime_roots()
+        .into_iter()
+        .map(|(_, root)| home.join(root.relative_path))
+        .collect()
 }
 
 pub(crate) fn workspace_agent_id(path: &Path) -> Option<String> {
-    match path
-        .parent()
-        .and_then(|parent| parent.file_name())
-        .and_then(|name| name.to_str())
-    {
-        Some(".codex") => Some("codex".to_string()),
-        Some(".agents") => Some("agents".to_string()),
-        Some(".claude") => Some("claude".to_string()),
-        Some(".cursor") => Some("cursor".to_string()),
-        _ => None,
+    let profile = resolve_runtime_profile_for_root(path).0;
+    match profile.id.as_str() {
+        CUSTOM_SKILL_MD_PROFILE_ID => None,
+        profile_id => Some(workspace_agent_id_for_profile(profile_id).to_string()),
+    }
+}
+
+fn workspace_agent_id_for_profile(profile_id: &str) -> &'static str {
+    match profile_id {
+        "agents" => "agents",
+        "codex" => "codex",
+        "claude-code" => "claude",
+        "cursor" => "cursor",
+        _ => "custom",
     }
 }
 
 pub(crate) fn workspace_display_name(
     path: &Path,
-    agent_id: Option<&str>,
+    profile_name: Option<&str>,
     kind: WorkspaceKind,
 ) -> String {
     if kind == WorkspaceKind::User {
@@ -1123,25 +1149,14 @@ pub(crate) fn workspace_display_name(
         }
     }
 
-    workspace_agent_label(agent_id)
+    profile_name
+        .map(str::to_string)
         .or_else(|| {
             path.file_name()
                 .and_then(|name| name.to_str())
                 .map(str::to_string)
         })
         .unwrap_or_else(|| "Local".to_string())
-}
-
-pub(crate) fn workspace_agent_label(agent_id: Option<&str>) -> Option<String> {
-    let label = match agent_id {
-        Some("codex") => "Codex",
-        Some("agents") => "Agents",
-        Some("claude") => "Claude Code",
-        Some("cursor") => "Cursor",
-        _ => return None,
-    };
-
-    Some(label.to_string())
 }
 
 pub(crate) fn workspace_project_name(path: &Path) -> Option<String> {
@@ -1152,7 +1167,10 @@ pub(crate) fn workspace_project_name(path: &Path) -> Option<String> {
         .and_then(|name| name.to_str())
         .unwrap_or("");
 
-    if root_name == "skills" && matches!(parent_name, ".codex" | ".agents" | ".claude" | ".cursor")
+    if root_name == "skills"
+        && project_runtime_parent_names()
+            .iter()
+            .any(|runtime_parent| runtime_parent == parent_name)
     {
         parent
             .parent()

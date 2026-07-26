@@ -28,7 +28,7 @@ test('derives dashboard labels, status, and favorite state without generated tag
     new Set(['note-manager'])
   );
 
-  assert.equal(skill.agentLabel, 'Codex');
+  assert.equal(skill.agentLabel, 'Local');
   assert.equal(skill.sourceLabel, '~/.codex/skills');
   assert.deepEqual(skill.installedAgents, []);
   assert.equal(skill.statusLabel, 'Update available');
@@ -50,7 +50,7 @@ test('derives user skill sync status without a default tag', () => {
     new Set()
   );
 
-  assert.equal(skill.agentLabel, 'Codex CLI');
+  assert.equal(skill.agentLabel, 'Local');
   assert.deepEqual(skill.installedAgents, []);
   assert.equal(skill.statusLabel, 'Synced');
   assert.equal(skill.statusTone, 'green');
@@ -94,7 +94,7 @@ test('managed current symlinks do not count as active workspace deployments', ()
   assert.deepEqual(skill.installedAgents, []);
 });
 
-test('derives installed agent icons from explicit agent and deployment fields', () => {
+test('derives installed agent icons only from explicit ids when workspace metadata is unavailable', () => {
   const skill = deriveDashboardSkill(
     {
       name: 'multi-agent',
@@ -114,8 +114,7 @@ test('derives installed agent icons from explicit agent and deployment fields', 
 
   assert.deepEqual(skill.installedAgents, [
     { id: 'claude', label: 'Claude Code', iconClass: 'claude-code', iconAsset: 'claude-code' },
-    { id: 'codex', label: 'Codex', iconClass: 'codex-app', iconAsset: 'codex-app' },
-    { id: 'cursor', label: 'Cursor' }
+    { id: 'codex', label: 'Codex', iconClass: 'codex-app', iconAsset: 'codex-app' }
   ]);
 });
 
@@ -140,6 +139,8 @@ test('keeps separate workspace deployment icons for the same agent runtime', () 
         canonical_path: '/Users/example/.codex/skills',
         kind: 'global',
         agent_id: 'codex',
+        profile_id: 'codex',
+        profile_name: 'Codex',
         display_name: 'Codex'
       },
       {
@@ -147,6 +148,8 @@ test('keeps separate workspace deployment icons for the same agent runtime', () 
         canonical_path: '/Users/example/zone/demo-app/.codex/skills',
         kind: 'user',
         agent_id: 'codex',
+        profile_id: 'codex',
+        profile_name: 'Codex',
         display_name: 'demo-app'
       }
     ]
@@ -182,13 +185,15 @@ test('uses the Codex CLI icon for global agents runtime deployments', () => {
         canonical_path: '/Users/example/.agents/skills',
         kind: 'global',
         agent_id: 'agents',
+        profile_id: 'agents',
+        profile_name: 'Agents',
         display_name: 'Agents'
       }
     ]
   );
 
   assert.deepEqual(skill.installedAgents, [
-    { id: 'agents', label: 'Codex CLI', iconClass: 'codex-cli', iconAsset: 'codex-cli' }
+    { id: 'agents', label: 'Agents', iconClass: 'codex-cli', iconAsset: 'codex-cli' }
   ]);
 });
 

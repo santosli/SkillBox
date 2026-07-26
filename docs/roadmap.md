@@ -4,16 +4,16 @@ SkillBox is early-stage software. This roadmap describes the public direction,
 not a date-based commitment. Implementation details can change as the app gets
 more real-world use.
 
-## Current Focus: 0.5.x
+## Current Focus: 0.6.x
 
-The 0.5 development line turns local usage history into a practical discovery
-signal and makes signed app updates visible without automatic downloads:
+The 0.6 development line makes `SKILL.md` deployment targets explicit and
+portable without moving runtime knowledge into React:
 
-- local skill usage rankings with time-range, skill-type, agent, and workspace
-  filters;
-- explicit local-only coverage and deterministic ranking semantics;
-- auditable, deduplicated history sync from Codex, Claude Code, and Cursor;
-- daily signed app-update awareness with user-confirmed install and restart.
+- a versioned Rust runtime-profile registry for Agents, Codex, Claude Code,
+  Cursor, and exact custom `SKILL.md` roots;
+- deterministic discovery precedence and schema-backed workspace identity;
+- read-only frontmatter and deployment compatibility previews;
+- stale-preview protection and explicit confirmation before runtime writes.
 
 The implementation scope is complete. Release qualification and the currently
 shipped version and distribution assets are tracked in `docs/release.md`; a
@@ -28,8 +28,9 @@ These are the next areas where focused contributions are most useful:
   aligned on the shared Rust core.
 - **Search and navigation.** After 0.5, add FTS-backed search for skills,
   operations, and usage history on top of the versioned SQLite schema.
-- **Runtime profiles.** Model additional `SKILL.md` roots, precedence, and
-  frontmatter capabilities without hard-coding agent behavior in React.
+- **Runtime profile qualification.** Exercise profile migration and
+  compatibility results against real-world `SKILL.md` libraries while keeping
+  native non-`SKILL.md` adapters out of the 0.6 boundary.
 - **Remote trust.** After 0.5, preserve source provenance and show explicit
   trust state before install or update without using popularity as proof of
   safety.
@@ -97,6 +98,20 @@ Future Codex reported runs remain a separate metric and storage boundary. They
 must retain provider, subject kind, time window, scope, and provenance, must not
 be written to `skill_usage_events`, and must never be included in local ranking,
 total, or delta values.
+
+### 0.6 Runtime Profile Boundaries
+
+The built-in `agents`, `codex`, `claude-code`, `cursor`, and
+`custom-skill-md` profiles all manage the current `SKILL.md` directory format.
+Profiles own root discovery, precedence, accepted frontmatter capabilities, and
+symlink deployment compatibility. They do not claim native support for
+non-`SKILL.md` Claude, OpenClaw, Cursor, Claude Code, or Copilot formats.
+
+Compatibility checks preserve unknown optional frontmatter and report it as a
+warning. Malformed metadata, required incompatibilities, unsafe paths, foreign
+targets, and unsupported deployment modes block deployment. SkillBox does not
+rewrite frontmatter, translate formats, select a target automatically, or write
+to a runtime before a fresh preview is explicitly confirmed.
 
 Minor-version scope may change with evidence from real usage. When the scope,
 ordering, status, or promotion gate of a milestone changes, the same change set

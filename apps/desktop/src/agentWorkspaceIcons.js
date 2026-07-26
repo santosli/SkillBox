@@ -4,24 +4,21 @@ const agentWorkspaceIconCatalog = {
     label: 'Codex',
     iconClass: 'codex-app',
     iconAsset: 'codex-app',
-    aliases: ['codex'],
-    pathMarkers: ['/.codex/skills', '~/.codex/skills']
+    aliases: ['codex']
   },
   agents: {
     id: 'agents',
-    label: 'Codex CLI',
+    label: 'Agents',
     iconClass: 'codex-cli',
     iconAsset: 'codex-cli',
-    aliases: ['agents', 'codex-cli', 'codex cli'],
-    pathMarkers: ['/.agents/skills', '~/.agents/skills']
+    aliases: ['agents']
   },
   claude: {
     id: 'claude',
     label: 'Claude Code',
     iconClass: 'claude-code',
     iconAsset: 'claude-code',
-    aliases: ['claude', 'anthropic'],
-    pathMarkers: ['/.claude/skills', '~/.claude/skills']
+    aliases: ['claude', 'anthropic']
   },
   'claude-code': {
     id: 'claude-code',
@@ -33,20 +30,22 @@ const agentWorkspaceIconCatalog = {
   cursor: {
     id: 'cursor',
     label: 'Cursor',
-    aliases: ['cursor'],
-    pathMarkers: ['/.cursor/skills', '~/.cursor/skills']
+    aliases: ['cursor']
   },
   copilot: {
     id: 'copilot',
     label: 'Copilot',
-    aliases: ['copilot', 'github copilot'],
-    pathMarkers: ['/.copilot/skills', '~/.copilot/skills']
+    aliases: ['copilot', 'github copilot']
   },
   openclaw: {
     id: 'openclaw',
     label: 'OpenClaw',
-    aliases: ['openclaw', 'open claw'],
-    pathMarkers: ['/.openclaw/skills', '~/.openclaw/skills']
+    aliases: ['openclaw', 'open claw']
+  },
+  'custom-skill-md': {
+    id: 'custom-skill-md',
+    label: 'Custom SKILL.md',
+    aliases: ['custom-skill-md']
   }
 };
 
@@ -63,30 +62,16 @@ export function agentWorkspaceIconForId(value = '') {
   );
 }
 
-export function agentWorkspaceIconForPath(value = '') {
-  const normalized = normalizeLookupValue(value);
-  if (!normalized) {
-    return null;
-  }
-
-  return publicIcon(
-    Object.values(agentWorkspaceIconCatalog).find((icon) =>
-      icon.pathMarkers?.some((marker) => normalized.includes(marker))
-    )
-  );
-}
-
 export function agentWorkspaceLabel(agentId = '', fallback = '') {
   return agentWorkspaceIconForId(agentId)?.label || fallback;
 }
 
 export function workspaceAgentIcon(workspace = {}) {
-  const kind = String(workspace.kind || '').toLowerCase();
-  if (kind !== 'user') {
-    return agentWorkspaceIconForId(workspace.agentId || workspace.agent_id) || workspaceFallbackIcon(workspace);
+  if (String(workspace.kind || '').toLowerCase() === 'user') {
+    return workspaceFallbackIcon(workspace);
   }
-
-  return workspaceFallbackIcon(workspace);
+  return agentWorkspaceIconForId(workspace.profileId || workspace.profile_id)
+    || workspaceFallbackIcon(workspace);
 }
 
 function workspaceFallbackIcon(workspace = {}) {
