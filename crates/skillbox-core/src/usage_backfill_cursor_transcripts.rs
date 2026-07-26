@@ -62,6 +62,8 @@ pub(crate) fn backfill_cursor_agent_transcript_usage(
     managed_database: &mut Connection,
 ) -> Result<BackfillCodexSessionUsageResult> {
     let projects_root = canonical_directory(projects_root, "Cursor projects root")?;
+    let allowed_skill_root_lexical =
+        normalize_lexical_path(&expand_home(allowed_skill_root.to_path_buf()));
     let allowed_skill_root = canonical_directory(allowed_skill_root, "Allowed skill root")?;
     let mut result = BackfillCodexSessionUsageResult::default();
     let mut files = Vec::new();
@@ -104,6 +106,7 @@ pub(crate) fn backfill_cursor_agent_transcript_usage(
         for candidate in extraction.candidates {
             let skill = match validate_cursor_transcript_skill_path(
                 &candidate.raw_path,
+                &allowed_skill_root_lexical,
                 &allowed_skill_root,
             ) {
                 Ok(skill) => skill,
@@ -560,6 +563,7 @@ fn collect_cursor_transcript_candidates_from_value(
 
 fn validate_cursor_transcript_skill_path(
     raw_path: &str,
+    allowed_skill_root_lexical: &Path,
     allowed_skill_root: &Path,
 ) -> Result<ValidatedCursorTranscriptSkill> {
     let expanded = expand_home(PathBuf::from(raw_path));
@@ -587,7 +591,11 @@ fn validate_cursor_transcript_skill_path(
     let metadata = match fs::symlink_metadata(&lexical) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            let evidence_path = resolve_missing_cursor_skill_path(&lexical, allowed_skill_root)?;
+            let evidence_path = resolve_missing_cursor_skill_path(
+                &lexical,
+                allowed_skill_root_lexical,
+                allowed_skill_root,
+            )?;
             return Ok(ValidatedCursorTranscriptSkill {
                 name: parent_name,
                 evidence_path,
@@ -644,13 +652,30 @@ fn validate_cursor_transcript_skill_path(
 
 fn resolve_missing_cursor_skill_path(
     missing_skill_path: &Path,
+    allowed_skill_root_lexical: &Path,
     allowed_skill_root: &Path,
 ) -> Result<PathBuf> {
+    if !missing_skill_path.starts_with(allowed_skill_root_lexical) {
+        return Err("Historical SKILL.md path is outside the allowed skill root.".to_string());
+    }
+
     let mut ancestor = missing_skill_path.parent();
     while let Some(path) = ancestor {
         match fs::symlink_metadata(path) {
             Ok(metadata) => {
-                if !metadata.is_dir() && !metadata.file_type().is_symlink() {
+                if metadata.file_type().is_symlink() {
+                    if let Ok(canonical) = fs::canonicalize(path) {
+                        if !canonical.starts_with(allowed_skill_root) {
+                            return Err(
+                                "Historical SKILL.md ancestor resolves outside the allowed skill root."
+                                    .to_string(),
+                            );
+                        }
+                    }
+                    ancestor = path.parent();
+                    continue;
+                }
+                if !metadata.is_dir() {
                     return Err(
                         "Missing historical SKILL.md has a non-directory ancestor.".to_string()
                     );
@@ -1036,10 +1061,105 @@ mod tests {
         let root = transcript_temp_dir("missing-outside");
         let allowed = root.join("home");
         fs::create_dir_all(&allowed).unwrap();
+        let allowed_lexical = normalize_lexical_path(&allowed);
         let allowed = fs::canonicalize(allowed).unwrap();
         let outside = root.join("outside/demo/SKILL.md");
-        let error =
-            validate_cursor_transcript_skill_path(outside.to_str().unwrap(), &allowed).unwrap_err();
+        let error = validate_cursor_transcript_skill_path(
+            outside.to_str().unwrap(),
+            &allowed_lexical,
+            &allowed,
+        )
+        .unwrap_err();
+        assert!(error.contains("outside the allowed skill root"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cursor_transcripts_retain_broken_skill_directory_as_historical_evidence_only() {
+        use std::os::unix::fs::symlink;
+
+        let root = transcript_temp_dir("broken-skill-directory");
+        let projects = root.join(".cursor/projects");
+        let runtime_root = root.join("skills-cursor");
+        fs::create_dir_all(&projects).unwrap();
+        fs::create_dir_all(&runtime_root).unwrap();
+        let broken_skill = runtime_root.join("frontend-design");
+        symlink(root.join("removed/frontend-design"), &broken_skill).unwrap();
+        let historical_skill = broken_skill.join("SKILL.md");
+        write_transcript(
+            &transcript_path(
+                &projects,
+                "project-one",
+                "45454545-4545-4545-4545-454545454545",
+            ),
+            &[transcript_row(
+                "assistant",
+                vec![tool("Read", &historical_skill)],
+            )],
+        );
+
+        let (result, paths) = run_provider(&root, &projects);
+        assert_eq!(result.recorded, 1);
+        assert_eq!(result.inferred_cursor_transcript_calls, 1);
+        assert_eq!(result.cursor_transcript_historical_missing, 1);
+        assert_eq!(result.cursor_transcript_unsafe_rejected, 0);
+
+        let rankings = list_skill_usage_rankings(
+            SkillUsageRankingRequest {
+                range: SkillUsageRankingRange::AllTime,
+                include_unmanaged: true,
+                ..SkillUsageRankingRequest::default()
+            },
+            &paths.root,
+        )
+        .unwrap();
+        let row = rankings
+            .rows
+            .iter()
+            .find(|row| row.skill_name == "frontend-design")
+            .expect("historical ranking row");
+        assert_eq!(row.inferred_count, 1);
+        assert!(row.source_missing);
+
+        let error = preview_usage_skill_import_for_source(
+            PreviewUsageSkillImportRequest {
+                skill_name: row.skill_name.clone(),
+                source_kind: Some(row.source_kind),
+                source_id: Some(row.source_id.clone()),
+                source_runtime_roots: row.source_runtime_roots.clone(),
+                ranking_request: Some(SkillUsageRankingRequest {
+                    range: SkillUsageRankingRange::AllTime,
+                    include_unmanaged: true,
+                    ..SkillUsageRankingRequest::default()
+                }),
+                ranking_generated_at: Some(rankings.generated_at.clone()),
+                runtime_root: None,
+            },
+            &paths.root,
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("Unable to locate") || error.contains("No recoverable local source"),
+            "{error}"
+        );
+
+        let metadata_json: String = open_database(&paths.database_path)
+            .unwrap()
+            .query_row("SELECT metadata_json FROM skill_usage_events", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert!(metadata_json.contains("\"historical_missing\":true"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn cursor_transcripts_reject_historical_paths_without_a_safe_real_parent() {
+        let root = transcript_temp_dir("no-safe-parent");
+        let lexical_root = root.join("missing-home");
+        let missing = lexical_root.join("skills/demo/SKILL.md");
+        let error = resolve_missing_cursor_skill_path(&missing, &lexical_root, &root).unwrap_err();
         assert!(error.contains("outside the allowed skill root"));
         fs::remove_dir_all(root).unwrap();
     }
