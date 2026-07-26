@@ -118,7 +118,26 @@ export function normalizeRemoteInstallPreview(preview = {}) {
     refKind: preview.refKind || preview.ref_kind || '',
     tracking: Boolean(preview.tracking),
     installedSha: preview.installedSha || preview.installed_sha || normalized.toVersion,
-    targetRoot: preview.targetRoot || preview.target_root || null
+    targetRoot: preview.targetRoot || preview.target_root || null,
+    compatibility: normalizeCompatibilityReport(preview.compatibility)
+  };
+}
+
+export function normalizeCompatibilityReport(report = null) {
+  if (!report) return null;
+
+  return {
+    previewId: report.previewId || report.preview_id || '',
+    profileId: report.profileId || report.profile_id || '',
+    profileName: report.profileName || report.profile_name || '',
+    targetRoot: report.targetRoot || report.target_root || '',
+    status: report.status || 'blocked',
+    issues: (report.issues || []).map((issue) => ({
+      code: issue.code || '',
+      severity: issue.severity || 'blocked',
+      message: issue.message || '',
+      suggestedAction: issue.suggestedAction || issue.suggested_action || ''
+    }))
   };
 }
 

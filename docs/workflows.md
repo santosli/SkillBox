@@ -1,7 +1,8 @@
 # SkillBox Workflows
 
 本文件定义工作流入口、步骤、失败处理和完成标准。实现位置和长期目标见 `docs/architecture.md`。
-SkillBox 的目标是跨 agent 管理，不只覆盖 Codex。当前 workflow 以 `SKILL.md` / Codex-style roots 为第一阶段实现；
+SkillBox 的目标是跨 agent 管理，不只覆盖 Codex。当前 workflow 以 Rust runtime
+profiles 管理 `SKILL.md` roots；
 Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter 扩展。
 
 ## 1. Scan Local Skill Roots
@@ -13,10 +14,13 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 步骤：
 
-- 读取当前已实现的默认 runtime roots：`~/.codex/skills`、`~/.agents/skills`、`~/.claude/skills`，以及发现到的项目局部 `.codex/skills`、`.agents/skills`、`.claude/skills`。
+- 从 versioned Rust profile registry 按 precedence 读取
+  `~/.agents/skills`、`~/.codex/skills`、`~/.claude/skills`、
+  `~/.cursor/skills` 及对应项目局部 roots。
 - 后续通过 agent adapter 读取 Claude、OpenClaw、Cursor、Claude Code、Copilot 等 runtime roots。
 - 在每个 root 内递归查找包含 `SKILL.md` 的目录。
-- 读取 frontmatter 中的 `name`、`description`、`version`。
+- 扫描摘要读取 frontmatter 的 `name`、`description`、`version`；严格的完整
+  structured parse 在 deployment compatibility preview 执行。
 - 计算 `SKILL.md` content hash。
 - 标记 source root、是否 symlink、real path。
 - 扫描 import candidates 时把存在且可读取的 skills root 写入 `workspaces` registry；home-level roots 记为 `global`，项目局部 roots 记为 `user`。
@@ -131,7 +135,9 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 更新 `remote-skills/<name>/current` symlink。
 - 写入 `source.json`，包含 GitHub 来源和 `installedSha`、`latestSha`。
 - 写入 SQLite `skills`。
-- 如果提供 target，执行 deploy workflow。
+- 如果提供 target，它必须是已登记 workspace；install preview 同时返回 runtime
+  compatibility，confirm/install 会重新计算 compatibility 和 install preview identity
+  后才执行 deploy workflow。
 - Desktop UI import does not provide target by default, so a newly installed
   GitHub skill remains in the managed store until the user explicitly deploys it.
 
@@ -152,21 +158,33 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - Rust install：`cargo run -p skillbox-cli --offline -- install <github-url> --preview-id <id> --managed-root <temp-skillbox-root>`
 - `cargo test -p skillbox-core --offline install_github_remote_skill`
 
-## 5. Deploy Managed Skill
+## 5. Preview And Deploy Managed Skill
 
 触发条件：
 
-- Rust CLI 执行 `deploy <skill-name> --target <path>`。
+- Rust CLI 先执行 `deploy-preview <skill-name> --target <path>`，再把返回的
+  `preview_id` 传给 `deploy <skill-name> --target <path> --preview-id <id>`；
+  warning 还需要 `--confirm-warnings`。
 - Rust CLI 执行 `undeploy <skill-name> --target <path>`。
 - 桌面详情页打开 Deploy workspace 弹窗，勾选 workspace 执行 deploy，取消已勾选 workspace 执行单 workspace remove/undeploy。
 - import workflow 选择 deploy back to source。
 
 步骤：
 
-- 校验 skill name。
-- 在 managed store 中解析 user skill 或 remote `current`。
-- 创建 target root。
-- target 不存在时创建 symlink。
+- target 必须是 workspace registry 中已存在、可读且 canonical path 匹配的 root。
+- Rust 从 workspace 的 `profile_id/root_key/format` 读取 runtime identity，不从
+  React path string 或 usage `agent_id` 推断。
+- read-only preview 严格解析 `SKILL.md` frontmatter，并按 profile capability 返回
+  `compatible`、`warnings` 或 `blocked`、结构化 issues 和 `preview_id`。
+- unknown optional frontmatter 作为 warning 原样保留；SkillBox 不 rewrite、translate
+  或删除字段。
+- malformed frontmatter、name mismatch、profile/root/format mismatch、unsupported
+  deployment mode、unsafe target、既有非 symlink/foreign symlink 会 blocked。
+- Desktop 对每个新勾选 target 请求 Rust preview：blocked 不可部署，warning 需要显式
+  确认，compatible 可直接确认。
+- apply 重算 skill 全目录 snapshot、target canonical path/state、profile identity、
+  registry version 和 frontmatter compatibility；stale preview 拒绝。
+- target 不存在时，仅在显式确认后创建指向 managed skill 的 symlink。
 - target 是 symlink 且已指向同一 managed path 时视为成功。
 - 写入 SQLite `deployments`。
 - undeploy 时只删除 `target_root/<skill-name>` 这个 symlink，并删除 SQLite `deployments` 对应记录。
@@ -180,12 +198,16 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - undeploy 遇到非 symlink 或指向其它位置的 symlink 时拒绝，不能删除磁盘内容。
 - active import 的 source workspace 必须通过 Revert Import 恢复，不能直接 undeploy；同一 skill 的其它 workspace deployment 仍可单独移除。
 - 不删除非 SkillBox 管理的内容。
+- preview 不写 runtime；apply 前 skill、target 或 workspace profile metadata 变化时
+  要求重新 preview。
 
 完成验证：
 
 - `cargo test --offline`
 - `npm test`
-- `cargo run -p skillbox-cli --offline -- deploy <skill-name> --target <temp-runtime> --managed-root <temp-skillbox-root>`
+- `cargo run -p skillbox-cli --offline -- runtime-profiles`
+- `cargo run -p skillbox-cli --offline -- deploy-preview <skill-name> --target <registered-runtime> --managed-root <temp-skillbox-root>`
+- `cargo run -p skillbox-cli --offline -- deploy <skill-name> --target <registered-runtime> --preview-id <id> --managed-root <temp-skillbox-root>`
 - `cargo run -p skillbox-cli --offline -- undeploy <skill-name> --target <temp-runtime> --managed-root <temp-skillbox-root>`
 - 检查 target path 是 symlink，real path 指向 managed store。
 - 检查 undeploy 后 target symlink 消失，非 symlink target 不会被删除。
@@ -476,7 +498,11 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 步骤：
 
-- 定义 `agent_id`、display name、支持的 scope 和默认发现路径。
+- 先判断需求是同格式 runtime profile，还是 native format adapter。只新增
+  `SKILL.md` root/capability 时扩展 Rust profile registry；非 `SKILL.md` format 才新增
+  adapter。
+- 定义独立的 profile/adapter id、display name、支持 scope 和默认发现路径；不要复用
+  usage/call `agent_id` 作为 target identity。
 - 定义原生格式读取方式：单文件、目录、规则文件、提示词文件或能力包。
 - 定义如何转换为 SkillBox 规范化记录，包括 name、description、content hash、source path 和格式类型。
 - 定义部署方式：symlink、copy snapshot、生成文件、或 adapter-specific materialization。
@@ -511,16 +537,20 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 步骤：
 
-- `workspace-scan` 调用 Rust core 发现存在且可读取的 `.codex/skills`、`.agents/skills`、`.claude/skills` roots。
+- `workspace-scan` 调用 Rust profile registry，按明确 precedence 发现存在且可读取的
+  `.agents/skills`、`.codex/skills`、`.claude/skills`、`.cursor/skills` roots。
 - home-level roots 记录为 `kind=global`；项目局部 roots 记录为 `kind=user`。
-- 根据路径推断 `agent_id`：`.codex` -> `codex`，`.agents` -> `agents`，`.claude` -> `claude`。
+- Rust 写入 `profile_id/root_key/format`；legacy `agent_id` 只为兼容保留，React 不根据
+  path marker 推断 runtime identity。
 - display name 由 path 推导：global root 使用 agent 名，项目局部 root 使用项目目录名，不拼接 `global` 或 `user`。
 - 扫描每个 workspace root，记录 skill 数、已导入 skill 数、scan error 数和最后一条 scan error。
 - 点击 workspace 时只扫描该 workspace path，复用 import candidate review 行样式展示其中的 skills，并使用现有 `import_candidates` 流程导入选中项。
 - Add workspace 的 `Project` 选项继续持久化为兼容现有 registry 的 `kind=user`；`Global` 继续持久化为 `kind=global`，不需要 schema migration。
 - `Project or skills folder` 保留可编辑的绝对路径输入；打包版 Tauri app 额外提供原生目录选择器，只允许选择一个本地目录，不接受文件或多选。浏览器 prototype 不把 file input 当成可信绝对路径来源。
 - 原生选择器返回目录后，UI 将绝对路径写入现有输入框，清除旧 preview、root selection 和 error，并在保持当前 Project/Global scope 的前提下立即调用只读 workspace setup preview；用户取消选择时保留当前路径和 preview，不显示错误。
-- workspace setup preview 是只读操作。现有 skills-root path 可直接登记；普通项目目录只检测直属的 `.agents/skills`、`.codex/skills`、`.claude/skills`。
+- workspace setup preview 是只读操作。现有 skills-root path 可直接登记；普通项目目录
+  只检测 registry v1 的 `.agents/skills`、`.codex/skills`、
+  `.claude/skills`、`.cursor/skills`。
 - 若项目中存在一个或多个受支持 root，用户必须选择其中一个登记。若不存在，UI 只允许选择并创建一个 root；已有 runtime marker 优先推荐对应 root，否则确定性默认 `.agents/skills`。
 - apply 会重新校验 preview identity、项目 canonical boundary、固定 relative-root allowlist、目录类型和 symlink 边界，然后才创建并登记。不会修改现有项目文件，也不会同时创建多个 runtime roots。
 - Global setup 只允许登记已存在目录，不推断或创建 global root。旧 `workspace-add <path> --kind user|global` CLI contract 继续只登记已存在目录。

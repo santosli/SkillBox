@@ -1,7 +1,7 @@
 export function normalizeSkill(skill) {
   const sourceRoot = skill.sourceRoot || skill.source_root;
   const isSymlink = skill.isSymlink || skill.is_symlink;
-  const type = skill.type || inferType(sourceRoot);
+  const type = skill.type || 'remote';
   const usageCountValue = Number(skill.usageCount ?? skill.usage_count);
 
   return {
@@ -64,11 +64,6 @@ export function normalizePaths(paths) {
     remoteSkillsRoot: paths.remoteSkillsRoot || paths.remote_skills_root,
     databasePath: paths.databasePath || paths.database_path
   };
-}
-
-function inferType(sourceRoot = '') {
-  if (String(sourceRoot).includes('.agents')) return 'user';
-  return 'remote';
 }
 
 export function defaultSkillStatus(type) {

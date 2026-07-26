@@ -233,7 +233,7 @@ export function RemoteVersionReviewDialog({ dialog, onActivatePath, onApply, onC
     allowNoFileChanges,
     files: preview?.files || [],
     loading: dialog.loading || dialog.applying
-  });
+  }) && preview?.compatibility?.status !== 'blocked';
 
   return (
     <div
@@ -253,6 +253,24 @@ export function RemoteVersionReviewDialog({ dialog, onActivatePath, onApply, onC
         </div>
         <div className="gitCommitDialogBody">
           {dialog.loading ? <LoadingNotice>{dialog.loadingLabel || 'Loading diff...'}</LoadingNotice> : null}
+          {preview?.compatibility ? (
+            <div className={`remoteCompatibilitySummary ${preview.compatibility.status}`}>
+              <div>
+                <strong>{preview.compatibility.profileName || preview.compatibility.profileId}</strong>
+                <span>
+                  {preview.compatibility.status === 'compatible' ? 'Compatible' : null}
+                  {preview.compatibility.status === 'warnings' ? 'Warning' : null}
+                  {preview.compatibility.status === 'blocked' ? 'Blocked' : null}
+                </span>
+              </div>
+              {preview.compatibility.issues.map((issue) => (
+                <p key={`${issue.code}-${issue.message}`}>
+                  {issue.message}
+                  {issue.suggestedAction ? <small>{issue.suggestedAction}</small> : null}
+                </p>
+              ))}
+            </div>
+          ) : null}
           {preview ? (
             <div className="gitCommitReview">
               <aside className="gitFilePane">

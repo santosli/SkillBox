@@ -2271,6 +2271,21 @@ strong.usageRankingTopCardName {
   flex: 0 0 24px;
 }
 
+.workspaceProfileIdentity {
+  display: flex;
+  min-width: 0;
+  margin-left: auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.workspaceProfileIdentity .badge {
+  max-width: 132px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .workspaceCardPath {
   min-width: 0;
   overflow: hidden;
@@ -4060,6 +4075,11 @@ dd {
   padding: 10px;
 }
 
+.deployWorkspaceItem {
+  display: grid;
+  min-width: 0;
+}
+
 .deployWorkspaceRow {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr);
@@ -4076,6 +4096,10 @@ dd {
 .deployWorkspaceRow.deployed {
   border-color: var(--skillbox-green-border);
   background: #f7fff9;
+}
+
+.deployWorkspaceRow:has(input:disabled) {
+  cursor: default;
 }
 
 .deployWorkspaceRow input {
@@ -4133,6 +4157,41 @@ dd {
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.deployCompatibilityDetails,
+.deployCompatibilityError {
+  display: grid;
+  gap: 6px;
+  margin: -1px 10px 0 36px;
+  border: 1px solid var(--skillbox-amber-border);
+  border-top: 0;
+  border-radius: 0 0 8px 8px;
+  background: var(--skillbox-surface-orange);
+  color: var(--skillbox-orange-text);
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 9px 11px;
+}
+
+.deployCompatibilityDetails.blocked,
+.deployCompatibilityError {
+  border-color: var(--skillbox-red-border);
+  background: var(--skillbox-red-bg);
+  color: var(--skillbox-red-text);
+}
+
+.deployCompatibilityConfirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--skillbox-text);
+  font-weight: 650;
+}
+
+.deployCompatibilityConfirm input {
+  width: 15px;
+  height: 15px;
 }
 
 .deployWorkspaceWarning {
@@ -5320,6 +5379,45 @@ dd {
 
 .remoteDialogError {
   margin: 0 24px 24px;
+}
+
+.remoteCompatibilitySummary {
+  display: grid;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--skillbox-border);
+  background: var(--skillbox-surface-muted);
+}
+
+.remoteCompatibilitySummary > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.remoteCompatibilitySummary > div span {
+  color: var(--skillbox-green-text);
+  font-weight: 700;
+}
+
+.remoteCompatibilitySummary.warnings > div span {
+  color: var(--skillbox-amber-text);
+}
+
+.remoteCompatibilitySummary.blocked > div span {
+  color: var(--skillbox-red-text);
+}
+
+.remoteCompatibilitySummary p {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  color: var(--skillbox-text-muted);
+}
+
+.remoteCompatibilitySummary p small {
+  color: var(--skillbox-text-muted);
 }
 
 .localImportBody {

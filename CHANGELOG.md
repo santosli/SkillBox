@@ -7,7 +7,17 @@ version tags such as `v0.3.0`.
 
 ## Unreleased
 
-- No unreleased changes.
+- Add a versioned Rust runtime-profile registry for Agents, Codex, Claude Code,
+  Cursor, and exact custom `SKILL.md` roots, with deterministic discovery
+  precedence and schema-v6 workspace backfill that does not require a rescan.
+- Preserve structured `SKILL.md` frontmatter during read-only compatibility
+  checks, reporting unknown optional fields as warnings and malformed or hard
+  incompatibilities as blockers without rewriting source files.
+- Require a fresh compatibility preview before deployment across core, CLI,
+  Tauri, and desktop; stale skill snapshots, targets, or profile metadata are
+  rejected before runtime writes.
+- Show runtime profile identity and Compatible/Warning/Blocked results in
+  Workspaces and deployment review, replacing React path-marker inference.
 
 ## 0.5.1
 

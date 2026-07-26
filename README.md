@@ -32,6 +32,7 @@ A 30-second overview of SkillBox: local-first skill management, review-before-im
 - **Reviewed Git commit and push.** Inspect user-skill diffs, create a Conventional Commit, and optionally push it; inbound divergence remains a normal Git conflict to resolve outside SkillBox.
 - **Locally observed calls, local rankings, and operation history.** Record supported agent hook calls, rank skills by the calls SkillBox can observe on this Mac, and show those calls beside management operations without storing full chat transcripts.
 - **Safe storage and deployment defaults.** Use ordered SQLite migrations, recovery backups, integrity checks, and ownership-checked symlinks instead of silently overwriting runtime content.
+- **Compatibility before deployment.** Rust-owned runtime profiles identify each workspace and report preserved frontmatter warnings or hard blockers before a confirmed symlink deployment.
 - **Signed macOS distribution.** Install a notarized DMG or Homebrew cask and apply signed app updates only after confirmation.
 
 ## Screenshots
@@ -42,7 +43,7 @@ The dashboard provides local search, type/update/tag/favorite filters, grid and 
 
 ![SkillBox workspaces](docs/screenshots/skillbox-workspaces-v041.jpg)
 
-The Workspaces view tracks global and project-local `SKILL.md` roots across Codex CLI, Codex App, Claude Code skill folders, and project-specific runtimes. Search by workspace name, path, or agent and combine the query with Global/User filters.
+The Workspaces view tracks profile-aware global and project-local `SKILL.md` roots for Agents, Codex, Claude Code, Cursor, and exact custom folders. Search by workspace name, path, or profile and combine the query with the existing scope filters.
 
 ![SkillBox history](docs/screenshots/skillbox-history-v041.jpg)
 
@@ -83,19 +84,21 @@ Runtime directories are deployment targets:
 - `~/.codex/skills`
 - `~/.agents/skills`
 - `~/.claude/skills`
+- `~/.cursor/skills`
 - project-local `.codex/skills`
 - project-local `.agents/skills`
 - project-local `.claude/skills`
+- project-local `.cursor/skills`
 
 Longer-term support for native Claude, OpenClaw, Cursor, Claude Code, Copilot, and other non-`SKILL.md` formats should go through explicit agent adapters rather than hard-coded UI behavior.
 
 ## Features
 
-- Scan and register supported global or project-local `SKILL.md` workspaces. In the packaged macOS app, use the native single-directory picker or enter a path manually to choose a project or existing skills folder; SkillBox immediately runs a read-only preview, and can explicitly create exactly one selected `.agents/skills`, `.codex/skills`, or `.claude/skills` root before registration. Cancelling the picker changes nothing, and SkillBox never creates all runtime roots automatically.
+- Scan and register supported global or project-local `SKILL.md` workspaces. In the packaged macOS app, use the native single-directory picker or enter a path manually to choose a project or existing skills folder; SkillBox immediately runs a read-only preview, and can explicitly create exactly one selected `.agents/skills`, `.codex/skills`, `.claude/skills`, or `.cursor/skills` root before registration. Cancelling the picker changes nothing, and SkillBox never creates all runtime roots automatically.
 - Review user, remote, and system import candidates before copying anything; group import-equivalent multi-root copies without losing their source locations, and conservatively revert eligible deploy-back imports.
 - Install GitHub-backed skills through a preview/apply flow and bind discovered remote source candidates without replacing the active version.
 - Check remote sources, preview all-file diffs, apply updates, and roll back to immutable versions.
-- Deploy or remove managed skills in individual workspaces through ownership-checked symlinks; migrate User/Remote ownership and retarget deployments through a reviewed flow.
+- Preview runtime-profile and frontmatter compatibility before deploying to an individual workspace. Blocked targets cannot be selected, warnings require confirmation, and apply revalidates stale skill/target/profile state before creating an ownership-checked symlink.
 - Delete a skill from the managed store and all associated workspaces after a name-confirmed preview, while retaining a recovery backup and workspace registrations.
 - Review user-skill Git diffs, create selected-file Conventional Commits, and optionally push without attempting an inbound auto-merge.
 - Search and filter the dashboard by type, update status, tag, or favorite; switch between grid and list views, with favorites and tags persisted in SQLite.

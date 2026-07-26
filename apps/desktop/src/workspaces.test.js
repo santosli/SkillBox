@@ -15,6 +15,7 @@ const {
   workspaceMatchesFilters,
   workspaceCounts,
   workspaceDeploymentChanges,
+  workspaceDeployCanSubmit,
   workspaceDeployPickerRows,
   workspaceDeployRequiresConfirmation,
   workspaceSkillReviewMeta,
@@ -31,6 +32,10 @@ test('normalizes workspace setup preview roots and preserves project scope mappi
       path: '/Users/example/project/.agents/skills',
       relative_path: '.agents/skills',
       agent_id: 'agents',
+      profile_id: 'agents',
+      profile_name: 'Agents',
+      root_key: 'skills',
+      format: 'skill_md',
       label: 'Agents',
       exists: false,
       recommended: true
@@ -43,6 +48,10 @@ test('normalizes workspace setup preview roots and preserves project scope mappi
     path: '/Users/example/project/.agents/skills',
     relativePath: '.agents/skills',
     agentId: 'agents',
+    profileId: 'agents',
+    profileName: 'Agents',
+    rootKey: 'skills',
+    format: 'skill_md',
     label: 'Agents',
     exists: false,
     recommended: true
@@ -56,6 +65,10 @@ test('normalizes workspace snake case fields and compact labels', () => {
     kind: 'user',
     source: 'manual',
     agent_id: 'agents',
+    profile_id: 'agents',
+    profile_name: 'Agents',
+    root_key: 'skills',
+    format: 'skill_md',
     display_name: 'Agents User',
     skill_count: 3,
     imported_skill_count: 2,
@@ -68,12 +81,16 @@ test('normalizes workspace snake case fields and compact labels', () => {
   assert.equal(workspace.canonicalPath, '/Users/example/project/.agents/skills');
   assert.equal(workspace.compactPath, '~/project/.agents/skills');
   assert.equal(workspace.kindLabel, 'User');
-  assert.equal(workspace.agentLabel, 'Codex CLI');
+  assert.equal(workspace.agentLabel, 'Agents');
+  assert.equal(workspace.profileId, 'agents');
+  assert.equal(workspace.profileName, 'Agents');
+  assert.equal(workspace.rootKey, 'skills');
+  assert.equal(workspace.format, 'skill_md');
   assert.deepEqual(workspace.agentIcon, {
     id: 'workspace:/Users/example/project/.agents/skills',
-    label: 'project',
+    label: 'Agents User',
     iconClass: 'workspace',
-    iconLabel: 'P',
+    iconLabel: 'A',
     workspace: true
   });
   assert.equal(workspace.skillCount, 3);
@@ -99,43 +116,53 @@ test('derives workspace display names from agent roots and project directories',
       path: '/Users/example/.codex/skills',
       kind: 'global',
       agent_id: 'codex',
+      profile_id: 'codex',
+      profile_name: 'Codex',
       display_name: 'Codex Global'
     }).displayName,
-    'Codex'
+    'Codex Global'
   );
   assert.equal(
     normalizeWorkspace({
       path: '/Users/example/.agents/skills',
       kind: 'global',
       agent_id: 'agents',
+      profile_id: 'agents',
+      profile_name: 'Agents',
       display_name: 'Agents'
     }).displayName,
-    'Codex CLI'
+    'Agents'
   );
   assert.equal(
     normalizeWorkspace({
       path: '/Users/example/Library/Mobile Documents/iCloud~md~obsidian/Documents/demo-vault/.agents/skills',
       kind: 'user',
       agent_id: 'agents',
+      profile_id: 'agents',
+      profile_name: 'Agents',
       display_name: 'Agents User'
     }).displayName,
-    'demo-vault'
+    'Agents User'
   );
   assert.equal(
     normalizeWorkspace({
       path: '/Users/example/zone/demo-app/.codex/skills',
       kind: 'user',
-      agent_id: 'codex'
+      agent_id: 'codex',
+      profile_id: 'codex',
+      profile_name: 'Codex'
     }).displayName,
     'demo-app'
   );
 });
 
-test('derives user workspace icons from display names instead of runtime paths', () => {
+test('uses project identity for user workspaces without inferring runtime from paths', () => {
   assert.deepEqual(
     normalizeWorkspace({
       path: '/Users/example/zone/demo-app/.codex/skills',
-      kind: 'user'
+      kind: 'user',
+      profile_id: 'codex',
+      profile_name: 'Codex'
     }).agentIcon,
     {
       id: 'workspace:/Users/example/zone/demo-app/.codex/skills',
@@ -190,18 +217,22 @@ test('filters workspaces by query and type together', () => {
   const codexGlobal = normalizeWorkspace({
     path: '/Users/example/.codex/skills',
     kind: 'global',
-    agent_id: 'codex'
+    agent_id: 'codex',
+    profile_id: 'codex',
+    profile_name: 'Codex'
   });
   const projectWorkspace = normalizeWorkspace({
     path: '/Users/example/zone/demo-app/.agents/skills',
     kind: 'user',
-    agent_id: 'agents'
+    agent_id: 'agents',
+    profile_id: 'agents',
+    profile_name: 'Agents'
   });
 
   assert.equal(workspaceMatchesFilters(codexGlobal, { query: 'codex', type: 'all' }), true);
   assert.equal(workspaceMatchesFilters(projectWorkspace, { query: 'demo-app', type: 'user' }), true);
   assert.equal(workspaceMatchesFilters(projectWorkspace, { query: '.agents/skills', type: 'all' }), true);
-  assert.equal(workspaceMatchesFilters(projectWorkspace, { query: 'Codex CLI', type: 'user' }), true);
+  assert.equal(workspaceMatchesFilters(projectWorkspace, { query: 'Agents', type: 'user' }), true);
   assert.equal(workspaceMatchesFilters(projectWorkspace, { query: 'demo-app', type: 'global' }), false);
   assert.equal(workspaceMatchesFilters(codexGlobal, { query: 'missing', type: 'all' }), false);
 });
@@ -270,6 +301,34 @@ test('computes deploy and undeploy changes from picker rows', () => {
     '/Users/example/project/.agents/skills'
   ]);
   assert.equal(workspaceDeployRequiresConfirmation(changes), true);
+});
+
+test('requires compatibility previews and explicit warning confirmation for new deployments', () => {
+  const base = {
+    isSelected: true,
+    isDeployed: false,
+    compatibilityLoading: false,
+    confirmWarnings: false
+  };
+  assert.equal(workspaceDeployCanSubmit([{ ...base, compatibility: null }]), false);
+  assert.equal(
+    workspaceDeployCanSubmit([{ ...base, compatibility: { status: 'blocked' } }]),
+    false
+  );
+  assert.equal(
+    workspaceDeployCanSubmit([{ ...base, compatibility: { status: 'warnings' } }]),
+    false
+  );
+  assert.equal(
+    workspaceDeployCanSubmit([
+      { ...base, compatibility: { status: 'warnings' }, confirmWarnings: true }
+    ]),
+    true
+  );
+  assert.equal(
+    workspaceDeployCanSubmit([{ ...base, compatibility: { status: 'compatible' } }]),
+    true
+  );
 });
 
 test('workspace helpers do not expose a status field formatter', () => {
