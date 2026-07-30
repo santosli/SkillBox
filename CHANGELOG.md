@@ -18,6 +18,9 @@ version tags such as `v0.3.0`.
 - Block collisions with ignored or untracked local content, isolate the flow
   from repository hooks/filters/merge drivers, serialize managed mutations, and
   use compare-and-swap recovery that never discards unrelated Git work.
+- Harden recovery with identity-bound quarantine restores, atomic generated-file
+  handling, bounded Git preflight, an explicit transport allowlist, and
+  structured partial-success warnings when only lock cleanup is contested.
 - Add matching Rust CLI, Tauri, and desktop review surfaces while preserving the
   existing outbound commit-and-push behavior.
 

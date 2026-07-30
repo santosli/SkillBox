@@ -557,9 +557,11 @@ Apply fast-forward:
 - Apply 持有 `.git/index.lock`，使并发 `git add` / `git commit` fail closed；tracked
   文件在替换或删除前以 fd-relative no-replace rename 移入 `.git/skillbox/` 内的
   operation-scoped recovery snapshot。snapshot parent chain 通过 no-follow directory
-  handle 逐级打开；预置或并发换入的 symlink/非目录不能重定向恢复写入。写入、ref
-  推进前后都会复核受审内容；检测到外部编辑时恢复或保留双方内容并要求人工处理，
-  不静默覆盖。
+  handle 逐级打开；receipt 绑定 backup entry 的 device/inode/size/content hash，
+  restore/cleanup 先将 pathname 原子移入私有 quarantine 再核验身份。预置或并发换入的
+  symlink、非目录或 replacement entry 不能重定向恢复写入，也不能被误当成已恢复。
+  写入、ref 推进前后都会复核受审内容；检测到外部编辑时恢复或保留双方内容并要求人工
+  处理，不静默覆盖。
 - Incoming add/rename/type-change 如果与本地 ignored 或 untracked path 发生 exact、
   ancestor 或 descendant 碰撞，Apply 必须在 mutation 前 blocked。普通
   `git status` 未显示 ignored 内容不等于可覆盖。
@@ -573,12 +575,22 @@ Apply fast-forward:
   保留 backup ref 并返回失败；补偿只在 HEAD 仍等于 expected applied SHA 且操作写集
   未被并发改变时执行，不能 reset 掉外部 commit。Remote-only 补偿还必须清空 index，
   并以 no-replace 方式恢复 generated `.gitignore`；若其它进程已创建不同内容则保留
-  外部内容并报告 partial recovery，不能截断它。
+  外部内容并报告 partial recovery，不能截断它。Remote-only apply 会先原子转移当前
+  `.gitignore` 再核验它仍是 SkillBox 生成的真实 regular file，因此 preflight 后的
+  editor atomic-save replacement 或 symlink 不会被 unlink。
+- Compensation 独立尝试所有仍可安全证明的 ref、index、worktree、generated defaults
+  和 lock cleanup；单项失败不会跳过其它恢复。若 Git/worktree/SQLite 已成功，但
+  `.git/index.lock` 的 pathname 已被外部替换，apply 返回 succeeded result 加
+  actionable warning，operation phase 记录 `completed_with_warnings`，不会伪装成普通
+  failed apply 或删除 replacement lock。
 - Operation log 记录 aggregate old/new refs、backup ref、mutation phase 与
   compensation outcome，不记录 credentials、diff contents 或 skill bodies。
   Remote identity 必须去除 URL userinfo、query 和 fragment。
-- Network fetch/push 拒绝 repository-local credential helper、SSH/upload/receive-pack
-  command、URL rewrite 和 transport override，禁止 `ext` protocol；按原顺序恢复用户
+- Network fetch/push 拒绝 repository-local 与 worktree-scope credential helper、
+  include/proxy、SSH/upload/receive-pack command、URL rewrite 和 protocol override；
+  `GIT_ALLOW_PROTOCOL` 只允许 `file/http/https/ssh/git`，任意 `git-remote-*` custom
+  helper 与 `ext` transport 均 fail closed。所有 origin/config/fetch preflight 共用
+  bounded deadline 和 isolated process-group termination；按原顺序恢复用户
   global generic/URL-scoped credential helpers（包括 GitHub CLI blank reset）与
   `core.sshCommand`。repo-local executable config 不得在 reviewed flow 中执行；global
   Git config 是用户受信任边界。helper/server stderr 只映射为有界分类错误，不直接进入
@@ -588,6 +600,9 @@ Apply fast-forward:
 
 - `diverged` 没有 Apply success path。只通过 commit/tree diff 生成 bounded
   both-changed files/skills 与 likely-conflict 诊断，不执行 remote `.gitattributes`
+  driver。Rename provenance 会保留到诊断中，clean delete/delete 不标为 conflict，
+  rename/delete 与 rename/rename 由 merge-tree 标出。无 merge base 的 unrelated
+  histories 返回结构化 `analysis unavailable` 原因，而不是伪装成 0 conflicts。
   选择的 merge driver。用户需在 SkillBox 外使用正常 Git 工具
   fetch/merge/rebase 并检查冲突，完成后回到 SkillBox 点 Refresh/Check remote。
 - 该手动解决过程不改变 outbound `sync-user-skills` 的 `push_failed` 语义：

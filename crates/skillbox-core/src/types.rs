@@ -711,6 +711,8 @@ pub struct UserSkillsInboundSafetyIssue {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
 pub struct UserSkillsInboundConflictAnalysis {
+    pub available: bool,
+    pub unavailable_reason: Option<String>,
     pub local_only_commits: u32,
     pub remote_only_commits: u32,
     pub both_changed_files: Vec<String>,
@@ -746,6 +748,7 @@ pub struct UserSkillsInboundApplyResult {
     pub changed_skill_count: usize,
     pub changed_file_count: usize,
     pub operation_id: String,
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]

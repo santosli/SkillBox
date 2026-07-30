@@ -1576,13 +1576,14 @@ fn mutation_lock_expands_tilde_before_locking_across_working_directories() {
     const READY: &str = "SKILLBOX_TILDE_LOCK_READY";
     const RELEASE: &str = "SKILLBOX_TILDE_LOCK_RELEASE";
     if let Some(role) = std::env::var_os(ROLE) {
-        let managed_root = if role == "env-holder" {
+        let role = role.to_string_lossy();
+        let managed_root = if role.starts_with("env-") {
             default_managed_root()
         } else {
             PathBuf::from("~/.skillbox")
         };
         match acquire_user_skills_mutation_lock(&managed_root) {
-            Ok(_lock) if role == "env-holder" || role == "cli-holder" => {
+            Ok(_lock) if role.ends_with("holder") => {
                 fs::write(std::env::var_os(READY).unwrap(), b"ready").unwrap();
                 let release = PathBuf::from(std::env::var_os(RELEASE).unwrap());
                 while !release.exists() {
@@ -1598,8 +1599,18 @@ fn mutation_lock_expands_tilde_before_locking_across_working_directories() {
         return;
     }
 
-    for holder_role in ["env-holder", "cli-holder"] {
+    for (holder_role, configured_home) in [
+        ("env-tilde-holder", "~/.skillbox"),
+        ("env-normalized-holder", "~/alias/../.skillbox"),
+        ("cli-holder", "~/.skillbox"),
+    ] {
         let home = temp_dir(&format!("tilde-lock-home-{holder_role}"));
+        fs::create_dir_all(home.join("alias")).unwrap();
+        make_skill(
+            &home.join("SkillBox/user-skills/legacy-demo"),
+            "legacy-demo",
+            "Legacy demo",
+        );
         let holder_cwd = temp_dir(&format!("tilde-lock-holder-cwd-{holder_role}"));
         let contender_cwd = temp_dir(&format!("tilde-lock-contender-cwd-{holder_role}"));
         let barrier = temp_dir(&format!("tilde-lock-barrier-{holder_role}"));
@@ -1614,7 +1625,7 @@ fn mutation_lock_expands_tilde_before_locking_across_working_directories() {
             ])
             .current_dir(&holder_cwd)
             .env("HOME", &home)
-            .env("SKILLBOX_HOME", "~/.skillbox")
+            .env("SKILLBOX_HOME", configured_home)
             .env(ROLE, holder_role)
             .env(READY, &ready)
             .env(RELEASE, &release)
@@ -1644,7 +1655,11 @@ fn mutation_lock_expands_tilde_before_locking_across_working_directories() {
         );
         fs::write(&release, b"release").unwrap();
         assert!(holder.wait().unwrap().success());
-        assert!(home.join(".skillbox/.user-skills-mutation.lock").is_file());
+        assert!(fs::symlink_metadata(home.join(".skillbox"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(home.join("SkillBox/.user-skills-mutation.lock").is_file());
         assert!(!holder_cwd.join("~/.skillbox").exists());
         assert!(!contender_cwd.join("~/.skillbox").exists());
     }

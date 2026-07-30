@@ -18,6 +18,10 @@ const MAX_TREE_ENTRIES: usize = 20_000;
 const MAX_SHOW_FILE_BYTES: usize = 2 * 1024 * 1024;
 const BACKUP_REF_PREFIX: &str = "refs/skillbox/backups/";
 static COMMAND_OUTPUT_COUNTER: AtomicU64 = AtomicU64::new(0);
+#[cfg(test)]
+thread_local! {
+    static TEST_COMMAND_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitStatus {
@@ -39,6 +43,21 @@ pub struct GitDiffFile {
     pub old_path: Option<String>,
     pub status: String,
     pub diff: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitRefChange {
+    pub path: String,
+    pub old_path: Option<String>,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitMergeDiagnosis {
+    pub local_changes: Vec<GitRefChange>,
+    pub remote_changes: Vec<GitRefChange>,
+    pub conflict_files: Vec<String>,
+    pub base_skill_names: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,12 +101,29 @@ pub struct GitLogEntry {
     pub subject: String,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-pub struct GitService;
+#[derive(Debug, Clone, Copy)]
+pub struct GitService {
+    preflight_timeout: Duration,
+}
+
+impl Default for GitService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl GitService {
     pub fn new() -> Self {
-        Self
+        Self {
+            preflight_timeout: LOCAL_GIT_TIMEOUT,
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn with_preflight_timeout(timeout: Duration) -> Self {
+        Self {
+            preflight_timeout: timeout,
+        }
     }
 
     pub fn status(&self, repo: impl AsRef<Path>) -> Result<GitStatus, String> {
@@ -289,10 +325,21 @@ impl GitService {
 
     pub fn origin_url(&self, repo: impl AsRef<Path>) -> Result<Option<String>, String> {
         let repo = repo.as_ref();
-        match self.run(repo, &["remote", "get-url", "origin"]) {
-            Ok(url) => Ok(Some(url.trim().to_string()).filter(|value| !value.is_empty())),
-            Err(error) if error.contains("No such remote") => Ok(None),
-            Err(error) => Err(error),
+        let output = self.run_output_with_timeout(
+            repo,
+            &["remote", "get-url", "origin"],
+            self.preflight_timeout,
+            "git remote get-url",
+        )?;
+        if output.status.success() {
+            let url = String::from_utf8_lossy(&output.stdout);
+            return Ok(Some(url.trim().to_string()).filter(|value| !value.is_empty()));
+        }
+        let error = sanitize_git_error(String::from_utf8_lossy(&output.stderr).trim());
+        if error.contains("No such remote") {
+            Ok(None)
+        } else {
+            Err(error)
         }
     }
 
@@ -572,6 +619,151 @@ impl GitService {
                 })
             })
             .collect()
+    }
+
+    pub fn diagnose_merge(
+        &self,
+        repo: impl AsRef<Path>,
+        base: &str,
+        local: &str,
+        remote: &str,
+    ) -> Result<GitMergeDiagnosis, String> {
+        for revision in [base, local, remote] {
+            validate_resolved_commit_id(revision)?;
+        }
+        let repo = repo.as_ref();
+        let deadline = Instant::now() + LOCAL_GIT_TIMEOUT;
+        let local_changes = self.diff_ref_statuses_until(repo, base, local, deadline)?;
+        let remote_changes = self.diff_ref_statuses_until(repo, base, remote, deadline)?;
+        let merge = self.merge_tree_analysis_until(repo, local, remote, deadline)?;
+        let base_skill_names = self.base_skill_names_until(repo, base, deadline)?;
+        Ok(GitMergeDiagnosis {
+            local_changes,
+            remote_changes,
+            conflict_files: merge.conflict_files,
+            base_skill_names,
+        })
+    }
+
+    #[cfg(test)]
+    fn diagnose_merge_with_timeout(
+        &self,
+        repo: impl AsRef<Path>,
+        base: &str,
+        local: &str,
+        remote: &str,
+        timeout: Duration,
+    ) -> Result<GitMergeDiagnosis, String> {
+        for revision in [base, local, remote] {
+            validate_resolved_commit_id(revision)?;
+        }
+        let repo = repo.as_ref();
+        let deadline = Instant::now() + timeout;
+        let local_changes = self.diff_ref_statuses_until(repo, base, local, deadline)?;
+        let remote_changes = self.diff_ref_statuses_until(repo, base, remote, deadline)?;
+        let merge = self.merge_tree_analysis_until(repo, local, remote, deadline)?;
+        let base_skill_names = self.base_skill_names_until(repo, base, deadline)?;
+        Ok(GitMergeDiagnosis {
+            local_changes,
+            remote_changes,
+            conflict_files: merge.conflict_files,
+            base_skill_names,
+        })
+    }
+
+    fn diff_ref_statuses_until(
+        &self,
+        repo: &Path,
+        old_revision: &str,
+        new_revision: &str,
+        deadline: Instant,
+    ) -> Result<Vec<GitRefChange>, String> {
+        let args = [
+            "diff",
+            "--name-status",
+            "-z",
+            "-M",
+            "--no-ext-diff",
+            old_revision,
+            new_revision,
+        ];
+        let output = self.run_hardened_status_output(
+            repo,
+            &args,
+            remaining_git_deadline(deadline)?,
+            "git diff status",
+        )?;
+        let entries = parse_name_status_z(&self.success_stdout_bytes(output)?)?;
+        if entries.len() > MAX_REF_DIFF_FILES {
+            return Err(format!(
+                "Git diff contains more than {MAX_REF_DIFF_FILES} files."
+            ));
+        }
+        Ok(entries
+            .into_iter()
+            .map(|(status, old_path, path)| GitRefChange {
+                path,
+                old_path,
+                status,
+            })
+            .collect())
+    }
+
+    fn merge_tree_analysis_until(
+        &self,
+        repo: &Path,
+        left: &str,
+        right: &str,
+        deadline: Instant,
+    ) -> Result<GitMergeTreeAnalysis, String> {
+        let args = [
+            "merge-tree",
+            "--write-tree",
+            "--name-only",
+            "-z",
+            "--no-messages",
+            left,
+            right,
+        ];
+        let output = self.run_hardened_status_output(
+            repo,
+            &args,
+            remaining_git_deadline(deadline)?,
+            "git merge-tree",
+        )?;
+        if !matches!(output.status.code(), Some(0 | 1)) {
+            return Err(sanitize_git_error(
+                String::from_utf8_lossy(&output.stderr).trim(),
+            ));
+        }
+        parse_merge_tree_analysis(&output.stdout)
+    }
+
+    fn base_skill_names_until(
+        &self,
+        repo: &Path,
+        base: &str,
+        deadline: Instant,
+    ) -> Result<Vec<String>, String> {
+        let args = ["ls-tree", "-r", "-z", "--full-tree", "--name-only", base];
+        let output = self.run_hardened_status_output(
+            repo,
+            &args,
+            remaining_git_deadline(deadline)?,
+            "git ls-tree skill roots",
+        )?;
+        let output = self.success_stdout_bytes(output)?;
+        let mut names = output
+            .split(|byte| *byte == 0)
+            .filter(|path| !path.is_empty())
+            .filter_map(|path| std::str::from_utf8(path).ok())
+            .filter_map(|path| path.strip_suffix("/SKILL.md"))
+            .filter(|name| !name.contains('/'))
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        names.sort();
+        names.dedup();
+        Ok(names)
     }
 
     pub fn create_or_update_backup_ref(
@@ -1330,9 +1522,122 @@ impl GitService {
         timeout: Duration,
         label: &str,
     ) -> Result<Output, String> {
-        let mut command = hardened_network_command(repo)?;
+        let deadline = Instant::now() + timeout.min(self.preflight_timeout);
+        let mut command = self.hardened_network_command(repo, deadline)?;
         command.args(args).env("LC_ALL", "C");
-        self.command_output_with_timeout(command, timeout, label)
+        self.command_output_with_timeout(command, remaining_git_deadline(deadline)?, label)
+    }
+
+    fn hardened_network_command(&self, repo: &Path, deadline: Instant) -> Result<Command, String> {
+        self.reject_untrusted_repository_network_config(repo, deadline)?;
+        let trusted_network_config = self.trusted_global_network_config(deadline)?;
+        let mut command = Command::new("git");
+        command
+            .arg("-c")
+            .arg("core.hooksPath=/dev/null")
+            .arg("-c")
+            .arg("credential.helper=")
+            .arg("-c")
+            .arg("credential.interactive=false")
+            .arg("-c")
+            .arg("core.sshCommand=ssh")
+            .arg("-c")
+            .arg("core.gitProxy=")
+            .arg("-c")
+            .arg("remote.origin.uploadpack=git-upload-pack")
+            .arg("-c")
+            .arg("remote.origin.receivepack=git-receive-pack")
+            .arg("-c")
+            .arg("protocol.ext.allow=never");
+        for (key, value) in trusted_network_config {
+            command.arg("-c").arg(format!("{key}={value}"));
+        }
+        command
+            .arg("-C")
+            .arg(repo)
+            .env("GIT_ALLOW_PROTOCOL", "file:http:https:ssh:git")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GIT_ASKPASS", "true")
+            .env("GCM_INTERACTIVE", "never")
+            .env_remove("GIT_SSH")
+            .env_remove("GIT_SSH_COMMAND");
+        Ok(command)
+    }
+
+    fn trusted_global_network_config(
+        &self,
+        deadline: Instant,
+    ) -> Result<Vec<(String, String)>, String> {
+        let mut command = Command::new("git");
+        command
+            .args(["config", "--global", "--null", "--list"])
+            .env("LC_ALL", "C");
+        let output = self.command_output_with_timeout(
+            command,
+            remaining_git_deadline(deadline)?,
+            "git global config",
+        )?;
+        if !output.status.success() {
+            return Err("Unable to inspect trusted global Git configuration.".to_string());
+        }
+        Ok(parse_null_git_config(&output.stdout)
+            .into_iter()
+            .filter(|(key, _)| {
+                is_credential_helper_key(key) || key.eq_ignore_ascii_case("core.sshcommand")
+            })
+            .collect())
+    }
+
+    fn reject_untrusted_repository_network_config(
+        &self,
+        repo: &Path,
+        deadline: Instant,
+    ) -> Result<(), String> {
+        let local = self.read_repository_config_scope(repo, "--local", deadline)?;
+        let mut entries = local.clone();
+        if local.iter().any(|(key, value)| {
+            key.eq_ignore_ascii_case("extensions.worktreeconfig")
+                && value.eq_ignore_ascii_case("true")
+        }) {
+            entries.extend(self.read_repository_config_scope(repo, "--worktree", deadline)?);
+        }
+        let mut rejected = entries
+            .into_iter()
+            .map(|(key, _)| key)
+            .filter(|key| local_network_config_is_untrusted(key))
+            .collect::<Vec<_>>();
+        rejected.sort();
+        rejected.dedup();
+        if rejected.is_empty() {
+            return Ok(());
+        }
+        Err(format!(
+            "Repository Git config contains unsupported network override(s): {}. Remove them before retrying.",
+            rejected.join(", ")
+        ))
+    }
+
+    fn read_repository_config_scope(
+        &self,
+        repo: &Path,
+        scope: &str,
+        deadline: Instant,
+    ) -> Result<Vec<(String, String)>, String> {
+        let mut command = Command::new("git");
+        command
+            .arg("-C")
+            .arg(repo)
+            .args(["config", scope, "--null", "--list"])
+            .env("LC_ALL", "C");
+        let output = self.command_output_with_timeout(
+            command,
+            remaining_git_deadline(deadline)?,
+            "git repository config",
+        )?;
+        if !output.status.success() {
+            return Err("Unable to inspect repository Git network configuration.".to_string());
+        }
+        Ok(parse_null_git_config(&output.stdout))
     }
 
     fn run_output_with_timeout(
@@ -1368,7 +1673,7 @@ impl GitService {
             .args(args)
             .env("GIT_OPTIONAL_LOCKS", "0")
             .env("LC_ALL", "C");
-        self.command_output_with_timeout(command, timeout, label)
+        self.command_output_with_timeout(command, timeout.min(self.preflight_timeout), label)
     }
 
     fn run_output_with_timeout_env(
@@ -1506,6 +1811,8 @@ impl GitService {
         timeout: Duration,
         label: &str,
     ) -> Result<Output, String> {
+        #[cfg(test)]
+        TEST_COMMAND_COUNT.with(|count| count.set(count.get() + 1));
         let output_id = COMMAND_OUTPUT_COUNTER.fetch_add(1, Ordering::Relaxed);
         let output_root = std::env::temp_dir().join(format!(
             "skillbox-git-output-{}-{output_id}",
@@ -1576,87 +1883,6 @@ impl GitService {
     }
 }
 
-fn hardened_network_command(repo: &Path) -> Result<Command, String> {
-    reject_untrusted_local_network_config(repo)?;
-    let trusted_network_config = trusted_global_network_config();
-    let mut command = Command::new("git");
-    command
-        .arg("-c")
-        .arg("core.hooksPath=/dev/null")
-        .arg("-c")
-        .arg("credential.helper=")
-        .arg("-c")
-        .arg("credential.interactive=false")
-        .arg("-c")
-        .arg("core.sshCommand=ssh")
-        .arg("-c")
-        .arg("core.gitProxy=")
-        .arg("-c")
-        .arg("remote.origin.uploadpack=git-upload-pack")
-        .arg("-c")
-        .arg("remote.origin.receivepack=git-receive-pack")
-        .arg("-c")
-        .arg("protocol.ext.allow=never");
-    for (key, value) in trusted_network_config {
-        command.arg("-c").arg(format!("{key}={value}"));
-    }
-    command
-        .arg("-C")
-        .arg(repo)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_ASKPASS", "true")
-        .env("GCM_INTERACTIVE", "never")
-        .env_remove("GIT_SSH")
-        .env_remove("GIT_SSH_COMMAND");
-    Ok(command)
-}
-
-fn trusted_global_network_config() -> Vec<(String, String)> {
-    let output = Command::new("git")
-        .args(["config", "--global", "--null", "--list"])
-        .env("LC_ALL", "C")
-        .output();
-    let Ok(output) = output else {
-        return Vec::new();
-    };
-    if !output.status.success() {
-        return Vec::new();
-    }
-    parse_null_git_config(&output.stdout)
-        .into_iter()
-        .filter(|(key, _)| {
-            is_credential_helper_key(key) || key.eq_ignore_ascii_case("core.sshcommand")
-        })
-        .collect()
-}
-
-fn reject_untrusted_local_network_config(repo: &Path) -> Result<(), String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(["config", "--local", "--null", "--list"])
-        .env("LC_ALL", "C")
-        .output()
-        .map_err(|_| "Unable to inspect repository Git network configuration.".to_string())?;
-    if !output.status.success() {
-        return Err("Unable to inspect repository Git network configuration.".to_string());
-    }
-    let mut rejected = parse_null_git_config(&output.stdout)
-        .into_iter()
-        .map(|(key, _)| key)
-        .filter(|key| local_network_config_is_untrusted(key))
-        .collect::<Vec<_>>();
-    rejected.sort();
-    rejected.dedup();
-    if rejected.is_empty() {
-        return Ok(());
-    }
-    Err(format!(
-        "Repository Git config contains unsupported network override(s): {}. Remove them before retrying.",
-        rejected.join(", ")
-    ))
-}
-
 fn parse_null_git_config(output: &[u8]) -> Vec<(String, String)> {
     output
         .split(|byte| *byte == 0)
@@ -1687,6 +1913,7 @@ fn local_network_config_is_untrusted(key: &str) -> bool {
         || key == "include.path"
         || (key.starts_with("includeif.") && key.ends_with(".path"))
         || (key.starts_with("url.") && key.ends_with(".insteadof"))
+        || (key.starts_with("protocol.") && key.ends_with(".allow"))
         || key == "http.proxy"
         || (key.starts_with("http.") && key.ends_with(".proxy"))
 }
@@ -1967,6 +2194,21 @@ fn parse_name_status_z(output: &[u8]) -> Result<Vec<(String, Option<String>, Str
         }
     }
     Ok(entries)
+}
+
+fn validate_resolved_commit_id(value: &str) -> Result<(), String> {
+    if value.len() != 40 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("Git conflict diagnosis requires a resolved commit SHA.".to_string());
+    }
+    Ok(())
+}
+
+fn remaining_git_deadline(deadline: Instant) -> Result<Duration, String> {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        return Err("Git conflict diagnosis timed out.".to_string());
+    }
+    Ok(remaining)
 }
 
 fn parse_merge_tree_analysis(output: &[u8]) -> Result<GitMergeTreeAnalysis, String> {
@@ -2722,7 +2964,9 @@ mod tests {
             )
             .unwrap();
             std::env::set_var("GIT_CONFIG_GLOBAL", &config);
-            let trusted = trusted_global_network_config();
+            let git = GitService::new();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let trusted = git.trusted_global_network_config(deadline).unwrap();
             assert!(
                 trusted
                     .iter()
@@ -2731,7 +2975,7 @@ mod tests {
                     == 2,
                 "scoped credential helpers were not restored in order"
             );
-            let mut command = hardened_network_command(&repo).unwrap();
+            let mut command = git.hardened_network_command(&repo, deadline).unwrap();
             command
                 .args(["credential", "fill"])
                 .stdin(Stdio::piped())
@@ -2800,6 +3044,157 @@ mod tests {
             git.rev_parse_optional(&repo, "refs/remotes/origin/main")
                 .unwrap(),
             None
+        );
+    }
+
+    #[test]
+    fn network_fetch_rejects_worktree_scope_execution_config_before_ref_update() {
+        let git = GitService::new();
+        let repo = temp_dir("git-network-worktree-config");
+        let remote = bare_remote_with_skill("git-network-worktree-config-remote");
+        git.init_main(&repo).unwrap();
+        git.set_origin_url(&repo, "https://github.com/acme/repo.git")
+            .unwrap();
+        run_git(&repo, &["config", "extensions.worktreeConfig", "true"]).unwrap();
+        let marker = repo.join("worktree-helper-invoked");
+        run_git(
+            &repo,
+            &[
+                "config",
+                "--worktree",
+                "credential.helper",
+                &format!("!sh -c 'printf invoked > \"{}\"'", marker.display()),
+            ],
+        )
+        .unwrap();
+        run_git(
+            &repo,
+            &[
+                "config",
+                "--worktree",
+                &format!("url.file://{}.insteadOf", remote.display()),
+                "https://github.com/acme/repo.git",
+            ],
+        )
+        .unwrap();
+
+        let error = git.fetch_origin_main(&repo).unwrap_err();
+        assert!(
+            error.contains("credential.helper") || error.contains("url."),
+            "{error}"
+        );
+        assert!(!marker.exists());
+        assert_eq!(
+            git.rev_parse_optional(&repo, "refs/remotes/origin/main")
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn network_fetch_rejects_custom_remote_helper_without_execution() {
+        const CHILD: &str = "SKILLBOX_CUSTOM_REMOTE_HELPER_CHILD";
+        if let Some(root) = std::env::var_os(CHILD) {
+            let root = PathBuf::from(root);
+            let repo = root.join("repo");
+            let bin = root.join("bin");
+            fs::create_dir_all(&bin).unwrap();
+            let marker = root.join("custom-helper-invoked");
+            let helper = bin.join("git-remote-evil");
+            fs::write(
+                &helper,
+                format!(
+                    "#!/bin/sh\nprintf invoked > '{}'\nexit 1\n",
+                    marker.display()
+                ),
+            )
+            .unwrap();
+            fs::set_permissions(&helper, fs::Permissions::from_mode(0o700)).unwrap();
+            let git = GitService::new();
+            git.init_main(&repo).unwrap();
+            run_git(&repo, &["remote", "add", "origin", "evil::payload"]).unwrap();
+            let path = format!(
+                "{}:{}",
+                bin.display(),
+                std::env::var("PATH").unwrap_or_default()
+            );
+            std::env::set_var("PATH", path);
+
+            let error = git.fetch_origin_main(&repo).unwrap_err();
+            assert!(!error.is_empty());
+            assert!(!marker.exists(), "custom remote helper executed");
+            assert_eq!(
+                git.rev_parse_optional(&repo, "refs/remotes/origin/main")
+                    .unwrap(),
+                None
+            );
+            return;
+        }
+
+        let root = temp_dir("git-custom-helper-child");
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::network_fetch_rejects_custom_remote_helper_without_execution",
+                "--nocapture",
+            ])
+            .env(CHILD, &root)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn network_config_preflight_uses_the_fetch_deadline() {
+        const CHILD: &str = "SKILLBOX_BLOCKING_GLOBAL_CONFIG_CHILD";
+        if let Some(root) = std::env::var_os(CHILD) {
+            let root = PathBuf::from(root);
+            fs::create_dir_all(&root).unwrap();
+            let repo = root.join("repo");
+            let fifo = root.join("global.gitconfig");
+            let git = GitService::new();
+            git.init_main(&repo).unwrap();
+            run_git(
+                &repo,
+                &[
+                    "remote",
+                    "add",
+                    "origin",
+                    "https://github.com/acme/repo.git",
+                ],
+            )
+            .unwrap();
+            let status = Command::new("mkfifo").arg(&fifo).status().unwrap();
+            assert!(status.success());
+            std::env::set_var("GIT_CONFIG_GLOBAL", &fifo);
+
+            let started = Instant::now();
+            let error = git
+                .fetch_origin_main_with_timeout(&repo, Duration::from_millis(150))
+                .unwrap_err();
+            assert!(error.contains("timed out"), "{error}");
+            assert!(started.elapsed() < Duration::from_secs(2));
+            return;
+        }
+
+        let root = temp_dir("git-blocking-config-child");
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::network_config_preflight_uses_the_fetch_deadline",
+                "--nocapture",
+            ])
+            .env(CHILD, &root)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
         );
     }
 
@@ -2874,6 +3269,62 @@ mod tests {
             git.rev_parse_optional(&repo, "refs/heads/missing").unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn merge_diagnosis_is_bounded_and_preserves_rename_provenance() {
+        let git = GitService::new();
+        let repo = temp_dir("git-merge-diagnosis");
+        git.init_main(&repo).unwrap();
+        fs::create_dir_all(repo.join("demo")).unwrap();
+        write_file(
+            &repo.join("demo/SKILL.md"),
+            "---\nname: demo\ndescription: Demo\n---\n",
+        );
+        write_file(&repo.join("demo/references.md"), "base\n");
+        let base = commit_all(&repo, "base");
+
+        run_git(&repo, &["mv", "demo", "local-demo"]).unwrap();
+        write_file(
+            &repo.join("local-demo/SKILL.md"),
+            "---\nname: local-demo\ndescription: Local\n---\n",
+        );
+        let local = commit_all(&repo, "local rename");
+
+        run_git(&repo, &["checkout", "-b", "remote", &base]).unwrap();
+        run_git(&repo, &["mv", "demo", "remote-demo"]).unwrap();
+        write_file(
+            &repo.join("remote-demo/SKILL.md"),
+            "---\nname: remote-demo\ndescription: Remote\n---\n",
+        );
+        let remote = commit_all(&repo, "remote rename");
+
+        TEST_COMMAND_COUNT.with(|count| count.set(0));
+        let diagnosis = git.diagnose_merge(&repo, &base, &local, &remote).unwrap();
+        let command_count = TEST_COMMAND_COUNT.with(std::cell::Cell::get);
+        assert_eq!(
+            command_count, 4,
+            "merge diagnosis must use constant Git commands"
+        );
+        assert!(diagnosis
+            .local_changes
+            .iter()
+            .any(|change| change.old_path.as_deref() == Some("demo/references.md")));
+        assert!(diagnosis
+            .remote_changes
+            .iter()
+            .any(|change| change.old_path.as_deref() == Some("demo/references.md")));
+        assert!(
+            !diagnosis.conflict_files.is_empty(),
+            "rename/rename must not be reported as a clean zero-conflict diagnosis"
+        );
+
+        TEST_COMMAND_COUNT.with(|count| count.set(0));
+        let error = git
+            .diagnose_merge_with_timeout(&repo, &base, &local, &remote, Duration::ZERO)
+            .unwrap_err();
+        assert!(error.contains("timed out"));
+        assert_eq!(TEST_COMMAND_COUNT.with(std::cell::Cell::get), 0);
     }
 
     #[test]

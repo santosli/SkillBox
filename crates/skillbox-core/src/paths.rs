@@ -212,10 +212,12 @@ pub(crate) fn ensure_default_user_skills_gitignore(user_skills_root: &Path) -> R
 }
 
 pub(crate) fn maybe_link_legacy_default_managed_root(root: &Path) -> Result<()> {
-    if std::env::var_os("SKILLBOX_HOME").is_some() || root != default_hidden_managed_root() {
+    let root = normalize_lexical_path(&expand_home(root.to_path_buf()));
+    let default_root = normalize_lexical_path(&default_hidden_managed_root());
+    if root != default_root {
         return Ok(());
     }
-    link_legacy_managed_root_if_needed(root, &legacy_managed_root()).map(|_| ())
+    link_legacy_managed_root_if_needed(&root, &legacy_managed_root()).map(|_| ())
 }
 
 pub(crate) fn link_legacy_managed_root_if_needed(
