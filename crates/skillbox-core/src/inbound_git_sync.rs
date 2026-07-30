@@ -2900,6 +2900,7 @@ mod tests {
     use super::*;
     use std::os::unix::fs::FileTypeExt;
     use std::process::Command;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -2988,12 +2989,13 @@ mod tests {
     }
 
     fn assert_unsafe_backup_replacement_fails_without_mutation(kind: BackupReplacementKind) {
-        let managed_root = temp_dir(match kind {
+        let label = match kind {
             BackupReplacementKind::Fifo => "inbound-backup-fifo",
             BackupReplacementKind::Directory => "inbound-backup-directory",
             BackupReplacementKind::OversizedFile => "inbound-backup-oversized",
-        });
-        let (remote, work) = remote_with_skill("inbound-backup-special");
+        };
+        let managed_root = temp_dir(label);
+        let (remote, work) = remote_with_skill(label);
         configure_and_bootstrap(&managed_root, &remote);
         let paths = managed_paths(&managed_root);
         let git = skillbox_git::GitService::new();
@@ -5524,11 +5526,16 @@ mod tests {
     }
 
     fn temp_dir(prefix: &str) -> PathBuf {
+        static NEXT_TEMP_DIR: AtomicU64 = AtomicU64::new(0);
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("{prefix}-{nonce}"));
+        let sequence = NEXT_TEMP_DIR.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "{prefix}-{}-{nonce}-{sequence}",
+            std::process::id()
+        ));
         fs::create_dir_all(&path).unwrap();
         path
     }
