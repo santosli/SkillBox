@@ -446,6 +446,7 @@ export default function App() {
   const appUpdateAutoCheckedRef = useRef(false);
   const usageRankingRequestRef = useRef(0);
   const rankingImportRequestRef = useRef(0);
+  const inboundApplyRefreshGenerationRef = useRef(0);
   const pageRef = useRef(page);
   const dismissNotice = () => setNotice('');
   const lastStatusCheckedLabel = useMemo(
@@ -1632,6 +1633,7 @@ export default function App() {
   }
 
   async function checkUserSkillsInbound() {
+    inboundApplyRefreshGenerationRef.current += 1;
     setStatus('checking_inbound');
     setError('');
     setNotice('');
@@ -1670,6 +1672,7 @@ export default function App() {
   }
 
   async function openUserSkillsInboundReview() {
+    inboundApplyRefreshGenerationRef.current += 1;
     const browserPreview = !window.__TAURI_INTERNALS__;
     setInboundReviewDialog({
       open: true,
@@ -1732,6 +1735,8 @@ export default function App() {
     const previewId = inboundReviewDialog.preview?.previewId;
     if (!previewId || !inboundReviewDialog.preview?.canApply) return;
 
+    const refreshGeneration = inboundApplyRefreshGenerationRef.current + 1;
+    inboundApplyRefreshGenerationRef.current = refreshGeneration;
     setStatus('applying_inbound');
     setInboundReviewDialog((current) => ({ ...current, applying: true, error: '' }));
 
@@ -1795,6 +1800,9 @@ export default function App() {
         invoke('user_skills_git_status'),
         invoke('check_user_skills_inbound')
       ]);
+    if (refreshGeneration !== inboundApplyRefreshGenerationRef.current) {
+      return;
+    }
 
     if (managedStateRefresh.status === 'fulfilled') {
       const state = managedStateRefresh.value;
@@ -3516,6 +3524,7 @@ export default function App() {
   }
 
   async function saveUserSkillsGitRemote(remoteUrl) {
+    inboundApplyRefreshGenerationRef.current += 1;
     const trimmed = remoteUrl.trim();
     if (!trimmed) {
       throw new Error('Enter a Git remote URL.');

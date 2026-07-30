@@ -494,6 +494,18 @@ test('production App commits apply success before best-effort refresh and preser
     assert.ok(warningAlert, 'a later apply failure must preserve earlier warnings');
 
     await act(async () => {
+      findButton(renderer, 'Dashboard').props.onClick();
+    });
+    assert.doesNotMatch(renderedText(renderer.root), /Deployment refresh was skipped for Codex/);
+    await act(async () => {
+      findButton(renderer, 'Settings').props.onClick();
+    });
+    warningAlert = renderer.root.findAllByProps({ role: 'alert' }).find((alert) =>
+      renderedText(alert).includes('Deployment refresh was skipped for Codex')
+    );
+    assert.ok(warningAlert, 'navigation must not dismiss a pending Settings warning');
+
+    await act(async () => {
       renderer.root
         .findByProps({ 'aria-label': 'Dismiss incoming changes warnings' })
         .props.onClick();
@@ -506,9 +518,6 @@ test('production App commits apply success before best-effort refresh and preser
       0
     );
 
-    await act(async () => {
-      findButton(renderer, 'Dashboard').props.onClick();
-    });
     assert.doesNotMatch(renderedText(renderer.root), /Deployment refresh was skipped for Codex/);
     await act(async () => {
       renderer.unmount();
@@ -518,6 +527,26 @@ test('production App commits apply success before best-effort refresh and preser
     globalThis.window = previousWindow;
     globalThis.document = previousDocument;
   }
+});
+
+test('App generation-gates best-effort inbound refresh writes against newer operations', () => {
+  assert.match(appSource, /const inboundApplyRefreshGenerationRef = useRef\(0\)/);
+  assert.match(
+    appSource,
+    /const refreshGeneration = inboundApplyRefreshGenerationRef\.current \+ 1;[\s\S]*inboundApplyRefreshGenerationRef\.current = refreshGeneration/
+  );
+  assert.match(
+    appSource,
+    /if \(refreshGeneration !== inboundApplyRefreshGenerationRef\.current\) \{\s*return;\s*\}[\s\S]*setSkills/
+  );
+  assert.match(
+    appSource,
+    /async function checkUserSkillsInbound\(\) \{\s*inboundApplyRefreshGenerationRef\.current \+= 1/
+  );
+  assert.match(
+    appSource,
+    /async function saveUserSkillsGitRemote\(remoteUrl\) \{\s*inboundApplyRefreshGenerationRef\.current \+= 1/
+  );
 });
 
 test('diverged review provides only external resolution actions', () => {

@@ -32,6 +32,7 @@ struct InboundMutationReceipt {
     old_index: Option<Vec<u8>>,
     index_replaced: bool,
     applied_index_identity: Option<InboundFileIdentity>,
+    pause_after_index_restore_exchange: Option<PathBuf>,
     index_lock: Option<GitIndexLock>,
     ref_advanced: bool,
     generated_gitignore_backup: Option<InboundBackupSlot>,
@@ -49,6 +50,7 @@ struct InboundMutationOptions {
     pause_before_compensation: Option<PathBuf>,
     pause_before_completed_index_lock_release: Option<PathBuf>,
     pause_before_operation_finalize: Option<PathBuf>,
+    pause_after_index_restore_exchange: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -1771,6 +1773,7 @@ fn apply_inbound_tree(
         old_index: read_optional_file(&repo.join(".git/index"))?,
         index_replaced: false,
         applied_index_identity: None,
+        pause_after_index_restore_exchange: options.pause_after_index_restore_exchange.clone(),
         index_lock: Some(index_lock),
         ref_advanced: false,
         generated_gitignore_backup: None,
@@ -2148,6 +2151,9 @@ fn restore_git_index(receipt: &mut InboundMutationReceipt) -> Result<()> {
             ),
         });
     }
+    if let Some(barrier) = receipt.pause_after_index_restore_exchange.as_deref() {
+        wait_for_test_barrier(barrier)?;
+    }
     let exchanged = rustix::fs::statat(&git_dir, replacement.as_str(), AtFlags::SYMLINK_NOFOLLOW)
         .map_err(|error| format!("Unable to inspect exchanged Git index: {error}"))?;
     if exchanged.st_dev as u64 != applied.device || exchanged.st_ino as u64 != applied.inode {
@@ -2178,6 +2184,16 @@ fn restore_git_index(receipt: &mut InboundMutationReceipt) -> Result<()> {
             ),
         });
     }
+    let restored = rustix::fs::statat(&git_dir, "index", AtFlags::SYMLINK_NOFOLLOW)
+        .map_err(|error| format!("Unable to inspect restored Git index: {error}"))?;
+    if restored.st_dev as u64 != replacement_metadata.dev()
+        || restored.st_ino as u64 != replacement_metadata.ino()
+    {
+        return Err(
+            "Restored Git index was replaced by another process; recovery materials were preserved."
+                .to_string(),
+        );
+    }
     atomically_remove_owned_entry(
         &git_dir,
         replacement.as_str(),
@@ -2195,6 +2211,17 @@ fn restore_git_index(receipt: &mut InboundMutationReceipt) -> Result<()> {
             "remove-unborn-index",
             None,
         )?;
+    } else {
+        let current = rustix::fs::statat(&git_dir, "index", AtFlags::SYMLINK_NOFOLLOW)
+            .map_err(|error| format!("Unable to verify restored Git index: {error}"))?;
+        if current.st_dev as u64 != replacement_metadata.dev()
+            || current.st_ino as u64 != replacement_metadata.ino()
+        {
+            return Err(
+                "Restored Git index changed before recovery completed; the replacement was preserved."
+                    .to_string(),
+            );
+        }
     }
     receipt.index_replaced = false;
     receipt.applied_index_identity = None;
@@ -4668,6 +4695,81 @@ mod tests {
     #[test]
     fn remote_only_compensation_preserves_foreign_index_replacement_and_reports_partial_recovery() {
         assert_index_replacement_is_preserved_during_compensation(true);
+    }
+
+    #[test]
+    fn compensation_detects_index_replacement_after_restore_exchange() {
+        let managed_root = temp_dir("inbound-index-post-exchange-replacement");
+        let (remote, work) = remote_with_skill("inbound-index-post-exchange-replacement");
+        configure_and_bootstrap(&managed_root, &remote);
+        let paths = managed_paths(&managed_root);
+        let git = skillbox_git::GitService::new();
+        fs::write(work.join("demo/README.md"), "incoming\n").unwrap();
+        git.add_all(&work).unwrap();
+        git.commit(&work, "Incoming").unwrap();
+        git.push_origin_main(&work, false).unwrap();
+        let preview = preview_user_skills_inbound(&managed_root).unwrap();
+        let old_sha = preview.status.local_sha.clone().unwrap();
+        let barrier = temp_dir("inbound-index-post-exchange-barrier").join("continue");
+        let ready = barrier.with_extension("ready");
+        let worker_root = managed_root.clone();
+        let worker_barrier = barrier.clone();
+        let worker = std::thread::spawn(move || {
+            apply_user_skills_inbound_with_options(
+                UserSkillsInboundApplyRequest {
+                    preview_id: Some(preview.preview_id),
+                    actor: "test".to_string(),
+                },
+                &worker_root,
+                &InboundMutationOptions {
+                    fail_after_index_replace: true,
+                    pause_after_index_restore_exchange: Some(worker_barrier),
+                    ..Default::default()
+                },
+            )
+        });
+        while !ready.exists() {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let index = paths.user_skills_root.join(".git/index");
+        fs::rename(
+            &index,
+            paths.user_skills_root.join(".git/restored-index.detached"),
+        )
+        .unwrap();
+        fs::write(&index, b"foreign post-exchange index\n").unwrap();
+        let foreign = fs::symlink_metadata(&index).unwrap();
+        fs::write(&barrier, b"continue").unwrap();
+
+        let error = worker.join().unwrap().unwrap_err();
+        assert!(error.contains("Restored Git index was replaced"), "{error}");
+        assert_eq!(fs::read(&index).unwrap(), b"foreign post-exchange index\n");
+        let current = fs::symlink_metadata(&index).unwrap();
+        assert_eq!(current.dev(), foreign.dev());
+        assert_eq!(current.ino(), foreign.ino());
+        assert_eq!(
+            git.rev_parse_optional(&paths.user_skills_root, "HEAD")
+                .unwrap()
+                .as_deref(),
+            Some(old_sha.as_str())
+        );
+        assert!(!paths.user_skills_root.join("demo/README.md").exists());
+        let failed = list_operations(
+            OperationFilter {
+                status: Some(OperationStatus::Failed),
+                ..Default::default()
+            },
+            &managed_root,
+        )
+        .unwrap()
+        .operations
+        .into_iter()
+        .find(|operation| operation.operation_type == "apply_user_skills_inbound")
+        .unwrap();
+        assert_eq!(failed.payload["compensation"]["succeeded"], false);
+        assert!(failed.payload["compensation"]["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("Restored Git index was replaced")));
     }
 
     #[test]
