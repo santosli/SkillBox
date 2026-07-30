@@ -160,8 +160,8 @@ pub fn import_skill(
     managed_root: impl AsRef<Path>,
 ) -> Result<ImportedSkill> {
     let source_dir = expand_home(source_dir.as_ref().to_path_buf());
-    let managed_root = managed_root.as_ref().to_path_buf();
-    let _mutation_lock = acquire_user_skills_mutation_lock(&managed_root)?;
+    let mutation_lock = acquire_user_skills_mutation_lock(managed_root.as_ref())?;
+    let managed_root = mutation_lock.truth_root().to_path_buf();
     let entity_name = source_dir
         .file_name()
         .and_then(|name| name.to_str())
@@ -258,8 +258,8 @@ pub fn change_skill_kind(
     kind: SkillKind,
     managed_root: impl AsRef<Path>,
 ) -> Result<ImportedSkill> {
-    let managed_root = managed_root.as_ref().to_path_buf();
-    let _mutation_lock = acquire_user_skills_mutation_lock(&managed_root)?;
+    let mutation_lock = acquire_user_skills_mutation_lock(managed_root.as_ref())?;
+    let managed_root = mutation_lock.truth_root().to_path_buf();
     audited_operation(
         OperationStart {
             operation_type: "change_skill_kind".to_string(),
@@ -593,8 +593,8 @@ pub(crate) fn deploy_skill(
     managed_root: impl AsRef<Path>,
     target_root: impl AsRef<Path>,
 ) -> Result<Deployment> {
-    let managed_root = managed_root.as_ref().to_path_buf();
-    let _mutation_lock = acquire_user_skills_mutation_lock(&managed_root)?;
+    let mutation_lock = acquire_user_skills_mutation_lock(managed_root.as_ref())?;
+    let managed_root = mutation_lock.truth_root().to_path_buf();
     deploy_skill_with_lock_held(skill_name, &managed_root, target_root)
 }
 
@@ -683,8 +683,8 @@ pub fn undeploy_skill(
     managed_root: impl AsRef<Path>,
     target_root: impl AsRef<Path>,
 ) -> Result<Deployment> {
-    let managed_root = managed_root.as_ref().to_path_buf();
-    let _mutation_lock = acquire_user_skills_mutation_lock(&managed_root)?;
+    let mutation_lock = acquire_user_skills_mutation_lock(managed_root.as_ref())?;
+    let managed_root = mutation_lock.truth_root().to_path_buf();
     let target_root = expand_home(target_root.as_ref().to_path_buf());
     audited_operation(
         OperationStart {
@@ -714,7 +714,8 @@ pub fn preview_delete_skill(
     skill_name: &str,
     managed_root: impl AsRef<Path>,
 ) -> Result<DeleteSkillPreview> {
-    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let mutation_lock = acquire_user_skills_mutation_lock(managed_root.as_ref())?;
+    let paths = ensure_managed_layout(mutation_lock.truth_root().to_path_buf())?;
     build_delete_skill_preview(&paths, skill_name)
 }
 
@@ -722,8 +723,8 @@ pub fn delete_skill(
     request: DeleteSkillRequest,
     managed_root: impl AsRef<Path>,
 ) -> Result<DeleteSkillResult> {
-    let managed_root = managed_root.as_ref().to_path_buf();
-    let _mutation_lock = acquire_user_skills_mutation_lock(&managed_root)?;
+    let mutation_lock = acquire_user_skills_mutation_lock(managed_root.as_ref())?;
+    let managed_root = mutation_lock.truth_root().to_path_buf();
     let skill_name = request.skill_name.clone();
     let actor = request.actor.clone();
     audited_operation(

@@ -188,8 +188,8 @@ pub fn apply_skill_deployment(
     request: DeploymentCompatibilityApplyRequest,
     managed_root: impl AsRef<Path>,
 ) -> Result<Deployment> {
-    let managed_root = managed_root.as_ref().to_path_buf();
-    let _mutation_lock = acquire_user_skills_mutation_lock(&managed_root)?;
+    let mutation_lock = acquire_user_skills_mutation_lock(managed_root.as_ref())?;
+    let managed_root = mutation_lock.truth_root().to_path_buf();
     let preview = preview_skill_deployment(
         DeploymentCompatibilityPreviewRequest {
             skill_name: request.skill_name.clone(),

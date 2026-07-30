@@ -30,6 +30,10 @@ version tags such as `v0.3.0`.
   replacement indexes, reject repository-defined `remote.*.vcs` helpers, and
   keep successful applies successful when audit finalization or read-only UI
   refresh reports a warning.
+- Pin every shared user-skills mutation to its canonical managed root, bind
+  index recovery to exact content, require atomic-exchange support before
+  mutation, reject push URL rewrites, and prevent stale async refreshes from
+  overwriting newer Git state.
 - Add matching Rust CLI, Tauri, and desktop review surfaces while preserving the
   existing outbound commit-and-push behavior.
 

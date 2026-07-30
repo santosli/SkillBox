@@ -568,7 +568,10 @@ Apply fast-forward:
   ancestor 或 descendant 碰撞，Apply 必须在 mutation 前 blocked。普通
   `git status` 未显示 ignored 内容不等于可覆盖。
 - Inbound apply、outbound user-skills Git、deploy/undeploy 与其它 managed user-skill
-  写操作共用 mutation lock；Save remote 与 inbound action 在 UI 也互斥。Apply 失败
+  写操作共用 mutation lock；lock 返回 canonical truth root，所有锁内 Git、DB 与文件
+  操作都固定使用该 root，调用方的 symlink alias 后续被 retarget 也不能转移 mutation。
+  Save remote、outbound sync、inbound check/apply 与状态 refresh 在 UI 共用 monotonic
+  generation，较早的异步 refresh 不能覆盖较新的权威状态。Apply 失败
   后旧 preview authorization 立即失效，必须 Refresh 并重新 review。
 - 通用 managed-layout/read 初始化不补写 Git ignore defaults；显式 Git 配置/同步在
   持 mutation lock 的路径内完成该设置，避免与 remote-only bootstrap 竞争。
@@ -589,16 +592,21 @@ Apply fast-forward:
   Settings 的当前 Git workflow 会 append/dedupe 并持续显示这些 warning，开始或失败的
   后续 apply 不会清除它们，只有用户 dismiss 才清除。reviewed index 安装时记录 stable
   identity；compensation 通过 atomic exchange 验证当前 index，只恢复/删除本次对象，
-  foreign replacement 会原子放回并报告 partial recovery。index restore 使用 `.git`
+  foreign replacement 会原子放回并报告 partial recovery。index identity 同时绑定
+  device/inode/size/content hash；restore exchange 后和 receipt 清除前都精确验证 bytes，
+  同 inode 的 truncate/write 不能被误报为恢复成功。index restore 使用 `.git`
   dirfd 下不可预测、
   create-new/no-follow 的 private regular file；index-lock release 通过 atomic
-  exchange 保持 pathname 全程占位，ownership mismatch 时原子换回外部 lock。
+  exchange 与 private quarantine 保持 pathname 全程占位，ownership mismatch 时原子
+  换回外部 lock。Apply 在任何 mutation 前先探测 repository volume 是否支持所需 atomic
+  exchange；不支持时 fail closed，不会留下永久 `index.lock`。
 - Operation log 记录 aggregate old/new refs、backup ref、mutation phase 与
   compensation outcome，不记录 credentials、diff contents 或 skill bodies。
   Remote identity 必须去除 URL userinfo、query 和 fragment。
 - Network fetch/push 拒绝 repository-local 与 worktree-scope credential helper、
   include/proxy、SSH/upload/receive-pack command、URL rewrite 和 protocol override；
-  `remote.*.vcs` 也按 helper dispatch config fail closed；`GIT_ALLOW_PROTOCOL` 只允许
+  `remote.*.vcs`、`url.*.insteadOf` 与 `url.*.pushInsteadOf` 都按 helper dispatch /
+  transport rewrite config fail closed；`GIT_ALLOW_PROTOCOL` 只允许
   `file/http/https/ssh/git`，任意 `git-remote-*` custom
   helper 与 `ext` transport 均 fail closed。所有 origin/config/fetch preflight 共用
   bounded deadline 和 isolated process-group termination；按原顺序恢复用户

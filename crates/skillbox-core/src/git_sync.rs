@@ -115,8 +115,8 @@ pub fn set_user_skills_git_remote(
     request: UserSkillsGitRemoteRequest,
     managed_root: impl AsRef<Path>,
 ) -> Result<UserSkillsGitStatus> {
-    let managed_root = managed_root.as_ref().to_path_buf();
-    let _mutation_lock = acquire_user_skills_mutation_lock(&managed_root)?;
+    let mutation_lock = acquire_user_skills_mutation_lock(managed_root.as_ref())?;
+    let managed_root = mutation_lock.truth_root().to_path_buf();
     audited_operation(
         OperationStart {
             operation_type: "set_user_skills_git_remote".to_string(),
@@ -168,8 +168,8 @@ pub fn sync_user_skills_git(
     request: UserSkillsSyncRequest,
     managed_root: impl AsRef<Path>,
 ) -> Result<UserSkillsSyncResult> {
-    let managed_root = managed_root.as_ref().to_path_buf();
-    let _mutation_lock = acquire_user_skills_mutation_lock(&managed_root)?;
+    let mutation_lock = acquire_user_skills_mutation_lock(managed_root.as_ref())?;
+    let managed_root = mutation_lock.truth_root().to_path_buf();
     let push = request.push;
     let selected_path_count = request
         .selected_paths

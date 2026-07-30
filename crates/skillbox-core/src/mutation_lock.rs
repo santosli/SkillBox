@@ -12,6 +12,12 @@ pub(crate) struct UserSkillsMutationLock {
     root: PathBuf,
 }
 
+impl UserSkillsMutationLock {
+    pub(crate) fn truth_root(&self) -> &Path {
+        &self.root
+    }
+}
+
 impl Drop for UserSkillsMutationLock {
     fn drop(&mut self) {
         if let Ok(mut active) = active_user_skills_mutations().lock() {
@@ -29,7 +35,8 @@ pub(crate) fn acquire_user_skills_mutation_lock(
     // Otherwise the lock file itself makes an empty migration stub look owned.
     maybe_link_legacy_default_managed_root(&managed_root)?;
     fs::create_dir_all(&managed_root).map_err(|error| error.to_string())?;
-    let root = fs::canonicalize(&managed_root).unwrap_or(managed_root);
+    let root = fs::canonicalize(&managed_root)
+        .map_err(|error| format!("Unable to canonicalize managed root: {error}"))?;
     let lock = OpenOptions::new()
         .create(true)
         .read(true)

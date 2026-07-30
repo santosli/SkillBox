@@ -26,6 +26,7 @@ import {
   useInboundReviewRequestController
 } from './userSkillsInbound.js';
 import {
+  previewUserSkillsGitChanges,
   previewUserSkillsInbound,
   previewUserSkillsInboundStatus
 } from './previewData.js';
@@ -49,6 +50,69 @@ function findButton(renderer, label) {
   return renderer.root
     .findAllByType('button')
     .find((button) => renderedText(button).trim() === label);
+}
+
+function createDeferred() {
+  let resolve;
+  const promise = new Promise((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
+async function withProductionApp(invoke, run) {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  globalThis.window = {
+    __TAURI_INTERNALS__: { invoke },
+    addEventListener() {},
+    clearInterval,
+    clearTimeout,
+    localStorage: {
+      getItem() {
+        return null;
+      },
+      removeItem() {},
+      setItem() {}
+    },
+    location: { search: '' },
+    open() {},
+    removeEventListener() {},
+    setInterval() {
+      return 1;
+    },
+    setTimeout
+  };
+  globalThis.document = {
+    activeElement: null,
+    querySelector() {
+      return null;
+    }
+  };
+
+  const vite = await createServer({
+    appType: 'custom',
+    root: new URL('..', import.meta.url).pathname,
+    server: { middlewareMode: true }
+  });
+  let renderer;
+
+  try {
+    const { default: App } = await vite.ssrLoadModule('/src/App.jsx');
+    await act(async () => {
+      renderer = TestRenderer.create(React.createElement(App));
+    });
+    await run(renderer);
+  } finally {
+    if (renderer) {
+      await act(async () => {
+        renderer.unmount();
+      });
+    }
+    await vite.close();
+    globalThis.window = previousWindow;
+    globalThis.document = previousDocument;
+  }
 }
 
 test('normalizes inbound status and keeps worktree state separate from relation', () => {
@@ -529,24 +593,258 @@ test('production App commits apply success before best-effort refresh and preser
   }
 });
 
-test('App generation-gates best-effort inbound refresh writes against newer operations', () => {
-  assert.match(appSource, /const inboundApplyRefreshGenerationRef = useRef\(0\)/);
-  assert.match(
-    appSource,
-    /const refreshGeneration = inboundApplyRefreshGenerationRef\.current \+ 1;[\s\S]*inboundApplyRefreshGenerationRef\.current = refreshGeneration/
-  );
-  assert.match(
-    appSource,
-    /if \(refreshGeneration !== inboundApplyRefreshGenerationRef\.current\) \{\s*return;\s*\}[\s\S]*setSkills/
-  );
-  assert.match(
-    appSource,
-    /async function checkUserSkillsInbound\(\) \{\s*inboundApplyRefreshGenerationRef\.current \+= 1/
-  );
-  assert.match(
-    appSource,
-    /async function saveUserSkillsGitRemote\(remoteUrl\) \{\s*inboundApplyRefreshGenerationRef\.current \+= 1/
-  );
+test('newer outbound sync revokes a pending inbound apply refresh', async () => {
+  const staleManagedRefresh = createDeferred();
+  let managedStateCount = 0;
+  let gitStatusCount = 0;
+  let inboundCheckCount = 0;
+
+  const invoke = async (command) => {
+    if (command === 'managed_state') {
+      managedStateCount += 1;
+      if (managedStateCount === 2) {
+        return staleManagedRefresh.promise;
+      }
+      return {
+        is_first_use: false,
+        paths: { user_skills_root: '/tmp/user-skills' },
+        skills: [
+          {
+            name: 'generation-test',
+            description: 'Generation test skill',
+            deployments: [],
+            path: '/tmp/user-skills/generation-test',
+            skill_md_path: '/tmp/user-skills/generation-test/SKILL.md',
+            source_root: '/tmp/user-skills',
+            status: 'synced',
+            type: 'user'
+          }
+        ]
+      };
+    }
+    if (command === 'managed_preferences') {
+      return {
+        remote_update_timeout_seconds: 30,
+        status_refresh_interval_minutes: 5
+      };
+    }
+    if (command === 'user_skills_git_status') {
+      gitStatusCount += 1;
+      return gitStatusCount === 1
+        ? {
+            branch: 'main',
+            remote_url: 'git@example.com:initial/skills.git',
+            repo_path: '/tmp/user-skills',
+            state: 'clean'
+          }
+        : {
+            branch: 'main',
+            remote_url: 'git@example.com:stale-refresh/skills.git',
+            repo_path: '/tmp/stale-refresh',
+            state: 'dirty'
+          };
+    }
+    if (command === 'check_user_skills_inbound') {
+      inboundCheckCount += 1;
+      return {
+        behind_count: 1,
+        relation: 'behind',
+        remote_sha: `remote-${inboundCheckCount}`,
+        worktree_state: 'clean'
+      };
+    }
+    if (command === 'preview_user_skills_inbound') {
+      return previewUserSkillsInbound('behind');
+    }
+    if (command === 'apply_user_skills_inbound') {
+      return {
+        changed_skill_count: 1,
+        new_sha: 'applied-sha',
+        repo_path: '/tmp/user-skills',
+        warnings: []
+      };
+    }
+    if (command === 'user_skills_git_changes') {
+      return previewUserSkillsGitChanges();
+    }
+    if (command === 'list_import_records') {
+      return { records: [] };
+    }
+    if (command === 'list_user_skill_versions') {
+      return { current_version: '', versions: [] };
+    }
+    if (command === 'sync_user_skills_git') {
+      return {
+        branch: 'main',
+        remote_url: 'git@example.com:outbound/skills.git',
+        repo_path: '/tmp/outbound',
+        state: 'clean',
+        message: 'Outbound sync complete.'
+      };
+    }
+    if (
+      [
+        'cached_remote_skill_updates',
+        'list_skill_user_metadata',
+        'list_workspaces',
+        'usage_hook_statuses'
+      ].includes(command)
+    ) {
+      return command === 'cached_remote_skill_updates' ? {} : [];
+    }
+    if (command === 'app_update_status') {
+      return { disabled: true };
+    }
+    return null;
+  };
+
+  await withProductionApp(invoke, async (renderer) => {
+    await act(async () => {
+      findButton(renderer, 'Settings').props.onClick();
+    });
+    await act(async () => {
+      await findButton(renderer, 'Check remote').props.onClick();
+    });
+    await act(async () => {
+      await findButton(renderer, 'Review incoming changes').props.onClick();
+    });
+
+    let applyRun;
+    await act(async () => {
+      applyRun = findButton(renderer, 'Apply fast-forward').props.onClick();
+      await Promise.resolve();
+    });
+    assert.equal(managedStateCount, 2);
+
+    await act(async () => {
+      findButton(renderer, 'Dashboard').props.onClick();
+    });
+    await act(async () => {
+      renderer.root.findByProps({ className: 'skillCardHitArea' }).props.onClick();
+    });
+    await act(async () => {
+      await findButton(renderer, 'Sync now').props.onClick();
+    });
+    await act(async () => {
+      await renderer.root.findByProps({ className: 'gitCommitForm' }).props.onSubmit({
+        preventDefault() {}
+      });
+    });
+
+    staleManagedRefresh.resolve({
+      is_first_use: false,
+      paths: { user_skills_root: '/tmp/stale-refresh' },
+      skills: []
+    });
+    await act(async () => {
+      await applyRun;
+    });
+    await act(async () => {
+      findButton(renderer, 'Settings').props.onClick();
+    });
+
+    assert.match(renderedText(renderer.root), /\/tmp\/outbound/);
+    assert.doesNotMatch(renderedText(renderer.root), /\/tmp\/stale-refresh/);
+    assert.doesNotMatch(renderedText(renderer.root), /Behind/);
+  });
+});
+
+test('newer remote save revokes an older inbound check result', async () => {
+  const staleInboundCheck = createDeferred();
+  let inboundCheckCount = 0;
+
+  const invoke = async (command) => {
+    if (command === 'managed_state') {
+      return {
+        is_first_use: false,
+        paths: { user_skills_root: '/tmp/user-skills' },
+        skills: []
+      };
+    }
+    if (command === 'managed_preferences') {
+      return {
+        remote_update_timeout_seconds: 30,
+        status_refresh_interval_minutes: 5
+      };
+    }
+    if (command === 'user_skills_git_status') {
+      return {
+        branch: 'main',
+        remote_url: 'git@example.com:initial/skills.git',
+        repo_path: '/tmp/user-skills',
+        state: 'clean'
+      };
+    }
+    if (command === 'check_user_skills_inbound') {
+      inboundCheckCount += 1;
+      return staleInboundCheck.promise;
+    }
+    if (command === 'set_user_skills_git_remote') {
+      return {
+        branch: 'main',
+        remote_url: 'git@example.com:saved/skills.git',
+        repo_path: '/tmp/user-skills',
+        state: 'clean'
+      };
+    }
+    if (
+      [
+        'cached_remote_skill_updates',
+        'list_skill_user_metadata',
+        'list_workspaces',
+        'usage_hook_statuses'
+      ].includes(command)
+    ) {
+      return command === 'cached_remote_skill_updates' ? {} : [];
+    }
+    if (command === 'app_update_status') {
+      return { disabled: true };
+    }
+    return null;
+  };
+
+  await withProductionApp(invoke, async (renderer) => {
+    await act(async () => {
+      findButton(renderer, 'Settings').props.onClick();
+    });
+
+    const checkRemote = findButton(renderer, 'Check remote');
+    const remoteInput = renderer.root.findByProps({
+      placeholder: 'git@github.com:santosli/user-skills.git'
+    });
+    const remoteForm = remoteInput.parent.parent;
+
+    await act(async () => {
+      remoteInput.props.onChange({ target: { value: 'git@example.com:saved/skills.git' } });
+    });
+
+    let checkRun;
+    let saveRun;
+    await act(async () => {
+      checkRun = checkRemote.props.onClick();
+      saveRun = remoteForm.props.onSubmit({ preventDefault() {} });
+      await saveRun;
+    });
+
+    staleInboundCheck.resolve({
+      behind_count: 4,
+      relation: 'behind',
+      remote_sha: 'stale-remote-sha',
+      worktree_state: 'clean'
+    });
+    await act(async () => {
+      await checkRun;
+    });
+
+    assert.equal(inboundCheckCount, 1);
+    assert.equal(
+      renderer.root.findByProps({
+        placeholder: 'git@github.com:santosli/user-skills.git'
+      }).props.value,
+      'git@example.com:saved/skills.git'
+    );
+    assert.doesNotMatch(renderedText(renderer.root), /Behind/);
+  });
 });
 
 test('diverged review provides only external resolution actions', () => {

@@ -5706,7 +5706,8 @@ fn deploys_remote_skill_to_current_symlink() {
     import_skill(&source, SkillKind::Remote, &managed_root).unwrap();
 
     let deployment = deploy_skill("remote-demo", &managed_root, &target_root).unwrap();
-    let current = managed_root
+    let current = fs::canonicalize(&managed_root)
+        .unwrap()
         .join("remote-skills")
         .join("remote-demo")
         .join("current");
@@ -5731,7 +5732,8 @@ fn redeploys_remote_skill_version_symlink_to_current() {
     symlink_dir(&imported.managed_path, &target_path).unwrap();
 
     deploy_skill("remote-demo", &managed_root, &target_root).unwrap();
-    let current = managed_root
+    let current = fs::canonicalize(&managed_root)
+        .unwrap()
         .join("remote-skills")
         .join("remote-demo")
         .join("current");
@@ -6460,7 +6462,8 @@ fn change_skill_kind_moves_user_skill_to_remote_and_retargets_deployments() {
     let deployment = deploy_skill("agently-mail", &managed_root, &target_root).unwrap();
 
     let changed = change_skill_kind("agently-mail", SkillKind::Remote, &managed_root).unwrap();
-    let current = managed_root
+    let current = fs::canonicalize(&managed_root)
+        .unwrap()
         .join("remote-skills")
         .join("agently-mail")
         .join("current");
@@ -6490,8 +6493,11 @@ fn change_skill_kind_moves_remote_skill_to_user_and_retargets_deployments() {
     let deployment = deploy_skill("json-canvas", &managed_root, &target_root).unwrap();
 
     let changed = change_skill_kind("json-canvas", SkillKind::User, &managed_root).unwrap();
-    let user_path = managed_root.join("user-skills").join("json-canvas");
-    let current = managed_root
+    let canonical_managed_root = fs::canonicalize(&managed_root).unwrap();
+    let user_path = canonical_managed_root
+        .join("user-skills")
+        .join("json-canvas");
+    let current = canonical_managed_root
         .join("remote-skills")
         .join("json-canvas")
         .join("current");
@@ -9989,7 +9995,10 @@ fn import_candidates_records_deploy_back_imports_per_skill() {
     assert_eq!(record.source_path, source);
     assert_eq!(
         record.managed_path,
-        managed_root.join("user-skills").join("demo")
+        fs::canonicalize(&managed_root)
+            .unwrap()
+            .join("user-skills")
+            .join("demo")
     );
     assert_eq!(record.status, ImportRecordStatus::Active);
     assert!(!record.legacy);

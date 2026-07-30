@@ -225,7 +225,10 @@ undeploy。Apply 在旧 HEAD 创建 `refs/skillbox/backups/inbound/<operation-id
 入站流程不会执行仓库 hook、filter、textconv、external diff 或 merge driver。Rust core
 在整个 apply 窗口持有 user-skills 共享 mutation lock，阻止 outbound Git、deploy、
 undeploy 与其它 managed user-skill 写操作并发改变受审状态，同时持有 Git index lock
-阻止并发 stage/commit。tracked worktree 内容先移入 `.git/skillbox/` 的 operation-scoped
+阻止并发 stage/commit。lock acquisition 返回已 canonicalize 的 truth root；锁内 Git、
+SQLite 与 filesystem 操作只使用该固定 identity，即使调用方传入的 symlink alias 随后
+被 retarget，也不能把受锁操作重定向到另一个 managed store。tracked worktree 内容先移入
+`.git/skillbox/` 的 operation-scoped
 recovery snapshot，再以 no-replace 方式写入。若文件写入、ref 推进或
 SQLite reindex 失败，core 只在 HEAD 仍等于预期 commit 且操作写集未被外部改变时补偿
 回旧状态，并保留 backup ref；发现并发 mutation 时拒绝覆盖恢复。该过程不自动 merge、
@@ -234,13 +237,18 @@ rebase、reset、force-push、stash 或解决 conflict；`diverged` 只从 commi
 Recovery snapshot 的目录链通过 no-follow directory handle 逐级打开，关键
 backup/restore/cleanup 使用 fd-relative 原子 quarantine-then-verify，并绑定 entry
 identity；backup 读取仅接受 bounded、nonblocking、nofollow 的 regular file，避免
-FIFO/special/增长文件阻塞或扩大恢复输入。reviewed index 安装时记录 stable identity；
-compensation 通过 atomic exchange 验证当前 index 仍属于本次 apply，遇到外部 replacement
+FIFO/special/增长文件阻塞或扩大恢复输入。reviewed index 安装时记录
+device/inode/size/content hash；restore exchange 后与清除 recovery receipt 前都要求
+内容精确匹配，原 inode 上的 truncate/write 也会变成 partial recovery，而不会误报完整
+恢复。compensation 通过 atomic exchange 验证当前 index 仍属于本次 apply，遇到外部 replacement
 时原子换回并报告 partial recovery，绝不覆盖或删除。index restore 使用 private
-create-new fd-relative file，index-lock release 通过 atomic exchange 保持外部 Git
-排他锁持续占位，避免验证窗口。Network Git 拒绝
+create-new fd-relative file；任何 worktree mutation 前先在实际 repository volume
+无副作用探测 atomic exchange 支持，不支持则 fail closed。index-lock release 通过
+private quarantine/exchange sequence 保持外部 Git 排他锁持续占位，避免公开 pathname
+上的 stat/unlink 窗口。Network Git 拒绝
 repository-local 与 worktree-scope execution-bearing config、URL rewrite 和自定义
-remote helper，包括可重定向 helper dispatch 的 `remote.*.vcs`；transport allowlist
+remote helper，包括可重定向 helper dispatch 的 `remote.*.vcs`、`url.*.insteadOf`
+与 `url.*.pushInsteadOf`；transport allowlist
 仅开放 `file/http/https/ssh/git`，全部 Git
 preflight/fetch 共用 bounded deadline，Git boolean parser 决定是否检查 worktree
 scope。按原顺序恢复受信任 global generic/URL-scoped
