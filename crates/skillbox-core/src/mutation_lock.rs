@@ -24,11 +24,12 @@ impl Drop for UserSkillsMutationLock {
 pub(crate) fn acquire_user_skills_mutation_lock(
     managed_root: &Path,
 ) -> Result<UserSkillsMutationLock> {
+    let managed_root = managed_paths(managed_root.to_path_buf()).root;
     // Resolve the legacy default root before creating any marker in ~/.skillbox.
     // Otherwise the lock file itself makes an empty migration stub look owned.
-    maybe_link_legacy_default_managed_root(managed_root)?;
-    fs::create_dir_all(managed_root).map_err(|error| error.to_string())?;
-    let root = fs::canonicalize(managed_root).unwrap_or_else(|_| managed_root.to_path_buf());
+    maybe_link_legacy_default_managed_root(&managed_root)?;
+    fs::create_dir_all(&managed_root).map_err(|error| error.to_string())?;
+    let root = fs::canonicalize(&managed_root).unwrap_or(managed_root);
     let lock = OpenOptions::new()
         .create(true)
         .read(true)

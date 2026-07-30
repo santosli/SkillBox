@@ -1571,6 +1571,86 @@ fn mutation_lock_resolves_legacy_only_home_before_creating_lock_file() {
 }
 
 #[test]
+fn mutation_lock_expands_tilde_before_locking_across_working_directories() {
+    const ROLE: &str = "SKILLBOX_TILDE_LOCK_ROLE";
+    const READY: &str = "SKILLBOX_TILDE_LOCK_READY";
+    const RELEASE: &str = "SKILLBOX_TILDE_LOCK_RELEASE";
+    if let Some(role) = std::env::var_os(ROLE) {
+        let managed_root = if role == "env-holder" {
+            default_managed_root()
+        } else {
+            PathBuf::from("~/.skillbox")
+        };
+        match acquire_user_skills_mutation_lock(&managed_root) {
+            Ok(_lock) if role == "env-holder" || role == "cli-holder" => {
+                fs::write(std::env::var_os(READY).unwrap(), b"ready").unwrap();
+                let release = PathBuf::from(std::env::var_os(RELEASE).unwrap());
+                while !release.exists() {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+            Err(error) if role == "contender" => {
+                assert!(error.contains("Another user-skills mutation"));
+            }
+            Ok(_) => panic!("contender unexpectedly acquired the tilde mutation lock"),
+            Err(error) => panic!("lock holder failed unexpectedly: {error}"),
+        }
+        return;
+    }
+
+    for holder_role in ["env-holder", "cli-holder"] {
+        let home = temp_dir(&format!("tilde-lock-home-{holder_role}"));
+        let holder_cwd = temp_dir(&format!("tilde-lock-holder-cwd-{holder_role}"));
+        let contender_cwd = temp_dir(&format!("tilde-lock-contender-cwd-{holder_role}"));
+        let barrier = temp_dir(&format!("tilde-lock-barrier-{holder_role}"));
+        let ready = barrier.join("ready");
+        let release = barrier.join("release");
+        let executable = std::env::current_exe().unwrap();
+        let mut holder = Command::new(&executable)
+            .args([
+                "--exact",
+                "tests::mutation_lock_expands_tilde_before_locking_across_working_directories",
+                "--nocapture",
+            ])
+            .current_dir(&holder_cwd)
+            .env("HOME", &home)
+            .env("SKILLBOX_HOME", "~/.skillbox")
+            .env(ROLE, holder_role)
+            .env(READY, &ready)
+            .env(RELEASE, &release)
+            .spawn()
+            .unwrap();
+        while !ready.exists() {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let contender = Command::new(&executable)
+            .args([
+                "--exact",
+                "tests::mutation_lock_expands_tilde_before_locking_across_working_directories",
+                "--nocapture",
+            ])
+            .current_dir(&contender_cwd)
+            .env("HOME", &home)
+            .env_remove("SKILLBOX_HOME")
+            .env(ROLE, "contender")
+            .env(READY, &ready)
+            .env(RELEASE, &release)
+            .output()
+            .unwrap();
+        assert!(
+            contender.status.success(),
+            "{}",
+            String::from_utf8_lossy(&contender.stderr)
+        );
+        fs::write(&release, b"release").unwrap();
+        assert!(holder.wait().unwrap().success());
+        assert!(home.join(".skillbox/.user-skills-mutation.lock").is_file());
+        assert!(!holder_cwd.join("~/.skillbox").exists());
+        assert!(!contender_cwd.join("~/.skillbox").exists());
+    }
+}
+
+#[test]
 fn list_workspaces_initializes_empty_registry() {
     let managed_root = temp_dir("workspace-empty").join("SkillBox");
 

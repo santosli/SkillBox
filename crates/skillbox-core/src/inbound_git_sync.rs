@@ -1,7 +1,8 @@
 use crate::*;
-use std::ffi::CString;
+use rustix::fs::{AtFlags, Mode, OFlags, RenameFlags};
 use std::fs::{File, OpenOptions};
-use std::os::unix::ffi::OsStrExt;
+use std::os::fd::{AsFd, OwnedFd};
+use std::os::unix::fs::MetadataExt;
 
 const USER_SKILLS_REMOTE_BRANCH: &str = "main";
 const MAX_INBOUND_FILE_BYTES: u64 = 10 * 1024 * 1024;
@@ -16,6 +17,7 @@ struct InboundTreeSnapshot {
 
 #[derive(Debug)]
 struct InboundMutationReceipt {
+    repo_dir: OwnedFd,
     old_sha: Option<String>,
     new_sha: String,
     old_entries: HashMap<String, skillbox_git::GitTreeEntry>,
@@ -24,10 +26,10 @@ struct InboundMutationReceipt {
     written_paths: HashSet<String>,
     deleted_paths: HashSet<String>,
     created_dirs: HashSet<String>,
-    path_backups: HashMap<String, PathBuf>,
+    path_backups: HashMap<String, InboundBackupSlot>,
     old_index: Option<Vec<u8>>,
     index_replaced: bool,
-    _index_lock: Option<GitIndexLock>,
+    index_lock: Option<GitIndexLock>,
     ref_advanced: bool,
     restore_generated_gitignore: bool,
 }
@@ -36,19 +38,50 @@ struct InboundMutationReceipt {
 struct InboundMutationOptions {
     fail_before_index_prepare: bool,
     fail_after_writes: Option<usize>,
+    fail_after_index_replace: bool,
     pause_before_materialization: Option<PathBuf>,
     pause_before_ref_update: Option<PathBuf>,
+    pause_before_backup_rename: Option<PathBuf>,
+    pause_before_compensation: Option<PathBuf>,
 }
 
 #[derive(Debug)]
 struct GitIndexLock {
-    path: PathBuf,
-    _file: File,
+    git_dir: OwnedFd,
+    file: File,
+    device: u64,
+    inode: u64,
+}
+
+#[derive(Debug)]
+struct InboundBackupSlot {
+    parent: OwnedFd,
+    file_name: String,
 }
 
 impl Drop for GitIndexLock {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
+        let _ = self.release_if_owned();
+    }
+}
+
+impl GitIndexLock {
+    fn release_if_owned(&mut self) -> Result<()> {
+        let expected = self.file.metadata().map_err(|error| error.to_string())?;
+        let current = rustix::fs::statat(&self.git_dir, "index.lock", AtFlags::SYMLINK_NOFOLLOW)
+            .map_err(|error| error.to_string())?;
+        if current.st_dev as u64 != self.device
+            || current.st_ino as u64 != self.inode
+            || expected.dev() != self.device
+            || expected.ino() != self.inode
+        {
+            return Err(
+                "Git index lock ownership changed; refusing to remove another process's lock."
+                    .to_string(),
+            );
+        }
+        rustix::fs::unlinkat(&self.git_dir, "index.lock", AtFlags::empty())
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -691,6 +724,13 @@ fn apply_user_skills_inbound_inner(
             audit,
         );
     }
+    if let Some(mut index_lock) = mutation.index_lock.take() {
+        index_lock.release_if_owned().map_err(|error| {
+            format!(
+                "Inbound apply completed, but the Git index lock could not be released safely: {error}"
+            )
+        })?;
+    }
     audit.phase = "completed".to_string();
     Ok(UserSkillsInboundApplyResult {
         repo_path: paths.user_skills_root,
@@ -1243,18 +1283,10 @@ fn inbound_conflict_analysis(
         .remote_sha
         .as_deref()
         .ok_or_else(|| "Remote SHA is missing for conflict analysis.".to_string())?;
-    let local_files = git
-        .diff_refs(repo, base, local)?
-        .into_iter()
-        .flat_map(|file| [Some(file.path), file.old_path])
-        .flatten()
-        .collect::<HashSet<_>>();
-    let remote_files = git
-        .diff_refs(repo, base, remote)?
-        .into_iter()
-        .flat_map(|file| [Some(file.path), file.old_path])
-        .flatten()
-        .collect::<HashSet<_>>();
+    let local_changes = changed_path_statuses(git.diff_refs(repo, base, local)?);
+    let remote_changes = changed_path_statuses(git.diff_refs(repo, base, remote)?);
+    let local_files = local_changes.keys().cloned().collect::<HashSet<_>>();
+    let remote_files = remote_changes.keys().cloned().collect::<HashSet<_>>();
     let mut both_changed_files = local_files
         .intersection(&remote_files)
         .cloned()
@@ -1269,19 +1301,16 @@ fn inbound_conflict_analysis(
         .map(|skill| skill.name.as_str())
         .map(str::to_string)
         .collect::<HashSet<_>>();
-    for name in local_files
+    let base_candidates = local_files
         .iter()
         .chain(remote_files.iter())
         .filter_map(|path| path.split('/').next())
-    {
-        if valid_skill_names.contains(name) || validate_skill_name(name).is_err() {
-            continue;
-        }
-        let skill_md_path = format!("{name}/SKILL.md");
-        if git.tree_path_exists(repo, base, &skill_md_path)? {
-            valid_skill_names.insert(name.to_string());
-        }
-    }
+        .filter(|name| !valid_skill_names.contains(*name) && validate_skill_name(name).is_ok())
+        .map(str::to_string)
+        .collect::<HashSet<_>>();
+    add_base_skill_names(&mut valid_skill_names, base_candidates, |name| {
+        git.tree_path_exists(repo, base, &format!("{name}/SKILL.md"))
+    })?;
     let local_changed_skills = local_files
         .iter()
         .filter_map(|path| path.split('/').next())
@@ -1298,7 +1327,19 @@ fn inbound_conflict_analysis(
         .collect::<Vec<_>>();
     both_changed_skills.sort();
     both_changed_skills.dedup();
-    let likely_conflict_files = both_changed_files.clone();
+    let likely_conflict_files = both_changed_files
+        .iter()
+        .filter(|path| {
+            !matches!(
+                (
+                    local_changes.get(path.as_str()).map(String::as_str),
+                    remote_changes.get(path.as_str()).map(String::as_str)
+                ),
+                (Some("D"), Some("D"))
+            )
+        })
+        .cloned()
+        .collect();
     Ok(UserSkillsInboundConflictAnalysis {
         local_only_commits: status.ahead_count,
         remote_only_commits: status.behind_count,
@@ -1306,6 +1347,41 @@ fn inbound_conflict_analysis(
         both_changed_files,
         both_changed_skills,
     })
+}
+
+fn changed_path_statuses(files: Vec<skillbox_git::GitDiffFile>) -> HashMap<String, String> {
+    let mut changed = HashMap::new();
+    for file in files {
+        let status = file.status.chars().next().unwrap_or('M').to_string();
+        if let Some(old_path) = file.old_path {
+            if status == "R" {
+                changed.insert(old_path, "D".to_string());
+                changed.insert(file.path, "A".to_string());
+                continue;
+            }
+            changed.entry(old_path).or_insert_with(|| status.clone());
+        }
+        changed.insert(file.path, status);
+    }
+    changed
+}
+
+fn add_base_skill_names<F>(
+    valid_skill_names: &mut HashSet<String>,
+    candidates: HashSet<String>,
+    mut tree_path_exists: F,
+) -> Result<()>
+where
+    F: FnMut(&str) -> Result<bool>,
+{
+    let mut candidates = candidates.into_iter().collect::<Vec<_>>();
+    candidates.sort();
+    for name in candidates {
+        if tree_path_exists(&name)? {
+            valid_skill_names.insert(name);
+        }
+    }
+    Ok(())
 }
 
 fn remote_only_worktree_is_safe(repo: &Path) -> Result<bool> {
@@ -1316,7 +1392,7 @@ fn remote_only_worktree_is_safe(repo: &Path) -> Result<bool> {
             continue;
         }
         if name == ".gitignore"
-            && entry.path().is_file()
+            && is_real_regular_file(&entry.path())?
             && fs::read_to_string(entry.path()).map_err(|error| error.to_string())?
                 == DEFAULT_USER_SKILLS_GITIGNORE
         {
@@ -1337,7 +1413,7 @@ fn append_local_content_collision_issues(
 ) -> Result<()> {
     let mut local_paths = git.untracked_and_ignored_paths(repo)?;
     if status.relation == UserSkillsInboundRelation::RemoteOnly
-        && repo.join(".gitignore").is_file()
+        && is_real_regular_file(&repo.join(".gitignore"))?
         && fs::read_to_string(repo.join(".gitignore")).ok().as_deref()
             == Some(DEFAULT_USER_SKILLS_GITIGNORE)
     {
@@ -1368,6 +1444,14 @@ fn append_local_content_collision_issues(
         });
     }
     Ok(())
+}
+
+fn is_real_regular_file(path: &Path) -> Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => Ok(metadata.is_file() && !metadata.file_type().is_symlink()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 fn paths_overlap(left: &str, right: &str) -> bool {
@@ -1525,7 +1609,7 @@ fn apply_inbound_tree(
     verify_worktree_matches_entries(git, repo, old_sha, &old_entries, &touched_paths)?;
     verify_added_paths_absent(repo, &old_entries, &new_entries, &touched_paths)?;
     let restore_generated_gitignore = old_sha.is_none()
-        && repo.join(".gitignore").is_file()
+        && is_real_regular_file(&repo.join(".gitignore"))?
         && fs::read_to_string(repo.join(".gitignore")).ok().as_deref()
             == Some(DEFAULT_USER_SKILLS_GITIGNORE);
     let index_temporary = repo.join(".git").join(format!(
@@ -1533,6 +1617,7 @@ fn apply_inbound_tree(
         sanitize_operation_ref_component(operation_id)
     ));
     let mut receipt = InboundMutationReceipt {
+        repo_dir: open_real_directory(repo)?,
         old_sha: old_sha.map(str::to_string),
         new_sha: new_sha.to_string(),
         old_entries,
@@ -1544,7 +1629,7 @@ fn apply_inbound_tree(
         path_backups: HashMap::new(),
         old_index: read_optional_file(&repo.join(".git/index"))?,
         index_replaced: false,
-        _index_lock: Some(index_lock),
+        index_lock: Some(index_lock),
         ref_advanced: false,
         restore_generated_gitignore,
     };
@@ -1566,6 +1651,9 @@ fn apply_inbound_tree(
     .and_then(|()| verify_inbound_backups(git, repo, &receipt))
     .and_then(|()| replace_git_index(repo, &index_temporary, &mut receipt))
     .and_then(|()| {
+        if options.fail_after_index_replace {
+            return Err("Injected inbound failure after index replacement.".to_string());
+        }
         if let Some(barrier) = options.pause_before_ref_update.as_deref() {
             wait_for_test_barrier(barrier)?;
         }
@@ -1577,6 +1665,9 @@ fn apply_inbound_tree(
     });
     let _ = fs::remove_file(&index_temporary);
     if let Err(error) = result {
+        if let Some(barrier) = options.pause_before_compensation.as_deref() {
+            wait_for_test_barrier(barrier)?;
+        }
         audit.compensation_attempted = true;
         return match compensate_inbound_tree(git, repo, &mut receipt, operation_id) {
             Ok(()) => {
@@ -1611,10 +1702,10 @@ fn apply_inbound_tree_changes(
     deletions.sort_by_key(|path| std::cmp::Reverse(path.matches('/').count()));
     for path in deletions {
         let target = repo.join(&path);
-        let backup = inbound_backup_path(repo, &path, operation_id)?;
-        rename_no_replace(&target, &backup).map_err(|error| {
-            format!("Unable to preserve incoming-deleted path '{path}': {error}")
-        })?;
+        let backup =
+            move_to_inbound_backup(receipt, &path, operation_id, options).map_err(|error| {
+                format!("Unable to preserve incoming-deleted path '{path}': {error}")
+            })?;
         receipt.path_backups.insert(path.clone(), backup);
         receipt.deleted_paths.insert(path);
         remove_empty_inbound_parents(&target, repo)?;
@@ -1640,9 +1731,7 @@ fn apply_inbound_tree_changes(
             .ok_or_else(|| format!("Reviewed Git blob disappeared: {path}"))?;
         let replace_existing = receipt.old_entries.contains_key(&path);
         if replace_existing && !receipt.path_backups.contains_key(&path) {
-            let target = repo.join(&path);
-            let backup = inbound_backup_path(repo, &path, operation_id)?;
-            rename_no_replace(&target, &backup)
+            let backup = move_to_inbound_backup(receipt, &path, operation_id, options)
                 .map_err(|error| format!("Unable to preserve tracked path '{path}': {error}"))?;
             receipt.path_backups.insert(path.clone(), backup);
         }
@@ -1767,18 +1856,31 @@ fn rename_inbound_no_replace(source: &Path, target: &Path) -> std::io::Result<()
 }
 
 fn acquire_git_index_lock(repo: &Path) -> Result<GitIndexLock> {
-    let path = repo.join(".git/index.lock");
-    let file = OpenOptions::new()
-        .create_new(true)
-        .read(true)
-        .write(true)
-        .open(&path)
-        .map_err(|error| {
+    let repo_dir = open_real_directory(repo)?;
+    let git_dir = open_real_child_directory(&repo_dir, ".git")?;
+    let fd = rustix::fs::openat(
+        &git_dir,
+        "index.lock",
+        OFlags::CREATE
+            | OFlags::EXCL
+            | OFlags::RDWR
+            | OFlags::CLOEXEC
+            | OFlags::NOFOLLOW,
+        Mode::from_bits_truncate(0o600),
+    )
+    .map_err(|error| {
             format!(
                 "Git index is being changed by another process. Wait for it to finish and retry: {error}"
             )
         })?;
-    Ok(GitIndexLock { path, _file: file })
+    let file = File::from(fd);
+    let metadata = file.metadata().map_err(|error| error.to_string())?;
+    Ok(GitIndexLock {
+        git_dir,
+        device: metadata.dev(),
+        inode: metadata.ino(),
+        file,
+    })
 }
 
 fn replace_git_index(
@@ -1824,26 +1926,19 @@ fn read_optional_file(path: &Path) -> Result<Option<Vec<u8>>> {
     }
 }
 
-fn inbound_backup_path(repo: &Path, relative_path: &str, operation_id: &str) -> Result<PathBuf> {
-    let git_dir = repo.join(".git");
-    let git_metadata = fs::symlink_metadata(&git_dir)
-        .map_err(|error| format!("Unable to inspect Git metadata directory: {error}"))?;
-    if git_metadata.file_type().is_symlink() || !git_metadata.is_dir() {
-        return Err("Git metadata directory must be a real directory.".to_string());
-    }
-    let canonical_repo = fs::canonicalize(repo).map_err(|error| error.to_string())?;
-    let canonical_git = fs::canonicalize(&git_dir).map_err(|error| error.to_string())?;
-    if !canonical_git.starts_with(&canonical_repo) {
-        return Err("Git metadata directory escapes the user-skills repository.".to_string());
-    }
-
+fn move_to_inbound_backup(
+    receipt: &InboundMutationReceipt,
+    relative_path: &str,
+    operation_id: &str,
+    options: &InboundMutationOptions,
+) -> Result<InboundBackupSlot> {
     let operation = sanitize_operation_ref_component(operation_id);
     if operation.is_empty() {
         return Err("Inbound recovery operation id is empty.".to_string());
     }
-    let mut parent = canonical_git.clone();
+    let mut parent = open_real_child_directory(&receipt.repo_dir, ".git")?;
     for component in ["skillbox", "inbound-worktree-backups", operation.as_str()] {
-        parent = ensure_secure_inbound_backup_directory(&parent, component, &canonical_git)?;
+        parent = open_or_create_real_child_directory(&parent, component)?;
     }
     let relative_parent = Path::new(relative_path)
         .parent()
@@ -1855,78 +1950,103 @@ fn inbound_backup_path(repo: &Path, relative_path: &str, operation_id: &str) -> 
         let component = component
             .to_str()
             .ok_or_else(|| "Inbound recovery path is not valid UTF-8.".to_string())?;
-        parent = ensure_secure_inbound_backup_directory(&parent, component, &canonical_git)?;
+        parent = open_or_create_real_child_directory(&parent, component)?;
     }
     let file_name = Path::new(relative_path)
         .file_name()
+        .and_then(|name| name.to_str())
         .ok_or_else(|| "Inbound recovery backup has no file name.".to_string())?;
-    Ok(parent.join(file_name))
+    let source_parent = open_relative_parent(&receipt.repo_dir, relative_path, false)?;
+    if let Some(barrier) = options.pause_before_backup_rename.as_deref() {
+        wait_for_test_barrier(barrier)?;
+    }
+    rustix::fs::renameat_with(
+        &source_parent,
+        file_name,
+        &parent,
+        file_name,
+        RenameFlags::NOREPLACE,
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(InboundBackupSlot {
+        parent,
+        file_name: file_name.to_string(),
+    })
 }
 
-fn ensure_secure_inbound_backup_directory(
-    parent: &Path,
-    child_name: &str,
-    canonical_git: &Path,
-) -> Result<PathBuf> {
-    let child = parent.join(child_name);
-    match fs::symlink_metadata(&child) {
-        Ok(metadata) => {
-            if metadata.file_type().is_symlink() || !metadata.is_dir() {
-                return Err(format!(
-                    "Inbound recovery directory is not a real directory: {}",
-                    child.display()
-                ));
+fn open_real_directory(path: &Path) -> Result<OwnedFd> {
+    rustix::fs::open(
+        path,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|error| format!("Unable to open real directory {}: {error}", path.display()))
+}
+
+fn open_real_child_directory(parent: impl AsFd, child: &str) -> Result<OwnedFd> {
+    rustix::fs::openat(
+        parent,
+        child,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|error| format!("Inbound directory '{child}' is not a real directory: {error}"))
+}
+
+fn open_or_create_real_child_directory(parent: impl AsFd, child: &str) -> Result<OwnedFd> {
+    match open_real_child_directory(parent.as_fd(), child) {
+        Ok(directory) => Ok(directory),
+        Err(_) => {
+            match rustix::fs::mkdirat(parent.as_fd(), child, Mode::from_bits_truncate(0o700)) {
+                Ok(()) => {}
+                Err(error) if error == rustix::io::Errno::EXIST => {}
+                Err(error) => {
+                    return Err(format!(
+                        "Unable to create inbound recovery directory '{child}': {error}"
+                    ))
+                }
             }
+            open_real_child_directory(parent, child)
         }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            fs::create_dir(&child).map_err(|error| {
-                format!(
-                    "Unable to create inbound recovery directory {}: {error}",
-                    child.display()
-                )
-            })?;
-        }
-        Err(error) => return Err(error.to_string()),
     }
-    let canonical = fs::canonicalize(&child).map_err(|error| error.to_string())?;
-    if !canonical.starts_with(canonical_git) {
-        return Err("Inbound recovery directory escapes Git metadata.".to_string());
-    }
-    Ok(canonical)
 }
 
-fn rename_no_replace(source: &Path, target: &Path) -> std::io::Result<()> {
-    let source = CString::new(source.as_os_str().as_bytes())
-        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
-    let target = CString::new(target.as_os_str().as_bytes())
-        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
-    #[cfg(target_os = "macos")]
-    unsafe {
-        if libc::renameatx_np(
-            libc::AT_FDCWD,
-            source.as_ptr(),
-            libc::AT_FDCWD,
-            target.as_ptr(),
-            libc::RENAME_EXCL,
-        ) == 0
-        {
-            return Ok(());
-        }
+fn open_relative_parent(repo_dir: impl AsFd, relative_path: &str, create: bool) -> Result<OwnedFd> {
+    let mut current = rustix::io::dup(repo_dir).map_err(|error| error.to_string())?;
+    let parent = Path::new(relative_path)
+        .parent()
+        .ok_or_else(|| "Inbound path has no parent.".to_string())?;
+    for component in parent.components() {
+        let std::path::Component::Normal(component) = component else {
+            return Err("Inbound path parent is unsafe.".to_string());
+        };
+        let component = component
+            .to_str()
+            .ok_or_else(|| "Inbound path parent is not valid UTF-8.".to_string())?;
+        current = if create {
+            open_or_create_real_child_directory(&current, component)?
+        } else {
+            open_real_child_directory(&current, component)?
+        };
     }
-    #[cfg(target_os = "linux")]
-    unsafe {
-        if libc::renameat2(
-            libc::AT_FDCWD,
-            source.as_ptr(),
-            libc::AT_FDCWD,
-            target.as_ptr(),
-            libc::RENAME_NOREPLACE,
-        ) == 0
-        {
-            return Ok(());
-        }
-    }
-    Err(std::io::Error::last_os_error())
+    Ok(current)
+}
+
+fn read_backup(slot: &InboundBackupSlot) -> Result<(Vec<u8>, bool)> {
+    let fd = rustix::fs::openat(
+        &slot.parent,
+        slot.file_name.as_str(),
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|error| error.to_string())?;
+    let mut file = File::from(fd);
+    let metadata = file.metadata().map_err(|error| error.to_string())?;
+    let mut bytes = Vec::new();
+    use std::io::Read;
+    file.read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    Ok((bytes, metadata.permissions().mode() & 0o111 != 0))
 }
 
 fn verify_inbound_backups(
@@ -1942,22 +2062,14 @@ fn verify_inbound_backups(
         .as_deref()
         .ok_or_else(|| "Missing old SHA for inbound recovery backups.".to_string())?;
     for (path, backup) in &receipt.path_backups {
-        let metadata = fs::symlink_metadata(backup).map_err(|error| error.to_string())?;
-        if !metadata.is_file() || metadata.file_type().is_symlink() {
-            return Err(format!(
-                "Inbound recovery backup changed type: {}",
-                backup.display()
-            ));
-        }
         let expected = git
             .show_file(repo, old_sha, path)?
             .ok_or_else(|| format!("Unable to read original tracked blob for recovery: {path}"))?;
-        let actual = fs::read(backup).map_err(|error| error.to_string())?;
+        let (actual, actual_executable) = read_backup(backup)?;
         let expected_executable = receipt
             .old_entries
             .get(path)
             .is_some_and(|entry| entry.mode == "100755");
-        let actual_executable = metadata.permissions().mode() & 0o111 != 0;
         if actual != expected || actual_executable != expected_executable {
             return Err(format!(
                 "Tracked path changed during inbound apply; the local version was restored: {path}"
@@ -2036,13 +2148,59 @@ fn compensate_inbound_tree(
         }
         receipt.ref_advanced = false;
     }
-    restore_git_index(repo, receipt)?;
-    restore_touched_paths(git, repo, receipt, operation_id)?;
-    if receipt.restore_generated_gitignore {
-        fs::write(repo.join(".gitignore"), DEFAULT_USER_SKILLS_GITIGNORE)
-            .map_err(|error| error.to_string())?;
+    let mut errors = Vec::new();
+    if let Err(error) = restore_git_index(repo, receipt) {
+        errors.push(format!("index: {error}"));
     }
-    Ok(())
+    if let Err(error) = restore_touched_paths(git, repo, receipt, operation_id) {
+        errors.push(format!("worktree: {error}"));
+    }
+    if receipt.restore_generated_gitignore {
+        if let Err(error) = restore_generated_gitignore_no_replace(repo) {
+            errors.push(format!("generated .gitignore: {error}"));
+        }
+    }
+    if let Some(mut index_lock) = receipt.index_lock.take() {
+        if let Err(error) = index_lock.release_if_owned() {
+            errors.push(format!("index lock: {error}"));
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
+    }
+}
+
+fn restore_generated_gitignore_no_replace(repo: &Path) -> Result<()> {
+    let path = repo.join(".gitignore");
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err(
+                    "another process created a non-regular .gitignore; it was preserved."
+                        .to_string(),
+                );
+            }
+            let current = fs::read_to_string(&path).map_err(|error| error.to_string())?;
+            if current == DEFAULT_USER_SKILLS_GITIGNORE {
+                Ok(())
+            } else {
+                Err("another process changed .gitignore; its content was preserved.".to_string())
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let mut file = OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(&path)
+                .map_err(|error| error.to_string())?;
+            use std::io::Write;
+            file.write_all(DEFAULT_USER_SKILLS_GITIGNORE.as_bytes())
+                .map_err(|error| error.to_string())
+        }
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 fn verify_operation_owned_paths(
@@ -2088,6 +2246,7 @@ fn restore_touched_paths(
     receipt: &InboundMutationReceipt,
     operation_id: &str,
 ) -> Result<()> {
+    let mut errors = Vec::new();
     let mut remove = receipt
         .written_paths
         .iter()
@@ -2096,52 +2255,89 @@ fn restore_touched_paths(
         .collect::<Vec<_>>();
     remove.sort_by_key(|path| std::cmp::Reverse(path.matches('/').count()));
     for path in remove {
-        preserve_then_remove_applied_path(git, repo, receipt, &path, operation_id)?;
+        if let Err(error) =
+            preserve_then_remove_applied_path(git, repo, receipt, &path, operation_id)
+        {
+            errors.push(format!("{path}: {error}"));
+        }
     }
     let mut restore = receipt.path_backups.iter().collect::<Vec<_>>();
     restore.sort_by(|left, right| left.0.cmp(right.0));
     for (path, backup) in restore {
-        let target = repo.join(path);
-        if target.exists() {
-            let incoming_backup = target.with_file_name(format!(
-                ".{}.skillbox-inbound-{}.recovery",
-                target
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("file"),
-                sanitize_operation_ref_component(operation_id)
-            ));
-            rename_no_replace(&target, &incoming_backup).map_err(|error| {
-                format!("Unable to preserve applied path during recovery: {error}")
-            })?;
-            let expected = receipt
-                .new_entries
-                .get(path)
-                .and_then(|_| git.show_file(repo, &receipt.new_sha, path).ok().flatten());
-            if expected.as_deref() != fs::read(&incoming_backup).ok().as_deref() {
-                return Err(format!(
-                    "Applied path changed during recovery; preserved both versions for manual review: {path}"
-                ));
-            }
-            fs::remove_file(&incoming_backup).map_err(|error| error.to_string())?;
+        if let Err(error) =
+            restore_one_inbound_backup(git, repo, receipt, path, backup, operation_id)
+        {
+            errors.push(format!("{path}: {error}"));
         }
-        if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        rename_no_replace(backup, &target)
-            .map_err(|error| format!("Unable to restore tracked path '{path}': {error}"))?;
     }
     let mut created_dirs = receipt.created_dirs.iter().cloned().collect::<Vec<_>>();
     created_dirs.sort_by_key(|path| std::cmp::Reverse(path.matches('/').count()));
     for path in created_dirs {
-        match fs::remove_dir(repo.join(path)) {
+        match fs::remove_dir(repo.join(&path)) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::DirectoryNotEmpty => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error.to_string()),
+            Err(error) => errors.push(format!("{path}: {error}")),
         }
     }
-    Ok(())
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
+    }
+}
+
+fn restore_one_inbound_backup(
+    git: &skillbox_git::GitService,
+    repo: &Path,
+    receipt: &InboundMutationReceipt,
+    path: &str,
+    backup: &InboundBackupSlot,
+    operation_id: &str,
+) -> Result<()> {
+    let target_parent = open_relative_parent(&receipt.repo_dir, path, true)?;
+    let file_name = Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "Inbound recovery target has no file name.".to_string())?;
+    if rustix::fs::statat(&target_parent, file_name, AtFlags::SYMLINK_NOFOLLOW).is_ok() {
+        let recovery_name = format!(
+            ".{file_name}.skillbox-inbound-{}.recovery",
+            sanitize_operation_ref_component(operation_id)
+        );
+        rustix::fs::renameat_with(
+            &target_parent,
+            file_name,
+            &backup.parent,
+            recovery_name.as_str(),
+            RenameFlags::NOREPLACE,
+        )
+        .map_err(|error| format!("Unable to preserve applied path during recovery: {error}"))?;
+        let incoming = InboundBackupSlot {
+            parent: rustix::io::dup(&backup.parent).map_err(|error| error.to_string())?,
+            file_name: recovery_name.clone(),
+        };
+        let expected = receipt
+            .new_entries
+            .get(path)
+            .and_then(|_| git.show_file(repo, &receipt.new_sha, path).ok().flatten());
+        let actual = read_backup(&incoming).ok().map(|(bytes, _)| bytes);
+        if expected.as_deref() != actual.as_deref() {
+            return Err(
+                "Applied path changed during recovery; both versions were preserved.".to_string(),
+            );
+        }
+        rustix::fs::unlinkat(&backup.parent, recovery_name.as_str(), AtFlags::empty())
+            .map_err(|error| error.to_string())?;
+    }
+    rustix::fs::renameat_with(
+        &backup.parent,
+        backup.file_name.as_str(),
+        &target_parent,
+        file_name,
+        RenameFlags::NOREPLACE,
+    )
+    .map_err(|error| format!("Unable to restore tracked path: {error}"))
 }
 
 fn preserve_then_remove_applied_path(
@@ -2151,30 +2347,41 @@ fn preserve_then_remove_applied_path(
     path: &str,
     operation_id: &str,
 ) -> Result<()> {
-    let target = repo.join(path);
-    if !target.exists() {
+    let parent = open_relative_parent(&receipt.repo_dir, path, false)?;
+    let file_name = Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "Applied inbound path has no file name.".to_string())?;
+    if rustix::fs::statat(&parent, file_name, AtFlags::SYMLINK_NOFOLLOW).is_err() {
         return Ok(());
     }
-    let preserved = target.with_file_name(format!(
-        ".{}.skillbox-inbound-{}.recovery",
-        target
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("file"),
+    let preserved = format!(
+        ".{file_name}.skillbox-inbound-{}.recovery",
         sanitize_operation_ref_component(operation_id)
-    ));
-    rename_no_replace(&target, &preserved)
-        .map_err(|error| format!("Unable to preserve applied path during recovery: {error}"))?;
+    );
+    rustix::fs::renameat_with(
+        &parent,
+        file_name,
+        &parent,
+        preserved.as_str(),
+        RenameFlags::NOREPLACE,
+    )
+    .map_err(|error| format!("Unable to preserve applied path during recovery: {error}"))?;
     let expected = git
         .show_file(repo, &receipt.new_sha, path)?
         .ok_or_else(|| format!("Unable to read applied blob for {path}"))?;
-    let actual = fs::read(&preserved).map_err(|error| error.to_string())?;
+    let preserved_slot = InboundBackupSlot {
+        parent: rustix::io::dup(&parent).map_err(|error| error.to_string())?,
+        file_name: preserved.clone(),
+    };
+    let actual = read_backup(&preserved_slot)?.0;
     if actual != expected {
         return Err(format!(
             "Applied path changed during recovery; preserved it for manual review: {path}"
         ));
     }
-    fs::remove_file(&preserved).map_err(|error| error.to_string())
+    rustix::fs::unlinkat(&parent, preserved.as_str(), AtFlags::empty())
+        .map_err(|error| error.to_string())
 }
 
 fn remove_empty_inbound_parents(path: &Path, repo: &Path) -> Result<()> {
@@ -2706,6 +2913,169 @@ mod tests {
     }
 
     #[test]
+    fn fd_relative_backup_and_restore_ignore_a_swapped_backup_path() {
+        let managed_root = temp_dir("inbound-fd-backup-swap");
+        let (remote, work) = remote_with_skill("inbound-fd-backup-swap");
+        configure_and_bootstrap(&managed_root, &remote);
+        let paths = managed_paths(&managed_root);
+        let git = skillbox_git::GitService::new();
+        fs::write(work.join("demo/README.md"), "old readme\n").unwrap();
+        git.add_all(&work).unwrap();
+        git.commit(&work, "Add readme").unwrap();
+        git.push_origin_main(&work, false).unwrap();
+        let bootstrap = preview_user_skills_inbound(&managed_root).unwrap();
+        apply_user_skills_inbound(
+            UserSkillsInboundApplyRequest {
+                preview_id: Some(bootstrap.preview_id),
+                actor: "test".to_string(),
+            },
+            &managed_root,
+        )
+        .unwrap();
+        let old_readme = fs::read(paths.user_skills_root.join("demo/README.md")).unwrap();
+        let old_skill = fs::read(paths.user_skills_root.join("demo/SKILL.md")).unwrap();
+        fs::write(work.join("demo/README.md"), "incoming readme\n").unwrap();
+        fs::write(
+            work.join("demo/SKILL.md"),
+            "---\nname: demo\ndescription: Incoming\n---\n",
+        )
+        .unwrap();
+        git.add_all(&work).unwrap();
+        git.commit(&work, "Incoming files").unwrap();
+        git.push_origin_main(&work, false).unwrap();
+        let preview = preview_user_skills_inbound(&managed_root).unwrap();
+        let old_sha = preview.status.local_sha.clone().unwrap();
+        let new_sha = preview.status.remote_sha.clone().unwrap();
+        let old_snapshot =
+            validate_inbound_git_tree(&git, &paths.user_skills_root, &old_sha, &mut Vec::new())
+                .unwrap();
+        let new_snapshot =
+            validate_inbound_git_tree(&git, &paths.user_skills_root, &new_sha, &mut Vec::new())
+                .unwrap();
+        let barrier = temp_dir("inbound-fd-swap-barrier").join("continue");
+        let ready = barrier.with_extension("ready");
+        let repo = paths.user_skills_root.clone();
+        let worker_barrier = barrier.clone();
+        let old_sha_worker = old_sha.clone();
+        let worker = std::thread::spawn(move || {
+            let mut audit = InboundApplyAudit::default();
+            apply_inbound_tree(
+                &skillbox_git::GitService::new(),
+                &repo,
+                Some(&old_sha_worker),
+                &new_sha,
+                old_snapshot.entries,
+                new_snapshot.entries,
+                "fd-swap",
+                &InboundMutationOptions {
+                    fail_after_writes: Some(1),
+                    pause_before_backup_rename: Some(worker_barrier),
+                    ..Default::default()
+                },
+                &mut audit,
+            )
+        });
+        while !ready.exists() {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let backup_root = paths
+            .user_skills_root
+            .join(".git/skillbox/inbound-worktree-backups/fd-swap");
+        let detached = backup_root.with_file_name("fd-swap-detached");
+        let outside = temp_dir("inbound-fd-swap-outside");
+        fs::rename(&backup_root, &detached).unwrap();
+        std::os::unix::fs::symlink(&outside, &backup_root).unwrap();
+        fs::write(&barrier, b"continue").unwrap();
+        let error = worker.join().unwrap().unwrap_err();
+        assert!(error.contains("restored"));
+        assert_eq!(
+            git.rev_parse_optional(&paths.user_skills_root, "HEAD")
+                .unwrap()
+                .as_deref(),
+            Some(old_sha.as_str())
+        );
+        assert_eq!(
+            fs::read(paths.user_skills_root.join("demo/README.md")).unwrap(),
+            old_readme
+        );
+        assert_eq!(
+            fs::read(paths.user_skills_root.join("demo/SKILL.md")).unwrap(),
+            old_skill
+        );
+        assert_eq!(fs::read_dir(outside).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn remote_only_recovery_preserves_concurrent_gitignore_content() {
+        let managed_root = temp_dir("inbound-gitignore-concurrent");
+        let (remote, _) = remote_with_skill("inbound-gitignore-concurrent");
+        set_user_skills_git_remote(
+            UserSkillsGitRemoteRequest {
+                remote_url: remote.to_string_lossy().to_string(),
+            },
+            &managed_root,
+        )
+        .unwrap();
+        let paths = managed_paths(&managed_root);
+        let preview = preview_user_skills_inbound(&managed_root).unwrap();
+        let git = skillbox_git::GitService::new();
+        let new_sha = preview.status.remote_sha.clone().unwrap();
+        let new_snapshot =
+            validate_inbound_git_tree(&git, &paths.user_skills_root, &new_sha, &mut Vec::new())
+                .unwrap();
+        let barrier = temp_dir("inbound-gitignore-concurrent-barrier").join("continue");
+        let ready = barrier.with_extension("ready");
+        let repo = paths.user_skills_root.clone();
+        let worker_barrier = barrier.clone();
+        let worker = std::thread::spawn(move || {
+            let mut audit = InboundApplyAudit::default();
+            apply_inbound_tree(
+                &skillbox_git::GitService::new(),
+                &repo,
+                None,
+                &new_sha,
+                HashMap::new(),
+                new_snapshot.entries,
+                "gitignore-concurrent",
+                &InboundMutationOptions {
+                    fail_after_index_replace: true,
+                    pause_before_compensation: Some(worker_barrier),
+                    ..Default::default()
+                },
+                &mut audit,
+            )
+        });
+        while !ready.exists() {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let index = paths.user_skills_root.join(".git/index");
+        fs::remove_file(&index).unwrap();
+        fs::create_dir(&index).unwrap();
+        fs::write(
+            paths.user_skills_root.join(".gitignore"),
+            "external concurrent content\n",
+        )
+        .unwrap();
+        fs::write(&barrier, b"continue").unwrap();
+        let error = worker.join().unwrap().unwrap_err();
+        assert!(error.contains("preserved"));
+        assert!(error.contains("index"));
+        assert_eq!(
+            fs::read_to_string(paths.user_skills_root.join(".gitignore")).unwrap(),
+            "external concurrent content\n"
+        );
+        assert_eq!(
+            git.rev_parse_optional(&paths.user_skills_root, "HEAD")
+                .unwrap(),
+            None
+        );
+        assert!(
+            !paths.user_skills_root.join("demo").exists(),
+            "worktree cleanup must continue after index restoration fails"
+        );
+    }
+
+    #[test]
     fn partial_remote_only_materialization_clears_index_and_can_retry() {
         let managed_root = temp_dir("inbound-partial-unborn");
         let (remote, work) = remote_with_skill("inbound-partial-unborn");
@@ -3067,6 +3437,106 @@ mod tests {
         let analysis = preview.conflict_analysis.unwrap();
         assert!(analysis.both_changed_files.is_empty());
         assert_eq!(analysis.both_changed_skills, vec!["demo"]);
+    }
+
+    #[test]
+    fn conflict_analysis_does_not_label_clean_delete_delete_as_likely_conflict() {
+        let managed_root = temp_dir("inbound-delete-delete");
+        let (remote, work) = remote_with_skill("inbound-delete-delete");
+        fs::write(work.join("demo/references.md"), "shared\n").unwrap();
+        let git = skillbox_git::GitService::new();
+        git.add_all(&work).unwrap();
+        git.commit(&work, "Add shared reference").unwrap();
+        git.push_origin_main(&work, false).unwrap();
+        configure_and_bootstrap(&managed_root, &remote);
+        let paths = managed_paths(&managed_root);
+        fs::remove_file(paths.user_skills_root.join("demo/references.md")).unwrap();
+        git.add_all(&paths.user_skills_root).unwrap();
+        git.commit(&paths.user_skills_root, "Delete local reference")
+            .unwrap();
+        fs::remove_file(work.join("demo/references.md")).unwrap();
+        git.add_all(&work).unwrap();
+        git.commit(&work, "Delete remote reference").unwrap();
+        git.push_origin_main(&work, false).unwrap();
+
+        let analysis = preview_user_skills_inbound(&managed_root)
+            .unwrap()
+            .conflict_analysis
+            .unwrap();
+        assert!(analysis
+            .both_changed_files
+            .iter()
+            .any(|path| path == "demo/references.md"));
+        assert!(!analysis
+            .likely_conflict_files
+            .iter()
+            .any(|path| path == "demo/references.md"));
+        assert!(analysis
+            .both_changed_skills
+            .iter()
+            .any(|name| name == "demo"));
+    }
+
+    #[test]
+    fn base_skill_lookup_deduplicates_top_level_candidates() {
+        let mut valid = HashSet::new();
+        let candidates = (0..1_000)
+            .map(|_| "historical".to_string())
+            .chain((0..1_000).map(|_| "not-a-skill".to_string()))
+            .collect::<HashSet<_>>();
+        let mut calls = HashMap::<String, usize>::new();
+        add_base_skill_names(&mut valid, candidates, |name| {
+            *calls.entry(name.to_string()).or_default() += 1;
+            Ok(name == "historical")
+        })
+        .unwrap();
+        assert_eq!(calls.get("historical"), Some(&1));
+        assert_eq!(calls.get("not-a-skill"), Some(&1));
+        assert!(valid.contains("historical"));
+    }
+
+    #[test]
+    fn remote_only_generated_gitignore_must_not_be_a_symlink() {
+        let managed_root = temp_dir("inbound-gitignore-symlink");
+        let (remote, _) = remote_with_skill("inbound-gitignore-symlink");
+        set_user_skills_git_remote(
+            UserSkillsGitRemoteRequest {
+                remote_url: remote.to_string_lossy().to_string(),
+            },
+            &managed_root,
+        )
+        .unwrap();
+        let paths = managed_paths(&managed_root);
+        let target = temp_dir("inbound-gitignore-target").join("defaults");
+        fs::write(&target, DEFAULT_USER_SKILLS_GITIGNORE).unwrap();
+        fs::remove_file(paths.user_skills_root.join(".gitignore")).unwrap();
+        std::os::unix::fs::symlink(&target, paths.user_skills_root.join(".gitignore")).unwrap();
+
+        let preview = preview_user_skills_inbound(&managed_root).unwrap();
+        assert!(!preview.can_apply);
+        assert_eq!(
+            fs::read_to_string(&target).unwrap(),
+            DEFAULT_USER_SKILLS_GITIGNORE
+        );
+    }
+
+    #[test]
+    fn index_lock_drop_preserves_a_replacement_lock() {
+        let repo = temp_dir("inbound-index-lock-owner");
+        let git = skillbox_git::GitService::new();
+        git.init_main(&repo).unwrap();
+        let lock = acquire_git_index_lock(&repo).unwrap();
+        fs::rename(
+            repo.join(".git/index.lock"),
+            repo.join(".git/index.lock.original"),
+        )
+        .unwrap();
+        fs::write(repo.join(".git/index.lock"), "external").unwrap();
+        drop(lock);
+        assert_eq!(
+            fs::read_to_string(repo.join(".git/index.lock")).unwrap(),
+            "external"
+        );
     }
 
     #[test]

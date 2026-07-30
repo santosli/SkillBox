@@ -555,10 +555,11 @@ Apply fast-forward:
   diff 或 merge driver。禁止 auto merge、rebase、reset、force-push、stash、
   last-write-wins 和 conflict-marker editing。
 - Apply 持有 `.git/index.lock`，使并发 `git add` / `git commit` fail closed；tracked
-  文件在替换或删除前以 no-replace rename 移入 `.git/skillbox/` 内的 operation-scoped
-  recovery snapshot。snapshot parent chain 必须逐级是 canonical `.git` 内的真实目录；
-  预置 symlink/非目录会在 worktree mutation 前 blocked。写入、ref 推进前后都会复核
-  受审内容；检测到外部编辑时恢复或保留双方内容并要求人工处理，不静默覆盖。
+  文件在替换或删除前以 fd-relative no-replace rename 移入 `.git/skillbox/` 内的
+  operation-scoped recovery snapshot。snapshot parent chain 通过 no-follow directory
+  handle 逐级打开；预置或并发换入的 symlink/非目录不能重定向恢复写入。写入、ref
+  推进前后都会复核受审内容；检测到外部编辑时恢复或保留双方内容并要求人工处理，
+  不静默覆盖。
 - Incoming add/rename/type-change 如果与本地 ignored 或 untracked path 发生 exact、
   ancestor 或 descendant 碰撞，Apply 必须在 mutation 前 blocked。普通
   `git status` 未显示 ignored 内容不等于可覆盖。
@@ -571,13 +572,17 @@ Apply fast-forward:
   rows，使其对应新的 repository snapshot。若 reindex 失败，必须补偿恢复旧 HEAD，
   保留 backup ref 并返回失败；补偿只在 HEAD 仍等于 expected applied SHA 且操作写集
   未被并发改变时执行，不能 reset 掉外部 commit。Remote-only 补偿还必须清空 index，
-  恢复为可重试的 unborn state。
+  并以 no-replace 方式恢复 generated `.gitignore`；若其它进程已创建不同内容则保留
+  外部内容并报告 partial recovery，不能截断它。
 - Operation log 记录 aggregate old/new refs、backup ref、mutation phase 与
   compensation outcome，不记录 credentials、diff contents 或 skill bodies。
   Remote identity 必须去除 URL userinfo、query 和 fragment。
-- Network fetch/push 清空 repository-local credential helper 和 transport command
-  override，禁止 `ext` protocol，并只恢复用户 global credential helpers；repo-local
-  shell helper、SSH command 或 upload-pack 不得在 reviewed flow 中执行。
+- Network fetch/push 拒绝 repository-local credential helper、SSH/upload/receive-pack
+  command、URL rewrite 和 transport override，禁止 `ext` protocol；按原顺序恢复用户
+  global generic/URL-scoped credential helpers（包括 GitHub CLI blank reset）与
+  `core.sshCommand`。repo-local executable config 不得在 reviewed flow 中执行；global
+  Git config 是用户受信任边界。helper/server stderr 只映射为有界分类错误，不直接进入
+  UI、日志或 operation payload。
 
 分叉处理：
 

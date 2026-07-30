@@ -231,10 +231,13 @@ SQLite reindex 失败，core 只在 HEAD 仍等于预期 commit 且操作写集�
 回旧状态，并保留 backup ref；发现并发 mutation 时拒绝覆盖恢复。该过程不自动 merge、
 rebase、reset、force-push、stash 或解决 conflict；`diverged` 只从 commit/tree diff
 返回 aggregate conflict diagnosis，用户需在应用外使用正常 Git 工具处理。
-Recovery snapshot 的目录链逐级拒绝 symlink/非目录并验证位于 canonical `.git`
-内。Network Git 清空 repository-local credential helper、SSH command、upload-pack
-和 `ext` transport override，仅恢复用户 global credential helpers，避免不可信 repo
-配置执行命令，同时保留正常的用户 GitHub 凭据链。
+Recovery snapshot 的目录链通过 no-follow directory handle 逐级打开，关键
+backup/restore rename 使用 fd-relative 路径，避免验证后换链。Network Git 拒绝
+repository-local credential helper、SSH/upload/receive-pack command、URL rewrite
+和 `ext` transport override；按原顺序恢复受信任 global generic/URL-scoped
+credential helpers（包括 GitHub CLI 的 blank reset）及 `core.sshCommand`，避免不可信
+repo 配置执行命令，同时保留用户现有 GitHub HTTPS/SSH 凭据链。Git 网络失败只返回
+有界分类错误，不回显 helper/server 原始 stderr。
 
 Preview 会在 working-tree write 前检查 incoming add/rename/type-change 与本地 ignored
 或 untracked 内容的 exact/ancestor/descendant 碰撞。碰撞必须 blocked，不能依赖普通

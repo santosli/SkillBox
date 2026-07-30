@@ -375,7 +375,7 @@ impl GitService {
             return Ok(None);
         }
 
-        Err(sanitize_git_error(stderr.trim()))
+        Err(network_git_error("git fetch origin/main", stderr.trim()))
     }
 
     pub fn rev_parse_optional(
@@ -1136,7 +1136,8 @@ impl GitService {
         let output = self.command_output_with_timeout(command, timeout, "git ls-remote")?;
 
         if !output.status.success() {
-            return Err(sanitize_git_error(
+            return Err(network_git_error(
+                "git ls-remote",
                 String::from_utf8_lossy(&output.stderr).trim(),
             ));
         }
@@ -1313,7 +1314,8 @@ impl GitService {
         let output = self.run_network_output(repo, args, timeout, label)?;
 
         if !output.status.success() {
-            return Err(sanitize_git_error(
+            return Err(network_git_error(
+                label,
                 String::from_utf8_lossy(&output.stderr).trim(),
             ));
         }
@@ -1328,36 +1330,8 @@ impl GitService {
         timeout: Duration,
         label: &str,
     ) -> Result<Output, String> {
-        let trusted_credential_helpers = trusted_global_credential_helpers();
-        let mut command = Command::new("git");
-        command
-            .arg("-c")
-            .arg("core.hooksPath=/dev/null")
-            .arg("-c")
-            .arg("credential.helper=")
-            .arg("-c")
-            .arg("credential.interactive=false")
-            .arg("-c")
-            .arg("core.sshCommand=ssh")
-            .arg("-c")
-            .arg("core.gitProxy=")
-            .arg("-c")
-            .arg("remote.origin.uploadpack=git-upload-pack")
-            .arg("-c")
-            .arg("protocol.ext.allow=never");
-        for helper in trusted_credential_helpers {
-            command.arg("-c").arg(format!("credential.helper={helper}"));
-        }
-        command
-            .arg("-C")
-            .arg(repo)
-            .args(args)
-            .env("GIT_TERMINAL_PROMPT", "0")
-            .env("GIT_ASKPASS", "true")
-            .env("GCM_INTERACTIVE", "never")
-            .env_remove("GIT_SSH")
-            .env_remove("GIT_SSH_COMMAND")
-            .env("LC_ALL", "C");
+        let mut command = hardened_network_command(repo)?;
+        command.args(args).env("LC_ALL", "C");
         self.command_output_with_timeout(command, timeout, label)
     }
 
@@ -1602,9 +1576,44 @@ impl GitService {
     }
 }
 
-fn trusted_global_credential_helpers() -> Vec<String> {
+fn hardened_network_command(repo: &Path) -> Result<Command, String> {
+    reject_untrusted_local_network_config(repo)?;
+    let trusted_network_config = trusted_global_network_config();
+    let mut command = Command::new("git");
+    command
+        .arg("-c")
+        .arg("core.hooksPath=/dev/null")
+        .arg("-c")
+        .arg("credential.helper=")
+        .arg("-c")
+        .arg("credential.interactive=false")
+        .arg("-c")
+        .arg("core.sshCommand=ssh")
+        .arg("-c")
+        .arg("core.gitProxy=")
+        .arg("-c")
+        .arg("remote.origin.uploadpack=git-upload-pack")
+        .arg("-c")
+        .arg("remote.origin.receivepack=git-receive-pack")
+        .arg("-c")
+        .arg("protocol.ext.allow=never");
+    for (key, value) in trusted_network_config {
+        command.arg("-c").arg(format!("{key}={value}"));
+    }
+    command
+        .arg("-C")
+        .arg(repo)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_ASKPASS", "true")
+        .env("GCM_INTERACTIVE", "never")
+        .env_remove("GIT_SSH")
+        .env_remove("GIT_SSH_COMMAND");
+    Ok(command)
+}
+
+fn trusted_global_network_config() -> Vec<(String, String)> {
     let output = Command::new("git")
-        .args(["config", "--global", "--get-all", "credential.helper"])
+        .args(["config", "--global", "--null", "--list"])
         .env("LC_ALL", "C")
         .output();
     let Ok(output) = output else {
@@ -1613,12 +1622,73 @@ fn trusted_global_credential_helpers() -> Vec<String> {
     if !output.status.success() {
         return Vec::new();
     }
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
+    parse_null_git_config(&output.stdout)
+        .into_iter()
+        .filter(|(key, _)| {
+            is_credential_helper_key(key) || key.eq_ignore_ascii_case("core.sshcommand")
+        })
         .collect()
+}
+
+fn reject_untrusted_local_network_config(repo: &Path) -> Result<(), String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["config", "--local", "--null", "--list"])
+        .env("LC_ALL", "C")
+        .output()
+        .map_err(|_| "Unable to inspect repository Git network configuration.".to_string())?;
+    if !output.status.success() {
+        return Err("Unable to inspect repository Git network configuration.".to_string());
+    }
+    let mut rejected = parse_null_git_config(&output.stdout)
+        .into_iter()
+        .map(|(key, _)| key)
+        .filter(|key| local_network_config_is_untrusted(key))
+        .collect::<Vec<_>>();
+    rejected.sort();
+    rejected.dedup();
+    if rejected.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "Repository Git config contains unsupported network override(s): {}. Remove them before retrying.",
+        rejected.join(", ")
+    ))
+}
+
+fn parse_null_git_config(output: &[u8]) -> Vec<(String, String)> {
+    output
+        .split(|byte| *byte == 0)
+        .filter(|entry| !entry.is_empty())
+        .filter_map(|entry| {
+            let entry = String::from_utf8_lossy(entry);
+            let (key, value) = entry.split_once('\n')?;
+            Some((key.to_ascii_lowercase(), value.to_string()))
+        })
+        .collect()
+}
+
+fn is_credential_helper_key(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    key == "credential.helper" || (key.starts_with("credential.") && key.ends_with(".helper"))
+}
+
+fn local_network_config_is_untrusted(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    is_credential_helper_key(&key)
+        || key == "core.askpass"
+        || key == "core.gitproxy"
+        || key == "core.sshcommand"
+        || key == "remote.origin.uploadpack"
+        || key == "remote.origin.receivepack"
+        || key == "remote.origin.proxy"
+        || key == "remote.origin.proxyauthmethod"
+        || key == "include.path"
+        || (key.starts_with("includeif.") && key.ends_with(".path"))
+        || (key.starts_with("url.") && key.ends_with(".insteadof"))
+        || key == "http.proxy"
+        || (key.starts_with("http.") && key.ends_with(".proxy"))
 }
 
 fn read_command_output_file(file: &mut fs::File) -> Result<Vec<u8>, String> {
@@ -1999,6 +2069,31 @@ fn sanitize_git_error(message: &str) -> String {
     sanitized
 }
 
+fn network_git_error(label: &str, stderr: &str) -> String {
+    let lower = stderr.to_ascii_lowercase();
+    if lower.contains("authentication")
+        || lower.contains("permission denied")
+        || lower.contains("repository not found")
+        || lower.contains("could not read username")
+        || lower.contains("access denied")
+    {
+        return format!(
+            "{label} failed because remote authentication or access was rejected. Verify the configured Git credentials and retry."
+        );
+    }
+    if lower.contains("could not resolve")
+        || lower.contains("failed to connect")
+        || lower.contains("connection refused")
+        || lower.contains("network is unreachable")
+        || lower.contains("timed out")
+    {
+        return format!(
+            "{label} could not reach the remote. Check the network and remote URL, then retry."
+        );
+    }
+    format!("{label} failed. Check remote access and retry.")
+}
+
 pub fn diff_no_index_tree(
     old_root: impl AsRef<Path>,
     new_root: impl AsRef<Path>,
@@ -2160,7 +2255,6 @@ fn strip_root_prefix(value: &str, root: &str) -> Option<String> {
 mod tests {
     use super::*;
     use std::io::Write as _;
-    use std::net::TcpListener;
     use std::path::PathBuf;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -2464,13 +2558,17 @@ mod tests {
         let run_network_start = source.find("fn run_network").unwrap();
         let run_with_config_start = source.find("fn run_with_config").unwrap();
         let run_network_source = &source[run_network_start..run_with_config_start];
+        let hardened_network_start = source.find("fn hardened_network_command").unwrap();
+        let trusted_config_start = source.find("fn trusted_global_network_config").unwrap();
+        let hardened_network_source = &source[hardened_network_start..trusted_config_start];
 
         assert!(fetch_ref_path_source.contains("run_network"));
         assert!(fetch_ref_path_source.contains("FETCH_REF_TIMEOUT"));
         assert!(run_network_source.contains("command_output_with_timeout"));
-        assert!(run_network_source.contains("GIT_TERMINAL_PROMPT"));
-        assert!(run_network_source.contains("GIT_ASKPASS"));
-        assert!(run_network_source.contains("GCM_INTERACTIVE"));
+        assert!(run_network_source.contains("hardened_network_command"));
+        assert!(hardened_network_source.contains("GIT_TERMINAL_PROMPT"));
+        assert!(hardened_network_source.contains("GIT_ASKPASS"));
+        assert!(hardened_network_source.contains("GCM_INTERACTIVE"));
     }
 
     #[test]
@@ -2529,25 +2627,12 @@ mod tests {
         );
         run_git(&repo, &["config", "credential.helper", &helper]).unwrap();
 
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request = [0_u8; 4096];
-            let _ = stream.read(&mut request);
-            stream
-                .write_all(
-                    b"HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"test\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                )
-                .unwrap();
-        });
-        git.set_origin_url(&repo, &format!("http://{address}/repo.git"))
+        git.set_origin_url(&repo, "http://127.0.0.1:9/repo.git")
             .unwrap();
 
         let error = git
             .fetch_origin_main_with_timeout(&repo, Duration::from_secs(5))
             .unwrap_err();
-        server.join().unwrap();
         assert!(!error.is_empty());
         assert!(
             !marker.exists(),
@@ -2575,6 +2660,184 @@ mod tests {
             !marker.exists(),
             "network fetch executed a repository-local Git proxy"
         );
+    }
+
+    #[test]
+    fn global_network_config_preserves_scoped_helpers_and_ssh_command_order() {
+        let parsed = parse_null_git_config(
+            b"credential.https://github.com.helper\n\0credential.https://github.com.helper\n!/opt/homebrew/bin/gh auth git-credential\0core.sshcommand\nssh -i ~/.ssh/github\0",
+        );
+        let trusted = parsed
+            .into_iter()
+            .filter(|(key, _)| {
+                is_credential_helper_key(key) || key.eq_ignore_ascii_case("core.sshcommand")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            trusted,
+            vec![
+                (
+                    "credential.https://github.com.helper".to_string(),
+                    String::new()
+                ),
+                (
+                    "credential.https://github.com.helper".to_string(),
+                    "!/opt/homebrew/bin/gh auth git-credential".to_string()
+                ),
+                (
+                    "core.sshcommand".to_string(),
+                    "ssh -i ~/.ssh/github".to_string()
+                )
+            ]
+        );
+    }
+
+    #[test]
+    fn network_fetch_uses_trusted_scoped_helper_without_leaking_its_stderr() {
+        const CHILD: &str = "SKILLBOX_SCOPED_HELPER_CHILD";
+        if let Some(root) = std::env::var_os(CHILD) {
+            let root = PathBuf::from(root);
+            let repo = root.join("repo");
+            fs::create_dir_all(&repo).unwrap();
+            let git = GitService::new();
+            git.init_main(&repo).unwrap();
+            let marker = root.join("helper-invoked");
+            let helper = root.join("credential-helper.sh");
+            fs::write(
+                &helper,
+                format!(
+                    "#!/bin/sh\nprintf invoked > '{}'\nprintf 'SUPERSECRET\\n' >&2\nprintf 'username=x\\npassword=y\\n'\n",
+                    marker.display()
+                ),
+            )
+            .unwrap();
+            fs::set_permissions(&helper, fs::Permissions::from_mode(0o700)).unwrap();
+            let config = root.join("global.gitconfig");
+            fs::write(
+                &config,
+                format!(
+                    "[credential \"https://github.com\"]\n\thelper =\n\thelper = !{}\n[core]\n\tsshCommand = ssh -o BatchMode=yes\n",
+                    helper.display()
+                ),
+            )
+            .unwrap();
+            std::env::set_var("GIT_CONFIG_GLOBAL", &config);
+            let trusted = trusted_global_network_config();
+            assert!(
+                trusted
+                    .iter()
+                    .filter(|(key, _)| key == "credential.https://github.com.helper")
+                    .count()
+                    == 2,
+                "scoped credential helpers were not restored in order"
+            );
+            let mut command = hardened_network_command(&repo).unwrap();
+            command
+                .args(["credential", "fill"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            let mut child = command.spawn().unwrap();
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(b"protocol=https\nhost=github.com\n\n")
+                .unwrap();
+            let output = child.wait_with_output().unwrap();
+            let error = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                marker.exists(),
+                "helper marker missing; status={:?}; stdout={}; stderr={}",
+                output.status.code(),
+                String::from_utf8_lossy(&output.stdout),
+                error
+            );
+            let surfaced = network_git_error("git credential", &error);
+            assert!(!surfaced.contains("SUPERSECRET"));
+            assert!(surfaced.len() < 240);
+            return;
+        }
+
+        let root = temp_dir("git-scoped-helper-child");
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::network_fetch_uses_trusted_scoped_helper_without_leaking_its_stderr",
+                "--nocapture",
+            ])
+            .env(CHILD, &root)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn network_fetch_rejects_repository_url_rewrite_before_ref_update() {
+        let git = GitService::new();
+        let repo = temp_dir("git-network-url-rewrite");
+        let remote = bare_remote_with_skill("git-network-url-rewrite-remote");
+        git.init_main(&repo).unwrap();
+        git.set_origin_url(&repo, "https://github.com/acme/repo.git")
+            .unwrap();
+        run_git(
+            &repo,
+            &[
+                "config",
+                &format!("url.file://{}.insteadOf", remote.display()),
+                "https://github.com/acme/repo.git",
+            ],
+        )
+        .unwrap();
+
+        let error = git.fetch_origin_main(&repo).unwrap_err();
+        assert!(error.contains("url."));
+        assert_eq!(
+            git.rev_parse_optional(&repo, "refs/remotes/origin/main")
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn network_push_rejects_repository_receivepack_helper() {
+        let git = GitService::new();
+        let repo = temp_dir("git-network-receivepack");
+        let remote = bare_remote_with_skill("git-network-receivepack-remote");
+        git.init_main(&repo).unwrap();
+        write_file(&repo.join("demo.txt"), "demo\n");
+        commit_all(&repo, "demo");
+        git.set_origin_url(&repo, remote.to_str().unwrap()).unwrap();
+        let marker = repo.join("receivepack-invoked");
+        run_git(
+            &repo,
+            &[
+                "config",
+                "remote.origin.receivepack",
+                &format!("sh -c 'printf invoked > \"{}\"'", marker.display()),
+            ],
+        )
+        .unwrap();
+
+        let error = git.push_origin_main(&repo, false).unwrap_err();
+        assert!(error.contains("remote.origin.receivepack"));
+        assert!(!marker.exists());
+    }
+
+    #[test]
+    fn network_errors_are_bounded_and_do_not_echo_helper_or_server_output() {
+        let error = network_git_error(
+            "git fetch",
+            "fatal: helper said token=SUPERSECRET and server body PRIVATE",
+        );
+        assert_eq!(error, "git fetch failed. Check remote access and retry.");
+        assert!(!error.contains("SUPERSECRET"));
+        assert!(!error.contains("PRIVATE"));
+        assert!(error.len() < 240);
     }
 
     #[test]
