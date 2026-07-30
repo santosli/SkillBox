@@ -26,6 +26,7 @@ import {
   useInboundReviewRequestController
 } from './userSkillsInbound.js';
 import {
+  previewSkills,
   previewUserSkillsGitChanges,
   previewUserSkillsInbound,
   previewUserSkillsInboundStatus
@@ -54,10 +55,12 @@ function findButton(renderer, label) {
 
 function createDeferred() {
   let resolve;
-  const promise = new Promise((resolvePromise) => {
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
+    reject = rejectPromise;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 async function withProductionApp(invoke, run) {
@@ -844,6 +847,261 @@ test('newer remote save revokes an older inbound check result', async () => {
       'git@example.com:saved/skills.git'
     );
     assert.doesNotMatch(renderedText(renderer.root), /Behind/);
+  });
+});
+
+test('refresh claims its generation before paint and cannot overwrite a newer remote save', async () => {
+  let managedStateCount = 0;
+  const invoke = async (command) => {
+    if (command === 'managed_state') {
+      managedStateCount += 1;
+      return {
+        is_first_use: false,
+        paths: {
+          user_skills_root:
+            managedStateCount === 1 ? '/tmp/user-skills' : '/tmp/stale-status-refresh'
+        },
+        skills: []
+      };
+    }
+    if (command === 'managed_preferences') {
+      return {
+        remote_update_timeout_seconds: 30,
+        status_refresh_interval_minutes: 5
+      };
+    }
+    if (command === 'user_skills_git_status') {
+      return {
+        branch: 'main',
+        remote_url: 'git@example.com:stale/skills.git',
+        repo_path: '/tmp/stale-status-refresh',
+        state: 'dirty'
+      };
+    }
+    if (command === 'set_user_skills_git_remote') {
+      return {
+        branch: 'main',
+        remote_url: 'git@example.com:saved/skills.git',
+        repo_path: '/tmp/user-skills',
+        state: 'clean'
+      };
+    }
+    if (command === 'check_remote_skill_updates') {
+      return { statuses: [] };
+    }
+    if (
+      [
+        'cached_remote_skill_updates',
+        'list_skill_user_metadata',
+        'list_workspaces',
+        'usage_hook_statuses'
+      ].includes(command)
+    ) {
+      return command === 'cached_remote_skill_updates' ? {} : [];
+    }
+    if (command === 'app_update_status') {
+      return { disabled: true };
+    }
+    return null;
+  };
+
+  const previousRequestAnimationFrame = globalThis.requestAnimationFrame;
+  const frames = [];
+  try {
+    await withProductionApp(invoke, async (renderer) => {
+      globalThis.requestAnimationFrame = (callback) => {
+        frames.push(callback);
+        return frames.length;
+      };
+
+      let refreshRun;
+      await act(async () => {
+        refreshRun = findButton(renderer, 'Refresh').props.onClick();
+        await Promise.resolve();
+      });
+      assert.equal(frames.length, 1);
+      await act(async () => {
+        frames.shift()();
+        await Promise.resolve();
+      });
+      assert.equal(frames.length, 1);
+
+      await act(async () => {
+        findButton(renderer, 'Settings').props.onClick();
+      });
+      const remoteInput = renderer.root.findByProps({
+        placeholder: 'git@github.com:santosli/user-skills.git'
+      });
+      const remoteForm = remoteInput.parent.parent;
+      await act(async () => {
+        remoteInput.props.onChange({ target: { value: 'git@example.com:saved/skills.git' } });
+      });
+      await act(async () => {
+        await remoteForm.props.onSubmit({ preventDefault() {} });
+      });
+      await act(async () => {
+        frames.shift()();
+        await refreshRun;
+      });
+
+      assert.equal(managedStateCount, 1, 'stale refresh must stop before invoking backend work');
+      assert.equal(
+        renderer.root.findByProps({
+          placeholder: 'git@github.com:santosli/user-skills.git'
+        }).props.value,
+        'git@example.com:saved/skills.git'
+      );
+      assert.doesNotMatch(renderedText(renderer.root), /stale-status-refresh/);
+    });
+  } finally {
+    globalThis.requestAnimationFrame = previousRequestAnimationFrame;
+  }
+});
+
+test('single-skill refresh success and error cannot overwrite a newer remote save', async () => {
+  const staleChecks = [createDeferred(), createDeferred()];
+  let checkCount = 0;
+  const invoke = async (command) => {
+    if (command === 'managed_state') {
+      return {
+        is_first_use: false,
+        paths: { user_skills_root: '/tmp/user-skills' },
+        skills: [previewSkills.find((skill) => skill.type === 'remote')]
+      };
+    }
+    if (command === 'managed_preferences') {
+      return {
+        remote_update_timeout_seconds: 30,
+        status_refresh_interval_minutes: 5
+      };
+    }
+    if (command === 'user_skills_git_status') {
+      return {
+        branch: 'main',
+        remote_url: 'git@example.com:initial/skills.git',
+        repo_path: '/tmp/user-skills',
+        state: 'clean'
+      };
+    }
+    if (command === 'check_remote_skill_update') {
+      const deferred = staleChecks[checkCount];
+      checkCount += 1;
+      return deferred.promise;
+    }
+    if (command === 'set_user_skills_git_remote') {
+      return {
+        branch: 'main',
+        remote_url: `git@example.com:saved-${checkCount}/skills.git`,
+        repo_path: '/tmp/user-skills',
+        state: 'clean'
+      };
+    }
+    if (command === 'list_remote_skill_versions') {
+      return { current_version: '', skill_name: 'docs-reviewer', versions: [] };
+    }
+    if (command === 'list_operations') {
+      return { operations: [] };
+    }
+    if (command === 'list_import_records') {
+      return { records: [] };
+    }
+    if (
+      [
+        'cached_remote_skill_updates',
+        'list_skill_user_metadata',
+        'list_workspaces',
+        'usage_hook_statuses'
+      ].includes(command)
+    ) {
+      return command === 'cached_remote_skill_updates'
+        ? {
+            statuses: [
+              {
+                skill_name: 'docs-reviewer',
+                source_type: 'github',
+                source_url: 'https://github.com/acme/docs-reviewer',
+                state: 'up_to_date'
+              }
+            ]
+          }
+        : [];
+    }
+    if (command === 'app_update_status') {
+      return { disabled: true };
+    }
+    return null;
+  };
+
+  await withProductionApp(invoke, async (renderer) => {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      if (renderedText(renderer.root).includes('Up to date')) {
+        break;
+      }
+    }
+    for (const outcome of ['success', 'error']) {
+      await act(async () => {
+        findButton(renderer, 'Dashboard').props.onClick();
+      });
+      await act(async () => {
+        renderer.root.findByProps({ className: 'skillCardHitArea' }).props.onClick();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      let checkRun;
+      await act(async () => {
+        const checkUpdate = findButton(renderer, 'Check update');
+        assert.ok(
+          checkUpdate,
+          `initial App refresh should settle before checking one skill; checks=${checkCount}; buttons=${renderer.root
+            .findAllByType('button')
+            .map((button) => renderedText(button).trim())
+            .join(' | ')}`
+        );
+        checkRun = checkUpdate.props.onClick();
+        await Promise.resolve();
+      });
+      await act(async () => {
+        findButton(renderer, 'Settings').props.onClick();
+      });
+      const remoteInput = renderer.root.findByProps({
+        placeholder: 'git@github.com:santosli/user-skills.git'
+      });
+      const remoteForm = remoteInput.parent.parent;
+      const savedRemote = `git@example.com:saved-${checkCount}/skills.git`;
+      await act(async () => {
+        remoteInput.props.onChange({ target: { value: savedRemote } });
+      });
+      await act(async () => {
+        await remoteForm.props.onSubmit({ preventDefault() {} });
+      });
+      await act(async () => {
+        if (outcome === 'success') {
+          staleChecks[checkCount - 1].resolve({
+            checked_at: new Date().toISOString(),
+            statuses: [
+              {
+                skill_name: 'remote-demo',
+                state: 'update_available',
+                message: 'stale single-skill success'
+              }
+            ]
+          });
+        } else {
+          staleChecks[checkCount - 1].reject(new Error('stale single-skill error'));
+        }
+        await checkRun;
+      });
+      assert.equal(
+        renderer.root.findByProps({
+          placeholder: 'git@github.com:santosli/user-skills.git'
+        }).props.value,
+        savedRemote
+      );
+      assert.doesNotMatch(renderedText(renderer.root), /stale single-skill/);
+    }
   });
 });
 

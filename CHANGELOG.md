@@ -34,6 +34,10 @@ version tags such as `v0.3.0`.
   index recovery to exact content, require atomic-exchange support before
   mutation, reject push URL rewrites, and prevent stale async refreshes from
   overwriting newer Git state.
+- Resolve relative and symlink-parent managed-root aliases before locking,
+  reject custom-helper origin URLs, gate every status refresh branch from
+  function entry, and detect plain worktree edits after reindex before
+  reporting a successful inbound apply.
 - Add matching Rust CLI, Tauri, and desktop review surfaces while preserving the
   existing outbound commit-and-push behavior.
 

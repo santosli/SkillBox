@@ -570,8 +570,11 @@ Apply fast-forward:
 - Inbound apply、outbound user-skills Git、deploy/undeploy 与其它 managed user-skill
   写操作共用 mutation lock；lock 返回 canonical truth root，所有锁内 Git、DB 与文件
   操作都固定使用该 root，调用方的 symlink alias 后续被 retarget 也不能转移 mutation。
+  Relative root、`~` 与 symlink-parent/`..` alias 先按真实 existing-parent identity
+  解析，再创建/获取 lock；不同 cwd 的等价 alias 不会锁住或创建错误的 managed store。
   Save remote、outbound sync、inbound check/apply 与状态 refresh 在 UI 共用 monotonic
-  generation，较早的异步 refresh 不能覆盖较新的权威状态。Apply 失败
+  generation；full、browser 与 single-skill refresh 都在函数入口领取 generation，
+  较早的异步 refresh 不能在 paint/backend await 后覆盖较新的权威状态。Apply 失败
   后旧 preview authorization 立即失效，必须 Refresh 并重新 review。
 - 通用 managed-layout/read 初始化不补写 Git ignore defaults；显式 Git 配置/同步在
   持 mutation lock 的路径内完成该设置，避免与 remote-only bootstrap 竞争。
@@ -583,6 +586,10 @@ Apply fast-forward:
   外部内容并报告 partial recovery，不能截断它。Remote-only apply 会先原子转移当前
   `.gitignore` 再核验它仍是 SkillBox 生成的真实 regular file，因此 preflight 后的
   editor atomic-save replacement 或 symlink 不会被 unlink。
+- Reindex 完成后、成功返回和释放 index lock 前，Apply 再次验证 HEAD 与 worktree
+  仍精确对应 reviewed/materialized tree。此窗口出现普通编辑时不覆盖用户内容，也不
+  报 clean success；operation 进入可审计 failure/partial-recovery 结果，SQLite 与
+  filesystem 不一致必须显式暴露并要求重新检查。
 - Compensation 独立尝试所有仍可安全证明的 ref、index、worktree、generated defaults
   和 lock cleanup；单项失败不会跳过其它恢复。若 Git/worktree/SQLite 已成功，但
   `.git/index.lock` 的 pathname 已被外部替换，apply 返回 succeeded result 加
@@ -606,7 +613,9 @@ Apply fast-forward:
 - Network fetch/push 拒绝 repository-local 与 worktree-scope credential helper、
   include/proxy、SSH/upload/receive-pack command、URL rewrite 和 protocol override；
   `remote.*.vcs`、`url.*.insteadOf` 与 `url.*.pushInsteadOf` 都按 helper dispatch /
-  transport rewrite config fail closed；`GIT_ALLOW_PROTOCOL` 只允许
+  transport rewrite config fail closed；`remote.origin.url` / `pushurl` 只接受
+  支持的 local/file/http/https/ssh/git 或 SCP-style Git 地址，custom helper syntax
+  在执行前拒绝。`GIT_ALLOW_PROTOCOL` 只允许
   `file/http/https/ssh/git`，任意 `git-remote-*` custom
   helper 与 `ext` transport 均 fail closed。所有 origin/config/fetch preflight 共用
   bounded deadline 和 isolated process-group termination；按原顺序恢复用户

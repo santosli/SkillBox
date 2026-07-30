@@ -1600,8 +1600,9 @@ impl GitService {
         }
         let mut rejected = entries
             .into_iter()
-            .map(|(key, _)| key)
-            .filter(|key| local_network_config_is_untrusted(key))
+            .filter_map(|(key, value)| {
+                repository_network_config_rejection(&key, &value).then_some(key)
+            })
             .collect::<Vec<_>>();
         rejected.sort();
         rejected.dedup();
@@ -1953,6 +1954,43 @@ fn local_network_config_is_untrusted(key: &str) -> bool {
         || (key.starts_with("protocol.") && key.ends_with(".allow"))
         || key == "http.proxy"
         || (key.starts_with("http.") && key.ends_with(".proxy"))
+}
+
+fn repository_network_config_rejection(key: &str, value: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    if key == "remote.origin.url" || key == "remote.origin.pushurl" {
+        return !supported_repository_remote_url(value);
+    }
+    local_network_config_is_untrusted(&key)
+}
+
+fn supported_repository_remote_url(value: &str) -> bool {
+    let value = value.trim();
+    if value.is_empty()
+        || value.starts_with('-')
+        || value
+            .chars()
+            .any(|character| character.is_whitespace() || character.is_control())
+    {
+        return false;
+    }
+    if let Some((scheme, remainder)) = value.split_once("://") {
+        return matches!(
+            scheme.to_ascii_lowercase().as_str(),
+            "file" | "http" | "https" | "ssh" | "git"
+        ) && !remainder.is_empty();
+    }
+    if value.starts_with('/') || value.starts_with("./") || value.starts_with("../") {
+        return true;
+    }
+    if let Some((host, path)) = value.split_once(':') {
+        return !host.is_empty()
+            && !host.contains('/')
+            && !path.is_empty()
+            && !path.starts_with(':')
+            && !path.contains("::");
+    }
+    !value.contains("::")
 }
 
 fn read_command_output_file(file: &mut fs::File) -> Result<Vec<u8>, String> {
@@ -3322,6 +3360,105 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    #[test]
+    fn network_fetch_and_push_reject_custom_origin_urls_without_execution() {
+        const CHILD: &str = "SKILLBOX_ORIGIN_URL_HELPER_CHILD";
+        if let Some(root) = std::env::var_os(CHILD) {
+            let root = PathBuf::from(root);
+            let bin = root.join("bin");
+            fs::create_dir_all(&bin).unwrap();
+            let marker = root.join("origin-url-helper-invoked");
+            let helper = bin.join("git-remote-git");
+            fs::write(
+                &helper,
+                format!(
+                    "#!/bin/sh\nprintf invoked > '{}'\nprintf 'SECRET origin helper stderr' >&2\nexit 1\n",
+                    marker.display()
+                ),
+            )
+            .unwrap();
+            fs::set_permissions(&helper, fs::Permissions::from_mode(0o700)).unwrap();
+            let path = format!(
+                "{}:{}",
+                bin.display(),
+                std::env::var("PATH").unwrap_or_default()
+            );
+            std::env::set_var("PATH", path);
+
+            for scope in ["local", "worktree"] {
+                for key in ["remote.origin.url", "remote.origin.pushurl"] {
+                    let repo = root.join(format!("repo-{scope}-{}", key.replace('.', "-")));
+                    let git = GitService::new();
+                    git.init_main(&repo).unwrap();
+                    write_file(&repo.join("demo.txt"), "demo\n");
+                    commit_all(&repo, "demo");
+                    git.set_origin_url(&repo, "https://github.com/acme/repo.git")
+                        .unwrap();
+                    if scope == "worktree" {
+                        run_git(&repo, &["config", "extensions.worktreeConfig", "true"]).unwrap();
+                        run_git(&repo, &["config", "--worktree", key, "git::payload"]).unwrap();
+                    } else {
+                        run_git(&repo, &["config", key, "git::payload"]).unwrap();
+                    }
+
+                    let error = if key.ends_with("pushurl") {
+                        git.push_origin_main(&repo, false).unwrap_err()
+                    } else {
+                        git.fetch_origin_main(&repo).unwrap_err()
+                    };
+                    assert!(error.contains(key), "{scope}/{key}: {error}");
+                    assert!(!error.contains("SECRET"), "{scope}/{key}: {error}");
+                    assert!(!marker.exists(), "{scope}/{key}: remote helper executed");
+                    assert_eq!(
+                        git.rev_parse_optional(&repo, "refs/remotes/origin/main")
+                            .unwrap(),
+                        None
+                    );
+                }
+            }
+            return;
+        }
+
+        let root = temp_dir("git-origin-url-helper-child");
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::network_fetch_and_push_reject_custom_origin_urls_without_execution",
+                "--nocapture",
+            ])
+            .env(CHILD, &root)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn repository_origin_url_validation_keeps_supported_git_transports() {
+        for value in [
+            "https://github.com/acme/repo.git",
+            "ssh://git@github.com/acme/repo.git",
+            "git://github.com/acme/repo.git",
+            "git@github.com:acme/repo.git",
+            "/tmp/repo.git",
+            "../repo.git",
+        ] {
+            assert!(
+                !repository_network_config_rejection("remote.origin.url", value),
+                "{value}"
+            );
+        }
+        for value in ["git::payload", "evil::payload", "ext::payload", ""] {
+            assert!(
+                repository_network_config_rejection("remote.origin.pushurl", value),
+                "{value}"
+            );
+        }
     }
 
     #[test]

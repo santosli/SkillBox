@@ -212,14 +212,24 @@ pub(crate) fn ensure_default_user_skills_gitignore(user_skills_root: &Path) -> R
 }
 
 pub(crate) fn maybe_link_legacy_default_managed_root(root: &Path) -> Result<()> {
-    let root = normalize_lexical_path(&expand_home(root.to_path_buf()));
-    let default_root = normalize_lexical_path(&default_hidden_managed_root());
-    let root_identity = canonicalize_existing_parent_identity(&root)?;
-    let default_identity = canonicalize_existing_parent_identity(&default_root)?;
+    let root_identity = managed_root_identity(root)?;
+    let default_identity = managed_root_identity(&default_hidden_managed_root())?;
     if root_identity != default_identity {
         return Ok(());
     }
     link_legacy_managed_root_if_needed(&default_identity, &legacy_managed_root()).map(|_| ())
+}
+
+pub(crate) fn managed_root_identity(path: &Path) -> Result<PathBuf> {
+    let expanded = expand_home(path.to_path_buf());
+    let absolute = if expanded.is_absolute() {
+        expanded
+    } else {
+        std::env::current_dir()
+            .map_err(|error| format!("Unable to read the current directory: {error}"))?
+            .join(expanded)
+    };
+    canonicalize_existing_parent_identity(&absolute)
 }
 
 fn canonicalize_existing_parent_identity(path: &Path) -> Result<PathBuf> {
@@ -231,7 +241,7 @@ fn canonicalize_existing_parent_identity(path: &Path) -> Result<PathBuf> {
                 for component in missing.iter().rev() {
                     canonical.push(component);
                 }
-                return Ok(normalize_lexical_path(&canonical));
+                return Ok(canonical);
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 let component = current.file_name().ok_or_else(|| {

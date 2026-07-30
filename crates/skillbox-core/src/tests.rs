@@ -1762,6 +1762,109 @@ fn mutation_lock_canonicalizes_symlink_parent_before_legacy_root_selection() {
 }
 
 #[test]
+fn mutation_lock_preserves_parent_and_symlink_resolution_before_creation() {
+    const ROLE: &str = "SKILLBOX_PARENT_SEGMENT_LOCK_ROLE";
+    const ROOT_ARG: &str = "SKILLBOX_PARENT_SEGMENT_LOCK_ROOT";
+    const EXPECTED: &str = "SKILLBOX_PARENT_SEGMENT_EXPECTED_ROOT";
+    const READY: &str = "SKILLBOX_PARENT_SEGMENT_LOCK_READY";
+    const RELEASE: &str = "SKILLBOX_PARENT_SEGMENT_LOCK_RELEASE";
+    if let Some(role) = std::env::var_os(ROLE) {
+        let root = PathBuf::from(std::env::var_os(ROOT_ARG).unwrap());
+        let expected = PathBuf::from(std::env::var_os(EXPECTED).unwrap());
+        match acquire_user_skills_mutation_lock(&root) {
+            Ok(lock) if role == "holder" => {
+                assert_eq!(lock.truth_root(), fs::canonicalize(&expected).unwrap());
+                fs::write(std::env::var_os(READY).unwrap(), b"ready").unwrap();
+                let release = PathBuf::from(std::env::var_os(RELEASE).unwrap());
+                while !release.exists() {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+            Err(error) if role == "contender" => {
+                assert!(error.contains("Another user-skills mutation"), "{error}");
+            }
+            Ok(_) => panic!("contender unexpectedly acquired the mutation lock"),
+            Err(error) => panic!("lock holder failed unexpectedly: {error}"),
+        }
+        return;
+    }
+
+    let executable = std::env::current_exe().unwrap();
+    for case in ["relative-parent", "symlink-parent"] {
+        let root = temp_dir(&format!("managed-root-resolution-{case}"));
+        let holder_cwd;
+        let contender_cwd;
+        let holder_arg;
+        let contender_arg;
+        let expected;
+        if case == "relative-parent" {
+            holder_cwd = root.join("holder");
+            contender_cwd = root.join("contender");
+            fs::create_dir_all(&holder_cwd).unwrap();
+            fs::create_dir_all(&contender_cwd).unwrap();
+            holder_arg = PathBuf::from("../SkillBox");
+            contender_arg = PathBuf::from("../SkillBox");
+            expected = root.join("SkillBox");
+        } else {
+            let real_parent = root.join("real");
+            holder_cwd = root.join("holder");
+            contender_cwd = root.join("contender");
+            fs::create_dir_all(real_parent.join("child")).unwrap();
+            fs::create_dir_all(&holder_cwd).unwrap();
+            fs::create_dir_all(&contender_cwd).unwrap();
+            std::os::unix::fs::symlink(real_parent.join("child"), root.join("alias")).unwrap();
+            holder_arg = root.join("alias/../SkillBox");
+            contender_arg = real_parent.join("SkillBox");
+            expected = real_parent.join("SkillBox");
+        }
+        let barrier = temp_dir(&format!("managed-root-resolution-barrier-{case}"));
+        let ready = barrier.join("ready");
+        let release = barrier.join("release");
+        let mut holder = Command::new(&executable)
+            .args([
+                "--exact",
+                "tests::mutation_lock_preserves_parent_and_symlink_resolution_before_creation",
+                "--nocapture",
+            ])
+            .current_dir(&holder_cwd)
+            .env(ROLE, "holder")
+            .env(ROOT_ARG, &holder_arg)
+            .env(EXPECTED, &expected)
+            .env(READY, &ready)
+            .env(RELEASE, &release)
+            .spawn()
+            .unwrap();
+        while !ready.exists() {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let contender = Command::new(&executable)
+            .args([
+                "--exact",
+                "tests::mutation_lock_preserves_parent_and_symlink_resolution_before_creation",
+                "--nocapture",
+            ])
+            .current_dir(&contender_cwd)
+            .env(ROLE, "contender")
+            .env(ROOT_ARG, &contender_arg)
+            .env(EXPECTED, &expected)
+            .env(READY, &ready)
+            .env(RELEASE, &release)
+            .output()
+            .unwrap();
+        assert!(
+            contender.status.success(),
+            "{}",
+            String::from_utf8_lossy(&contender.stderr)
+        );
+        fs::write(&release, b"release").unwrap();
+        assert!(holder.wait().unwrap().success());
+        assert!(expected.join(".user-skills-mutation.lock").is_file());
+        assert!(!holder_cwd.join("SkillBox").exists());
+        assert!(!contender_cwd.join("SkillBox").exists());
+    }
+}
+
+#[test]
 fn list_workspaces_initializes_empty_registry() {
     let managed_root = temp_dir("workspace-empty").join("SkillBox");
 

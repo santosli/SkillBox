@@ -30,7 +30,7 @@ impl Drop for UserSkillsMutationLock {
 pub(crate) fn acquire_user_skills_mutation_lock(
     managed_root: &Path,
 ) -> Result<UserSkillsMutationLock> {
-    let managed_root = normalize_lexical_path(&managed_paths(managed_root.to_path_buf()).root);
+    let managed_root = managed_root_identity(managed_root)?;
     // Resolve the legacy default root before creating any marker in ~/.skillbox.
     // Otherwise the lock file itself makes an empty migration stub look owned.
     maybe_link_legacy_default_managed_root(&managed_root)?;

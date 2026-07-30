@@ -887,12 +887,17 @@ export default function App() {
   }
 
   async function refreshSkillStatuses({ automatic = false, skillName = '' } = {}) {
+    const generation = authoritativeGenerationRef.current + 1;
+    authoritativeGenerationRef.current = generation;
     setStatus('checking');
     setError('');
     if (!automatic) {
       setNotice('');
     }
     await waitForNextPaint();
+    if (generation !== authoritativeGenerationRef.current) {
+      return;
+    }
 
     if (!window.__TAURI_INTERNALS__) {
       const nextRemoteUpdates = normalizeRemoteSkillUpdates({
@@ -906,6 +911,9 @@ export default function App() {
           }))
       });
 
+      if (generation !== authoritativeGenerationRef.current) {
+        return;
+      }
       setRemoteSkillUpdates(nextRemoteUpdates);
       setLastStatusCheckedAt(nextRemoteUpdates.checkedAt || new Date().toISOString());
       if (!automatic) {
@@ -924,6 +932,9 @@ export default function App() {
         const checkedRemoteUpdates = normalizeRemoteSkillUpdates(remoteUpdatesResult);
         const nextRemoteUpdates = mergeRemoteSkillUpdates(remoteSkillUpdates, checkedRemoteUpdates);
 
+        if (generation !== authoritativeGenerationRef.current) {
+          return;
+        }
         setRemoteSkillUpdates(nextRemoteUpdates);
         setLastStatusCheckedAt(nextRemoteUpdates.checkedAt || new Date().toISOString());
         if (!automatic) {
@@ -932,6 +943,9 @@ export default function App() {
         setStatus('ready');
         return;
       } catch (refreshError) {
+        if (generation !== authoritativeGenerationRef.current) {
+          return;
+        }
         setLastStatusCheckedAt(new Date().toISOString());
         setError(refreshError.message || String(refreshError) || 'Unable to refresh skill status.');
         setStatus('ready');
@@ -939,8 +953,6 @@ export default function App() {
       }
     }
 
-    const generation = authoritativeGenerationRef.current + 1;
-    authoritativeGenerationRef.current = generation;
     try {
       const [state, gitStatus, remoteUpdatesResult] = await Promise.all([
         invoke('managed_state'),
@@ -3583,6 +3595,7 @@ export default function App() {
     }
     const generation = authoritativeGenerationRef.current + 1;
     authoritativeGenerationRef.current = generation;
+    setStatus('ready');
 
     if (!window.__TAURI_INTERNALS__) {
       const normalized = normalizeUserSkillsGitStatus({

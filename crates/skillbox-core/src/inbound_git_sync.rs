@@ -990,6 +990,16 @@ fn apply_user_skills_inbound_inner(
     if let Some(barrier) = options.pause_before_completed_index_lock_release.as_deref() {
         wait_for_test_barrier(barrier)?;
     }
+    audit.phase = "final_consistency".to_string();
+    if let Err(error) = verify_completed_inbound_state(&git, &paths.user_skills_root, &new_sha) {
+        return rollback_inbound_after_failure(
+            &git,
+            &paths.user_skills_root,
+            &mut mutation,
+            &error,
+            audit,
+        );
+    }
     let warnings = release_completed_inbound_index_lock(&mut mutation);
     audit.phase = if warnings.is_empty() {
         "completed".to_string()
@@ -1006,6 +1016,29 @@ fn apply_user_skills_inbound_inner(
         operation_id: operation_id.to_string(),
         warnings,
     })
+}
+
+fn verify_completed_inbound_state(
+    git: &skillbox_git::GitService,
+    repo: &Path,
+    expected_sha: &str,
+) -> Result<()> {
+    let current_head = git
+        .rev_parse_optional(repo, "HEAD")?
+        .ok_or_else(|| "Inbound apply completed without a local HEAD.".to_string())?;
+    if current_head != expected_sha {
+        return Err(
+            "Inbound apply target changed after reindex. Review repository recovery state."
+                .to_string(),
+        );
+    }
+    if git.status_hardened(repo)?.dirty {
+        return Err(
+            "User skills changed after reindex. The concurrent edit was preserved; refresh and review repository recovery state."
+                .to_string(),
+        );
+    }
+    Ok(())
 }
 
 fn release_completed_inbound_index_lock(mutation: &mut InboundMutationReceipt) -> Vec<String> {
@@ -3016,9 +3049,20 @@ fn preserve_then_remove_applied_path(
     preserved_slot.identity = read_backup_identity(&preserved_slot)?;
     let actual = read_backup(&preserved_slot)?.0;
     if actual != expected {
-        return Err(format!(
-            "Applied path changed during recovery; preserved it for manual review: {path}"
-        ));
+        return match rustix::fs::renameat_with(
+            &parent,
+            preserved.as_str(),
+            &parent,
+            file_name,
+            RenameFlags::NOREPLACE,
+        ) {
+            Ok(()) => Err(format!(
+                "Applied path changed outside SkillBox; the concurrent edit was preserved at its original path: {path}"
+            )),
+            Err(error) => Err(format!(
+                "Applied path changed outside SkillBox; the concurrent edit remains at {preserved} for manual recovery because its original path could not be restored: {error}"
+            )),
+        };
     }
     remove_verified_slot(&preserved_slot, "remove-applied-path")
 }
@@ -5217,6 +5261,75 @@ mod tests {
         assert!(failed.payload["compensation"]["error"]
             .as_str()
             .is_some_and(|message| message.contains("identity or content changed")));
+    }
+
+    #[test]
+    fn concurrent_plain_edit_after_reindex_is_preserved_and_not_reported_as_success() {
+        let managed_root = temp_dir("inbound-post-reindex-edit");
+        let (remote, work) = remote_with_skill("inbound-post-reindex-edit");
+        configure_and_bootstrap(&managed_root, &remote);
+        let paths = managed_paths(&managed_root);
+        let git = skillbox_git::GitService::new();
+        fs::write(work.join("demo/README.md"), "incoming reviewed\n").unwrap();
+        git.add_all(&work).unwrap();
+        git.commit(&work, "Incoming").unwrap();
+        git.push_origin_main(&work, false).unwrap();
+        let preview = preview_user_skills_inbound(&managed_root).unwrap();
+        let old_sha = preview.status.local_sha.clone().unwrap();
+        let barrier = temp_dir("inbound-post-reindex-edit-barrier").join("continue");
+        let ready = barrier.with_extension("ready");
+        let worker_root = managed_root.clone();
+        let worker_barrier = barrier.clone();
+        let worker = std::thread::spawn(move || {
+            apply_user_skills_inbound_with_options(
+                UserSkillsInboundApplyRequest {
+                    preview_id: Some(preview.preview_id),
+                    actor: "test".to_string(),
+                },
+                &worker_root,
+                &InboundMutationOptions {
+                    pause_before_completed_index_lock_release: Some(worker_barrier),
+                    ..Default::default()
+                },
+            )
+        });
+        while !ready.exists() {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let edited_path = paths.user_skills_root.join("demo/README.md");
+        fs::write(&edited_path, "editor content after reindex\n").unwrap();
+        fs::write(&barrier, b"continue").unwrap();
+
+        let error = worker.join().unwrap().unwrap_err();
+        assert!(error.contains("changed after reindex"), "{error}");
+        assert_eq!(
+            fs::read_to_string(&edited_path).unwrap(),
+            "editor content after reindex\n"
+        );
+        assert_eq!(
+            git.rev_parse_optional(&paths.user_skills_root, "HEAD")
+                .unwrap()
+                .as_deref(),
+            Some(old_sha.as_str())
+        );
+        assert!(git.status_hardened(&paths.user_skills_root).unwrap().dirty);
+        let operation = list_operations(
+            OperationFilter {
+                status: Some(OperationStatus::Failed),
+                ..Default::default()
+            },
+            &managed_root,
+        )
+        .unwrap()
+        .operations
+        .into_iter()
+        .find(|operation| operation.operation_type == "apply_user_skills_inbound")
+        .unwrap();
+        assert_eq!(operation.payload["mutationPhase"], "final_consistency");
+        assert_eq!(operation.payload["compensation"]["succeeded"], false);
+        assert!(operation.payload["compensation"]["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("changed outside SkillBox")));
     }
 
     #[test]

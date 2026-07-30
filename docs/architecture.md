@@ -227,7 +227,9 @@ undeploy。Apply 在旧 HEAD 创建 `refs/skillbox/backups/inbound/<operation-id
 undeploy 与其它 managed user-skill 写操作并发改变受审状态，同时持有 Git index lock
 阻止并发 stage/commit。lock acquisition 返回已 canonicalize 的 truth root；锁内 Git、
 SQLite 与 filesystem 操作只使用该固定 identity，即使调用方传入的 symlink alias 随后
-被 retarget，也不能把受锁操作重定向到另一个 managed store。tracked worktree 内容先移入
+被 retarget，也不能把受锁操作重定向到另一个 managed store。relative root、`~` 与
+symlink-parent/`..` alias 会先按 OS existing-parent 语义解析，再选择 canonical truth
+root；不会在 symlink 解析前做可能改变路径含义的 lexical collapse。tracked worktree 内容先移入
 `.git/skillbox/` 的 operation-scoped
 recovery snapshot，再以 no-replace 方式写入。若文件写入、ref 推进或
 SQLite reindex 失败，core 只在 HEAD 仍等于预期 commit 且操作写集未被外部改变时补偿
@@ -248,7 +250,9 @@ private quarantine/exchange sequence 保持外部 Git 排他锁持续占位，�
 上的 stat/unlink 窗口。Network Git 拒绝
 repository-local 与 worktree-scope execution-bearing config、URL rewrite 和自定义
 remote helper，包括可重定向 helper dispatch 的 `remote.*.vcs`、`url.*.insteadOf`
-与 `url.*.pushInsteadOf`；transport allowlist
+与 `url.*.pushInsteadOf`。`remote.origin.url` / `pushurl` 也必须解析为支持的
+local/file/http/https/ssh/git 或 SCP-style Git 地址；`git::<payload>` 等 custom
+remote-helper syntax 在启动 network Git 前 fail closed。transport allowlist
 仅开放 `file/http/https/ssh/git`，全部 Git
 preflight/fetch 共用 bounded deadline，Git boolean parser 决定是否检查 worktree
 scope。按原顺序恢复受信任 global generic/URL-scoped
