@@ -26,6 +26,10 @@ version tags such as `v0.3.0`.
   a third-party lock window.
 - Keep partial-success warnings visible in Settings and parse Git worktree-config
   booleans through Git's complete boolean semantics before network access.
+- Bind compensation to the exact reviewed Git index, preserve concurrent
+  replacement indexes, reject repository-defined `remote.*.vcs` helpers, and
+  keep successful applies successful when audit finalization or read-only UI
+  refresh reports a warning.
 - Add matching Rust CLI, Tauri, and desktop review surfaces while preserving the
   existing outbound commit-and-push behavior.
 

@@ -5,6 +5,8 @@ import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
 import { createServer } from 'vite';
 import {
+  appendUserSkillsInboundWarnings,
+  appliedUserSkillsInboundStatus,
   beginReviewDialogFocus,
   canApplyUserSkillsInbound,
   canReviewUserSkillsInbound,
@@ -12,6 +14,7 @@ import {
   createInboundReviewRequestGate,
   handleReviewDialogKeyDown,
   InboundReviewLiveFeedback,
+  inboundApplyRefreshWarning,
   inboundConflictDiagnosticGroups,
   inboundRelationLabel,
   invalidateUserSkillsInboundPreview,
@@ -40,6 +43,12 @@ const dialogSource = fs.readFileSync(
 function renderedText(node) {
   if (typeof node === 'string') return node;
   return (node.children || []).map(renderedText).join('');
+}
+
+function findButton(renderer, label) {
+  return renderer.root
+    .findAllByType('button')
+    .find((button) => renderedText(button).trim() === label);
 }
 
 test('normalizes inbound status and keeps worktree state separate from relation', () => {
@@ -164,9 +173,11 @@ test('inbound apply passes only structured preview authorization and keeps dirty
   assert.match(dialogSource, /Bootstrap safe/);
   assert.match(dialogSource, /Apply fast-forward/);
   assert.match(dialogSource, /aria-label="Incoming file diff"/);
-  assert.match(appSource, /const warnings = normalizeUserSkillsInboundWarnings\(result\.warnings\)/);
-  assert.match(appSource, /setUserSkillsInboundWarnings\(warnings\)/);
-  assert.match(appSource, /warnings\.join\(' '\)/);
+  assert.match(
+    appSource,
+    /setUserSkillsInboundWarnings\(\(current\) =>\s*appendUserSkillsInboundWarnings\(current, result\.warnings\)/
+  );
+  assert.doesNotMatch(appSource, /warnings\.join\(' '\)/);
 });
 
 test('App keeps partial-success warnings visible in the real Settings workflow until dismissed', async () => {
@@ -176,7 +187,7 @@ test('App keeps partial-success warnings visible in the real Settings workflow u
   );
   assert.match(
     appSource,
-    /setInboundReviewDialog\(\(current\) => \(\{ \.\.\.current, open: false, applying: false \}\)\);[\s\S]*setUserSkillsInboundWarnings\(warnings\)/
+    /setInboundReviewDialog\(\(current\) => \(\{ \.\.\.current, open: false, applying: false \}\)\);[\s\S]*appendUserSkillsInboundWarnings\(current, result\.warnings\)/
   );
   assert.match(appSource, /userSkillsInboundWarnings=\{userSkillsInboundWarnings\}/);
   assert.match(
@@ -270,6 +281,242 @@ test('App keeps partial-success warnings visible in the real Settings workflow u
     renderer.unmount();
   } finally {
     await vite.close();
+  }
+});
+
+test('production App commits apply success before best-effort refresh and preserves warnings until dismiss', async () => {
+  assert.deepEqual(
+    appendUserSkillsInboundWarnings(
+      ['First complete warning.', 'Repeated warning.'],
+      ['Repeated warning.', 'Second complete warning.']
+    ),
+    ['First complete warning.', 'Repeated warning.', 'Second complete warning.']
+  );
+  assert.deepEqual(
+    appliedUserSkillsInboundStatus({
+      new_sha: 'abc123',
+      repo_path: '/tmp/user-skills'
+    }),
+    {
+      repoPath: '/tmp/user-skills',
+      branch: 'main',
+      remoteUrl: '',
+      worktreeState: 'clean',
+      relation: 'synced',
+      localSha: 'abc123',
+      remoteSha: 'abc123',
+      mergeBaseSha: '',
+      aheadCount: 0,
+      behindCount: 0,
+      fetchedAt: '',
+      fetchError: '',
+      message: 'User skills fast-forwarded to origin/main.'
+    }
+  );
+  assert.match(
+    inboundApplyRefreshWarning([
+      { label: 'Managed state refresh', error: new Error('database unavailable') }
+    ]),
+    /applied, but refresh failed[\s\S]*Managed state refresh: database unavailable/
+  );
+
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  let applyCount = 0;
+  let inboundCheckCount = 0;
+  let managedStateCount = 0;
+  let rejectManagedStateRefresh;
+  let rejectSecondApply;
+  const managedStateRefresh = new Promise((_, reject) => {
+    rejectManagedStateRefresh = reject;
+  });
+  const secondApply = new Promise((_, reject) => {
+    rejectSecondApply = reject;
+  });
+
+  const invoke = async (command) => {
+    if (command === 'managed_state') {
+      managedStateCount += 1;
+      if (managedStateCount > 1) {
+        return managedStateRefresh;
+      }
+      return { is_first_use: false, paths: {}, skills: [] };
+    }
+    if (command === 'managed_preferences') {
+      return {
+        remote_update_timeout_seconds: 30,
+        status_refresh_interval_minutes: 5
+      };
+    }
+    if (command === 'user_skills_git_status') {
+      return {
+        branch: 'main',
+        remote_url: 'git@example.com:user/skills.git',
+        repo_path: '/tmp/user-skills',
+        state: 'clean'
+      };
+    }
+    if (command === 'check_user_skills_inbound') {
+      inboundCheckCount += 1;
+      if (inboundCheckCount === 2) {
+        throw new Error('inbound refresh unavailable');
+      }
+      return {
+        behind_count: 1,
+        relation: 'behind',
+        remote_sha: `remote-${inboundCheckCount}`,
+        worktree_state: 'clean'
+      };
+    }
+    if (command === 'preview_user_skills_inbound') {
+      return previewUserSkillsInbound('behind');
+    }
+    if (command === 'apply_user_skills_inbound') {
+      applyCount += 1;
+      if (applyCount === 2) return secondApply;
+      return {
+        changed_skill_count: 1,
+        new_sha: 'applied-sha-1',
+        repo_path: '/tmp/user-skills',
+        warnings: ['Deployment refresh was skipped for Codex.']
+      };
+    }
+    if (
+      [
+        'cached_remote_skill_updates',
+        'list_skill_user_metadata',
+        'list_workspaces',
+        'usage_hook_statuses'
+      ].includes(command)
+    ) {
+      return command === 'cached_remote_skill_updates' ? {} : [];
+    }
+    if (command === 'app_update_status') {
+      return { disabled: true };
+    }
+    return null;
+  };
+
+  globalThis.window = {
+    __TAURI_INTERNALS__: { invoke },
+    addEventListener() {},
+    clearInterval,
+    clearTimeout,
+    localStorage: {
+      getItem() {
+        return null;
+      },
+      removeItem() {},
+      setItem() {}
+    },
+    location: { search: '' },
+    open() {},
+    removeEventListener() {},
+    setInterval() {
+      return 1;
+    },
+    setTimeout
+  };
+  globalThis.document = {
+    activeElement: null,
+    querySelector() {
+      return null;
+    }
+  };
+
+  const vite = await createServer({
+    appType: 'custom',
+    root: new URL('..', import.meta.url).pathname,
+    server: { middlewareMode: true }
+  });
+
+  try {
+    const { default: App } = await vite.ssrLoadModule('/src/App.jsx');
+    let renderer;
+    await act(async () => {
+      renderer = TestRenderer.create(React.createElement(App));
+    });
+
+    await act(async () => {
+      findButton(renderer, 'Settings').props.onClick();
+    });
+    await act(async () => {
+      await findButton(renderer, 'Check remote').props.onClick();
+    });
+    await act(async () => {
+      await findButton(renderer, 'Review incoming changes').props.onClick();
+    });
+
+    let firstApplyRun;
+    await act(async () => {
+      firstApplyRun = findButton(renderer, 'Apply fast-forward').props.onClick();
+      await Promise.resolve();
+    });
+
+    assert.equal(renderer.root.findAllByProps({ role: 'dialog' }).length, 0);
+    let warningAlert = renderer.root.findByProps({ role: 'alert' });
+    assert.match(renderedText(warningAlert), /Deployment refresh was skipped for Codex/);
+    assert.doesNotMatch(renderedText(warningAlert), /refresh failed/);
+    assert.match(renderedText(renderer.root), /Synced/);
+
+    await act(async () => {
+      rejectManagedStateRefresh(new Error('managed state unavailable'));
+      await firstApplyRun;
+    });
+    warningAlert = renderer.root.findByProps({ role: 'alert' });
+    assert.match(renderedText(warningAlert), /Incoming changes were applied, but refresh failed/);
+    assert.match(renderedText(renderer.root), /Synced/);
+
+    await act(async () => {
+      await findButton(renderer, 'Check remote').props.onClick();
+    });
+    await act(async () => {
+      await findButton(renderer, 'Review incoming changes').props.onClick();
+    });
+
+    let secondApplyRun;
+    await act(async () => {
+      secondApplyRun = findButton(renderer, 'Apply fast-forward').props.onClick();
+      await Promise.resolve();
+    });
+    warningAlert = renderer.root.findAllByProps({ role: 'alert' }).find((alert) =>
+      renderedText(alert).includes('Deployment refresh was skipped for Codex')
+    );
+    assert.ok(warningAlert, 'starting a later apply must not clear pending warnings');
+
+    await act(async () => {
+      rejectSecondApply(new Error('second apply rejected'));
+      await secondApplyRun;
+    });
+    warningAlert = renderer.root.findAllByProps({ role: 'alert' }).find((alert) =>
+      renderedText(alert).includes('Deployment refresh was skipped for Codex')
+    );
+    assert.ok(warningAlert, 'a later apply failure must preserve earlier warnings');
+
+    await act(async () => {
+      renderer.root
+        .findByProps({ 'aria-label': 'Dismiss incoming changes warnings' })
+        .props.onClick();
+    });
+    assert.equal(
+      renderer.root
+        .findAllByProps({ role: 'alert' })
+        .filter((alert) => renderedText(alert).includes('Deployment refresh was skipped for Codex'))
+        .length,
+      0
+    );
+
+    await act(async () => {
+      findButton(renderer, 'Dashboard').props.onClick();
+    });
+    assert.doesNotMatch(renderedText(renderer.root), /Deployment refresh was skipped for Codex/);
+    await act(async () => {
+      renderer.unmount();
+    });
+  } finally {
+    await vite.close();
+    globalThis.window = previousWindow;
+    globalThis.document = previousDocument;
   }
 });
 

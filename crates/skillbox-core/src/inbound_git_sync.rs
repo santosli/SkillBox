@@ -31,6 +31,7 @@ struct InboundMutationReceipt {
     path_backups: HashMap<String, InboundBackupSlot>,
     old_index: Option<Vec<u8>>,
     index_replaced: bool,
+    applied_index_identity: Option<InboundFileIdentity>,
     index_lock: Option<GitIndexLock>,
     ref_advanced: bool,
     generated_gitignore_backup: Option<InboundBackupSlot>,
@@ -47,6 +48,7 @@ struct InboundMutationOptions {
     pause_before_generated_gitignore_transfer: Option<PathBuf>,
     pause_before_compensation: Option<PathBuf>,
     pause_before_completed_index_lock_release: Option<PathBuf>,
+    pause_before_operation_finalize: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -73,6 +75,12 @@ struct InboundEntryIdentity {
     size: u64,
     content_hash: String,
     executable: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct InboundFileIdentity {
+    device: u64,
+    inode: u64,
 }
 
 impl Drop for GitIndexLock {
@@ -339,35 +347,39 @@ fn apply_user_skills_inbound_with_options(
         phase: "preflight".to_string(),
         ..Default::default()
     };
-    let result = apply_user_skills_inbound_inner(
+    let mut result = apply_user_skills_inbound_inner(
         &managed_root,
         &preview_id,
         &operation.id,
         options,
         &mut audit,
     );
-    match &result {
+    match result.as_mut() {
         Ok(applied) => {
-            if let Err(finish_error) = finish_operation(
-                OperationFinish {
-                    id: operation.id.clone(),
-                    status: OperationStatus::Succeeded,
-                    summary: format!("Fast-forwarded user skills to {}", applied.new_sha),
-                    error: None,
-                    payload: serde_json::json!({
-                        "oldSha": applied.old_sha,
-                        "newSha": applied.new_sha,
-                        "backupRef": applied.backup_ref,
-                        "changedSkillCount": applied.changed_skill_count,
-                        "changedFileCount": applied.changed_file_count,
-                        "mutationPhase": audit.phase,
-                        "warnings": applied.warnings
-                    }),
-                },
-                &managed_root,
-            ) {
-                return Err(format!(
-                    "Inbound apply succeeded, but operation history could not be finalized: {finish_error}"
+            let finish_request = OperationFinish {
+                id: operation.id.clone(),
+                status: OperationStatus::Succeeded,
+                summary: format!("Fast-forwarded user skills to {}", applied.new_sha),
+                error: None,
+                payload: serde_json::json!({
+                    "oldSha": applied.old_sha,
+                    "newSha": applied.new_sha,
+                    "backupRef": applied.backup_ref,
+                    "changedSkillCount": applied.changed_skill_count,
+                    "changedFileCount": applied.changed_file_count,
+                    "mutationPhase": audit.phase,
+                    "warnings": applied.warnings
+                }),
+            };
+            let finish_result = options
+                .pause_before_operation_finalize
+                .as_deref()
+                .map(wait_for_test_barrier)
+                .unwrap_or(Ok(()))
+                .and_then(|()| finish_operation(finish_request, &managed_root).map(|_| ()));
+            if let Err(finish_error) = finish_result {
+                applied.warnings.push(format!(
+                    "Incoming changes were applied, but operation history could not be finalized: {finish_error}"
                 ));
             }
         }
@@ -1758,6 +1770,7 @@ fn apply_inbound_tree(
         path_backups: HashMap::new(),
         old_index: read_optional_file(&repo.join(".git/index"))?,
         index_replaced: false,
+        applied_index_identity: None,
         index_lock: Some(index_lock),
         ref_advanced: false,
         generated_gitignore_backup: None,
@@ -2061,101 +2074,130 @@ fn replace_git_index(
     prepared_index: &Path,
     receipt: &mut InboundMutationReceipt,
 ) -> Result<()> {
+    let prepared = fs::symlink_metadata(prepared_index)
+        .map_err(|error| format!("Unable to inspect reviewed Git index: {error}"))?;
+    if !prepared.is_file() || prepared.file_type().is_symlink() {
+        return Err("Reviewed Git index is not a real regular file.".to_string());
+    }
     fs::rename(prepared_index, repo.join(".git/index"))
         .map_err(|error| format!("Unable to install reviewed Git index: {error}"))?;
+    receipt.applied_index_identity = Some(InboundFileIdentity {
+        device: prepared.dev(),
+        inode: prepared.ino(),
+    });
     receipt.index_replaced = true;
     Ok(())
 }
 
-fn restore_git_index(repo: &Path, receipt: &mut InboundMutationReceipt) -> Result<()> {
+fn restore_git_index(receipt: &mut InboundMutationReceipt) -> Result<()> {
     if !receipt.index_replaced {
         return Ok(());
     }
-    let index = repo.join(".git/index");
-    match receipt.old_index.as_deref() {
-        Some(bytes) => {
-            let git_dir = open_real_child_directory(&receipt.repo_dir, ".git")?;
-            let temporary = random_inbound_entry_name("index", "restore")?;
-            let fd = rustix::fs::openat(
+    let applied = receipt
+        .applied_index_identity
+        .ok_or_else(|| "Applied Git index identity was not recorded.".to_string())?;
+    let git_dir = open_real_child_directory(&receipt.repo_dir, ".git")?;
+    let replacement = random_inbound_entry_name("index", "restore")?;
+    let fd = rustix::fs::openat(
+        &git_dir,
+        replacement.as_str(),
+        OFlags::CREATE | OFlags::EXCL | OFlags::WRONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+        Mode::from_bits_truncate(0o600),
+    )
+    .map_err(|error| format!("Unable to create private Git index restore file: {error}"))?;
+    let mut file = File::from(fd);
+    let replacement_metadata = file.metadata().map_err(|error| error.to_string())?;
+    if let Some(bytes) = receipt.old_index.as_deref() {
+        use std::io::Write;
+        if let Err(error) = file.write_all(bytes).and_then(|()| file.sync_all()) {
+            let cleanup = atomically_remove_owned_entry(
                 &git_dir,
-                temporary.as_str(),
-                OFlags::CREATE | OFlags::EXCL | OFlags::WRONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
-                Mode::from_bits_truncate(0o600),
-            )
-            .map_err(|error| format!("Unable to create private Git index restore file: {error}"))?;
-            let mut file = File::from(fd);
-            let metadata = file.metadata().map_err(|error| error.to_string())?;
-            use std::io::Write;
-            let write_result = file
-                .write_all(bytes)
-                .and_then(|()| file.sync_all())
-                .map_err(|error| error.to_string());
-            if let Err(error) = write_result {
-                let cleanup = atomically_remove_owned_entry(
-                    &git_dir,
-                    temporary.as_str(),
-                    metadata.dev(),
-                    metadata.ino(),
-                    "restore-cleanup",
-                    None,
-                );
-                return Err(match cleanup {
-                    Ok(()) => error,
-                    Err(cleanup_error) => format!("{error}; cleanup failed: {cleanup_error}"),
-                });
-            }
-            let current =
-                rustix::fs::statat(&git_dir, temporary.as_str(), AtFlags::SYMLINK_NOFOLLOW)
-                    .map_err(|error| {
-                        format!("Unable to verify private Git index restore file: {error}")
-                    })?;
-            if current.st_dev as u64 != metadata.dev() || current.st_ino as u64 != metadata.ino() {
-                let cleanup = atomically_remove_owned_entry(
-                    &git_dir,
-                    temporary.as_str(),
-                    metadata.dev(),
-                    metadata.ino(),
-                    "restore-cleanup",
-                    None,
-                );
-                return Err(match cleanup {
-                    Ok(()) => {
-                        "Private Git index restore file identity changed before installation."
-                            .to_string()
-                    }
-                    Err(cleanup_error) => format!(
-                        "Private Git index restore file identity changed before installation; cleanup failed: {cleanup_error}"
-                    ),
-                });
-            }
-            if let Err(error) =
-                rustix::fs::renameat(&git_dir, temporary.as_str(), &git_dir, "index")
-            {
-                let cleanup = atomically_remove_owned_entry(
-                    &git_dir,
-                    temporary.as_str(),
-                    metadata.dev(),
-                    metadata.ino(),
-                    "restore-cleanup",
-                    None,
-                );
-                return Err(match cleanup {
-                    Ok(()) => format!("Unable to restore Git index: {error}"),
-                    Err(cleanup_error) => {
-                        format!(
-                            "Unable to restore Git index: {error}; cleanup failed: {cleanup_error}"
-                        )
-                    }
-                });
-            }
+                replacement.as_str(),
+                replacement_metadata.dev(),
+                replacement_metadata.ino(),
+                "restore-write-cleanup",
+                None,
+            );
+            return Err(match cleanup {
+                Ok(()) => format!("Unable to write private Git index restore file: {error}"),
+                Err(cleanup_error) => format!(
+                    "Unable to write private Git index restore file: {error}; cleanup failed: {cleanup_error}"
+                ),
+            });
         }
-        None => match fs::remove_file(&index) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error.to_string()),
-        },
+    }
+    if let Err(error) = rustix::fs::renameat_with(
+        &git_dir,
+        replacement.as_str(),
+        &git_dir,
+        "index",
+        RenameFlags::EXCHANGE,
+    ) {
+        let cleanup = atomically_remove_owned_entry(
+            &git_dir,
+            replacement.as_str(),
+            replacement_metadata.dev(),
+            replacement_metadata.ino(),
+            "restore-exchange-cleanup",
+            None,
+        );
+        return Err(match cleanup {
+            Ok(()) => format!("Unable to exchange Git index for recovery: {error}"),
+            Err(cleanup_error) => format!(
+                "Unable to exchange Git index for recovery: {error}; cleanup failed: {cleanup_error}"
+            ),
+        });
+    }
+    let exchanged = rustix::fs::statat(&git_dir, replacement.as_str(), AtFlags::SYMLINK_NOFOLLOW)
+        .map_err(|error| format!("Unable to inspect exchanged Git index: {error}"))?;
+    if exchanged.st_dev as u64 != applied.device || exchanged.st_ino as u64 != applied.inode {
+        let restore = rustix::fs::renameat_with(
+            &git_dir,
+            replacement.as_str(),
+            &git_dir,
+            "index",
+            RenameFlags::EXCHANGE,
+        );
+        if restore.is_ok() {
+            let _ = atomically_remove_owned_entry(
+                &git_dir,
+                replacement.as_str(),
+                replacement_metadata.dev(),
+                replacement_metadata.ino(),
+                "restore-foreign-cleanup",
+                None,
+            );
+        }
+        return Err(match restore {
+            Ok(()) => {
+                "Git index was replaced by another process; the foreign index was preserved."
+                    .to_string()
+            }
+            Err(error) => format!(
+                "Git index was replaced by another process and atomic restoration failed; both indexes were preserved: {error}"
+            ),
+        });
+    }
+    atomically_remove_owned_entry(
+        &git_dir,
+        replacement.as_str(),
+        applied.device,
+        applied.inode,
+        "remove-applied-index",
+        None,
+    )?;
+    if receipt.old_index.is_none() {
+        atomically_remove_owned_entry(
+            &git_dir,
+            "index",
+            replacement_metadata.dev(),
+            replacement_metadata.ino(),
+            "remove-unborn-index",
+            None,
+        )?;
     }
     receipt.index_replaced = false;
+    receipt.applied_index_identity = None;
     Ok(())
 }
 
@@ -2551,7 +2593,7 @@ fn compensate_inbound_tree(
         }
     }
     if head_owned && ref_recovered {
-        if let Err(error) = restore_git_index(repo, receipt) {
+        if let Err(error) = restore_git_index(receipt) {
             errors.push(format!("index: {error}"));
         }
     } else if receipt.index_replaced {
@@ -4520,6 +4562,114 @@ mod tests {
         assert_eq!(audit.compensation_succeeded, Some(true));
     }
 
+    fn assert_index_replacement_is_preserved_during_compensation(remote_only: bool) {
+        let label = if remote_only {
+            "inbound-index-foreign-remote-only"
+        } else {
+            "inbound-index-foreign-behind"
+        };
+        let managed_root = temp_dir(label);
+        let (remote, work) = remote_with_skill(label);
+        let git = skillbox_git::GitService::new();
+        if remote_only {
+            set_user_skills_git_remote(
+                UserSkillsGitRemoteRequest {
+                    remote_url: remote.to_string_lossy().to_string(),
+                },
+                &managed_root,
+            )
+            .unwrap();
+        } else {
+            configure_and_bootstrap(&managed_root, &remote);
+            fs::write(work.join("demo/README.md"), "incoming\n").unwrap();
+            git.add_all(&work).unwrap();
+            git.commit(&work, "Incoming").unwrap();
+            git.push_origin_main(&work, false).unwrap();
+        }
+        let paths = managed_paths(&managed_root);
+        let preview = preview_user_skills_inbound(&managed_root).unwrap();
+        let old_sha = preview.status.local_sha.clone();
+        let barrier = temp_dir(&format!("{label}-barrier")).join("continue");
+        let ready = barrier.with_extension("ready");
+        let worker_root = managed_root.clone();
+        let worker_barrier = barrier.clone();
+        let worker = std::thread::spawn(move || {
+            apply_user_skills_inbound_with_options(
+                UserSkillsInboundApplyRequest {
+                    preview_id: Some(preview.preview_id),
+                    actor: "test".to_string(),
+                },
+                &worker_root,
+                &InboundMutationOptions {
+                    fail_after_index_replace: true,
+                    pause_before_compensation: Some(worker_barrier),
+                    ..Default::default()
+                },
+            )
+        });
+        while !ready.exists() {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let index = paths.user_skills_root.join(".git/index");
+        fs::rename(
+            &index,
+            paths.user_skills_root.join(".git/applied-index.detached"),
+        )
+        .unwrap();
+        fs::write(&index, b"foreign concurrent index\n").unwrap();
+        let foreign = fs::symlink_metadata(&index).unwrap();
+        fs::write(&barrier, b"continue").unwrap();
+
+        let error = worker.join().unwrap().unwrap_err();
+        assert!(error.contains("foreign index was preserved"), "{error}");
+        assert_eq!(fs::read(&index).unwrap(), b"foreign concurrent index\n");
+        let current = fs::symlink_metadata(&index).unwrap();
+        assert_eq!(current.dev(), foreign.dev());
+        assert_eq!(current.ino(), foreign.ino());
+        assert_eq!(
+            git.rev_parse_optional(&paths.user_skills_root, "HEAD")
+                .unwrap(),
+            old_sha
+        );
+        assert!(paths
+            .user_skills_root
+            .join(".git/applied-index.detached")
+            .is_file());
+        if remote_only {
+            assert!(!paths.user_skills_root.join("demo/SKILL.md").exists());
+        } else {
+            assert!(!paths.user_skills_root.join("demo/README.md").exists());
+            assert!(paths.user_skills_root.join("demo/SKILL.md").is_file());
+        }
+        let failed = list_operations(
+            OperationFilter {
+                status: Some(OperationStatus::Failed),
+                ..Default::default()
+            },
+            &managed_root,
+        )
+        .unwrap()
+        .operations
+        .into_iter()
+        .find(|operation| operation.operation_type == "apply_user_skills_inbound")
+        .unwrap();
+        assert_eq!(failed.payload["compensation"]["attempted"], true);
+        assert_eq!(failed.payload["compensation"]["succeeded"], false);
+        assert!(failed.payload["compensation"]["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("foreign index was preserved")));
+    }
+
+    #[test]
+    fn behind_compensation_preserves_foreign_index_replacement_and_reports_partial_recovery() {
+        assert_index_replacement_is_preserved_during_compensation(false);
+    }
+
+    #[test]
+    fn remote_only_compensation_preserves_foreign_index_replacement_and_reports_partial_recovery() {
+        assert_index_replacement_is_preserved_during_compensation(true);
+    }
+
     #[test]
     fn completed_apply_persists_partial_success_warning_in_operation_history() {
         let managed_root = temp_dir("inbound-partial-success-operation");
@@ -4589,6 +4739,79 @@ mod tests {
             fs::read_to_string(index_lock).unwrap(),
             "external replacement\n"
         );
+    }
+
+    #[test]
+    fn operation_finalize_failure_returns_applied_result_with_warning_without_rollback() {
+        let managed_root = temp_dir("inbound-operation-finalize-warning");
+        let (remote, work) = remote_with_skill("inbound-operation-finalize-warning");
+        configure_and_bootstrap(&managed_root, &remote);
+        let paths = managed_paths(&managed_root);
+        let git = skillbox_git::GitService::new();
+        fs::write(work.join("demo/README.md"), "incoming\n").unwrap();
+        git.add_all(&work).unwrap();
+        git.commit(&work, "Incoming").unwrap();
+        git.push_origin_main(&work, false).unwrap();
+        let preview = preview_user_skills_inbound(&managed_root).unwrap();
+
+        let barrier = temp_dir("inbound-operation-finalize-barrier").join("continue");
+        let ready = barrier.with_extension("ready");
+        let worker_root = managed_root.clone();
+        let worker_barrier = barrier.clone();
+        let worker = std::thread::spawn(move || {
+            apply_user_skills_inbound_with_options(
+                UserSkillsInboundApplyRequest {
+                    preview_id: Some(preview.preview_id),
+                    actor: "test".to_string(),
+                },
+                &worker_root,
+                &InboundMutationOptions {
+                    pause_before_operation_finalize: Some(worker_barrier),
+                    ..Default::default()
+                },
+            )
+        });
+        while !ready.exists() {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let database = paths.database_path.clone();
+        let database_backup = database.with_extension("sqlite.finalize-backup");
+        fs::rename(&database, &database_backup).unwrap();
+        fs::create_dir(&database).unwrap();
+        fs::write(&barrier, b"continue").unwrap();
+        let result = worker.join().unwrap().unwrap();
+
+        assert_eq!(
+            git.rev_parse_optional(&paths.user_skills_root, "HEAD")
+                .unwrap()
+                .as_deref(),
+            Some(result.new_sha.as_str())
+        );
+        assert!(paths.user_skills_root.join("demo/README.md").is_file());
+        fs::remove_dir(&database).unwrap();
+        fs::rename(&database_backup, &database).unwrap();
+        assert!(managed_state(&managed_root)
+            .unwrap()
+            .skills
+            .iter()
+            .any(|skill| skill.name == "demo"));
+        assert!(result
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("operation history could not be finalized")));
+        let started = list_operations(
+            OperationFilter {
+                status: Some(OperationStatus::Started),
+                ..Default::default()
+            },
+            &managed_root,
+        )
+        .unwrap()
+        .operations
+        .into_iter()
+        .filter(|operation| operation.operation_type == "apply_user_skills_inbound")
+        .collect::<Vec<_>>();
+        assert_eq!(started.len(), 1);
     }
 
     #[test]

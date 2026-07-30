@@ -234,11 +234,14 @@ rebase、reset、force-push、stash 或解决 conflict；`diverged` 只从 commi
 Recovery snapshot 的目录链通过 no-follow directory handle 逐级打开，关键
 backup/restore/cleanup 使用 fd-relative 原子 quarantine-then-verify，并绑定 entry
 identity；backup 读取仅接受 bounded、nonblocking、nofollow 的 regular file，避免
-FIFO/special/增长文件阻塞或扩大恢复输入。index restore 使用 private create-new
-fd-relative file，index-lock release 通过 atomic exchange 保持外部 Git 排他锁持续
-占位，避免验证窗口。Network Git 拒绝
+FIFO/special/增长文件阻塞或扩大恢复输入。reviewed index 安装时记录 stable identity；
+compensation 通过 atomic exchange 验证当前 index 仍属于本次 apply，遇到外部 replacement
+时原子换回并报告 partial recovery，绝不覆盖或删除。index restore 使用 private
+create-new fd-relative file，index-lock release 通过 atomic exchange 保持外部 Git
+排他锁持续占位，避免验证窗口。Network Git 拒绝
 repository-local 与 worktree-scope execution-bearing config、URL rewrite 和自定义
-remote helper；transport allowlist 仅开放 `file/http/https/ssh/git`，全部 Git
+remote helper，包括可重定向 helper dispatch 的 `remote.*.vcs`；transport allowlist
+仅开放 `file/http/https/ssh/git`，全部 Git
 preflight/fetch 共用 bounded deadline，Git boolean parser 决定是否检查 worktree
 scope。按原顺序恢复受信任 global generic/URL-scoped
 credential helpers（包括 GitHub CLI 的 blank reset）及 `core.sshCommand`，避免不可信

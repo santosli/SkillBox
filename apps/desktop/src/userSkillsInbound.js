@@ -38,6 +38,42 @@ export function normalizeUserSkillsInboundWarnings(value) {
     .filter(Boolean);
 }
 
+export function appendUserSkillsInboundWarnings(current, incoming) {
+  return [
+    ...new Set([
+      ...normalizeUserSkillsInboundWarnings(current),
+      ...normalizeUserSkillsInboundWarnings(incoming)
+    ])
+  ];
+}
+
+export function appliedUserSkillsInboundStatus(result) {
+  const source = result || {};
+  const appliedSha = source.new_sha || source.newSha || '';
+
+  return normalizeUserSkillsInboundStatus({
+    relation: 'synced',
+    worktree_state: 'clean',
+    repo_path: source.repo_path || source.repoPath || '',
+    local_sha: appliedSha,
+    remote_sha: appliedSha,
+    message: 'User skills fast-forwarded to origin/main.'
+  });
+}
+
+export function inboundApplyRefreshWarning(failures) {
+  const details = (failures || [])
+    .map(({ label, error }) => {
+      const message = error?.message || String(error || '') || 'Unknown refresh error.';
+      return `${label}: ${message}`;
+    })
+    .filter(Boolean);
+
+  return details.length
+    ? `Incoming changes were applied, but refresh failed. ${details.join(' ')}`
+    : '';
+}
+
 export function normalizeUserSkillsInboundPreview(value) {
   const source = value || {};
   const files = (source.files || []).map((file) => ({

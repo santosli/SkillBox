@@ -136,10 +136,12 @@ import {
   waitForNextPaint
 } from './userSkillsGitSync.js';
 import {
+  appendUserSkillsInboundWarnings,
+  appliedUserSkillsInboundStatus,
+  inboundApplyRefreshWarning,
   invalidateUserSkillsInboundPreview,
   normalizeUserSkillsInboundPreview,
   normalizeUserSkillsInboundStatus,
-  normalizeUserSkillsInboundWarnings,
   useInboundReviewRequestController
 } from './userSkillsInbound.js';
 import {
@@ -1731,7 +1733,6 @@ export default function App() {
     if (!previewId || !inboundReviewDialog.preview?.canApply) return;
 
     setStatus('applying_inbound');
-    setUserSkillsInboundWarnings([]);
     setInboundReviewDialog((current) => ({ ...current, applying: true, error: '' }));
 
     if (!window.__TAURI_INTERNALS__) {
@@ -1748,41 +1749,11 @@ export default function App() {
       return;
     }
 
+    let result;
     try {
-      const result = await invoke('apply_user_skills_inbound', {
+      result = await invoke('apply_user_skills_inbound', {
         request: { preview_id: previewId, actor: 'desktop' }
       });
-      const [state, gitStatus, inboundStatus] = await Promise.all([
-        invoke('managed_state'),
-        invoke('user_skills_git_status').catch(() => userSkillsGit),
-        invoke('check_user_skills_inbound').catch(() => null)
-      ]);
-      setSkills(state.skills?.map(normalizeSkill) || []);
-      setPaths(normalizePaths(state.paths));
-      setIsFirstUse(Boolean(state.isFirstUse ?? state.is_first_use));
-      setUserSkillsGit(normalizeUserSkillsGitStatus(gitStatus));
-      setUserSkillsInbound(
-        inboundStatus
-          ? normalizeUserSkillsInboundStatus(inboundStatus)
-          : normalizeUserSkillsInboundStatus({
-              relation: 'synced',
-              worktree_state: 'clean',
-              repo_path: result.repo_path,
-              local_sha: result.new_sha,
-              remote_sha: result.new_sha,
-              message: 'User skills fast-forwarded to origin/main.'
-            })
-      );
-      setInboundReviewDialog((current) => ({ ...current, open: false, applying: false }));
-      const changedCount = result.changed_skill_count ?? result.changedSkillCount ?? 0;
-      const warnings = normalizeUserSkillsInboundWarnings(result.warnings);
-      setUserSkillsInboundWarnings(warnings);
-      setNotice(
-        warnings.length
-          ? `Applied ${changedCount} incoming skill change${changedCount === 1 ? '' : 's'} by fast-forward. ${warnings.join(' ')}`
-          : `Applied ${changedCount} incoming skill change${changedCount === 1 ? '' : 's'} by fast-forward.`
-      );
-      setStatus('ready');
     } catch (applyError) {
       const applyMessage =
         applyError?.message ||
@@ -1795,6 +1766,62 @@ export default function App() {
         error: `${applyMessage} Refresh to review the current repository state.`
       }));
       setStatus('ready');
+      return;
+    }
+
+    const changedCount = result.changed_skill_count ?? result.changedSkillCount ?? 0;
+    const appliedStatus = appliedUserSkillsInboundStatus(result);
+    setUserSkillsInbound(appliedStatus);
+    setUserSkillsGit((current) =>
+      normalizeUserSkillsGitStatus({
+        ...current,
+        dirty: false,
+        repoPath: appliedStatus.repoPath || current.repoPath,
+        state: 'clean'
+      })
+    );
+    setInboundReviewDialog((current) => ({ ...current, open: false, applying: false }));
+    setUserSkillsInboundWarnings((current) =>
+      appendUserSkillsInboundWarnings(current, result.warnings)
+    );
+    setNotice(
+      `Applied ${changedCount} incoming skill change${changedCount === 1 ? '' : 's'} by fast-forward.`
+    );
+    setStatus('ready');
+
+    const [managedStateRefresh, gitStatusRefresh, inboundStatusRefresh] =
+      await Promise.allSettled([
+        invoke('managed_state'),
+        invoke('user_skills_git_status'),
+        invoke('check_user_skills_inbound')
+      ]);
+
+    if (managedStateRefresh.status === 'fulfilled') {
+      const state = managedStateRefresh.value;
+      setSkills(state.skills?.map(normalizeSkill) || []);
+      setPaths(normalizePaths(state.paths));
+      setIsFirstUse(Boolean(state.isFirstUse ?? state.is_first_use));
+    }
+    if (gitStatusRefresh.status === 'fulfilled') {
+      setUserSkillsGit(normalizeUserSkillsGitStatus(gitStatusRefresh.value));
+    }
+    if (inboundStatusRefresh.status === 'fulfilled' && inboundStatusRefresh.value) {
+      setUserSkillsInbound(normalizeUserSkillsInboundStatus(inboundStatusRefresh.value));
+    }
+
+    const refreshWarning = inboundApplyRefreshWarning(
+      [
+        ['Managed state refresh', managedStateRefresh],
+        ['Git status refresh', gitStatusRefresh],
+        ['Inbound status refresh', inboundStatusRefresh]
+      ]
+        .filter(([, refresh]) => refresh.status === 'rejected')
+        .map(([label, refresh]) => ({ label, error: refresh.reason }))
+    );
+    if (refreshWarning) {
+      setUserSkillsInboundWarnings((current) =>
+        appendUserSkillsInboundWarnings(current, [refreshWarning])
+      );
     }
   }
 

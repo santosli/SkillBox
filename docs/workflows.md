@@ -584,8 +584,13 @@ Apply fast-forward:
   和 lock cleanup；单项失败不会跳过其它恢复。若 Git/worktree/SQLite 已成功，但
   `.git/index.lock` 的 pathname 已被外部替换，apply 返回 succeeded result 加
   actionable warning，operation phase 记录 `completed_with_warnings`，不会伪装成普通
-  failed apply 或删除 replacement lock；Settings 的当前 Git workflow 会持续显示该
-  warning，直到用户 dismiss。index restore 使用 `.git` dirfd 下不可预测、
+  failed apply 或删除 replacement lock；operation-history finalize 或 apply 后只读
+  refresh 失败也只追加 partial-success warning，不会把已完成 mutation 报成失败。
+  Settings 的当前 Git workflow 会 append/dedupe 并持续显示这些 warning，开始或失败的
+  后续 apply 不会清除它们，只有用户 dismiss 才清除。reviewed index 安装时记录 stable
+  identity；compensation 通过 atomic exchange 验证当前 index，只恢复/删除本次对象，
+  foreign replacement 会原子放回并报告 partial recovery。index restore 使用 `.git`
+  dirfd 下不可预测、
   create-new/no-follow 的 private regular file；index-lock release 通过 atomic
   exchange 保持 pathname 全程占位，ownership mismatch 时原子换回外部 lock。
 - Operation log 记录 aggregate old/new refs、backup ref、mutation phase 与
@@ -593,7 +598,8 @@ Apply fast-forward:
   Remote identity 必须去除 URL userinfo、query 和 fragment。
 - Network fetch/push 拒绝 repository-local 与 worktree-scope credential helper、
   include/proxy、SSH/upload/receive-pack command、URL rewrite 和 protocol override；
-  `GIT_ALLOW_PROTOCOL` 只允许 `file/http/https/ssh/git`，任意 `git-remote-*` custom
+  `remote.*.vcs` 也按 helper dispatch config fail closed；`GIT_ALLOW_PROTOCOL` 只允许
+  `file/http/https/ssh/git`，任意 `git-remote-*` custom
   helper 与 `ext` transport 均 fail closed。所有 origin/config/fetch preflight 共用
   bounded deadline 和 isolated process-group termination；按原顺序恢复用户
   global generic/URL-scoped credential helpers（包括 GitHub CLI blank reset）与

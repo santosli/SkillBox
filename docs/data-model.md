@@ -112,9 +112,13 @@ rows、workspace registry、usage history 和 operation history 不属于该 reb
 - compensation 失败会作为 actionable error/operation result 暴露，不能静默忽略；
 - apply 主状态已成功但 index-lock ownership cleanup 异常时，result/operation 记录
   `completed_with_warnings`，保留外部 replacement lock，不把已完成的 Git/SQLite
-  状态错误标记为 rolled back；Settings workflow 持续显示 warning。index restore
-  temporary 使用 `.git` dirfd 下不可预测的 create-new/no-follow regular file，
-  index-lock release 使用 atomic exchange，ownership check 期间不留下 lock 空窗；
+  状态错误标记为 rolled back；operation-history finalize 或 apply 后只读 refresh 失败
+  同样返回 applied result 加 warning，不反报 mutation 失败。Settings workflow 持续显示
+  warning，只有显式 dismiss 才清除。reviewed index 的 stable identity 随 receipt 保存；
+  compensation 通过 atomic exchange 只恢复/删除本次 index，foreign replacement 原子
+  放回原位并触发 partial recovery。index restore temporary 使用 `.git` dirfd 下不可预测
+  的 create-new/no-follow regular file，index-lock release 使用 atomic exchange，
+  ownership check 期间不留下 lock 空窗；
 - failure operation payload 保存 old/new SHA、backup ref、mutation phase 和
   compensation outcome；不保存 credentials、diff content 或 skill body。
 

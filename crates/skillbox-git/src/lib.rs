@@ -1945,6 +1945,7 @@ fn local_network_config_is_untrusted(key: &str) -> bool {
         || key == "remote.origin.receivepack"
         || key == "remote.origin.proxy"
         || key == "remote.origin.proxyauthmethod"
+        || (key.starts_with("remote.") && key.ends_with(".vcs"))
         || key == "include.path"
         || (key.starts_with("includeif.") && key.ends_with(".path"))
         || (key.starts_with("url.") && key.ends_with(".insteadof"))
@@ -3242,6 +3243,74 @@ mod tests {
             .args([
                 "--exact",
                 "tests::network_fetch_rejects_custom_remote_helper_without_execution",
+                "--nocapture",
+            ])
+            .env(CHILD, &root)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn network_fetch_rejects_local_and_worktree_remote_vcs_helpers_without_execution() {
+        const CHILD: &str = "SKILLBOX_REMOTE_VCS_HELPER_CHILD";
+        if let Some(root) = std::env::var_os(CHILD) {
+            let root = PathBuf::from(root);
+            let bin = root.join("bin");
+            fs::create_dir_all(&bin).unwrap();
+            let marker = root.join("remote-vcs-helper-invoked");
+            let helper = bin.join("git-remote-git");
+            fs::write(
+                &helper,
+                format!(
+                    "#!/bin/sh\nprintf 'SECRET helper output' > '{}'\nprintf 'SECRET helper stderr' >&2\nexit 1\n",
+                    marker.display()
+                ),
+            )
+            .unwrap();
+            fs::set_permissions(&helper, fs::Permissions::from_mode(0o700)).unwrap();
+            let path = format!(
+                "{}:{}",
+                bin.display(),
+                std::env::var("PATH").unwrap_or_default()
+            );
+            std::env::set_var("PATH", path);
+
+            for scope in ["local", "worktree"] {
+                let repo = root.join(format!("repo-{scope}"));
+                let git = GitService::new();
+                git.init_main(&repo).unwrap();
+                git.set_origin_url(&repo, "https://github.com/acme/repo.git")
+                    .unwrap();
+                if scope == "worktree" {
+                    run_git(&repo, &["config", "extensions.worktreeConfig", "true"]).unwrap();
+                    run_git(&repo, &["config", "--worktree", "remote.origin.vcs", "git"]).unwrap();
+                } else {
+                    run_git(&repo, &["config", "remote.origin.vcs", "git"]).unwrap();
+                }
+
+                let error = git.fetch_origin_main(&repo).unwrap_err();
+                assert!(error.contains("remote.origin.vcs"), "{scope}: {error}");
+                assert!(!error.contains("SECRET"), "{scope}: {error}");
+                assert!(!marker.exists(), "{scope}: remote helper executed");
+                assert_eq!(
+                    git.rev_parse_optional(&repo, "refs/remotes/origin/main")
+                        .unwrap(),
+                    None
+                );
+            }
+            return;
+        }
+
+        let root = temp_dir("git-remote-vcs-helper-child");
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::network_fetch_rejects_local_and_worktree_remote_vcs_helpers_without_execution",
                 "--nocapture",
             ])
             .env(CHILD, &root)
