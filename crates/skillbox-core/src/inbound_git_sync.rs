@@ -315,6 +315,12 @@ struct InboundApplyAudit {
     compensation_attempted: bool,
     compensation_succeeded: Option<bool>,
     compensation_error: Option<String>,
+    git_recovery_attempted: bool,
+    git_recovery_succeeded: Option<bool>,
+    git_recovery_error: Option<String>,
+    database_recovery_attempted: bool,
+    database_recovery_succeeded: Option<bool>,
+    database_recovery_error: Option<String>,
 }
 
 impl InboundApplyAudit {
@@ -328,6 +334,16 @@ impl InboundApplyAudit {
                 "attempted": self.compensation_attempted,
                 "succeeded": self.compensation_succeeded,
                 "error": self.compensation_error
+            },
+            "gitRecovery": {
+                "attempted": self.git_recovery_attempted,
+                "succeeded": self.git_recovery_succeeded,
+                "error": self.git_recovery_error
+            },
+            "databaseRecovery": {
+                "attempted": self.database_recovery_attempted,
+                "succeeded": self.database_recovery_succeeded,
+                "error": self.database_recovery_error
             }
         })
     }
@@ -953,6 +969,7 @@ fn apply_user_skills_inbound_inner(
         audit,
     )?;
     audit.phase = "ref_updated".to_string();
+    let mut database_snapshot = None;
     let post_mutation = (|| -> Result<()> {
         let applied_head = git
             .rev_parse_optional(&paths.user_skills_root, "HEAD")?
@@ -975,14 +992,21 @@ fn apply_user_skills_inbound_inner(
             ));
         }
         audit.phase = "reindexing".to_string();
-        reindex_user_skills(&paths.database_path, &scan.skills, &paths.user_skills_root)
-            .map_err(|error| format!("Unable to reindex fast-forwarded user skills: {error}"))
+        database_snapshot = Some(
+            reindex_user_skills(&paths.database_path, &scan.skills, &paths.user_skills_root)
+                .map_err(|error| {
+                    format!("Unable to reindex fast-forwarded user skills: {error}")
+                })?,
+        );
+        Ok(())
     })();
     if let Err(error) = post_mutation {
         return rollback_inbound_after_failure(
             &git,
             &paths.user_skills_root,
+            &paths.database_path,
             &mut mutation,
+            database_snapshot.as_ref(),
             &error,
             audit,
         );
@@ -995,7 +1019,9 @@ fn apply_user_skills_inbound_inner(
         return rollback_inbound_after_failure(
             &git,
             &paths.user_skills_root,
+            &paths.database_path,
             &mut mutation,
+            database_snapshot.as_ref(),
             &error,
             audit,
         );
@@ -3100,21 +3126,56 @@ fn wait_for_test_barrier(path: &Path) -> Result<()> {
 fn rollback_inbound_after_failure(
     git: &skillbox_git::GitService,
     repo: &Path,
+    database_path: &Path,
     receipt: &mut InboundMutationReceipt,
+    database_snapshot: Option<&UserSkillIndexSnapshot>,
     cause: &str,
     audit: &mut InboundApplyAudit,
 ) -> Result<UserSkillsInboundApplyResult> {
     audit.compensation_attempted = true;
-    match compensate_inbound_tree(git, repo, receipt, "reindex-recovery") {
-        Ok(()) => {
-            audit.compensation_succeeded = Some(true);
-            Err(format!("{cause} The previous Git state was restored."))
+    let git_recovery = compensate_inbound_tree(git, repo, receipt, "reindex-recovery");
+    audit.git_recovery_attempted = true;
+    match &git_recovery {
+        Ok(()) => audit.git_recovery_succeeded = Some(true),
+        Err(error) => {
+            audit.git_recovery_succeeded = Some(false);
+            audit.git_recovery_error = Some(error.clone());
         }
-        Err(rollback_error) => {
-            audit.compensation_succeeded = Some(false);
-            audit.compensation_error = Some(rollback_error.clone());
+    }
+    if let Some(database_snapshot) = database_snapshot {
+        audit.database_recovery_attempted = true;
+        match restore_user_skill_index(database_path, database_snapshot) {
+            Ok(()) => audit.database_recovery_succeeded = Some(true),
+            Err(error) => {
+                audit.database_recovery_succeeded = Some(false);
+                audit.database_recovery_error = Some(error);
+            }
+        }
+    }
+    let database_recovery = audit
+        .database_recovery_error
+        .as_deref()
+        .map(|error| format!("User skill index recovery failed: {error}"));
+    match (git_recovery, database_recovery) {
+        (Ok(()), None) => {
+            audit.compensation_succeeded = Some(true);
             Err(format!(
-                "{cause} Automatic recovery failed: {rollback_error}. Use the recorded backup ref and normal Git tooling before retrying."
+                "{cause} The previous Git state was restored, and the user skill index is consistent."
+            ))
+        }
+        (git_result, database_error) => {
+            let mut failures = Vec::new();
+            if let Err(error) = git_result {
+                failures.push(format!("Git/worktree recovery failed: {error}"));
+            }
+            if let Some(error) = database_error {
+                failures.push(error);
+            }
+            let recovery_error = failures.join(" ");
+            audit.compensation_succeeded = Some(false);
+            audit.compensation_error = Some(recovery_error.clone());
+            Err(format!(
+                "{cause} Automatic recovery was incomplete: {recovery_error}. Use the recorded backup ref and normal Git tooling before retrying."
             ))
         }
     }
@@ -5270,7 +5331,19 @@ mod tests {
         configure_and_bootstrap(&managed_root, &remote);
         let paths = managed_paths(&managed_root);
         let git = skillbox_git::GitService::new();
+        let previous_index = indexed_user_skill_rows(&paths.database_path);
+        fs::write(
+            work.join("demo/SKILL.md"),
+            "---\nname: demo\ndescription: Incoming demo\n---\n",
+        )
+        .unwrap();
         fs::write(work.join("demo/README.md"), "incoming reviewed\n").unwrap();
+        fs::create_dir_all(work.join("incoming-only")).unwrap();
+        fs::write(
+            work.join("incoming-only/SKILL.md"),
+            "---\nname: incoming-only\ndescription: Incoming only\n---\n",
+        )
+        .unwrap();
         git.add_all(&work).unwrap();
         git.commit(&work, "Incoming").unwrap();
         git.push_origin_main(&work, false).unwrap();
@@ -5296,6 +5369,11 @@ mod tests {
         while !ready.exists() {
             std::thread::sleep(Duration::from_millis(10));
         }
+        let incoming_index = indexed_user_skill_rows(&paths.database_path);
+        assert_ne!(incoming_index, previous_index);
+        assert!(incoming_index
+            .iter()
+            .any(|(name, _)| name == "incoming-only"));
         let edited_path = paths.user_skills_root.join("demo/README.md");
         fs::write(&edited_path, "editor content after reindex\n").unwrap();
         fs::write(&barrier, b"continue").unwrap();
@@ -5313,6 +5391,10 @@ mod tests {
             Some(old_sha.as_str())
         );
         assert!(git.status_hardened(&paths.user_skills_root).unwrap().dirty);
+        assert_eq!(
+            indexed_user_skill_rows(&paths.database_path),
+            previous_index
+        );
         let operation = list_operations(
             OperationFilter {
                 status: Some(OperationStatus::Failed),
@@ -5327,9 +5409,118 @@ mod tests {
         .unwrap();
         assert_eq!(operation.payload["mutationPhase"], "final_consistency");
         assert_eq!(operation.payload["compensation"]["succeeded"], false);
+        assert_eq!(operation.payload["gitRecovery"]["attempted"], true);
+        assert_eq!(operation.payload["gitRecovery"]["succeeded"], false);
+        assert_eq!(operation.payload["databaseRecovery"]["attempted"], true);
+        assert_eq!(operation.payload["databaseRecovery"]["succeeded"], true);
         assert!(operation.payload["compensation"]["error"]
             .as_str()
             .is_some_and(|message| message.contains("changed outside SkillBox")));
+    }
+
+    #[test]
+    fn failed_database_recovery_is_audited_without_overwriting_concurrent_user_content() {
+        let managed_root = temp_dir("inbound-post-reindex-db-recovery-failure");
+        let (remote, work) = remote_with_skill("inbound-post-reindex-db-recovery-failure");
+        configure_and_bootstrap(&managed_root, &remote);
+        let paths = managed_paths(&managed_root);
+        let git = skillbox_git::GitService::new();
+        let previous_index = indexed_user_skill_rows(&paths.database_path);
+        fs::create_dir_all(work.join("incoming-only")).unwrap();
+        fs::write(
+            work.join("incoming-only/SKILL.md"),
+            "---\nname: incoming-only\ndescription: Incoming only\n---\n",
+        )
+        .unwrap();
+        git.add_all(&work).unwrap();
+        git.commit(&work, "Incoming").unwrap();
+        git.push_origin_main(&work, false).unwrap();
+        let preview = preview_user_skills_inbound(&managed_root).unwrap();
+        let old_sha = preview.status.local_sha.clone().unwrap();
+        let barrier = temp_dir("inbound-post-reindex-db-failure-barrier").join("continue");
+        let ready = barrier.with_extension("ready");
+        let worker_root = managed_root.clone();
+        let worker_barrier = barrier.clone();
+        let worker = std::thread::spawn(move || {
+            apply_user_skills_inbound_with_options(
+                UserSkillsInboundApplyRequest {
+                    preview_id: Some(preview.preview_id),
+                    actor: "test".to_string(),
+                },
+                &worker_root,
+                &InboundMutationOptions {
+                    pause_before_completed_index_lock_release: Some(worker_barrier),
+                    ..Default::default()
+                },
+            )
+        });
+        while !ready.exists() {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let incoming_index = indexed_user_skill_rows(&paths.database_path);
+        assert!(incoming_index
+            .iter()
+            .any(|(name, _)| name == "incoming-only"));
+        assert_ne!(incoming_index, previous_index);
+        fs::write(
+            paths
+                .database_path
+                .with_extension("fail-inbound-index-restore"),
+            b"fail",
+        )
+        .unwrap();
+        let edited_path = paths.user_skills_root.join("demo/README.md");
+        fs::write(&edited_path, "editor content during failed DB recovery\n").unwrap();
+        fs::write(&barrier, b"continue").unwrap();
+
+        let error = worker.join().unwrap().unwrap_err();
+        assert!(
+            error.contains("User skill index recovery failed"),
+            "{error}"
+        );
+        assert_eq!(
+            fs::read_to_string(&edited_path).unwrap(),
+            "editor content during failed DB recovery\n"
+        );
+        assert_eq!(
+            git.rev_parse_optional(&paths.user_skills_root, "HEAD")
+                .unwrap()
+                .as_deref(),
+            Some(old_sha.as_str())
+        );
+        assert_eq!(
+            indexed_user_skill_rows(&paths.database_path),
+            incoming_index,
+            "failed DB restore must be reported rather than disguised as the previous index"
+        );
+        let operation = list_operations(
+            OperationFilter {
+                status: Some(OperationStatus::Failed),
+                ..Default::default()
+            },
+            &managed_root,
+        )
+        .unwrap()
+        .operations
+        .into_iter()
+        .find(|operation| operation.operation_type == "apply_user_skills_inbound")
+        .unwrap();
+        assert_eq!(operation.payload["mutationPhase"], "final_consistency");
+        assert_eq!(operation.payload["compensation"]["succeeded"], false);
+        assert_eq!(operation.payload["gitRecovery"]["attempted"], true);
+        assert_eq!(operation.payload["gitRecovery"]["succeeded"], true);
+        assert_eq!(
+            operation.payload["gitRecovery"]["error"],
+            serde_json::Value::Null
+        );
+        assert!(operation.payload["compensation"]["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("User skill index recovery failed")));
+        assert_eq!(operation.payload["databaseRecovery"]["attempted"], true);
+        assert_eq!(operation.payload["databaseRecovery"]["succeeded"], false);
+        assert!(operation.payload["databaseRecovery"]["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("Injected inbound index restore failure")));
     }
 
     #[test]
@@ -6058,6 +6249,25 @@ mod tests {
             managed_root,
         )
         .unwrap();
+    }
+
+    fn indexed_user_skill_rows(database_path: &Path) -> Vec<(String, String)> {
+        let connection = open_database(database_path).unwrap();
+        let mut statement = connection
+            .prepare(
+                "
+                SELECT name, content_hash
+                FROM skills
+                WHERE type = 'user'
+                ORDER BY name
+                ",
+            )
+            .unwrap();
+        statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap()
     }
 
     fn remote_with_skill(label: &str) -> (PathBuf, PathBuf) {

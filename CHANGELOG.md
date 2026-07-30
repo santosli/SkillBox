@@ -38,6 +38,9 @@ version tags such as `v0.3.0`.
   reject custom-helper origin URLs, gate every status refresh branch from
   function entry, and detect plain worktree edits after reindex before
   reporting a successful inbound apply.
+- Snapshot the user-skill SQLite index inside the reindex transaction and
+  restore it independently from Git recovery when final consistency fails,
+  with separate audited outcomes for partial database recovery.
 - Add matching Rust CLI, Tauri, and desktop review surfaces while preserving the
   existing outbound commit-and-push behavior.
 

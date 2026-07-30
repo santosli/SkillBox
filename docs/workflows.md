@@ -589,7 +589,11 @@ Apply fast-forward:
 - Reindex 完成后、成功返回和释放 index lock 前，Apply 再次验证 HEAD 与 worktree
   仍精确对应 reviewed/materialized tree。此窗口出现普通编辑时不覆盖用户内容，也不
   报 clean success；operation 进入可审计 failure/partial-recovery 结果，SQLite 与
-  filesystem 不一致必须显式暴露并要求重新检查。
+  filesystem 不一致必须显式暴露并要求重新检查。Reindex transaction 会在替换 user
+  rows 前保存精确的 pre-apply row snapshot；final consistency 失败时即使 dirty
+  worktree 无法安全重扫，也会独立尝试恢复该 snapshot。Operation payload 分别记录
+  Git/worktree 与 database recovery outcome；DB restore 自身失败时保留实际 rows、
+  报 partial recovery，不会伪装成完整恢复或再次改写用户文件。
 - Compensation 独立尝试所有仍可安全证明的 ref、index、worktree、generated defaults
   和 lock cleanup；单项失败不会跳过其它恢复。若 Git/worktree/SQLite 已成功，但
   `.git/index.lock` 的 pathname 已被外部替换，apply 返回 succeeded result 加

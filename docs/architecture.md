@@ -259,6 +259,11 @@ scope。按原顺序恢复受信任 global generic/URL-scoped
 credential helpers（包括 GitHub CLI 的 blank reset）及 `core.sshCommand`，避免不可信
 repo 配置执行命令，同时保留用户现有 GitHub HTTPS/SSH 凭据链。Git 网络失败只返回
 有界分类错误，不回显 helper/server 原始 stderr。
+User-skill SQLite reindex 在同一 transaction 内先快照原 user rows，再替换为 incoming
+rows。若 reindex commit 后的 final consistency 检查失败，Git/worktree recovery 与
+SQLite snapshot restore 会独立执行；operation payload 分别记录 `gitRecovery` 和
+`databaseRecovery`，任一失败都会成为 partial recovery。dirty/malformed worktree
+不会被重新扫描来猜测旧 index，也不会让 incoming rows 静默留在已回退的 Git 状态中。
 
 Preview 会在 working-tree write 前检查 incoming add/rename/type-change 与本地 ignored
 或 untracked 内容的 exact/ancestor/descendant 碰撞。碰撞必须 blocked，不能依赖普通
