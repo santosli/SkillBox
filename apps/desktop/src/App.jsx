@@ -25,6 +25,7 @@ import {
   SkillTypeChangeDialog
 } from './components/skillDetail.jsx';
 import { UserSkillsSyncDialog } from './components/userSkillsSync.jsx';
+import { UserSkillsInboundReviewDialog } from './components/userSkillsInbound.jsx';
 import {
   DeployWorkspaceDialog,
   WorkspaceAddDialog,
@@ -81,6 +82,8 @@ import {
   previewSkills,
   previewUsageRankings,
   previewUserSkillsGitChanges,
+  previewUserSkillsInbound,
+  previewUserSkillsInboundStatus,
   previewWorkspaces,
   publicPreviewRequested
 } from './previewData.js';
@@ -133,6 +136,10 @@ import {
   waitForNextPaint
 } from './userSkillsGitSync.js';
 import {
+  normalizeUserSkillsInboundPreview,
+  normalizeUserSkillsInboundStatus
+} from './userSkillsInbound.js';
+import {
   normalizeWorkspace,
   normalizeWorkspaceSetupPreview,
   normalizeWorkspaces,
@@ -156,6 +163,9 @@ const autoRefreshBlockedStatuses = new Set([
   'importing',
   'loading',
   'preparing_sync',
+  'checking_inbound',
+  'previewing_inbound',
+  'applying_inbound',
   'deploying_skill',
   'deleting_skill',
   'installing_usage_hook',
@@ -304,6 +314,7 @@ export default function App() {
     error: ''
   });
   const [userSkillsGit, setUserSkillsGit] = useState(normalizeUserSkillsGitStatus(null));
+  const [userSkillsInbound, setUserSkillsInbound] = useState(null);
   const [usageHooks, setUsageHooks] = useState(normalizeUsageHookStatuses(null));
   const [doctorReport, setDoctorReport] = useState(normalizeDoctorReport(null));
   const [remoteSkillUpdates, setRemoteSkillUpdates] = useState(normalizeRemoteSkillUpdates(null));
@@ -322,6 +333,14 @@ export default function App() {
     activePath: ''
   });
   const [syncCommitMessage, setSyncCommitMessage] = useState(defaultSyncCommitMessage);
+  const [inboundReviewDialog, setInboundReviewDialog] = useState({
+    open: false,
+    loading: false,
+    applying: false,
+    preview: null,
+    activePath: '',
+    error: ''
+  });
   const [workspaceDialog, setWorkspaceDialog] = useState({
     open: false,
     path: '',
@@ -1563,6 +1582,7 @@ export default function App() {
         message: 'Mock synced user skills.'
       });
       setUserSkillsGit(normalized);
+      setUserSkillsInbound(null);
       setSyncCommitMessage(message);
       if (closeDialog) {
         setSyncDialog((current) => ({ ...current, open: false, error: '' }));
@@ -1586,6 +1606,7 @@ export default function App() {
         remote_url: result.remote_url || remoteUrl || userSkillsGit.remoteUrl
       });
       setUserSkillsGit(normalized);
+      setUserSkillsInbound(null);
       setSyncCommitMessage(message);
       if (closeDialog) {
         setSyncDialog((current) => ({ ...current, open: false, error: '' }));
@@ -1600,6 +1621,203 @@ export default function App() {
         setError(syncMessage);
       }
       setStatus('ready');
+    }
+  }
+
+  async function checkUserSkillsInbound() {
+    setStatus('checking_inbound');
+    setError('');
+    setNotice('');
+
+    if (!window.__TAURI_INTERNALS__) {
+      const inboundPreviewMode = new URLSearchParams(window.location.search).get('inbound') || 'behind';
+      const checked = normalizeUserSkillsInboundStatus(
+        previewUserSkillsInboundStatus(inboundPreviewMode)
+      );
+      setUserSkillsInbound(checked);
+      setNotice(checked.message);
+      setStatus('prototype');
+      return checked;
+    }
+
+    try {
+      const result = await invoke('check_user_skills_inbound');
+      const checked = normalizeUserSkillsInboundStatus(result);
+      setUserSkillsInbound(checked);
+      setNotice(checked.fetchError || checked.message);
+      setStatus('ready');
+      return checked;
+    } catch (checkError) {
+      const message =
+        checkError.message || String(checkError) || 'Unable to check incoming user skills.';
+      setUserSkillsInbound((current) => ({
+        ...normalizeUserSkillsInboundStatus(current),
+        relation: 'unknown',
+        fetchError: message,
+        message
+      }));
+      setNotice(message);
+      setStatus('ready');
+      return null;
+    }
+  }
+
+  async function openUserSkillsInboundReview() {
+    setInboundReviewDialog({
+      open: true,
+      loading: true,
+      applying: false,
+      preview: null,
+      activePath: '',
+      error: ''
+    });
+    setStatus('previewing_inbound');
+
+    if (!window.__TAURI_INTERNALS__) {
+      const inboundPreviewMode = new URLSearchParams(window.location.search).get('inbound') || 'behind';
+      const preview = normalizeUserSkillsInboundPreview(
+        previewUserSkillsInbound(inboundPreviewMode)
+      );
+      setUserSkillsInbound(preview.status);
+      setInboundReviewDialog({
+        open: true,
+        loading: false,
+        applying: false,
+        preview,
+        activePath: preview.files[0]?.path || '',
+        error: ''
+      });
+      setStatus('prototype');
+      return;
+    }
+
+    try {
+      const result = await invoke('preview_user_skills_inbound');
+      const preview = normalizeUserSkillsInboundPreview(result);
+      setUserSkillsInbound(preview.status);
+      setInboundReviewDialog({
+        open: true,
+        loading: false,
+        applying: false,
+        preview,
+        activePath: preview.files[0]?.path || '',
+        error: ''
+      });
+      setStatus('ready');
+    } catch (previewError) {
+      setInboundReviewDialog((current) => ({
+        ...current,
+        loading: false,
+        error:
+          previewError.message ||
+          String(previewError) ||
+          'Unable to preview incoming user skills.'
+      }));
+      setStatus('ready');
+    }
+  }
+
+  async function applyUserSkillsInbound() {
+    const previewId = inboundReviewDialog.preview?.previewId;
+    if (!previewId || !inboundReviewDialog.preview?.canApply) return;
+
+    setStatus('applying_inbound');
+    setInboundReviewDialog((current) => ({ ...current, applying: true, error: '' }));
+
+    if (!window.__TAURI_INTERNALS__) {
+      const nextStatus = normalizeUserSkillsInboundStatus({
+        ...previewUserSkillsInboundStatus(),
+        relation: 'synced',
+        behind_count: 0,
+        message: 'User skills fast-forwarded to origin/main.'
+      });
+      setUserSkillsInbound(nextStatus);
+      setInboundReviewDialog((current) => ({ ...current, open: false, applying: false }));
+      setNotice(nextStatus.message);
+      setStatus('prototype');
+      return;
+    }
+
+    try {
+      const result = await invoke('apply_user_skills_inbound', {
+        request: { preview_id: previewId, actor: 'desktop' }
+      });
+      const [state, gitStatus, inboundStatus] = await Promise.all([
+        invoke('managed_state'),
+        invoke('user_skills_git_status').catch(() => userSkillsGit),
+        invoke('check_user_skills_inbound').catch(() => null)
+      ]);
+      setSkills(state.skills?.map(normalizeSkill) || []);
+      setPaths(normalizePaths(state.paths));
+      setIsFirstUse(Boolean(state.isFirstUse ?? state.is_first_use));
+      setUserSkillsGit(normalizeUserSkillsGitStatus(gitStatus));
+      setUserSkillsInbound(
+        inboundStatus
+          ? normalizeUserSkillsInboundStatus(inboundStatus)
+          : normalizeUserSkillsInboundStatus({
+              relation: 'synced',
+              worktree_state: 'clean',
+              repo_path: result.repo_path,
+              local_sha: result.new_sha,
+              remote_sha: result.new_sha,
+              message: 'User skills fast-forwarded to origin/main.'
+            })
+      );
+      setInboundReviewDialog((current) => ({ ...current, open: false, applying: false }));
+      setNotice(
+        `Applied ${result.changed_skill_count ?? result.changedSkillCount ?? 0} incoming skill change${(result.changed_skill_count ?? result.changedSkillCount ?? 0) === 1 ? '' : 's'} by fast-forward.`
+      );
+      setStatus('ready');
+    } catch (applyError) {
+      setInboundReviewDialog((current) => ({
+        ...current,
+        applying: false,
+        error:
+          applyError.message ||
+          String(applyError) ||
+          'Unable to apply incoming user skills. Refresh the preview and try again.'
+      }));
+      setStatus('ready');
+    }
+  }
+
+  async function openUserSkillsRepository() {
+    const repoPath =
+      inboundReviewDialog.preview?.status.repoPath ||
+      userSkillsInbound?.repoPath ||
+      userSkillsGit.repoPath;
+    if (!repoPath) return;
+
+    if (window.__TAURI_INTERNALS__) {
+      try {
+        await invoke('open_local_path', { path: repoPath });
+        return;
+      } catch (openError) {
+        setInboundReviewDialog((current) => ({
+          ...current,
+          error: openError.message || String(openError)
+        }));
+        return;
+      }
+    }
+    setNotice(`User skills repository: ${compactPath(repoPath)}`);
+  }
+
+  async function copyUserSkillsRepositoryPath() {
+    const repoPath =
+      inboundReviewDialog.preview?.status.repoPath ||
+      userSkillsInbound?.repoPath ||
+      userSkillsGit.repoPath;
+    if (!repoPath) return;
+
+    try {
+      await navigator.clipboard.writeText(repoPath);
+      setNotice('Copied the user skills repository path.');
+    } catch (copyError) {
+      setInboundReviewDialog((current) => ({
+        ...current,
+        error: copyError.message || String(copyError) || 'Unable to copy repository path.'
+      }));
     }
   }
 
@@ -3268,6 +3486,7 @@ export default function App() {
         dirty: false
       });
       setUserSkillsGit(normalized);
+      setUserSkillsInbound(null);
       setNotice('User skills remote saved.');
       return normalized;
     }
@@ -3277,6 +3496,7 @@ export default function App() {
     });
     const normalized = normalizeUserSkillsGitStatus(result);
     setUserSkillsGit(normalized);
+    setUserSkillsInbound(null);
     setNotice('User skills remote saved.');
     return normalized;
   }
@@ -3684,7 +3904,9 @@ export default function App() {
             preferences={preferences}
             status={status}
             usageHooks={usageHooks}
+            userSkillsInbound={userSkillsInbound}
             userSkillsGit={userSkillsGit}
+            onCheckUserSkillsInbound={checkUserSkillsInbound}
             onCheckAppUpdate={() => checkAppUpdate()}
             onRunDoctor={runHealthCheck}
             onRepairStaleDeployments={repairStaleDeploymentRecords}
@@ -3695,6 +3917,7 @@ export default function App() {
             onSaveStatusRefreshInterval={saveStatusRefreshIntervalMinutes}
             onSaveRemoteUpdateTimeout={saveRemoteUpdateTimeoutSeconds}
             onSaveUserSkillsRemote={saveUserSkillsGitRemote}
+            onReviewUserSkillsInbound={openUserSkillsInboundReview}
           />
         ) : page === 'workspaces' ? (
           <WorkspacePage
@@ -3896,6 +4119,24 @@ export default function App() {
           onSubmit={submitSyncSetup}
           onTogglePath={toggleSyncDialogPath}
           onUpdate={updateSyncDialog}
+        />
+      ) : null}
+
+      {inboundReviewDialog.open ? (
+        <UserSkillsInboundReviewDialog
+          dialog={inboundReviewDialog}
+          onActivatePath={(activePath) =>
+            setInboundReviewDialog((current) => ({ ...current, activePath }))
+          }
+          onApply={applyUserSkillsInbound}
+          onClose={() =>
+            setInboundReviewDialog((current) =>
+              current.applying ? current : { ...current, open: false, error: '' }
+            )
+          }
+          onCopyRepositoryPath={copyUserSkillsRepositoryPath}
+          onOpenRepository={openUserSkillsRepository}
+          onRefresh={openUserSkillsInboundReview}
         />
       ) : null}
 

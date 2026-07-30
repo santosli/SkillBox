@@ -7,7 +7,16 @@ version tags such as `v0.3.0`.
 
 ## Unreleased
 
-- No unreleased changes.
+- Add explicit inbound user-skills Git updates through Check remote, reviewed
+  repository-wide diffs, and preview-confirmed fast-forward apply.
+- Report worktree cleanliness separately from synced/ahead/behind/diverged,
+  remote-only, and missing-remote-branch states without automatic conflict
+  resolution.
+- Validate incoming skill trees, disclose affected runtime deployments, block
+  deployed deletes or renames, create pre-apply backup refs, and reconcile the
+  user-skill index after a successful fast-forward.
+- Add matching Rust CLI, Tauri, and desktop review surfaces while preserving the
+  existing outbound commit-and-push behavior.
 
 ## 0.6.1
 

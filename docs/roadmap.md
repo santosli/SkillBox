@@ -19,15 +19,19 @@ The runtime-profile and evidence-aware usage work passed release qualification
 through the signed and notarized `v0.6.1` distribution. The current release
 identity and distribution invariants remain documented in `docs/release.md`.
 
-The next implementation target is 0.7: reviewed inbound sync, safer deployment
-choices, and stronger recovery. These capabilities are planned, not shipped.
+The active 0.7 implementation adds reviewed inbound synchronization for the
+shared user-skills Git repository. It is under Draft PR qualification and is
+not part of the shipped `v0.6.1` release. Copy-snapshot deployment and the
+broader recovery work remain planned.
 
 ## Near-Term Priorities
 
 These are the next areas where focused contributions are most useful:
 
-- **Reviewed inbound sync.** Report ahead/behind/diverged Git state and allow
-  explicit fast-forward updates without automatically merging conflicts.
+- **Reviewed inbound sync (implementation in progress).** Report worktree state
+  separately from synced/ahead/behind/diverged/remote-only relation, then allow
+  repository-wide, preview-confirmed `origin/main` fast-forwards without
+  automatically merging conflicts.
 - **Deployment portability.** Add copy-snapshot deployment as an explicit
   alternative to the current compatibility-checked symlink path.
 - **Recovery workflows.** Strengthen restore previews, backup inspection, and
@@ -56,7 +60,7 @@ verified; completing a feature list alone does not qualify a release.
 | **0.4 — Reliability foundation** | Versioned database migrations, persisted user metadata, Doctor diagnostics, and durable mutation auditing. | Upgrade and backup tests pass; Doctor is available through core, CLI, Tauri, and desktop; audited workflows record both success and failure; release automation passes. |
 | **0.5 — Local usage discovery and release awareness** | Evidence-aware local skill rankings with time-range, skill-type, agent, and workspace filters; separate Calls and history references; auditable multi-provider history sync; daily signed app-update awareness without automatic downloads. | CLI and desktop reconcile confirmed/inferred/reference evidence consistently; Calls never include low-signal references or claim provider-native totals; history providers resolve real local skills, deduplicate and upgrade stable identities, and preserve successful imports when another provider fails; schema upgrades and representative ranking queries are tested; update checks are rate-limited and every install is revalidated after an explicit click. |
 | **0.6 — Runtime profiles and portability** | Rust-owned runtime profiles model roots, precedence, frontmatter capabilities, and compatibility without hard-coding agent behavior in React. | Each supported profile has fixtures and compatibility tests; unsupported fields are reported before deployment; runtime-specific behavior remains behind an adapter boundary. |
-| **0.7 — Safe sync, deployment, and recovery** | Reviewed inbound user-skills Git updates, copy-snapshot deployment, and stronger restore/audit workflows complement the existing symlink path. | Ahead/behind/diverged states are explicit; conflicts are never auto-merged; overwrite protection, rollback, and backup restoration have automated coverage. |
+| **0.7 — Safe sync, deployment, and recovery** | Reviewed inbound user-skills Git updates, copy-snapshot deployment, and stronger restore/audit workflows complement the existing symlink path. Inbound fast-forward is implemented pending qualification; the rest remains planned. | Worktree and branch-relation states are explicit; conflicts are never auto-merged; incoming trees, stale previews, deployed deletion/rename blockers, backup refs, index reconciliation, overwrite protection, and recovery paths have automated coverage. |
 | **0.8 — Product hardening** | Large-library performance, actionable diagnostics, accessibility, onboarding, and recovery behavior are ready for sustained daily use. | Performance budgets and critical UI workflows are verified; no known data-loss path remains; supported upgrade and recovery procedures are documented and exercised. |
 | **0.9 — Release candidate** | Feature scope is frozen while security, migration compatibility, packaging, updater, Homebrew, and real-world beta feedback are closed out. | Threat-model review is complete; upgrades from every supported prior release are tested; blocker defects are closed; signed and notarized distribution rehearsals pass. |
 | **1.0 — Stable local skill management** | SkillBox offers a documented, supportable contract for discovering, importing, managing, deploying, updating, synchronizing, diagnosing, and recovering supported skills. | Core workflows meet their definitions of done; supported runtimes and limitations are explicit; migrations and recovery are proven; release artifacts and docs match; no open blocker or known data-loss issue remains. |

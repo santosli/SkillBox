@@ -283,6 +283,117 @@ export function previewUserSkillsGitChanges() {
   };
 }
 
+export function previewUserSkillsInboundStatus(mode = 'behind') {
+  const isDiverged = mode === 'diverged';
+  const isDirty = mode === 'dirty';
+  const isRemoteOnly = mode === 'remote-only';
+  return {
+    repo_path: previewPaths.userSkillsRoot,
+    branch: 'main',
+    remote_url: 'git@example.com:santosli/user-skills.git',
+    worktree_state: isDirty || isRemoteOnly ? 'dirty' : 'clean',
+    relation: isDiverged ? 'diverged' : isRemoteOnly ? 'remote_only' : 'behind',
+    local_sha: isRemoteOnly ? null : '27f71e4',
+    remote_sha: '4b6a204',
+    merge_base_sha: '27f71e4',
+    ahead_count: isDiverged ? 1 : 0,
+    behind_count: 2,
+    fetched_at: '2026-07-30 16:20:00',
+    fetch_error: null,
+    message: isDiverged
+      ? 'Local and remote histories have diverged.'
+      : isRemoteOnly
+        ? 'Remote main can initialize this empty local repository.'
+        : '2 incoming commits are ready to review.'
+  };
+}
+
+export function previewUserSkillsInbound(mode = 'behind') {
+  const status = previewUserSkillsInboundStatus(mode);
+  const isDiverged = mode === 'diverged';
+  const isDirty = mode === 'dirty';
+  return {
+    preview_id: 'public-preview-inbound-4b6a204',
+    status,
+    can_apply: !isDiverged && !isDirty,
+    blocked_reason: isDiverged
+      ? 'Diverged history must be resolved with normal Git tooling.'
+      : isDirty
+        ? 'Commit or discard local changes before applying incoming changes.'
+        : null,
+    repository_files: ['README.md'],
+    safety_issues: [],
+    conflict_analysis: isDiverged
+      ? {
+          local_only_commits: 1,
+          remote_only_commits: 2,
+          both_changed_files: ['release-helper/SKILL.md'],
+          both_changed_skills: ['release-helper'],
+          likely_conflict_files: ['release-helper/SKILL.md']
+        }
+      : null,
+    skill_changes: [
+      {
+        skill_name: 'release-helper',
+        previous_name: null,
+        kind: 'updated',
+        files: ['release-helper/SKILL.md'],
+        affected_deployments: [
+          {
+            target_root: '/Users/example/.codex/skills/release-helper',
+            profile_id: 'codex',
+            profile_name: 'Codex'
+          }
+        ]
+      },
+      {
+        skill_name: 'incident-review',
+        previous_name: null,
+        kind: 'added',
+        files: ['incident-review/SKILL.md'],
+        affected_deployments: []
+      }
+    ],
+    files: [
+      {
+        path: 'release-helper/SKILL.md',
+        status: 'M',
+        label: 'Modified',
+        diff:
+          'diff --git a/release-helper/SKILL.md b/release-helper/SKILL.md\n' +
+          '--- a/release-helper/SKILL.md\n' +
+          '+++ b/release-helper/SKILL.md\n' +
+          '@@\n' +
+          '-description: Prepare release notes.\n' +
+          '+description: Prepare release notes and verify signed assets.\n'
+      },
+      {
+        path: 'incident-review/SKILL.md',
+        status: 'A',
+        label: 'Added',
+        diff:
+          'diff --git a/incident-review/SKILL.md b/incident-review/SKILL.md\n' +
+          'new file mode 100644\n' +
+          '--- /dev/null\n' +
+          '+++ b/incident-review/SKILL.md\n' +
+          '@@\n' +
+          '+name: incident-review\n'
+      },
+      {
+        path: 'README.md',
+        status: 'M',
+        label: 'Modified',
+        diff:
+          'diff --git a/README.md b/README.md\n' +
+          '--- a/README.md\n' +
+          '+++ b/README.md\n' +
+          '@@\n' +
+          '+Repository notes for shared user skills.\n'
+      }
+    ]
+  };
+}
+
 export function previewHistory() {
   const now = Date.now();
   return {
