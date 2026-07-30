@@ -44,6 +44,8 @@ for (const file of requiredFiles) {
 const html = await readFile(path.join(root, "site", "index.html"), "utf8");
 const privacy = await readFile(path.join(root, "site", "privacy.html"), "utf8");
 const telemetry = await readFile(path.join(root, "site", "telemetry.js"), "utf8");
+const robots = await readFile(path.join(root, "site", "robots.txt"), "utf8");
+const sitemap = await readFile(path.join(root, "site", "sitemap.xml"), "utf8");
 const workflow = await readFile(path.join(root, ".github", "workflows", "pages.yml"), "utf8");
 const readme = await readFile(path.join(root, "README.md"), "utf8");
 const readmeZh = await readFile(path.join(root, "README.zh-CN.md"), "utf8");
@@ -67,6 +69,14 @@ expect(
   /<meta name="description" content="[^"]*SkillBox[^"]*local-first[^"]*Codex[^"]*Claude Code[^"]*Cursor[^"]*SKILL\.md[^"]*GitHub[^"]*">/.test(html)
 );
 expect("canonical URL present", /<link rel="canonical" href="https:\/\/santosli\.github\.io\/SkillBox\/">/.test(html));
+expect(
+  "robots.txt points to the canonical sitemap",
+  /Sitemap:\s*https:\/\/santosli\.github\.io\/SkillBox\/sitemap\.xml/.test(robots)
+);
+expect(
+  "sitemap.xml contains the canonical homepage",
+  /<loc>https:\/\/santosli\.github\.io\/SkillBox\/<\/loc>/.test(sitemap)
+);
 expect("Open Graph image present", /<meta property="og:image" content="https:\/\/santosli\.github\.io\/SkillBox\/assets\/skillbox-promo-poster\.jpg">/.test(html));
 expect("Open Graph image dimensions present", /<meta property="og:image:width" content="1920">/.test(html) && /<meta property="og:image:height" content="1080">/.test(html));
 expect("Twitter card present", /<meta name="twitter:card" content="summary_large_image">/.test(html));
