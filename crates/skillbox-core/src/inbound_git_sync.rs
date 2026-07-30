@@ -1260,16 +1260,28 @@ fn inbound_conflict_analysis(
         .cloned()
         .collect::<Vec<_>>();
     both_changed_files.sort();
-    let base_skills = validate_inbound_git_tree(git, repo, base, &mut Vec::new())?;
     let local_skills = validate_inbound_git_tree(git, repo, local, &mut Vec::new())?;
     let remote_skills = validate_inbound_git_tree(git, repo, remote, &mut Vec::new())?;
-    let valid_skill_names = base_skills
+    let mut valid_skill_names = local_skills
         .skills
         .iter()
-        .chain(local_skills.skills.iter())
         .chain(remote_skills.skills.iter())
         .map(|skill| skill.name.as_str())
+        .map(str::to_string)
         .collect::<HashSet<_>>();
+    for name in local_files
+        .iter()
+        .chain(remote_files.iter())
+        .filter_map(|path| path.split('/').next())
+    {
+        if valid_skill_names.contains(name) || validate_skill_name(name).is_err() {
+            continue;
+        }
+        let skill_md_path = format!("{name}/SKILL.md");
+        if git.tree_path_exists(repo, base, &skill_md_path)? {
+            valid_skill_names.insert(name.to_string());
+        }
+    }
     let local_changed_skills = local_files
         .iter()
         .filter_map(|path| path.split('/').next())
@@ -3518,6 +3530,22 @@ mod tests {
         configure_and_bootstrap(&managed_root, &remote);
         let paths = managed_paths(&managed_root);
         let git = skillbox_git::GitService::new();
+
+        fs::write(
+            work.join("demo/SKILL.md"),
+            vec![b'x'; MAX_INBOUND_FILE_BYTES as usize + 1],
+        )
+        .unwrap();
+        git.add_all(&work).unwrap();
+        git.commit(&work, "Create historical oversized skill")
+            .unwrap();
+        git.push_origin_main(&work, false).unwrap();
+        let historical_base = git
+            .fetch_origin_main(&paths.user_skills_root)
+            .unwrap()
+            .unwrap();
+        git.fast_forward_only(&paths.user_skills_root, &historical_base)
+            .unwrap();
 
         fs::remove_dir_all(paths.user_skills_root.join("demo")).unwrap();
         git.add_all(&paths.user_skills_root).unwrap();

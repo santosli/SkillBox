@@ -1019,6 +1019,28 @@ impl GitService {
         Ok(Some(content))
     }
 
+    pub fn tree_path_exists(
+        &self,
+        repo: impl AsRef<Path>,
+        revision: &str,
+        path: &str,
+    ) -> Result<bool, String> {
+        validate_git_tree_path(path)?;
+        let repo = repo.as_ref();
+        let sha = self.require_commit(repo, revision)?;
+        let object = format!("{sha}:{path}");
+        let args = ["cat-file", "-e", object.as_str()];
+        let output =
+            self.run_output_with_timeout(repo, &args, LOCAL_GIT_TIMEOUT, "git cat-file")?;
+        match output.status.code() {
+            Some(0) => Ok(true),
+            Some(1 | 128) => Ok(false),
+            _ => Err(sanitize_git_error(
+                String::from_utf8_lossy(&output.stderr).trim(),
+            )),
+        }
+    }
+
     pub fn changed_files(&self, repo: impl AsRef<Path>) -> Result<Vec<GitChangedFile>, String> {
         let output = self.run(
             repo.as_ref(),
@@ -1317,6 +1339,8 @@ impl GitService {
             .arg("credential.interactive=false")
             .arg("-c")
             .arg("core.sshCommand=ssh")
+            .arg("-c")
+            .arg("core.gitProxy=")
             .arg("-c")
             .arg("remote.origin.uploadpack=git-upload-pack")
             .arg("-c")
@@ -2532,6 +2556,28 @@ mod tests {
     }
 
     #[test]
+    fn network_fetch_does_not_execute_repository_git_proxy() {
+        let git = GitService::new();
+        let repo = temp_dir("git-network-proxy");
+        git.init_main(&repo).unwrap();
+        let marker = repo.join("git-proxy-invoked");
+        let proxy = format!("sh -c 'printf invoked > \"{}\"; exit 1'", marker.display());
+        run_git(&repo, &["config", "core.gitProxy", &proxy]).unwrap();
+        git.set_origin_url(&repo, "git://127.0.0.1:9/repo.git")
+            .unwrap();
+
+        let error = git
+            .fetch_origin_main_with_timeout(&repo, Duration::from_millis(500))
+            .unwrap_err();
+
+        assert!(!error.is_empty());
+        assert!(
+            !marker.exists(),
+            "network fetch executed a repository-local Git proxy"
+        );
+    }
+
+    #[test]
     fn graph_primitives_report_divergence_and_optional_unborn_refs() {
         let git = GitService::new();
         let repo = temp_dir("git-inbound-graph");
@@ -2745,8 +2791,13 @@ mod tests {
             Some(b"name: demo\n".to_vec())
         );
         assert_eq!(git.show_file(&repo, &sha, "missing").unwrap(), None);
+        assert!(git
+            .tree_path_exists(&repo, &sha, "skills/demo/SKILL.md")
+            .unwrap());
+        assert!(!git.tree_path_exists(&repo, &sha, "missing").unwrap());
         for invalid in ["../outside", "/absolute", ".git/config", "bad:selector"] {
             assert!(git.show_file(&repo, &sha, invalid).is_err());
+            assert!(git.tree_path_exists(&repo, &sha, invalid).is_err());
         }
         assert_eq!(git.rev_parse_optional(&repo, "HEAD").unwrap(), Some(sha));
     }
