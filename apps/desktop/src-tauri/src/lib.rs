@@ -562,6 +562,43 @@ async fn sync_user_skills_git(
 }
 
 #[tauri::command]
+async fn check_user_skills_inbound() -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result =
+            skillbox_core::check_user_skills_inbound(skillbox_core::default_managed_root())?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("User skills inbound check task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn preview_user_skills_inbound() -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result =
+            skillbox_core::preview_user_skills_inbound(skillbox_core::default_managed_root())?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("User skills inbound preview task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn apply_user_skills_inbound(
+    request: skillbox_core::UserSkillsInboundApplyRequest,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = skillbox_core::apply_user_skills_inbound(
+            request,
+            skillbox_core::default_managed_root(),
+        )?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("User skills inbound apply task failed: {error}"))?
+}
+
+#[tauri::command]
 async fn check_remote_skill_updates(timeout_seconds: Option<u32>) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let result = if let Some(timeout_seconds) = timeout_seconds {
@@ -1089,6 +1126,9 @@ pub fn run() {
             user_skills_git_changes,
             set_user_skills_git_remote,
             sync_user_skills_git,
+            check_user_skills_inbound,
+            preview_user_skills_inbound,
+            apply_user_skills_inbound,
             check_remote_skill_updates,
             check_remote_skill_update,
             cached_remote_skill_updates,

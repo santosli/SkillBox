@@ -443,6 +443,8 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 ## 11. Sync User-Skills Git
 
+### Outbound Commit And Push
+
 触发条件：
 
 - Rust CLI 入口：`skillbox sync-user-skills [--remote <git-url>] [--message <msg>] [--no-push]`。
@@ -489,6 +491,169 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `cargo run -p skillbox-cli --offline -- user-skills-status --managed-root <temp-skillbox-root>`
 - `cargo run -p skillbox-cli --offline -- sync-user-skills --managed-root <temp-skillbox-root> --remote <bare-repo-path> --message "test sync"`
 - UI 路径变更时，手动验证 commit review dialog、diff preview、默认 commit message、文件选择、shared remote 提示和 push failure 状态。
+
+### Reviewed Inbound Fast-Forward
+
+v0.7 Draft contract:
+
+- Rust CLI:
+  - `skillbox user-skills-inbound-check`
+  - `skillbox user-skills-inbound-preview`
+  - `skillbox user-skills-inbound-apply --preview-id <id>`
+- Tauri:
+  - `check_user_skills_inbound`
+  - `preview_user_skills_inbound`
+  - `apply_user_skills_inbound`
+- Desktop Settings 的 `User skills Git` 区域使用 `Check remote`、
+  `Review incoming changes`、`Apply fast-forward` 三个明确术语。
+
+Check remote:
+
+- 只由用户或 CLI 显式触发；v0.7 不在 startup/background 自动 fetch。
+- 固定 fetch configured `origin/main`。remote 未配置、`origin/main` 不存在、
+  auth/network failure 或 timeout 必须返回 actionable structured state/error。
+- fetch 只更新 remote-tracking refs，不修改 working tree、index 或 SQLite skill
+  rows。
+- 分开返回 worktree `clean/dirty` 和 history relation：
+  `unknown/synced/ahead/behind/diverged/remote_only/no_remote_branch`。
+- 同时返回 local/remote/merge-base SHA、ahead/behind counts、fetch timestamp/error、
+  sanitized remote URL 和 branch；不得在 UI/log 中暴露 credentials。
+
+Review incoming changes:
+
+- 再次显式 fetch/recompute，并提供 repository-wide review；不提供 selective
+  per-skill apply。
+- 将 remote changes 分组为 added/updated/deleted/renamed skills 与 repository
+  files，提供有界 file diff。
+- remote tree 是不可信输入。Preview 必须验证 `SKILL.md`/skill name、entry/file/tree
+  大小、路径和文件类型，拒绝 `.git` content、traversal、unsafe files 和 escaping
+  symlinks。
+- Preview 列出受影响的 deployed runtime/profile targets。已部署 skill 的 update
+  可以继续 review；已部署 skill 的 delete/rename 必须 blocked，并提示先
+  undeploy。未部署 skill 的 delete 可以 apply。
+- `preview_id` 绑定 local HEAD、remote SHA、merge base、remote URL、branch、
+  worktree state、validated tree、diff/change grouping 和 deployment impact。
+- `dirty + behind` 仍可展示 incoming review，但 Apply 必须 disabled。
+- `diverged` 只显示 local-only/remote-only commit counts、双方修改的 files/skills
+  和 likely conflicts。允许 Open repository、Copy repository path、Refresh；
+  不提供 Keep local / Accept remote 或内置 merge editor。
+
+Apply fast-forward:
+
+- 必须提供当前 `preview_id`；apply 会重新 fetch、重新计算 relation/tree/deployment
+  state，任何 local HEAD、remote SHA/URL/branch、dirty state 或 target state 变化都
+  以 stale preview 拒绝。
+- 只允许 clean `behind`，或 local unborn 且没有 user content 的安全
+  `remote_only` bootstrap。生成的默认 `.gitignore` 可以被识别为非 user content；
+  其它未提交文件/skill 都阻止 bootstrap。
+- `ahead`、`synced`、`diverged`、`unknown`、`no_remote_branch` 不得通过该 API
+  修改 working tree。
+- Apply 在旧 HEAD 创建
+  `refs/skillbox/backups/inbound/<operation-id>`。Rust core 从已验证 commit 的 Git
+  blobs 直接物化受审文件，更新 index，并用 compare-and-swap 将 `main` 从预期旧
+  SHA 推进到受审 remote SHA。入站流程不运行仓库 hook、filter、textconv、external
+  diff 或 merge driver。禁止 auto merge、rebase、reset、force-push、stash、
+  last-write-wins 和 conflict-marker editing。
+- Apply 持有 `.git/index.lock`，使并发 `git add` / `git commit` fail closed；tracked
+  文件在替换或删除前以 fd-relative no-replace rename 移入 `.git/skillbox/` 内的
+  operation-scoped recovery snapshot。snapshot parent chain 通过 no-follow directory
+  handle 逐级打开；receipt 绑定 backup entry 的 device/inode/size/content hash，
+  backup 只以 `NOFOLLOW|NONBLOCK` 打开受限大小的真实 regular file，并拒绝 FIFO、
+  special file、oversize 或读取期间增长的 entry；restore/cleanup 先将 pathname 原子
+  移入私有 quarantine 再核验身份。预置或并发换入的 symlink、非目录或 replacement
+  entry 不能重定向恢复写入，也不能被误当成已恢复。
+  写入、ref 推进前后都会复核受审内容；检测到外部编辑时恢复或保留双方内容并要求人工
+  处理，不静默覆盖。
+- Incoming add/rename/type-change 如果与本地 ignored 或 untracked path 发生 exact、
+  ancestor 或 descendant 碰撞，Apply 必须在 mutation 前 blocked。普通
+  `git status` 未显示 ignored 内容不等于可覆盖。
+- Inbound apply、outbound user-skills Git、deploy/undeploy 与其它 managed user-skill
+  写操作共用 mutation lock；lock 返回 canonical truth root，所有锁内 Git、DB 与文件
+  操作都固定使用该 root，调用方的 symlink alias 后续被 retarget 也不能转移 mutation。
+  Relative root、`~` 与 symlink-parent/`..` alias 先按真实 existing-parent identity
+  解析，再创建/获取 lock；不同 cwd 的等价 alias 不会锁住或创建错误的 managed store。
+  Save remote、outbound sync、inbound check/apply 与状态 refresh 在 UI 共用 monotonic
+  generation；full、browser 与 single-skill refresh 都在函数入口领取 generation，
+  较早的异步 refresh 不能在 paint/backend await 后覆盖较新的权威状态。Apply 失败
+  后旧 preview authorization 立即失效，必须 Refresh 并重新 review。
+- 通用 managed-layout/read 初始化不补写 Git ignore defaults；显式 Git 配置/同步在
+  持 mutation lock 的路径内完成该设置，避免与 remote-only bootstrap 竞争。
+- Git 成功后，Rust core transactionally reconcile SQLite 中全部 user-skill index
+  rows，使其对应新的 repository snapshot。若 reindex 失败，必须补偿恢复旧 HEAD，
+  保留 backup ref 并返回失败；补偿只在 HEAD 仍等于 expected applied SHA 且操作写集
+  未被并发改变时执行，不能 reset 掉外部 commit。Remote-only 补偿还必须清空 index，
+  并以 no-replace 方式恢复 generated `.gitignore`；若其它进程已创建不同内容则保留
+  外部内容并报告 partial recovery，不能截断它。Remote-only apply 会先原子转移当前
+  `.gitignore` 再核验它仍是 SkillBox 生成的真实 regular file，因此 preflight 后的
+  editor atomic-save replacement 或 symlink 不会被 unlink。
+- Reindex 完成后、成功返回和释放 index lock 前，Apply 再次验证 HEAD 与 worktree
+  仍精确对应 reviewed/materialized tree。此窗口出现普通编辑时不覆盖用户内容，也不
+  报 clean success；operation 进入可审计 failure/partial-recovery 结果，SQLite 与
+  filesystem 不一致必须显式暴露并要求重新检查。Reindex transaction 会在替换 user
+  rows 前保存精确的 pre-apply row snapshot；final consistency 失败时即使 dirty
+  worktree 无法安全重扫，也会独立尝试恢复该 snapshot。Operation payload 分别记录
+  Git/worktree 与 database recovery outcome；DB restore 自身失败时保留实际 rows、
+  报 partial recovery，不会伪装成完整恢复或再次改写用户文件。
+- Compensation 独立尝试所有仍可安全证明的 ref、index、worktree、generated defaults
+  和 lock cleanup；单项失败不会跳过其它恢复。若 Git/worktree/SQLite 已成功，但
+  `.git/index.lock` 的 pathname 已被外部替换，apply 返回 succeeded result 加
+  actionable warning，operation phase 记录 `completed_with_warnings`，不会伪装成普通
+  failed apply 或删除 replacement lock；operation-history finalize 或 apply 后只读
+  refresh 失败也只追加 partial-success warning，不会把已完成 mutation 报成失败。
+  Settings 的当前 Git workflow 会 append/dedupe 并持续显示这些 warning，开始或失败的
+  后续 apply 不会清除它们，只有用户 dismiss 才清除。reviewed index 安装时记录 stable
+  identity；compensation 通过 atomic exchange 验证当前 index，只恢复/删除本次对象，
+  foreign replacement 会原子放回并报告 partial recovery。index identity 同时绑定
+  device/inode/size/content hash；restore exchange 后和 receipt 清除前都精确验证 bytes，
+  同 inode 的 truncate/write 不能被误报为恢复成功。index restore 使用 `.git`
+  dirfd 下不可预测、
+  create-new/no-follow 的 private regular file；index-lock release 通过 atomic
+  exchange 与 private quarantine 保持 pathname 全程占位，ownership mismatch 时原子
+  换回外部 lock。Apply 在任何 mutation 前先探测 repository volume 是否支持所需 atomic
+  exchange；不支持时 fail closed，不会留下永久 `index.lock`。
+- Operation log 记录 aggregate old/new refs、backup ref、mutation phase 与
+  compensation outcome，不记录 credentials、diff contents 或 skill bodies。
+  Remote identity 必须去除 URL userinfo、query 和 fragment。
+- Network fetch/push 拒绝 repository-local 与 worktree-scope credential helper、
+  include/proxy、SSH/upload/receive-pack command、URL rewrite 和 protocol override；
+  `remote.*.vcs`、`url.*.insteadOf` 与 `url.*.pushInsteadOf` 都按 helper dispatch /
+  transport rewrite config fail closed；`remote.origin.url` / `pushurl` 只接受
+  支持的 local/file/http/https/ssh/git 或 SCP-style Git 地址，custom helper syntax
+  在执行前拒绝。`GIT_ALLOW_PROTOCOL` 只允许
+  `file/http/https/ssh/git`，任意 `git-remote-*` custom
+  helper 与 `ext` transport 均 fail closed。所有 origin/config/fetch preflight 共用
+  bounded deadline 和 isolated process-group termination；按原顺序恢复用户
+  global generic/URL-scoped credential helpers（包括 GitHub CLI blank reset）与
+  `core.sshCommand`。`extensions.worktreeConfig` 通过 bounded Git boolean parser
+  识别 `true/yes/on/1` 与 implicit true；非法值 fail closed。repo-local executable
+  config 不得在 reviewed flow 中执行；global
+  Git config 是用户受信任边界。helper/server stderr 只映射为有界分类错误，不直接进入
+  UI、日志或 operation payload。
+
+分叉处理：
+
+- `diverged` 没有 Apply success path。只通过 commit/tree diff 生成 bounded
+  both-changed files/skills 与 likely-conflict 诊断，不执行 remote `.gitattributes`
+  driver。Rename provenance 会保留到诊断中，clean delete/delete 不标为 conflict，
+  rename/delete 与 rename/rename 由 merge-tree 标出。无 merge base 的 unrelated
+  histories 返回结构化 `analysis unavailable` 原因，而不是伪装成 0 conflicts。
+  选择的 merge driver。用户需在 SkillBox 外使用正常 Git 工具
+  fetch/merge/rebase 并检查冲突，完成后回到 SkillBox 点 Refresh/Check remote。
+- 该手动解决过程不改变 outbound `sync-user-skills` 的 `push_failed` 语义：
+  outbound push rejected 时仍保留 local commit。
+
+完成验证：
+
+- `cargo test -p skillbox-git --offline`
+- `cargo test -p skillbox-core --offline inbound`
+- 两个 local clones + bare remote 验证 behind preview、backup ref、fast-forward 与
+  SQLite reindex。
+- 验证 dirty/stale/diverged/remote-only/invalid tree/deployed delete-or-rename
+  blockers 不修改 working tree 或 managed/index state。
+- `cargo run -p skillbox-cli --offline -- user-skills-inbound-check --managed-root <temp-skillbox-root>`
+- `cargo run -p skillbox-cli --offline -- user-skills-inbound-preview --managed-root <temp-skillbox-root>`
+- `cargo run -p skillbox-cli --offline -- user-skills-inbound-apply --preview-id <id> --managed-root <temp-skillbox-root>`
+- Desktop 手动验证 behind review、dirty+behind、diverged diagnostics 与窄 viewport。
 
 ## 12. Add Agent Adapter
 
@@ -862,7 +1027,8 @@ returns structured JSON while the desktop provides interactive review.
 | Runtime profiles and deployment compatibility | Full | Full | CLI exposes `runtime-profiles`, `deploy-preview`, and `deploy`; desktop shows profile metadata and an interactive compatibility review. |
 | Undeploy and reviewed skill deletion | Full | Full | Both share overwrite, ownership, stale-preview, and confirmation protections. |
 | Remote source binding, update, rollback, and versions | Full | Full | Desktop provides all-file visual review; CLI returns structured diff/version data. |
-| User-skills Git status and outbound sync | Full | Full | Desktop adds selected-file diff review. Neither interface pulls, merges, rebases, or resolves divergence automatically. |
+| User-skills Git status and outbound commit/push | Full | Full | Desktop adds selected-file diff review. Existing push defaults and `push_failed` semantics remain unchanged. |
+| Reviewed inbound user-skills fast-forward (Unreleased v0.7 Draft) | Full | Full | Both use Check -> Preview -> Apply with the same Rust validation and stale-preview contract. Desktop adds visual repository/skill/deployment review and conflict diagnostics. Neither interface auto-merges, rebases, resets, stashes, or resolves divergence. |
 | Workspaces | Partial | Full | CLI lists/scans/adds/forgets exact roots. Desktop also previews a project directory, initializes one selected supported root, and offers the native folder picker. |
 | Usage rankings and local history sync | Full | Full | Both use the same confirmed/inferred/reference evidence model and provider backfills. |
 | Aggregate usage diagnostics | Full | Limited | CLI `usage-audit` is the automation-oriented aggregate report. Desktop exposes the relevant coverage summary and disclosure, not the complete diagnostic JSON. |

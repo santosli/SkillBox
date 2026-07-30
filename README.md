@@ -29,7 +29,7 @@ A 30-second overview of SkillBox: runtime-aware workspaces, review-before-write 
 - **One managed store for supported runtimes.** Keep durable skill state in `~/.skillbox`, then deploy it into supported global or project-local `SKILL.md` roots.
 - **Review the whole lifecycle.** Inspect imports, deployments, type changes, source bindings, updates, rollbacks, and deletion before SkillBox changes managed or runtime files.
 - **Versioned remote skills.** Check GitHub sources while SkillBox is open, preview all-file diffs, apply updates, and roll back to immutable versions.
-- **Reviewed Git commit and push.** Inspect user-skill diffs, create a Conventional Commit, and optionally push it; inbound divergence remains a normal Git conflict to resolve outside SkillBox.
+- **Reviewed Git changes in both directions.** Inspect local user-skill diffs before commit/push. The Unreleased v0.7 work adds an explicit Check remote -> Review incoming changes -> Apply fast-forward flow for safe inbound updates; diverged history remains a normal Git conflict to resolve outside SkillBox.
 - **Evidence-aware Calls, references, and operation history.** Count locally confirmed executions plus defensible structured invocations as Calls, keep lower-signal history references separate, and explain coverage without storing full chat transcripts.
 - **Safe storage and deployment defaults.** Use ordered SQLite migrations, recovery backups, integrity checks, and ownership-checked symlinks instead of silently overwriting runtime content.
 - **Compatibility before deployment.** Rust-owned runtime profiles identify each workspace and report preserved frontmatter warnings or hard blockers before a confirmed symlink deployment.
@@ -102,7 +102,7 @@ Longer-term support for native Claude, OpenClaw, Cursor, Claude Code, Copilot, a
 - Check remote sources, preview all-file diffs, apply updates, and roll back to immutable versions.
 - Preview runtime-profile and frontmatter compatibility before deploying to an individual workspace. Blocked targets cannot be selected, warnings require confirmation, and apply revalidates stale skill/target/profile state before creating an ownership-checked symlink.
 - Delete a skill from the managed store and all associated workspaces after a name-confirmed preview, while retaining a recovery backup and workspace registrations.
-- Review user-skill Git diffs, create selected-file Conventional Commits, and optionally push without attempting an inbound auto-merge.
+- Review user-skill Git diffs, create selected-file Conventional Commits, and optionally push. The Unreleased v0.7 flow handles incoming `origin/main` changes through separate preview-confirmed fast-forward steps; SkillBox never auto-merges, rebases, resets, stashes, or resolves conflicts.
 - Search and filter the dashboard by type, update status, tag, or favorite; switch between grid and list views, with favorites and tags persisted in SQLite.
 - Record supported hooks and structured local-history evidence; browse Calls separately from History references, rank by confirmed plus defensible inferred Calls, and inspect aggregate-only coverage without storing full transcripts.
 - Apply ordered SQLite migrations with pre-migration backups and integrity checks; run Doctor diagnostics and explicitly clean up stale deployment records.
@@ -188,6 +188,7 @@ SkillBox is local-first and does not require a hosted account. The app may:
 - write managed copies and metadata under `~/.skillbox`;
 - create symlinks from runtime directories back to managed skills;
 - initialize and update Git metadata for `~/.skillbox/user-skills`;
+- in the Unreleased v0.7 flow, explicitly fetch and preview incoming `origin/main` changes, then fast-forward the shared user-skills repository only after confirmation;
 - modify supported runtime hook config files when you explicitly inject hooks.
 
 SkillBox treats runtime folders, GitHub URLs, downloaded archives, and existing skills as untrusted input. It should not silently overwrite a non-symlink runtime target.
@@ -233,6 +234,8 @@ New core business logic should go into Rust crates. React should call structured
 - [Symlink deployment ADR](docs/decisions/0002-symlink-deployment-by-default.md)
 - [Rust core migration ADR](docs/decisions/0003-migrate-node-cli-behavior-to-rust-core.md)
 - [Agent adapter ADR](docs/decisions/0004-support-multiple-agent-runtimes-through-adapters.md)
+- [Usage evidence ADR](docs/decisions/0005-usage-evidence-classification.md)
+- [Reviewed inbound Git ADR](docs/decisions/0006-review-inbound-user-skills-git-before-fast-forward.md)
 
 ## Development
 

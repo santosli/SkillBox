@@ -1072,6 +1072,167 @@ pub(crate) fn index_skill(
     Ok(())
 }
 
+pub(crate) fn reindex_user_skills(
+    database_path: &Path,
+    skills: &[Skill],
+    managed_root: &Path,
+) -> Result<UserSkillIndexSnapshot> {
+    #[cfg(test)]
+    if database_path
+        .with_extension("fail-inbound-reindex")
+        .exists()
+    {
+        return Err("Injected inbound reindex failure.".to_string());
+    }
+    let mut connection = open_database(database_path).map_err(|error| error.to_string())?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| error.to_string())?;
+    let snapshot = read_user_skill_index_snapshot(&transaction)?;
+    for skill in skills {
+        let existing_kind = transaction
+            .query_row(
+                "SELECT type FROM skills WHERE name = ?1",
+                params![skill.name],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        if let Some(kind) = existing_kind.as_deref().filter(|kind| *kind != "user") {
+            return Err(format!(
+                "Incoming user skill '{}' conflicts with an indexed {kind} skill.",
+                skill.name,
+            ));
+        }
+    }
+    transaction
+        .execute("DELETE FROM skills WHERE type = 'user'", [])
+        .map_err(|error| error.to_string())?;
+    for skill in skills {
+        let managed_path = managed_root.join(&skill.name);
+        if skill.path != managed_path {
+            return Err(format!(
+                "Incoming skill '{}' did not resolve to its managed user-skills path.",
+                skill.name
+            ));
+        }
+        transaction
+            .execute(
+                "
+                INSERT INTO skills (
+                  name, type, description, version, managed_path, status, content_hash, updated_at
+                )
+                VALUES (?1, 'user', ?2, ?3, ?4, 'ok', ?5, CURRENT_TIMESTAMP)
+                ON CONFLICT(name) DO UPDATE SET
+                  type = excluded.type,
+                  description = excluded.description,
+                  version = excluded.version,
+                  managed_path = excluded.managed_path,
+                  status = excluded.status,
+                  content_hash = excluded.content_hash,
+                  updated_at = CURRENT_TIMESTAMP
+                ",
+                params![
+                    skill.name,
+                    skill.description,
+                    skill.version,
+                    managed_path.to_string_lossy(),
+                    skill.content_hash
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(snapshot)
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct UserSkillIndexSnapshot {
+    rows: Vec<UserSkillIndexRow>,
+}
+
+#[derive(Debug, Clone)]
+struct UserSkillIndexRow {
+    name: String,
+    description: String,
+    version: String,
+    managed_path: String,
+    status: String,
+    content_hash: String,
+    updated_at: String,
+}
+
+fn read_user_skill_index_snapshot(connection: &Connection) -> Result<UserSkillIndexSnapshot> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT name, description, version, managed_path, status, content_hash, updated_at
+            FROM skills
+            WHERE type = 'user'
+            ORDER BY name
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(UserSkillIndexRow {
+                name: row.get(0)?,
+                description: row.get(1)?,
+                version: row.get(2)?,
+                managed_path: row.get(3)?,
+                status: row.get(4)?,
+                content_hash: row.get(5)?,
+                updated_at: row.get(6)?,
+            })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    Ok(UserSkillIndexSnapshot { rows })
+}
+
+pub(crate) fn restore_user_skill_index(
+    database_path: &Path,
+    snapshot: &UserSkillIndexSnapshot,
+) -> Result<()> {
+    #[cfg(test)]
+    if database_path
+        .with_extension("fail-inbound-index-restore")
+        .exists()
+    {
+        return Err("Injected inbound index restore failure.".to_string());
+    }
+    let mut connection = open_database(database_path)?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute("DELETE FROM skills WHERE type = 'user'", [])
+        .map_err(|error| error.to_string())?;
+    for row in &snapshot.rows {
+        transaction
+            .execute(
+                "
+                INSERT INTO skills (
+                  name, type, description, version, managed_path, status, content_hash, updated_at
+                )
+                VALUES (?1, 'user', ?2, ?3, ?4, ?5, ?6, ?7)
+                ",
+                params![
+                    row.name,
+                    row.description,
+                    row.version,
+                    row.managed_path,
+                    row.status,
+                    row.content_hash,
+                    row.updated_at
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    transaction.commit().map_err(|error| error.to_string())
+}
+
 pub(crate) fn index_deployment(
     database_path: &Path,
     skill_name: &str,

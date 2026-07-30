@@ -1419,6 +1419,84 @@ button {
   font-size: 13px;
 }
 
+.inboundGitStatus {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+  border-top: 1px solid var(--skillbox-border);
+  padding-top: 14px;
+}
+
+.inboundGitStatusHeader,
+.inboundGitStatusHeader > div {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.inboundGitStatusHeader {
+  justify-content: space-between;
+}
+
+.inboundGitStatusHeader > div > svg {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--skillbox-blue);
+}
+
+.inboundGitStatusHeader span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.inboundGitStatusHeader strong {
+  color: var(--skillbox-text);
+  font-size: 13px;
+}
+
+.inboundGitStatus small {
+  color: var(--skillbox-text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.inboundGitStatusMeta {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.inboundGitStatusMeta span {
+  border-radius: 6px;
+  background: var(--skillbox-surface-muted);
+  color: var(--skillbox-text-secondary);
+  font-size: 11px;
+  font-weight: 650;
+  padding: 5px 7px;
+}
+
+.inboundGitStatusMeta span.warning {
+  background: var(--skillbox-amber-bg);
+  color: var(--skillbox-amber-text);
+}
+
+.inboundGitActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.inboundGitActions .button svg,
+.inboundRepositoryActions .button svg {
+  width: 15px;
+  height: 15px;
+}
+
 .syncRefreshGrid {
   display: grid;
   grid-template-columns: 1fr;
@@ -3638,6 +3716,283 @@ dd {
   width: min(1040px, calc(100vw - 64px));
   max-height: min(760px, calc(100vh - 64px));
   grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.inboundReviewDialog {
+  width: min(1120px, calc(100vw - 64px));
+}
+
+.inboundReviewBody {
+  overflow-y: auto;
+}
+
+.inboundReviewSummary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  border-bottom: 1px solid var(--skillbox-border);
+  background: var(--skillbox-border);
+}
+
+.inboundReviewSummary > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  background: var(--skillbox-surface-muted);
+  padding: 10px 14px;
+}
+
+.inboundReviewSummary span {
+  color: var(--skillbox-text-muted);
+  font-size: 10px;
+  font-weight: 720;
+  text-transform: uppercase;
+}
+
+.inboundReviewSummary strong {
+  overflow: hidden;
+  color: var(--skillbox-text);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inboundBlockingNotice,
+.inboundBootstrapNotice,
+.inboundConflictDiagnosis {
+  margin: 14px 18px 0;
+}
+
+.inboundBootstrapNotice {
+  display: grid;
+  gap: 3px;
+  border-radius: 8px;
+  background: var(--skillbox-green-bg);
+  color: var(--skillbox-green-text);
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 11px 12px;
+}
+
+.inboundBlockingNotice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border-radius: 8px;
+  background: var(--skillbox-amber-bg);
+  color: var(--skillbox-amber-text);
+  padding: 11px 12px;
+}
+
+.inboundBlockingNotice > svg,
+.inboundConflictHeader > svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
+.inboundBlockingNotice > div,
+.inboundConflictHeader > span {
+  display: grid;
+  gap: 3px;
+}
+
+.inboundBlockingNotice span,
+.inboundConflictDiagnosis span {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.inboundChangeSummary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  border-bottom: 1px solid var(--skillbox-border);
+  padding: 14px 18px;
+}
+
+.inboundChangeSummary section {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.inboundChangeSummary h3 {
+  margin: 0;
+  color: var(--skillbox-text);
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.inboundChangeSummary small {
+  color: var(--skillbox-text-muted);
+  font-size: 12px;
+}
+
+.inboundChangeChips,
+.inboundAffectedTargets {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.inboundChangeChip,
+.inboundAffectedTargets > span {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--skillbox-border);
+  border-radius: 6px;
+  background: var(--skillbox-surface);
+  color: var(--skillbox-text-secondary);
+  font-size: 11px;
+  padding: 5px 7px;
+}
+
+.inboundChangeChip strong {
+  color: var(--skillbox-blue);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.inboundAffectedTargets > span {
+  display: grid;
+  grid-template-columns: auto auto;
+}
+
+.inboundAffectedTargets code {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  color: var(--skillbox-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inboundDiffReview {
+  min-height: 300px;
+  flex: 1 1 auto;
+  border-width: 0 0 1px;
+  border-radius: 0;
+}
+
+.inboundSafetyIssues {
+  display: grid;
+  gap: 7px;
+  border-bottom: 1px solid var(--skillbox-border);
+  padding: 12px 18px;
+}
+
+.inboundSafetyIssues > strong {
+  color: var(--skillbox-text);
+  font-size: 12px;
+}
+
+.inboundSafetyIssues > div {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--skillbox-text-secondary);
+  font-size: 12px;
+}
+
+.inboundSafetyIssues > div.blocking {
+  color: var(--skillbox-red-strong);
+}
+
+.inboundConflictDiagnosis {
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--skillbox-amber-border);
+  border-radius: 8px;
+  background: var(--skillbox-amber-bg);
+  color: var(--skillbox-amber-text);
+  padding: 14px;
+}
+
+.inboundConflictHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.inboundConflictDiagnosis dl {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.inboundConflictDiagnosis dl > div {
+  display: grid;
+  gap: 3px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--skillbox-surface) 72%, transparent);
+  padding: 8px 9px;
+}
+
+.inboundConflictDiagnosis dt {
+  font-size: 10px;
+  font-weight: 680;
+}
+
+.inboundConflictDiagnosis dd {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 720;
+}
+
+.inboundConflictLists {
+  display: grid;
+  gap: 8px;
+}
+
+.inboundConflictLists details {
+  border: 1px solid color-mix(in srgb, var(--skillbox-amber-border) 72%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--skillbox-surface) 72%, transparent);
+}
+
+.inboundConflictLists summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 680;
+  padding: 8px 9px;
+}
+
+.inboundConflictLists ul {
+  display: grid;
+  max-height: 180px;
+  gap: 4px;
+  overflow: auto;
+  margin: 0;
+  padding: 0 9px 8px 26px;
+}
+
+.inboundConflictLists code {
+  overflow-wrap: anywhere;
+  color: var(--skillbox-text-secondary);
+  font-size: 11px;
+}
+
+.inboundConflictLists small {
+  display: block;
+  color: var(--skillbox-text-muted);
+  font-size: 11px;
+  padding: 0 9px 8px;
+}
+
+.inboundReviewFooter {
+  justify-content: space-between;
+}
+
+.inboundRepositoryActions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .localImportDialog {
@@ -6426,6 +6781,26 @@ dd {
   .gitCommitFields,
   .gitCommitReview {
     grid-template-columns: 1fr;
+  }
+
+  .inboundReviewSummary,
+  .inboundConflictDiagnosis dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .inboundChangeSummary {
+    grid-template-columns: 1fr;
+  }
+
+  .inboundReviewFooter {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .inboundRepositoryActions,
+  .inboundReviewFooter .appUpdateActions {
+    width: 100%;
+    justify-content: flex-start;
   }
 
   .gitFilePane {

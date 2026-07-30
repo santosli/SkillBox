@@ -247,6 +247,17 @@ test('settings sections are anchored and sync controls are grouped together', ()
   assert.match(appSource, /onSaveRemoteUpdateTimeout/);
 });
 
+test('settings receives persistent inbound apply warnings and an explicit dismiss action', () => {
+  assert.match(appComponentSource, /userSkillsInboundWarnings=\{userSkillsInboundWarnings\}/);
+  assert.match(
+    appComponentSource,
+    /onDismissUserSkillsInboundWarnings=\{\(\) => setUserSkillsInboundWarnings\(\[\]\)\}/
+  );
+  assert.match(appSource, /<UserSkillsInboundApplyWarning/);
+  assert.match(appSource, /warnings=\{userSkillsInboundWarnings\}/);
+  assert.match(appSource, /onDismiss=\{onDismissInboundWarnings\}/);
+});
+
 test('settings workbench CSS defines a desktop rail and responsive fallback', () => {
   const workbenchRule = css.match(/\.settingsWorkbench\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const railRule = css.match(/\.settingsRail\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';

@@ -3226,7 +3226,9 @@ version = "0.6.1"
 dependencies = [
  "chrono",
  "fs2",
+ "libc",
  "rusqlite",
+ "rustix",
  "serde",
  "serde_json",
  "serde_yaml_ng",
@@ -3253,6 +3255,9 @@ dependencies = [
 [[package]]
 name = "skillbox-git"
 version = "0.6.1"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "skillbox-github"

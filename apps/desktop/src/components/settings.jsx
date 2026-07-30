@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { GitPullRequest, RefreshCw } from 'lucide-react';
 import {
   groupUsageHooksByConfig,
   normalizeUsageHookStatuses,
@@ -8,6 +8,12 @@ import {
 } from '../usageHooks.js';
 import { doctorIssueTone, hasStaleDeploymentRecords } from '../doctor.js';
 import { userSyncLabel } from '../userSkillsGitSync.js';
+import {
+  canReviewUserSkillsInbound,
+  inboundRelationLabel,
+  inboundRelationTone,
+  UserSkillsInboundApplyWarning
+} from '../userSkillsInbound.js';
 import { Badge, PageTitleRow, PathList } from './common.jsx';
 
 const settingsSections = [
@@ -26,7 +32,10 @@ export function SettingsPage({
   preferences,
   status,
   usageHooks,
+  userSkillsInboundWarnings,
+  userSkillsInbound,
   userSkillsGit,
+  onCheckUserSkillsInbound,
   onCheckAppUpdate,
   onRunDoctor,
   onRepairStaleDeployments,
@@ -36,7 +45,9 @@ export function SettingsPage({
   onRefreshUsageHooks,
   onSaveRemoteUpdateTimeout,
   onSaveStatusRefreshInterval,
-  onSaveUserSkillsRemote
+  onSaveUserSkillsRemote,
+  onDismissUserSkillsInboundWarnings,
+  onReviewUserSkillsInbound
 }) {
   const normalizedUsageHooks = normalizeUsageHookStatuses(usageHooks);
   const usageHookGroups = groupUsageHooksByConfig(normalizedUsageHooks);
@@ -62,10 +73,15 @@ export function SettingsPage({
           <SyncRefreshSettingsPanel
             preferences={preferences}
             status={status}
+            userSkillsInboundWarnings={userSkillsInboundWarnings}
+            userSkillsInbound={userSkillsInbound}
             userSkillsGit={userSkillsGit}
+            onCheckUserSkillsInbound={onCheckUserSkillsInbound}
+            onDismissUserSkillsInboundWarnings={onDismissUserSkillsInboundWarnings}
             onSaveRemoteUpdateTimeout={onSaveRemoteUpdateTimeout}
             onSaveStatusRefreshInterval={onSaveStatusRefreshInterval}
             onSaveUserSkillsRemote={onSaveUserSkillsRemote}
+            onReviewUserSkillsInbound={onReviewUserSkillsInbound}
           />
           <AppUpdateSettingsPanel
             appUpdate={appUpdate}
@@ -294,10 +310,15 @@ function UsageHookSettingsPanel({ hookGroups, status, onInstall, onOpenConfig, o
 function SyncRefreshSettingsPanel({
   preferences,
   status,
+  userSkillsInboundWarnings,
+  userSkillsInbound,
   userSkillsGit,
+  onCheckUserSkillsInbound,
+  onDismissUserSkillsInboundWarnings,
   onSaveRemoteUpdateTimeout,
   onSaveStatusRefreshInterval,
-  onSaveUserSkillsRemote
+  onSaveUserSkillsRemote,
+  onReviewUserSkillsInbound
 }) {
   return (
     <aside className="panel compactPanel settingsPanel syncRefreshSettingsPanel" id="settings-sync">
@@ -310,8 +331,13 @@ function SyncRefreshSettingsPanel({
       <div className="syncRefreshGrid">
         <UserSkillsGitSettingsForm
           status={status}
+          userSkillsInboundWarnings={userSkillsInboundWarnings}
+          userSkillsInbound={userSkillsInbound}
           userSkillsGit={userSkillsGit}
+          onCheckInbound={onCheckUserSkillsInbound}
+          onDismissInboundWarnings={onDismissUserSkillsInboundWarnings}
           onSave={onSaveUserSkillsRemote}
+          onReviewInbound={onReviewUserSkillsInbound}
         />
         <StatusRefreshSettingsForm
           preferences={preferences}
@@ -405,10 +431,27 @@ function StatusRefreshSettingsForm({ preferences, status, onSave, onSaveRemoteUp
   );
 }
 
-function UserSkillsGitSettingsForm({ status, userSkillsGit, onSave }) {
+function UserSkillsGitSettingsForm({
+  status,
+  userSkillsInboundWarnings,
+  userSkillsInbound,
+  userSkillsGit,
+  onCheckInbound,
+  onDismissInboundWarnings,
+  onSave,
+  onReviewInbound
+}) {
   const [remoteUrl, setRemoteUrl] = useState(userSkillsGit.remoteUrl || '');
   const [saveStatus, setSaveStatus] = useState('idle');
   const [message, setMessage] = useState('');
+  const inboundOperationBusy = [
+    'checking_inbound',
+    'previewing_inbound',
+    'applying_inbound'
+  ].includes(status);
+  const remoteSaveBusy = saveStatus === 'saving';
+  const inboundBusy = inboundOperationBusy || remoteSaveBusy;
+  const canReviewInbound = canReviewUserSkillsInbound(userSkillsInbound, inboundBusy);
 
   useEffect(() => {
     setRemoteUrl(userSkillsGit.remoteUrl || '');
@@ -416,6 +459,7 @@ function UserSkillsGitSettingsForm({ status, userSkillsGit, onSave }) {
 
   async function submit(event) {
     event.preventDefault();
+    if (inboundOperationBusy || remoteSaveBusy) return;
     setSaveStatus('saving');
     setMessage('');
 
@@ -450,9 +494,76 @@ function UserSkillsGitSettingsForm({ status, userSkillsGit, onSave }) {
           ['State', userSyncLabel(userSkillsGit)]
         ]}
       />
+      <div className="inboundGitStatus" aria-live="polite">
+        <div className="inboundGitStatusHeader">
+          <div>
+            <GitPullRequest aria-hidden="true" />
+            <span>
+              <strong>Incoming changes</strong>
+              <small>
+                Fetch only when requested. SkillBox never merges, rebases, resets, or stashes.
+              </small>
+            </span>
+          </div>
+          {userSkillsInbound ? (
+            <Badge tone={inboundRelationTone(userSkillsInbound)}>
+              {inboundRelationLabel(userSkillsInbound)}
+            </Badge>
+          ) : null}
+        </div>
+        {userSkillsInbound ? (
+          <div className="inboundGitStatusMeta">
+            <span>
+              <strong>{userSkillsInbound.behindCount}</strong> behind
+            </span>
+            <span>
+              <strong>{userSkillsInbound.aheadCount}</strong> ahead
+            </span>
+            <span className={userSkillsInbound.worktreeState === 'dirty' ? 'warning' : ''}>
+              {userSkillsInbound.worktreeState === 'dirty' ? 'Dirty worktree' : 'Clean worktree'}
+            </span>
+            {userSkillsInbound.fetchedAt ? <span>Checked {userSkillsInbound.fetchedAt}</span> : null}
+          </div>
+        ) : (
+          <small>Check <code>origin/main</code> for repository-wide incoming changes.</small>
+        )}
+        {userSkillsInbound?.fetchError ? (
+          <div className="settingsError">{userSkillsInbound.fetchError}</div>
+        ) : null}
+        {userSkillsInbound?.message && !userSkillsInbound.fetchError ? (
+          <small>{userSkillsInbound.message}</small>
+        ) : null}
+        <UserSkillsInboundApplyWarning
+          warnings={userSkillsInboundWarnings}
+          onDismiss={onDismissInboundWarnings}
+        />
+        <div className="inboundGitActions">
+          <button
+            className="button secondary"
+            disabled={inboundBusy || status === 'syncing'}
+            type="button"
+            onClick={onCheckInbound}
+          >
+            <RefreshCw aria-hidden="true" />
+            {status === 'checking_inbound' ? 'Checking...' : 'Check remote'}
+          </button>
+          <button
+            className="button secondary"
+            disabled={!canReviewInbound}
+            type="button"
+            onClick={onReviewInbound}
+          >
+            Review incoming changes
+          </button>
+        </div>
+      </div>
       <div className="settingsActions">
         {message ? <span className={saveStatus === 'error' ? 'settingsError' : 'settingsSaved'}>{message}</span> : <span />}
-        <button className="button primary" disabled={status === 'syncing' || saveStatus === 'saving'} type="submit">
+        <button
+          className="button primary"
+          disabled={status === 'syncing' || inboundOperationBusy || remoteSaveBusy}
+          type="submit"
+        >
           {saveStatus === 'saving' ? 'Saving...' : 'Save remote'}
         </button>
       </div>

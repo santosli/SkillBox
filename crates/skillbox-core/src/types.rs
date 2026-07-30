@@ -638,6 +638,121 @@ pub struct UserSkillsSyncResult {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum UserSkillsInboundWorktreeState {
+    Clean,
+    Dirty,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UserSkillsInboundRelation {
+    Unknown,
+    Synced,
+    Ahead,
+    Behind,
+    Diverged,
+    RemoteOnly,
+    NoRemoteBranch,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UserSkillsInboundStatus {
+    pub repo_path: PathBuf,
+    pub branch: String,
+    pub remote_url: Option<String>,
+    pub worktree_state: UserSkillsInboundWorktreeState,
+    pub relation: UserSkillsInboundRelation,
+    pub local_sha: Option<String>,
+    pub remote_sha: Option<String>,
+    pub merge_base_sha: Option<String>,
+    pub ahead_count: u32,
+    pub behind_count: u32,
+    pub fetched_at: Option<String>,
+    pub fetch_error: Option<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UserSkillsInboundSkillChangeKind {
+    Added,
+    Updated,
+    Deleted,
+    Renamed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UserSkillsInboundAffectedDeployment {
+    pub target_root: PathBuf,
+    pub target_path: PathBuf,
+    pub mode: String,
+    pub profile_id: String,
+    pub profile_name: String,
+    pub state: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UserSkillsInboundSkillChange {
+    pub skill_name: String,
+    pub previous_name: Option<String>,
+    pub kind: UserSkillsInboundSkillChangeKind,
+    pub files: Vec<String>,
+    pub affected_deployments: Vec<UserSkillsInboundAffectedDeployment>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UserSkillsInboundSafetyIssue {
+    pub code: String,
+    pub message: String,
+    pub path: Option<String>,
+    pub blocking: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
+pub struct UserSkillsInboundConflictAnalysis {
+    pub available: bool,
+    pub unavailable_reason: Option<String>,
+    pub local_only_commits: u32,
+    pub remote_only_commits: u32,
+    pub both_changed_files: Vec<String>,
+    pub both_changed_skills: Vec<String>,
+    pub likely_conflict_files: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UserSkillsInboundPreview {
+    pub preview_id: String,
+    pub status: UserSkillsInboundStatus,
+    pub files: Vec<RemoteDiffFile>,
+    pub skill_changes: Vec<UserSkillsInboundSkillChange>,
+    pub repository_files: Vec<String>,
+    pub safety_issues: Vec<UserSkillsInboundSafetyIssue>,
+    pub conflict_analysis: Option<UserSkillsInboundConflictAnalysis>,
+    pub can_apply: bool,
+    pub blocked_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UserSkillsInboundApplyRequest {
+    pub preview_id: Option<String>,
+    pub actor: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UserSkillsInboundApplyResult {
+    pub repo_path: PathBuf,
+    pub old_sha: Option<String>,
+    pub new_sha: String,
+    pub backup_ref: Option<String>,
+    pub changed_skill_count: usize,
+    pub changed_file_count: usize,
+    pub operation_id: String,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RemoteSkillUpdateState {
     NoSource,
     NotCheckable,

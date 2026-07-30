@@ -185,7 +185,6 @@ pub fn ensure_managed_layout(root: impl Into<PathBuf>) -> Result<ManagedPaths> {
     maybe_link_legacy_default_managed_root(&root)?;
     let paths = managed_paths(root);
     fs::create_dir_all(&paths.user_skills_root).map_err(|error| error.to_string())?;
-    ensure_default_user_skills_gitignore(&paths.user_skills_root)?;
     fs::create_dir_all(&paths.remote_skills_root).map_err(|error| error.to_string())?;
     init_database(&paths.database_path)?;
     Ok(paths)
@@ -196,14 +195,77 @@ pub(crate) fn ensure_default_user_skills_gitignore(user_skills_root: &Path) -> R
     if gitignore_path.exists() {
         return Ok(());
     }
+    if user_skills_root.join(".git").is_dir() {
+        let exclude_path = user_skills_root.join(".git/info/exclude");
+        let mut existing = fs::read_to_string(&exclude_path).unwrap_or_default();
+        if !existing.contains("# SkillBox managed defaults") {
+            if !existing.is_empty() && !existing.ends_with('\n') {
+                existing.push('\n');
+            }
+            existing.push_str("# SkillBox managed defaults\n");
+            existing.push_str(DEFAULT_USER_SKILLS_GITIGNORE);
+            fs::write(exclude_path, existing).map_err(|error| error.to_string())?;
+        }
+        return Ok(());
+    }
     fs::write(gitignore_path, DEFAULT_USER_SKILLS_GITIGNORE).map_err(|error| error.to_string())
 }
 
 pub(crate) fn maybe_link_legacy_default_managed_root(root: &Path) -> Result<()> {
-    if std::env::var_os("SKILLBOX_HOME").is_some() || root != default_hidden_managed_root() {
+    let root_identity = managed_root_identity(root)?;
+    let default_identity = managed_root_identity(&default_hidden_managed_root())?;
+    if root_identity != default_identity {
         return Ok(());
     }
-    link_legacy_managed_root_if_needed(root, &legacy_managed_root()).map(|_| ())
+    link_legacy_managed_root_if_needed(&default_identity, &legacy_managed_root()).map(|_| ())
+}
+
+pub(crate) fn managed_root_identity(path: &Path) -> Result<PathBuf> {
+    let expanded = expand_home(path.to_path_buf());
+    let absolute = if expanded.is_absolute() {
+        expanded
+    } else {
+        std::env::current_dir()
+            .map_err(|error| format!("Unable to read the current directory: {error}"))?
+            .join(expanded)
+    };
+    canonicalize_existing_parent_identity(&absolute)
+}
+
+fn canonicalize_existing_parent_identity(path: &Path) -> Result<PathBuf> {
+    let mut current = path;
+    let mut missing = Vec::new();
+    loop {
+        match fs::canonicalize(current) {
+            Ok(mut canonical) => {
+                for component in missing.iter().rev() {
+                    canonical.push(component);
+                }
+                return Ok(canonical);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let component = current.file_name().ok_or_else(|| {
+                    format!(
+                        "Unable to resolve managed root identity for {}.",
+                        path.display()
+                    )
+                })?;
+                missing.push(component.to_os_string());
+                current = current.parent().ok_or_else(|| {
+                    format!(
+                        "Unable to resolve managed root identity for {}.",
+                        path.display()
+                    )
+                })?;
+            }
+            Err(error) => {
+                return Err(format!(
+                    "Unable to resolve managed root identity for {}: {error}",
+                    path.display()
+                ))
+            }
+        }
+    }
 }
 
 pub(crate) fn link_legacy_managed_root_if_needed(

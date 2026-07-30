@@ -2,6 +2,7 @@ use super::*;
 use rusqlite::OptionalExtension;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
+use std::process::Command;
 use std::sync::{Arc, Barrier};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1382,10 +1383,11 @@ fn default_managed_root_uses_hidden_skillbox_directory() {
 }
 
 #[test]
-fn ensure_managed_layout_writes_default_user_skills_gitignore() {
+fn explicit_git_setup_writes_default_user_skills_gitignore() {
     let managed_root = temp_dir("managed-layout-gitignore").join("SkillBox");
 
     let paths = ensure_managed_layout(&managed_root).unwrap();
+    ensure_default_user_skills_gitignore(&paths.user_skills_root).unwrap();
     let gitignore = fs::read_to_string(paths.user_skills_root.join(".gitignore")).unwrap();
 
     assert!(gitignore.contains(".DS_Store"));
@@ -1397,6 +1399,40 @@ fn ensure_managed_layout_writes_default_user_skills_gitignore() {
 }
 
 #[test]
+fn managed_layout_never_writes_git_defaults() {
+    let managed_root = temp_dir("managed-layout-mutation-lock");
+    let paths = managed_paths(&managed_root);
+    fs::create_dir_all(&paths.user_skills_root).unwrap();
+
+    ensure_managed_layout(&managed_root).unwrap();
+    assert!(!paths.user_skills_root.join(".gitignore").exists());
+}
+
+#[test]
+fn managed_layout_read_does_not_race_git_defaults_during_mutation() {
+    let managed_root = temp_dir("managed-layout-read-barrier");
+    let paths = managed_paths(&managed_root);
+    fs::create_dir_all(&paths.user_skills_root).unwrap();
+    let entered = Arc::new(Barrier::new(2));
+    let release = Arc::new(Barrier::new(2));
+    let worker_root = managed_root.clone();
+    let worker_entered = entered.clone();
+    let worker_release = release.clone();
+    let worker = std::thread::spawn(move || {
+        let _lock = acquire_user_skills_mutation_lock(&worker_root).unwrap();
+        worker_entered.wait();
+        worker_release.wait();
+    });
+
+    entered.wait();
+    ensure_managed_layout(&managed_root).unwrap();
+    assert!(!paths.user_skills_root.join(".gitignore").exists());
+    assert!(!paths.user_skills_root.join(".git/info/exclude").exists());
+    release.wait();
+    worker.join().unwrap();
+}
+
+#[test]
 fn ensure_managed_layout_preserves_existing_user_skills_gitignore() {
     let managed_root = temp_dir("managed-layout-preserve-gitignore").join("SkillBox");
     let user_skills_root = managed_root.join("user-skills");
@@ -1404,9 +1440,53 @@ fn ensure_managed_layout_preserves_existing_user_skills_gitignore() {
     fs::write(user_skills_root.join(".gitignore"), "custom-ignore\n").unwrap();
 
     let paths = ensure_managed_layout(&managed_root).unwrap();
+    ensure_default_user_skills_gitignore(&paths.user_skills_root).unwrap();
     let gitignore = fs::read_to_string(paths.user_skills_root.join(".gitignore")).unwrap();
 
     assert_eq!(gitignore, "custom-ignore\n");
+}
+
+#[test]
+fn ensure_managed_layout_keeps_existing_user_skills_repo_clean() {
+    let managed_root = temp_dir("managed-layout-clean-git-repo").join("SkillBox");
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    let repo = paths.user_skills_root;
+    ensure_default_user_skills_gitignore(&repo).unwrap();
+    skillbox_git::GitService::new().init_main(&repo).unwrap();
+    run_git(&repo, &["add", ".gitignore"]);
+    run_git(
+        &repo,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Track defaults",
+        ],
+    );
+    run_git(&repo, &["rm", ".gitignore"]);
+    run_git(
+        &repo,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Remove tracked defaults",
+        ],
+    );
+
+    ensure_default_user_skills_gitignore(&repo).unwrap();
+
+    assert!(!repo.join(".gitignore").exists());
+    assert!(fs::read_to_string(repo.join(".git/info/exclude"))
+        .unwrap()
+        .contains("# SkillBox managed defaults"));
+    assert!(!skillbox_git::GitService::new().status(&repo).unwrap().dirty);
 }
 
 #[test]
@@ -1436,6 +1516,352 @@ fn legacy_managed_root_is_linked_when_hidden_root_is_empty_stub() {
     assert_eq!(fs::read_link(&hidden_root).unwrap(), legacy_root);
     assert_eq!(state.skills.len(), 1);
     assert_eq!(state.skills[0].name, "demo");
+}
+
+#[test]
+fn mutation_lock_resolves_legacy_only_home_before_creating_lock_file() {
+    const CHILD_HOME: &str = "SKILLBOX_LEGACY_LOCK_TEST_HOME";
+    if let Some(home) = std::env::var_os(CHILD_HOME) {
+        let home = PathBuf::from(home);
+        let hidden_root = home.join(".skillbox");
+        let legacy_root = home.join("SkillBox");
+        let error = check_user_skills_inbound(&hidden_root).unwrap_err();
+        assert!(error.contains("not initialized"));
+        assert!(fs::symlink_metadata(&hidden_root)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            fs::canonicalize(&hidden_root).unwrap(),
+            fs::canonicalize(&legacy_root).unwrap()
+        );
+        assert!(legacy_root.join(".user-skills-mutation.lock").is_file());
+        assert!(!home.join(".skillbox.empty-backup-0").exists());
+        return;
+    }
+
+    let home = temp_dir("legacy-lock-real-home");
+    let legacy_root = home.join("SkillBox");
+    make_skill(
+        &legacy_root.join("user-skills/demo"),
+        "demo",
+        "Legacy-only demo",
+    );
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tests::mutation_lock_resolves_legacy_only_home_before_creating_lock_file",
+            "--nocapture",
+        ])
+        .env("HOME", &home)
+        .env_remove("SKILLBOX_HOME")
+        .env(CHILD_HOME, &home)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(fs::symlink_metadata(home.join(".skillbox"))
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert!(legacy_root.join(".user-skills-mutation.lock").is_file());
+}
+
+#[test]
+fn mutation_lock_expands_tilde_before_locking_across_working_directories() {
+    const ROLE: &str = "SKILLBOX_TILDE_LOCK_ROLE";
+    const READY: &str = "SKILLBOX_TILDE_LOCK_READY";
+    const RELEASE: &str = "SKILLBOX_TILDE_LOCK_RELEASE";
+    if let Some(role) = std::env::var_os(ROLE) {
+        let role = role.to_string_lossy();
+        let managed_root = if role.starts_with("env-") {
+            default_managed_root()
+        } else {
+            PathBuf::from("~/.skillbox")
+        };
+        match acquire_user_skills_mutation_lock(&managed_root) {
+            Ok(_lock) if role.ends_with("holder") => {
+                fs::write(std::env::var_os(READY).unwrap(), b"ready").unwrap();
+                let release = PathBuf::from(std::env::var_os(RELEASE).unwrap());
+                while !release.exists() {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+            Err(error) if role == "contender" => {
+                assert!(error.contains("Another user-skills mutation"));
+            }
+            Ok(_) => panic!("contender unexpectedly acquired the tilde mutation lock"),
+            Err(error) => panic!("lock holder failed unexpectedly: {error}"),
+        }
+        return;
+    }
+
+    for (holder_role, configured_home) in [
+        ("env-tilde-holder", "~/.skillbox"),
+        ("env-normalized-holder", "~/alias/../.skillbox"),
+        ("cli-holder", "~/.skillbox"),
+    ] {
+        let home = temp_dir(&format!("tilde-lock-home-{holder_role}"));
+        fs::create_dir_all(home.join("alias")).unwrap();
+        make_skill(
+            &home.join("SkillBox/user-skills/legacy-demo"),
+            "legacy-demo",
+            "Legacy demo",
+        );
+        let holder_cwd = temp_dir(&format!("tilde-lock-holder-cwd-{holder_role}"));
+        let contender_cwd = temp_dir(&format!("tilde-lock-contender-cwd-{holder_role}"));
+        let barrier = temp_dir(&format!("tilde-lock-barrier-{holder_role}"));
+        let ready = barrier.join("ready");
+        let release = barrier.join("release");
+        let executable = std::env::current_exe().unwrap();
+        let mut holder = Command::new(&executable)
+            .args([
+                "--exact",
+                "tests::mutation_lock_expands_tilde_before_locking_across_working_directories",
+                "--nocapture",
+            ])
+            .current_dir(&holder_cwd)
+            .env("HOME", &home)
+            .env("SKILLBOX_HOME", configured_home)
+            .env(ROLE, holder_role)
+            .env(READY, &ready)
+            .env(RELEASE, &release)
+            .spawn()
+            .unwrap();
+        while !ready.exists() {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let contender = Command::new(&executable)
+            .args([
+                "--exact",
+                "tests::mutation_lock_expands_tilde_before_locking_across_working_directories",
+                "--nocapture",
+            ])
+            .current_dir(&contender_cwd)
+            .env("HOME", &home)
+            .env_remove("SKILLBOX_HOME")
+            .env(ROLE, "contender")
+            .env(READY, &ready)
+            .env(RELEASE, &release)
+            .output()
+            .unwrap();
+        assert!(
+            contender.status.success(),
+            "{}",
+            String::from_utf8_lossy(&contender.stderr)
+        );
+        fs::write(&release, b"release").unwrap();
+        assert!(holder.wait().unwrap().success());
+        assert!(fs::symlink_metadata(home.join(".skillbox"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(home.join("SkillBox/.user-skills-mutation.lock").is_file());
+        assert!(!holder_cwd.join("~/.skillbox").exists());
+        assert!(!contender_cwd.join("~/.skillbox").exists());
+    }
+}
+
+#[test]
+fn mutation_lock_canonicalizes_symlink_parent_before_legacy_root_selection() {
+    const ROLE: &str = "SKILLBOX_SYMLINK_PARENT_LOCK_ROLE";
+    const MANAGED_ROOT: &str = "SKILLBOX_SYMLINK_PARENT_MANAGED_ROOT";
+    const READY: &str = "SKILLBOX_SYMLINK_PARENT_LOCK_READY";
+    const RELEASE: &str = "SKILLBOX_SYMLINK_PARENT_LOCK_RELEASE";
+    if let Some(role) = std::env::var_os(ROLE) {
+        let root = PathBuf::from(std::env::var_os(MANAGED_ROOT).unwrap());
+        match acquire_user_skills_mutation_lock(&root) {
+            Ok(_lock) if role == "holder" => {
+                fs::write(std::env::var_os(READY).unwrap(), b"ready").unwrap();
+                let release = PathBuf::from(std::env::var_os(RELEASE).unwrap());
+                while !release.exists() {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+            Err(error) if role == "contender" => {
+                assert!(error.contains("Another user-skills mutation"), "{error}");
+            }
+            Ok(_) => panic!("contender unexpectedly acquired the legacy mutation lock"),
+            Err(error) => panic!("lock holder failed unexpectedly: {error}"),
+        }
+        return;
+    }
+
+    let root = temp_dir("symlink-parent-lock");
+    let home = root.join("home");
+    let home_alias = root.join("home-link");
+    fs::create_dir_all(&home).unwrap();
+    std::os::unix::fs::symlink(&home, &home_alias).unwrap();
+    let legacy_root = home.join("SkillBox");
+    make_skill(
+        &legacy_root.join("user-skills/legacy-demo"),
+        "legacy-demo",
+        "Legacy demo",
+    );
+    let barrier = temp_dir("symlink-parent-lock-barrier");
+    let ready = barrier.join("ready");
+    let release = barrier.join("release");
+    let holder_cwd = temp_dir("symlink-parent-holder-cwd");
+    let contender_cwd = temp_dir("symlink-parent-contender-cwd");
+    let executable = std::env::current_exe().unwrap();
+    let mut holder = Command::new(&executable)
+        .args([
+            "--exact",
+            "tests::mutation_lock_canonicalizes_symlink_parent_before_legacy_root_selection",
+            "--nocapture",
+        ])
+        .current_dir(&holder_cwd)
+        .env("HOME", &home)
+        .env("SKILLBOX_HOME", home_alias.join(".skillbox"))
+        .env(ROLE, "holder")
+        .env(MANAGED_ROOT, home_alias.join(".skillbox"))
+        .env(READY, &ready)
+        .env(RELEASE, &release)
+        .spawn()
+        .unwrap();
+    while !ready.exists() {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let contender = Command::new(&executable)
+        .args([
+            "--exact",
+            "tests::mutation_lock_canonicalizes_symlink_parent_before_legacy_root_selection",
+            "--nocapture",
+        ])
+        .current_dir(&contender_cwd)
+        .env("HOME", &home)
+        .env_remove("SKILLBOX_HOME")
+        .env(ROLE, "contender")
+        .env(MANAGED_ROOT, &legacy_root)
+        .env(READY, &ready)
+        .env(RELEASE, &release)
+        .output()
+        .unwrap();
+    assert!(
+        contender.status.success(),
+        "{}",
+        String::from_utf8_lossy(&contender.stderr)
+    );
+    fs::write(&release, b"release").unwrap();
+    assert!(holder.wait().unwrap().success());
+    let hidden_root = home.join(".skillbox");
+    assert!(fs::symlink_metadata(&hidden_root)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(
+        fs::canonicalize(home_alias.join(".skillbox")).unwrap(),
+        fs::canonicalize(&legacy_root).unwrap()
+    );
+    assert!(legacy_root.join(".user-skills-mutation.lock").is_file());
+    assert!(!holder_cwd.join("home-link/.skillbox").exists());
+    assert!(!contender_cwd.join("home-link/.skillbox").exists());
+}
+
+#[test]
+fn mutation_lock_preserves_parent_and_symlink_resolution_before_creation() {
+    const ROLE: &str = "SKILLBOX_PARENT_SEGMENT_LOCK_ROLE";
+    const ROOT_ARG: &str = "SKILLBOX_PARENT_SEGMENT_LOCK_ROOT";
+    const EXPECTED: &str = "SKILLBOX_PARENT_SEGMENT_EXPECTED_ROOT";
+    const READY: &str = "SKILLBOX_PARENT_SEGMENT_LOCK_READY";
+    const RELEASE: &str = "SKILLBOX_PARENT_SEGMENT_LOCK_RELEASE";
+    if let Some(role) = std::env::var_os(ROLE) {
+        let root = PathBuf::from(std::env::var_os(ROOT_ARG).unwrap());
+        let expected = PathBuf::from(std::env::var_os(EXPECTED).unwrap());
+        match acquire_user_skills_mutation_lock(&root) {
+            Ok(lock) if role == "holder" => {
+                assert_eq!(lock.truth_root(), fs::canonicalize(&expected).unwrap());
+                fs::write(std::env::var_os(READY).unwrap(), b"ready").unwrap();
+                let release = PathBuf::from(std::env::var_os(RELEASE).unwrap());
+                while !release.exists() {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+            Err(error) if role == "contender" => {
+                assert!(error.contains("Another user-skills mutation"), "{error}");
+            }
+            Ok(_) => panic!("contender unexpectedly acquired the mutation lock"),
+            Err(error) => panic!("lock holder failed unexpectedly: {error}"),
+        }
+        return;
+    }
+
+    let executable = std::env::current_exe().unwrap();
+    for case in ["relative-parent", "symlink-parent"] {
+        let root = temp_dir(&format!("managed-root-resolution-{case}"));
+        let holder_cwd;
+        let contender_cwd;
+        let holder_arg;
+        let contender_arg;
+        let expected;
+        if case == "relative-parent" {
+            holder_cwd = root.join("holder");
+            contender_cwd = root.join("contender");
+            fs::create_dir_all(&holder_cwd).unwrap();
+            fs::create_dir_all(&contender_cwd).unwrap();
+            holder_arg = PathBuf::from("../SkillBox");
+            contender_arg = PathBuf::from("../SkillBox");
+            expected = root.join("SkillBox");
+        } else {
+            let real_parent = root.join("real");
+            holder_cwd = root.join("holder");
+            contender_cwd = root.join("contender");
+            fs::create_dir_all(real_parent.join("child")).unwrap();
+            fs::create_dir_all(&holder_cwd).unwrap();
+            fs::create_dir_all(&contender_cwd).unwrap();
+            std::os::unix::fs::symlink(real_parent.join("child"), root.join("alias")).unwrap();
+            holder_arg = root.join("alias/../SkillBox");
+            contender_arg = real_parent.join("SkillBox");
+            expected = real_parent.join("SkillBox");
+        }
+        let barrier = temp_dir(&format!("managed-root-resolution-barrier-{case}"));
+        let ready = barrier.join("ready");
+        let release = barrier.join("release");
+        let mut holder = Command::new(&executable)
+            .args([
+                "--exact",
+                "tests::mutation_lock_preserves_parent_and_symlink_resolution_before_creation",
+                "--nocapture",
+            ])
+            .current_dir(&holder_cwd)
+            .env(ROLE, "holder")
+            .env(ROOT_ARG, &holder_arg)
+            .env(EXPECTED, &expected)
+            .env(READY, &ready)
+            .env(RELEASE, &release)
+            .spawn()
+            .unwrap();
+        while !ready.exists() {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let contender = Command::new(&executable)
+            .args([
+                "--exact",
+                "tests::mutation_lock_preserves_parent_and_symlink_resolution_before_creation",
+                "--nocapture",
+            ])
+            .current_dir(&contender_cwd)
+            .env(ROLE, "contender")
+            .env(ROOT_ARG, &contender_arg)
+            .env(EXPECTED, &expected)
+            .env(READY, &ready)
+            .env(RELEASE, &release)
+            .output()
+            .unwrap();
+        assert!(
+            contender.status.success(),
+            "{}",
+            String::from_utf8_lossy(&contender.stderr)
+        );
+        fs::write(&release, b"release").unwrap();
+        assert!(holder.wait().unwrap().success());
+        assert!(expected.join(".user-skills-mutation.lock").is_file());
+        assert!(!holder_cwd.join("SkillBox").exists());
+        assert!(!contender_cwd.join("SkillBox").exists());
+    }
 }
 
 #[test]
@@ -5049,6 +5475,48 @@ optional-runtime-field: preserved
 }
 
 #[test]
+fn deployment_compatibility_apply_holds_the_shared_mutation_lock_during_revalidation() {
+    let root = temp_dir("deployment-compatibility-shared-lock");
+    let source = root.join("source/demo");
+    let managed_root = root.join("SkillBox");
+    let target_root = root.join("project/.codex/skills");
+    fs::create_dir_all(&target_root).unwrap();
+    make_skill(&source, "demo", "Demo skill");
+    import_skill(&source, SkillKind::User, &managed_root).unwrap();
+    add_workspace(
+        WorkspaceAddRequest {
+            path: target_root.clone(),
+            kind: WorkspaceKind::User,
+        },
+        &managed_root,
+    )
+    .unwrap();
+    let preview = preview_skill_deployment(
+        DeploymentCompatibilityPreviewRequest {
+            skill_name: "demo".to_string(),
+            target_root: target_root.clone(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+    let _lock = acquire_user_skills_mutation_lock(&managed_root).unwrap();
+
+    let error = apply_skill_deployment(
+        DeploymentCompatibilityApplyRequest {
+            skill_name: "demo".to_string(),
+            target_root: target_root.clone(),
+            preview_id: preview.preview_id,
+            confirm_warnings: false,
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+
+    assert!(error.contains("Another user-skills mutation"));
+    assert!(!target_root.join("demo").exists());
+}
+
+#[test]
 fn deployment_compatibility_blocks_invalid_frontmatter_and_existing_content() {
     let root = temp_dir("deployment-compatibility-blocked");
     let source = root.join("source").join("demo");
@@ -5341,7 +5809,8 @@ fn deploys_remote_skill_to_current_symlink() {
     import_skill(&source, SkillKind::Remote, &managed_root).unwrap();
 
     let deployment = deploy_skill("remote-demo", &managed_root, &target_root).unwrap();
-    let current = managed_root
+    let current = fs::canonicalize(&managed_root)
+        .unwrap()
         .join("remote-skills")
         .join("remote-demo")
         .join("current");
@@ -5366,7 +5835,8 @@ fn redeploys_remote_skill_version_symlink_to_current() {
     symlink_dir(&imported.managed_path, &target_path).unwrap();
 
     deploy_skill("remote-demo", &managed_root, &target_root).unwrap();
-    let current = managed_root
+    let current = fs::canonicalize(&managed_root)
+        .unwrap()
         .join("remote-skills")
         .join("remote-demo")
         .join("current");
@@ -6095,7 +6565,8 @@ fn change_skill_kind_moves_user_skill_to_remote_and_retargets_deployments() {
     let deployment = deploy_skill("agently-mail", &managed_root, &target_root).unwrap();
 
     let changed = change_skill_kind("agently-mail", SkillKind::Remote, &managed_root).unwrap();
-    let current = managed_root
+    let current = fs::canonicalize(&managed_root)
+        .unwrap()
         .join("remote-skills")
         .join("agently-mail")
         .join("current");
@@ -6125,8 +6596,11 @@ fn change_skill_kind_moves_remote_skill_to_user_and_retargets_deployments() {
     let deployment = deploy_skill("json-canvas", &managed_root, &target_root).unwrap();
 
     let changed = change_skill_kind("json-canvas", SkillKind::User, &managed_root).unwrap();
-    let user_path = managed_root.join("user-skills").join("json-canvas");
-    let current = managed_root
+    let canonical_managed_root = fs::canonicalize(&managed_root).unwrap();
+    let user_path = canonical_managed_root
+        .join("user-skills")
+        .join("json-canvas");
+    let current = canonical_managed_root
         .join("remote-skills")
         .join("json-canvas")
         .join("current");
@@ -9624,7 +10098,10 @@ fn import_candidates_records_deploy_back_imports_per_skill() {
     assert_eq!(record.source_path, source);
     assert_eq!(
         record.managed_path,
-        managed_root.join("user-skills").join("demo")
+        fs::canonicalize(&managed_root)
+            .unwrap()
+            .join("user-skills")
+            .join("demo")
     );
     assert_eq!(record.status, ImportRecordStatus::Active);
     assert!(!record.legacy);

@@ -188,7 +188,8 @@ pub fn apply_skill_deployment(
     request: DeploymentCompatibilityApplyRequest,
     managed_root: impl AsRef<Path>,
 ) -> Result<Deployment> {
-    let managed_root = managed_root.as_ref().to_path_buf();
+    let mutation_lock = acquire_user_skills_mutation_lock(managed_root.as_ref())?;
+    let managed_root = mutation_lock.truth_root().to_path_buf();
     let preview = preview_skill_deployment(
         DeploymentCompatibilityPreviewRequest {
             skill_name: request.skill_name.clone(),
@@ -217,7 +218,7 @@ pub fn apply_skill_deployment(
         }
         CompatibilityStatus::Compatible | CompatibilityStatus::Warnings => {}
     }
-    deploy_skill(&request.skill_name, managed_root, preview.target_root)
+    deploy_skill_with_lock_held(&request.skill_name, &managed_root, preview.target_root)
 }
 
 fn load_registered_workspace_runtime(

@@ -49,8 +49,17 @@ next milestones follow [the versioned evolution path](roadmap.md#versioned-evolu
 
 ### 0.7 — Safe Sync, Deployment, And Recovery
 
-- Add reviewed inbound user-skills Git updates with explicit
-  ahead/behind/diverged states and no automatic conflict merge.
+- Reviewed inbound user-skills Git is implemented on the active Draft change
+  set pending qualification. It separates clean/dirty worktree state from
+  unknown/synced/ahead/behind/diverged/remote-only/no-remote-branch relation,
+  then uses Check remote -> Review incoming changes -> Apply fast-forward.
+- The inbound implementation validates the complete remote skill tree, binds a
+  `preview_id`, discloses deployed updates, blocks deployed deletes/renames,
+  creates an internal backup ref, and transactionally reconciles the user-skill
+  index with Git compensation on failure.
+- Inbound remains explicit and `origin/main`-only. It does not run on startup,
+  select individual skills, or automatically merge, rebase, reset, stash,
+  force-push, or resolve conflicts.
 - Add copy-snapshot deployment as an explicit, compatibility-checked
   alternative without weakening the current symlink protections.
 - Strengthen backup inspection, restore previews, and recovery auditing.
@@ -63,8 +72,6 @@ next milestones follow [the versioned evolution path](roadmap.md#versioned-evolu
 - Add FTS-backed search across skills, operations, and usage history.
 - Add remote source provenance and trust classification without treating
   popularity as verification.
-- Add safe inbound Git status and reviewed fast-forward updates for the shared
-  user-skills repository.
 - Add copy-snapshot deployment and stronger restore/audit workflows.
 - Complete product hardening, release-candidate qualification, and the explicit
   1.0 promotion gates defined in the roadmap.
