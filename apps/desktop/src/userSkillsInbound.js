@@ -143,6 +143,21 @@ export function createInboundReviewRequestGate() {
   };
 }
 
+export async function runInboundReviewRequest({
+  gate,
+  requestGeneration,
+  loadPreview,
+  onSuccess,
+  onError
+}) {
+  try {
+    const preview = await loadPreview();
+    return gate.runIfCurrent(requestGeneration, () => onSuccess(preview));
+  } catch (error) {
+    return gate.runIfCurrent(requestGeneration, () => onError(error));
+  }
+}
+
 export function isReviewDialogFocusTarget(element) {
   if (
     !element ||

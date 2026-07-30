@@ -139,7 +139,8 @@ import {
   createInboundReviewRequestGate,
   invalidateUserSkillsInboundPreview,
   normalizeUserSkillsInboundPreview,
-  normalizeUserSkillsInboundStatus
+  normalizeUserSkillsInboundStatus,
+  runInboundReviewRequest
 } from './userSkillsInbound.js';
 import {
   normalizeWorkspace,
@@ -1666,7 +1667,9 @@ export default function App() {
   }
 
   async function openUserSkillsInboundReview() {
-    const requestGeneration = inboundReviewRequestGateRef.current.begin();
+    const gate = inboundReviewRequestGateRef.current;
+    const requestGeneration = gate.begin();
+    const browserPreview = !window.__TAURI_INTERNALS__;
     setInboundReviewDialog({
       open: true,
       loading: true,
@@ -1677,12 +1680,20 @@ export default function App() {
     });
     setStatus('previewing_inbound');
 
-    if (!window.__TAURI_INTERNALS__) {
-      const inboundPreviewMode = new URLSearchParams(window.location.search).get('inbound') || 'behind';
-      const preview = normalizeUserSkillsInboundPreview(
-        previewUserSkillsInbound(inboundPreviewMode)
-      );
-      inboundReviewRequestGateRef.current.runIfCurrent(requestGeneration, () => {
+    await runInboundReviewRequest({
+      gate,
+      requestGeneration,
+      loadPreview: async () => {
+        if (browserPreview) {
+          const inboundPreviewMode =
+            new URLSearchParams(window.location.search).get('inbound') || 'behind';
+          return normalizeUserSkillsInboundPreview(
+            previewUserSkillsInbound(inboundPreviewMode)
+          );
+        }
+        return normalizeUserSkillsInboundPreview(await invoke('preview_user_skills_inbound'));
+      },
+      onSuccess: (preview) => {
         setUserSkillsInbound(preview.status);
         setInboundReviewDialog({
           open: true,
@@ -1692,28 +1703,9 @@ export default function App() {
           activePath: preview.files[0]?.path || '',
           error: ''
         });
-        setStatus('prototype');
-      });
-      return;
-    }
-
-    try {
-      const result = await invoke('preview_user_skills_inbound');
-      const preview = normalizeUserSkillsInboundPreview(result);
-      inboundReviewRequestGateRef.current.runIfCurrent(requestGeneration, () => {
-        setUserSkillsInbound(preview.status);
-        setInboundReviewDialog({
-          open: true,
-          loading: false,
-          applying: false,
-          preview,
-          activePath: preview.files[0]?.path || '',
-          error: ''
-        });
-        setStatus('ready');
-      });
-    } catch (previewError) {
-      inboundReviewRequestGateRef.current.runIfCurrent(requestGeneration, () => {
+        setStatus(browserPreview ? 'prototype' : 'ready');
+      },
+      onError: (previewError) => {
         setInboundReviewDialog((current) => ({
           ...current,
           loading: false,
@@ -1722,9 +1714,9 @@ export default function App() {
             String(previewError) ||
             'Unable to preview incoming user skills.'
         }));
-        setStatus('ready');
-      });
-    }
+        setStatus(browserPreview ? 'prototype' : 'ready');
+      }
+    });
   }
 
   function closeUserSkillsInboundReview() {
