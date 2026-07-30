@@ -11,7 +11,8 @@ import { userSyncLabel } from '../userSkillsGitSync.js';
 import {
   canReviewUserSkillsInbound,
   inboundRelationLabel,
-  inboundRelationTone
+  inboundRelationTone,
+  UserSkillsInboundApplyWarning
 } from '../userSkillsInbound.js';
 import { Badge, PageTitleRow, PathList } from './common.jsx';
 
@@ -31,6 +32,7 @@ export function SettingsPage({
   preferences,
   status,
   usageHooks,
+  userSkillsInboundWarnings,
   userSkillsInbound,
   userSkillsGit,
   onCheckUserSkillsInbound,
@@ -44,6 +46,7 @@ export function SettingsPage({
   onSaveRemoteUpdateTimeout,
   onSaveStatusRefreshInterval,
   onSaveUserSkillsRemote,
+  onDismissUserSkillsInboundWarnings,
   onReviewUserSkillsInbound
 }) {
   const normalizedUsageHooks = normalizeUsageHookStatuses(usageHooks);
@@ -70,9 +73,11 @@ export function SettingsPage({
           <SyncRefreshSettingsPanel
             preferences={preferences}
             status={status}
+            userSkillsInboundWarnings={userSkillsInboundWarnings}
             userSkillsInbound={userSkillsInbound}
             userSkillsGit={userSkillsGit}
             onCheckUserSkillsInbound={onCheckUserSkillsInbound}
+            onDismissUserSkillsInboundWarnings={onDismissUserSkillsInboundWarnings}
             onSaveRemoteUpdateTimeout={onSaveRemoteUpdateTimeout}
             onSaveStatusRefreshInterval={onSaveStatusRefreshInterval}
             onSaveUserSkillsRemote={onSaveUserSkillsRemote}
@@ -305,9 +310,11 @@ function UsageHookSettingsPanel({ hookGroups, status, onInstall, onOpenConfig, o
 function SyncRefreshSettingsPanel({
   preferences,
   status,
+  userSkillsInboundWarnings,
   userSkillsInbound,
   userSkillsGit,
   onCheckUserSkillsInbound,
+  onDismissUserSkillsInboundWarnings,
   onSaveRemoteUpdateTimeout,
   onSaveStatusRefreshInterval,
   onSaveUserSkillsRemote,
@@ -324,9 +331,11 @@ function SyncRefreshSettingsPanel({
       <div className="syncRefreshGrid">
         <UserSkillsGitSettingsForm
           status={status}
+          userSkillsInboundWarnings={userSkillsInboundWarnings}
           userSkillsInbound={userSkillsInbound}
           userSkillsGit={userSkillsGit}
           onCheckInbound={onCheckUserSkillsInbound}
+          onDismissInboundWarnings={onDismissUserSkillsInboundWarnings}
           onSave={onSaveUserSkillsRemote}
           onReviewInbound={onReviewUserSkillsInbound}
         />
@@ -424,9 +433,11 @@ function StatusRefreshSettingsForm({ preferences, status, onSave, onSaveRemoteUp
 
 function UserSkillsGitSettingsForm({
   status,
+  userSkillsInboundWarnings,
   userSkillsInbound,
   userSkillsGit,
   onCheckInbound,
+  onDismissInboundWarnings,
   onSave,
   onReviewInbound
 }) {
@@ -522,6 +533,10 @@ function UserSkillsGitSettingsForm({
         {userSkillsInbound?.message && !userSkillsInbound.fetchError ? (
           <small>{userSkillsInbound.message}</small>
         ) : null}
+        <UserSkillsInboundApplyWarning
+          warnings={userSkillsInboundWarnings}
+          onDismiss={onDismissInboundWarnings}
+        />
         <div className="inboundGitActions">
           <button
             className="button secondary"

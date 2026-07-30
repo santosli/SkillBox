@@ -29,6 +29,15 @@ export function normalizeUserSkillsInboundStatus(value) {
   };
 }
 
+export function normalizeUserSkillsInboundWarnings(value) {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .filter((warning) => typeof warning === 'string')
+    .map((warning) => warning.trim())
+    .filter(Boolean);
+}
+
 export function normalizeUserSkillsInboundPreview(value) {
   const source = value || {};
   const files = (source.files || []).map((file) => ({
@@ -222,6 +231,43 @@ export function InboundReviewLiveFeedback({ loading, applying, error }) {
           error
         )
       : null
+  );
+}
+
+export function UserSkillsInboundApplyWarning({ warnings, onDismiss }) {
+  const normalizedWarnings = normalizeUserSkillsInboundWarnings(warnings);
+  if (!normalizedWarnings.length) return null;
+
+  return createElement(
+    'div',
+    {
+      'aria-atomic': 'true',
+      'aria-live': 'assertive',
+      className: 'settingsError inboundApplyWarning',
+      role: 'alert'
+    },
+    createElement(
+      'div',
+      null,
+      createElement('strong', null, 'Incoming changes applied with warnings'),
+      createElement(
+        'ul',
+        null,
+        normalizedWarnings.map((warning, index) =>
+          createElement('li', { key: `${index}:${warning}` }, warning)
+        )
+      )
+    ),
+    createElement(
+      'button',
+      {
+        'aria-label': 'Dismiss incoming changes warnings',
+        className: 'button secondary',
+        onClick: onDismiss,
+        type: 'button'
+      },
+      'Dismiss'
+    )
   );
 }
 

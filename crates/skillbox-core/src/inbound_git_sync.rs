@@ -46,6 +46,7 @@ struct InboundMutationOptions {
     pause_before_backup_rename: Option<PathBuf>,
     pause_before_generated_gitignore_transfer: Option<PathBuf>,
     pause_before_compensation: Option<PathBuf>,
+    pause_before_completed_index_lock_release: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -55,6 +56,7 @@ struct GitIndexLock {
     device: u64,
     inode: u64,
     release_attempted: bool,
+    pause_after_exchange: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -84,40 +86,23 @@ impl Drop for GitIndexLock {
 impl GitIndexLock {
     fn release_if_owned(&mut self) -> Result<()> {
         self.release_attempted = true;
-        let quarantine = unique_inbound_entry_name("index.lock", "release");
-        rustix::fs::renameat_with(
-            &self.git_dir,
-            "index.lock",
-            &self.git_dir,
-            quarantine.as_str(),
-            RenameFlags::NOREPLACE,
-        )
-        .map_err(|error| format!("Unable to quarantine Git index lock for release: {error}"))?;
-        let current = rustix::fs::statat(
-            &self.git_dir,
-            quarantine.as_str(),
-            AtFlags::SYMLINK_NOFOLLOW,
-        )
-        .map_err(|error| error.to_string())?;
         let expected = self.file.metadata().map_err(|error| error.to_string())?;
-        if current.st_dev as u64 != self.device
-            || current.st_ino as u64 != self.inode
-            || expected.dev() != self.device
-            || expected.ino() != self.inode
-        {
-            let _ = rustix::fs::renameat_with(
-                &self.git_dir,
-                quarantine.as_str(),
-                &self.git_dir,
-                "index.lock",
-                RenameFlags::NOREPLACE,
-            );
+        if expected.dev() != self.device || expected.ino() != self.inode {
             return Err(
-                "Git index lock ownership changed; the replacement lock was preserved.".to_string(),
+                "Git index lock descriptor identity changed; the lock was preserved.".to_string(),
             );
         }
-        rustix::fs::unlinkat(&self.git_dir, quarantine.as_str(), AtFlags::empty())
-            .map_err(|error| error.to_string())
+        atomically_remove_owned_entry(
+            &self.git_dir,
+            "index.lock",
+            self.device,
+            self.inode,
+            "release",
+            self.pause_after_exchange.as_deref(),
+        )
+        .map_err(|error| {
+            format!("Git index lock ownership changed; the replacement lock was preserved: {error}")
+        })
     }
 }
 
@@ -127,6 +112,90 @@ fn unique_inbound_entry_name(file_name: &str, phase: &str) -> String {
         ".{file_name}.skillbox-{phase}-{}-{counter}",
         std::process::id()
     )
+}
+
+fn random_inbound_entry_name(file_name: &str, phase: &str) -> Result<String> {
+    let mut random = [0u8; 16];
+    use std::io::Read;
+    File::open("/dev/urandom")
+        .and_then(|mut source| source.read_exact(&mut random))
+        .map_err(|error| format!("Unable to obtain private inbound file name: {error}"))?;
+    let suffix = random
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    Ok(format!(".{file_name}.skillbox-{phase}-{suffix}"))
+}
+
+fn atomically_remove_owned_entry(
+    parent: impl AsFd,
+    file_name: &str,
+    expected_device: u64,
+    expected_inode: u64,
+    phase: &str,
+    pause_after_exchange: Option<&Path>,
+) -> Result<()> {
+    let placeholder_name = unique_inbound_entry_name(file_name, phase);
+    let placeholder_fd = rustix::fs::openat(
+        parent.as_fd(),
+        placeholder_name.as_str(),
+        OFlags::CREATE | OFlags::EXCL | OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+        Mode::from_bits_truncate(0o600),
+    )
+    .map_err(|error| format!("Unable to create owned-entry placeholder: {error}"))?;
+    let placeholder = File::from(placeholder_fd);
+    let cleanup_placeholder = |name: &str| {
+        let _ = rustix::fs::unlinkat(parent.as_fd(), name, AtFlags::empty());
+    };
+    if let Err(error) = rustix::fs::renameat_with(
+        parent.as_fd(),
+        placeholder_name.as_str(),
+        parent.as_fd(),
+        file_name,
+        RenameFlags::EXCHANGE,
+    ) {
+        cleanup_placeholder(&placeholder_name);
+        return Err(format!("Unable to exchange owned entry: {error}"));
+    }
+    if let Some(barrier) = pause_after_exchange {
+        wait_for_test_barrier(barrier)?;
+    }
+    let exchanged = rustix::fs::statat(
+        parent.as_fd(),
+        placeholder_name.as_str(),
+        AtFlags::SYMLINK_NOFOLLOW,
+    )
+    .map_err(|error| format!("Unable to inspect exchanged entry: {error}"))?;
+    if exchanged.st_dev as u64 != expected_device || exchanged.st_ino as u64 != expected_inode {
+        let restore = rustix::fs::renameat_with(
+            parent.as_fd(),
+            placeholder_name.as_str(),
+            parent.as_fd(),
+            file_name,
+            RenameFlags::EXCHANGE,
+        );
+        if restore.is_ok() {
+            cleanup_placeholder(&placeholder_name);
+        }
+        return Err(match restore {
+            Ok(()) => "Owned entry was replaced; the replacement stayed in place.".to_string(),
+            Err(error) => format!(
+                "Owned entry was replaced and atomic restoration failed; both entries were preserved: {error}"
+            ),
+        });
+    }
+    rustix::fs::unlinkat(parent.as_fd(), placeholder_name.as_str(), AtFlags::empty())
+        .map_err(|error| format!("Unable to remove exchanged owned entry: {error}"))?;
+    let placeholder_metadata = placeholder.metadata().map_err(|error| error.to_string())?;
+    let current = rustix::fs::statat(parent.as_fd(), file_name, AtFlags::SYMLINK_NOFOLLOW)
+        .map_err(|error| error.to_string())?;
+    if current.st_dev as u64 != placeholder_metadata.dev()
+        || current.st_ino as u64 != placeholder_metadata.ino()
+    {
+        return Err("Owned-entry placeholder identity changed; it was preserved.".to_string());
+    }
+    rustix::fs::unlinkat(parent.as_fd(), file_name, AtFlags::empty())
+        .map_err(|error| format!("Unable to remove owned-entry placeholder: {error}"))
 }
 
 #[derive(Debug, Default)]
@@ -233,7 +302,19 @@ pub fn apply_user_skills_inbound(
     request: UserSkillsInboundApplyRequest,
     managed_root: impl AsRef<Path>,
 ) -> Result<UserSkillsInboundApplyResult> {
-    let managed_root = managed_root.as_ref().to_path_buf();
+    apply_user_skills_inbound_with_options(
+        request,
+        managed_root.as_ref(),
+        &InboundMutationOptions::default(),
+    )
+}
+
+fn apply_user_skills_inbound_with_options(
+    request: UserSkillsInboundApplyRequest,
+    managed_root: &Path,
+    options: &InboundMutationOptions,
+) -> Result<UserSkillsInboundApplyResult> {
+    let managed_root = managed_root.to_path_buf();
     let preview_id = request
         .preview_id
         .as_deref()
@@ -258,8 +339,13 @@ pub fn apply_user_skills_inbound(
         phase: "preflight".to_string(),
         ..Default::default()
     };
-    let result =
-        apply_user_skills_inbound_inner(&managed_root, &preview_id, &operation.id, &mut audit);
+    let result = apply_user_skills_inbound_inner(
+        &managed_root,
+        &preview_id,
+        &operation.id,
+        options,
+        &mut audit,
+    );
     match &result {
         Ok(applied) => {
             if let Err(finish_error) = finish_operation(
@@ -683,6 +769,7 @@ fn apply_user_skills_inbound_inner(
     managed_root: &Path,
     preview_id: &str,
     operation_id: &str,
+    options: &InboundMutationOptions,
     audit: &mut InboundApplyAudit,
 ) -> Result<UserSkillsInboundApplyResult> {
     let paths = managed_paths(managed_root.to_path_buf());
@@ -748,7 +835,7 @@ fn apply_user_skills_inbound_inner(
         old_snapshot.entries,
         new_snapshot.entries,
         operation_id,
-        &InboundMutationOptions::default(),
+        options,
         audit,
     )?;
     audit.phase = "ref_updated".to_string();
@@ -785,6 +872,9 @@ fn apply_user_skills_inbound_inner(
             &error,
             audit,
         );
+    }
+    if let Some(barrier) = options.pause_before_completed_index_lock_release.as_deref() {
+        wait_for_test_barrier(barrier)?;
     }
     let warnings = release_completed_inbound_index_lock(&mut mutation);
     audit.phase = if warnings.is_empty() {
@@ -1652,10 +1742,9 @@ fn apply_inbound_tree(
     verify_added_paths_absent(repo, &old_entries, &new_entries, &touched_paths)?;
     let transfer_generated_gitignore =
         old_sha.is_none() && fs::symlink_metadata(repo.join(".gitignore")).is_ok();
-    let index_temporary = repo.join(".git").join(format!(
-        "skillbox-inbound-index-{}.tmp",
-        sanitize_operation_ref_component(operation_id)
-    ));
+    let index_temporary = repo
+        .join(".git")
+        .join(random_inbound_entry_name("index", "prepare")?);
     let mut receipt = InboundMutationReceipt {
         repo_dir: open_real_directory(repo)?,
         old_sha: old_sha.map(str::to_string),
@@ -1963,6 +2052,7 @@ fn acquire_git_index_lock(repo: &Path) -> Result<GitIndexLock> {
         inode: metadata.ino(),
         file,
         release_attempted: false,
+        pause_after_exchange: None,
     })
 }
 
@@ -1984,12 +2074,80 @@ fn restore_git_index(repo: &Path, receipt: &mut InboundMutationReceipt) -> Resul
     let index = repo.join(".git/index");
     match receipt.old_index.as_deref() {
         Some(bytes) => {
-            let temporary = repo.join(".git").join(format!(
-                "skillbox-index-restore-{}.tmp",
-                sanitize_operation_ref_component(&receipt.new_sha)
-            ));
-            fs::write(&temporary, bytes).map_err(|error| error.to_string())?;
-            fs::rename(&temporary, &index).map_err(|error| error.to_string())?;
+            let git_dir = open_real_child_directory(&receipt.repo_dir, ".git")?;
+            let temporary = random_inbound_entry_name("index", "restore")?;
+            let fd = rustix::fs::openat(
+                &git_dir,
+                temporary.as_str(),
+                OFlags::CREATE | OFlags::EXCL | OFlags::WRONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+                Mode::from_bits_truncate(0o600),
+            )
+            .map_err(|error| format!("Unable to create private Git index restore file: {error}"))?;
+            let mut file = File::from(fd);
+            let metadata = file.metadata().map_err(|error| error.to_string())?;
+            use std::io::Write;
+            let write_result = file
+                .write_all(bytes)
+                .and_then(|()| file.sync_all())
+                .map_err(|error| error.to_string());
+            if let Err(error) = write_result {
+                let cleanup = atomically_remove_owned_entry(
+                    &git_dir,
+                    temporary.as_str(),
+                    metadata.dev(),
+                    metadata.ino(),
+                    "restore-cleanup",
+                    None,
+                );
+                return Err(match cleanup {
+                    Ok(()) => error,
+                    Err(cleanup_error) => format!("{error}; cleanup failed: {cleanup_error}"),
+                });
+            }
+            let current =
+                rustix::fs::statat(&git_dir, temporary.as_str(), AtFlags::SYMLINK_NOFOLLOW)
+                    .map_err(|error| {
+                        format!("Unable to verify private Git index restore file: {error}")
+                    })?;
+            if current.st_dev as u64 != metadata.dev() || current.st_ino as u64 != metadata.ino() {
+                let cleanup = atomically_remove_owned_entry(
+                    &git_dir,
+                    temporary.as_str(),
+                    metadata.dev(),
+                    metadata.ino(),
+                    "restore-cleanup",
+                    None,
+                );
+                return Err(match cleanup {
+                    Ok(()) => {
+                        "Private Git index restore file identity changed before installation."
+                            .to_string()
+                    }
+                    Err(cleanup_error) => format!(
+                        "Private Git index restore file identity changed before installation; cleanup failed: {cleanup_error}"
+                    ),
+                });
+            }
+            if let Err(error) =
+                rustix::fs::renameat(&git_dir, temporary.as_str(), &git_dir, "index")
+            {
+                let cleanup = atomically_remove_owned_entry(
+                    &git_dir,
+                    temporary.as_str(),
+                    metadata.dev(),
+                    metadata.ino(),
+                    "restore-cleanup",
+                    None,
+                );
+                return Err(match cleanup {
+                    Ok(()) => format!("Unable to restore Git index: {error}"),
+                    Err(cleanup_error) => {
+                        format!(
+                            "Unable to restore Git index: {error}; cleanup failed: {cleanup_error}"
+                        )
+                    }
+                });
+            }
         }
         None => match fs::remove_file(&index) {
             Ok(()) => {}
@@ -2156,16 +2314,35 @@ fn read_backup_with_identity(slot: &InboundBackupSlot) -> Result<(Vec<u8>, Inbou
     let fd = rustix::fs::openat(
         &slot.parent,
         slot.file_name.as_str(),
-        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        OFlags::RDONLY | OFlags::NONBLOCK | OFlags::NOFOLLOW | OFlags::CLOEXEC,
         Mode::empty(),
     )
     .map_err(|error| error.to_string())?;
     let mut file = File::from(fd);
     let metadata = file.metadata().map_err(|error| error.to_string())?;
-    let mut bytes = Vec::new();
+    if !metadata.file_type().is_file() {
+        return Err("Inbound recovery entry is not a regular file.".to_string());
+    }
+    if metadata.len() > MAX_INBOUND_FILE_BYTES {
+        return Err(format!(
+            "Inbound recovery entry exceeds the {} byte file limit.",
+            MAX_INBOUND_FILE_BYTES
+        ));
+    }
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
     use std::io::Read;
-    file.read_to_end(&mut bytes)
+    file.by_ref()
+        .take(MAX_INBOUND_FILE_BYTES + 1)
+        .read_to_end(&mut bytes)
         .map_err(|error| error.to_string())?;
+    let final_metadata = file.metadata().map_err(|error| error.to_string())?;
+    if bytes.len() as u64 != metadata.len()
+        || final_metadata.len() != metadata.len()
+        || final_metadata.dev() != metadata.dev()
+        || final_metadata.ino() != metadata.ino()
+    {
+        return Err("Inbound recovery entry changed while it was being read.".to_string());
+    }
     let identity = InboundEntryIdentity {
         device: metadata.dev(),
         inode: metadata.ino(),
@@ -2652,6 +2829,7 @@ fn rollback_inbound_after_failure(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::FileTypeExt;
     use std::process::Command;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -2730,6 +2908,134 @@ mod tests {
             output.status.success(),
             "{}",
             String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[derive(Clone, Copy)]
+    enum BackupReplacementKind {
+        Fifo,
+        Directory,
+        OversizedFile,
+    }
+
+    fn assert_unsafe_backup_replacement_fails_without_mutation(kind: BackupReplacementKind) {
+        let managed_root = temp_dir(match kind {
+            BackupReplacementKind::Fifo => "inbound-backup-fifo",
+            BackupReplacementKind::Directory => "inbound-backup-directory",
+            BackupReplacementKind::OversizedFile => "inbound-backup-oversized",
+        });
+        let (remote, work) = remote_with_skill("inbound-backup-special");
+        configure_and_bootstrap(&managed_root, &remote);
+        let paths = managed_paths(&managed_root);
+        let git = skillbox_git::GitService::new();
+        fs::write(
+            work.join("demo/SKILL.md"),
+            "---\nname: demo\ndescription: Incoming\n---\n",
+        )
+        .unwrap();
+        git.add_all(&work).unwrap();
+        git.commit(&work, "Incoming").unwrap();
+        git.push_origin_main(&work, false).unwrap();
+        let preview = preview_user_skills_inbound(&managed_root).unwrap();
+        let old_sha = preview.status.local_sha.clone().unwrap();
+        let new_sha = preview.status.remote_sha.clone().unwrap();
+        let old_snapshot =
+            validate_inbound_git_tree(&git, &paths.user_skills_root, &old_sha, &mut Vec::new())
+                .unwrap();
+        let new_snapshot =
+            validate_inbound_git_tree(&git, &paths.user_skills_root, &new_sha, &mut Vec::new())
+                .unwrap();
+        let old_index = fs::read(paths.user_skills_root.join(".git/index")).unwrap();
+        let barrier = temp_dir("inbound-backup-special-barrier").join("continue");
+        let ready = barrier.with_extension("ready");
+        let repo = paths.user_skills_root.clone();
+        let worker_barrier = barrier.clone();
+        let old_sha_worker = old_sha.clone();
+        let worker = std::thread::spawn(move || {
+            let mut audit = InboundApplyAudit::default();
+            let result = apply_inbound_tree(
+                &skillbox_git::GitService::new(),
+                &repo,
+                Some(&old_sha_worker),
+                &new_sha,
+                old_snapshot.entries,
+                new_snapshot.entries,
+                "backup-special",
+                &InboundMutationOptions {
+                    pause_before_backup_rename: Some(worker_barrier),
+                    ..Default::default()
+                },
+                &mut audit,
+            );
+            (result, audit)
+        });
+        while !ready.exists() {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let skill_path = paths.user_skills_root.join("demo/SKILL.md");
+        let detached = paths.user_skills_root.join("demo/SKILL.md.original");
+        fs::rename(&skill_path, &detached).unwrap();
+        match kind {
+            BackupReplacementKind::Fifo => {
+                assert!(Command::new("mkfifo")
+                    .arg(&skill_path)
+                    .status()
+                    .unwrap()
+                    .success());
+            }
+            BackupReplacementKind::Directory => fs::create_dir(&skill_path).unwrap(),
+            BackupReplacementKind::OversizedFile => {
+                let file = File::create(&skill_path).unwrap();
+                file.set_len(MAX_INBOUND_FILE_BYTES + 1).unwrap();
+            }
+        }
+        fs::write(&barrier, b"continue").unwrap();
+        let (result, audit) = worker.join().unwrap();
+        let error = result.unwrap_err();
+        assert!(
+            error.contains("not a readable regular file")
+                || error.contains("not a regular file")
+                || error.contains("exceeds"),
+            "{error}"
+        );
+        assert_eq!(
+            git.rev_parse_optional(&paths.user_skills_root, "HEAD")
+                .unwrap()
+                .as_deref(),
+            Some(old_sha.as_str())
+        );
+        assert_eq!(
+            fs::read(paths.user_skills_root.join(".git/index")).unwrap(),
+            old_index
+        );
+        assert!(audit.compensation_attempted);
+        assert_eq!(audit.compensation_succeeded, Some(true));
+        let replacement = fs::symlink_metadata(&skill_path).unwrap();
+        match kind {
+            BackupReplacementKind::Fifo => assert!(replacement.file_type().is_fifo()),
+            BackupReplacementKind::Directory => assert!(replacement.is_dir()),
+            BackupReplacementKind::OversizedFile => {
+                assert_eq!(replacement.len(), MAX_INBOUND_FILE_BYTES + 1)
+            }
+        }
+        drop(acquire_git_index_lock(&paths.user_skills_root).unwrap());
+        drop(acquire_user_skills_mutation_lock(&managed_root).unwrap());
+    }
+
+    #[test]
+    fn backup_fifo_replacement_fails_closed_without_blocking_or_mutation() {
+        assert_unsafe_backup_replacement_fails_without_mutation(BackupReplacementKind::Fifo);
+    }
+
+    #[test]
+    fn backup_special_file_replacement_fails_closed_without_mutation() {
+        assert_unsafe_backup_replacement_fails_without_mutation(BackupReplacementKind::Directory);
+    }
+
+    #[test]
+    fn backup_oversized_replacement_fails_closed_without_unbounded_read() {
+        assert_unsafe_backup_replacement_fails_without_mutation(
+            BackupReplacementKind::OversizedFile,
         );
     }
 
@@ -4049,6 +4355,52 @@ mod tests {
     }
 
     #[test]
+    fn index_lock_release_keeps_git_excluded_while_restoring_a_replacement_lock() {
+        let repo = temp_dir("inbound-index-lock-three-party");
+        let git = skillbox_git::GitService::new();
+        git.init_main(&repo).unwrap();
+        fs::write(repo.join("candidate.txt"), "candidate\n").unwrap();
+        let mut lock = acquire_git_index_lock(&repo).unwrap();
+        fs::rename(
+            repo.join(".git/index.lock"),
+            repo.join(".git/index.lock.original"),
+        )
+        .unwrap();
+        fs::write(repo.join(".git/index.lock"), "external replacement\n").unwrap();
+        let barrier = temp_dir("inbound-index-lock-exchange-barrier").join("continue");
+        let ready = barrier.with_extension("ready");
+        lock.pause_after_exchange = Some(barrier.clone());
+        let releaser = std::thread::spawn(move || lock.release_if_owned());
+        while !ready.exists() {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        assert!(
+            repo.join(".git/index.lock").exists(),
+            "atomic exchange must leave a lock placeholder at index.lock"
+        );
+        let third_git = Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["add", "--", "candidate.txt"])
+            .output()
+            .unwrap();
+        assert!(
+            !third_git.status.success(),
+            "a third Git process acquired the index lock during release"
+        );
+
+        fs::write(&barrier, b"continue").unwrap();
+        let error = releaser.join().unwrap().unwrap_err();
+        assert!(error.contains("replacement lock was preserved"), "{error}");
+        assert_eq!(
+            fs::read_to_string(repo.join(".git/index.lock")).unwrap(),
+            "external replacement\n"
+        );
+        assert!(!git.staged_changes(&repo).unwrap());
+    }
+
+    #[test]
     fn completed_apply_reports_index_lock_replacement_as_partial_success_warning() {
         let managed_root = temp_dir("inbound-index-lock-warning");
         let (remote, work) = remote_with_skill("inbound-index-lock-warning");
@@ -4102,6 +4454,141 @@ mod tests {
         );
         assert_eq!(fs::read_to_string(&index_lock).unwrap(), "external lock\n");
         assert!(original.is_file());
+    }
+
+    #[test]
+    fn index_compensation_ignores_predictable_restore_symlink_and_preserves_external_file() {
+        let managed_root = temp_dir("inbound-index-restore-symlink");
+        let (remote, work) = remote_with_skill("inbound-index-restore-symlink");
+        configure_and_bootstrap(&managed_root, &remote);
+        let paths = managed_paths(&managed_root);
+        let git = skillbox_git::GitService::new();
+        fs::write(work.join("demo/README.md"), "incoming\n").unwrap();
+        git.add_all(&work).unwrap();
+        git.commit(&work, "Incoming").unwrap();
+        git.push_origin_main(&work, false).unwrap();
+        let preview = preview_user_skills_inbound(&managed_root).unwrap();
+        let old_sha = preview.status.local_sha.clone().unwrap();
+        let new_sha = preview.status.remote_sha.clone().unwrap();
+        let old_snapshot =
+            validate_inbound_git_tree(&git, &paths.user_skills_root, &old_sha, &mut Vec::new())
+                .unwrap();
+        let new_snapshot =
+            validate_inbound_git_tree(&git, &paths.user_skills_root, &new_sha, &mut Vec::new())
+                .unwrap();
+        let old_index = fs::read(paths.user_skills_root.join(".git/index")).unwrap();
+        let sentinel = temp_dir("inbound-index-restore-sentinel").join("sentinel");
+        fs::write(&sentinel, b"external sentinel\n").unwrap();
+        let predictable = paths.user_skills_root.join(".git").join(format!(
+            "skillbox-index-restore-{}.tmp",
+            sanitize_operation_ref_component(&new_sha)
+        ));
+        std::os::unix::fs::symlink(&sentinel, &predictable).unwrap();
+        let mut audit = InboundApplyAudit::default();
+
+        let error = apply_inbound_tree(
+            &git,
+            &paths.user_skills_root,
+            Some(&old_sha),
+            &new_sha,
+            old_snapshot.entries,
+            new_snapshot.entries,
+            "index-restore-symlink",
+            &InboundMutationOptions {
+                fail_after_index_replace: true,
+                ..Default::default()
+            },
+            &mut audit,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("restored"), "{error}");
+        assert_eq!(fs::read(&sentinel).unwrap(), b"external sentinel\n");
+        assert_eq!(
+            fs::read(paths.user_skills_root.join(".git/index")).unwrap(),
+            old_index
+        );
+        assert_eq!(
+            git.rev_parse_optional(&paths.user_skills_root, "HEAD")
+                .unwrap()
+                .as_deref(),
+            Some(old_sha.as_str())
+        );
+        assert!(!paths.user_skills_root.join("demo/README.md").exists());
+        assert!(predictable.is_symlink());
+        assert!(audit.compensation_attempted);
+        assert_eq!(audit.compensation_succeeded, Some(true));
+    }
+
+    #[test]
+    fn completed_apply_persists_partial_success_warning_in_operation_history() {
+        let managed_root = temp_dir("inbound-partial-success-operation");
+        let (remote, work) = remote_with_skill("inbound-partial-success-operation");
+        configure_and_bootstrap(&managed_root, &remote);
+        let paths = managed_paths(&managed_root);
+        let git = skillbox_git::GitService::new();
+        fs::write(work.join("demo/README.md"), "incoming\n").unwrap();
+        git.add_all(&work).unwrap();
+        git.commit(&work, "Incoming").unwrap();
+        git.push_origin_main(&work, false).unwrap();
+        let preview = preview_user_skills_inbound(&managed_root).unwrap();
+        let barrier = temp_dir("inbound-partial-success-barrier").join("continue");
+        let ready = barrier.with_extension("ready");
+        let worker_root = managed_root.clone();
+        let worker_barrier = barrier.clone();
+        let worker = std::thread::spawn(move || {
+            apply_user_skills_inbound_with_options(
+                UserSkillsInboundApplyRequest {
+                    preview_id: Some(preview.preview_id),
+                    actor: "test".to_string(),
+                },
+                &worker_root,
+                &InboundMutationOptions {
+                    pause_before_completed_index_lock_release: Some(worker_barrier),
+                    ..Default::default()
+                },
+            )
+        });
+        while !ready.exists() {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let index_lock = paths.user_skills_root.join(".git/index.lock");
+        fs::rename(
+            &index_lock,
+            paths.user_skills_root.join(".git/index.lock.original"),
+        )
+        .unwrap();
+        fs::write(&index_lock, "external replacement\n").unwrap();
+        fs::write(&barrier, b"continue").unwrap();
+        let result = worker.join().unwrap().unwrap();
+
+        assert_eq!(result.warnings.len(), 1);
+        assert!(result.warnings[0].contains("replacement lock was preserved"));
+        let succeeded = list_operations(
+            OperationFilter {
+                status: Some(OperationStatus::Succeeded),
+                ..Default::default()
+            },
+            &managed_root,
+        )
+        .unwrap()
+        .operations
+        .into_iter()
+        .find(|operation| operation.operation_type == "apply_user_skills_inbound")
+        .unwrap();
+        assert_eq!(
+            succeeded.payload["mutationPhase"],
+            "completed_with_warnings"
+        );
+        assert_eq!(
+            succeeded.payload["warnings"][0].as_str(),
+            Some(result.warnings[0].as_str())
+        );
+        assert!(paths.user_skills_root.join("demo/README.md").is_file());
+        assert_eq!(
+            fs::read_to_string(index_lock).unwrap(),
+            "external replacement\n"
+        );
     }
 
     #[test]

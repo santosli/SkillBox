@@ -21,6 +21,11 @@ version tags such as `v0.3.0`.
 - Harden recovery with identity-bound quarantine restores, atomic generated-file
   handling, bounded Git preflight, an explicit transport allowlist, and
   structured partial-success warnings when only lock cleanup is contested.
+- Reject FIFO, special, oversized, or changing recovery entries; restore the Git
+  index through private no-follow files and release index locks without opening
+  a third-party lock window.
+- Keep partial-success warnings visible in Settings and parse Git worktree-config
+  booleans through Git's complete boolean semantics before network access.
 - Add matching Rust CLI, Tauri, and desktop review surfaces while preserving the
   existing outbound commit-and-push behavior.
 

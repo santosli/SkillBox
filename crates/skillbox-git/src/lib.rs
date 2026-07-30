@@ -1595,10 +1595,7 @@ impl GitService {
     ) -> Result<(), String> {
         let local = self.read_repository_config_scope(repo, "--local", deadline)?;
         let mut entries = local.clone();
-        if local.iter().any(|(key, value)| {
-            key.eq_ignore_ascii_case("extensions.worktreeconfig")
-                && value.eq_ignore_ascii_case("true")
-        }) {
+        if self.repository_worktree_config_enabled(repo, deadline)? {
             entries.extend(self.read_repository_config_scope(repo, "--worktree", deadline)?);
         }
         let mut rejected = entries
@@ -1615,6 +1612,44 @@ impl GitService {
             "Repository Git config contains unsupported network override(s): {}. Remove them before retrying.",
             rejected.join(", ")
         ))
+    }
+
+    fn repository_worktree_config_enabled(
+        &self,
+        repo: &Path,
+        deadline: Instant,
+    ) -> Result<bool, String> {
+        let mut command = Command::new("git");
+        command
+            .arg("-C")
+            .arg(repo)
+            .args([
+                "config",
+                "--local",
+                "--type=bool",
+                "--get",
+                "extensions.worktreeConfig",
+            ])
+            .env("LC_ALL", "C");
+        let output = self.command_output_with_timeout(
+            command,
+            remaining_git_deadline(deadline)?,
+            "git worktree config flag",
+        )?;
+        if output.status.success() {
+            return match String::from_utf8_lossy(&output.stdout).trim() {
+                "true" => Ok(true),
+                "false" => Ok(false),
+                _ => Err(
+                    "Repository Git config has an invalid extensions.worktreeConfig value."
+                        .to_string(),
+                ),
+            };
+        }
+        if output.status.code() == Some(1) {
+            return Ok(false);
+        }
+        Err("Repository Git config has an invalid extensions.worktreeConfig value.".to_string())
     }
 
     fn read_repository_config_scope(
@@ -3089,6 +3124,77 @@ mod tests {
                 .unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn network_preflight_uses_complete_git_boolean_semantics_for_worktree_config() {
+        for value in ["true", "yes", "on", "1", "implicit"] {
+            let git = GitService::new();
+            let repo = temp_dir(&format!("git-worktree-bool-enabled-{value}"));
+            git.init_main(&repo).unwrap();
+            git.set_origin_url(&repo, "https://github.com/acme/repo.git")
+                .unwrap();
+            if value == "implicit" {
+                use std::io::Write;
+                let mut config = fs::OpenOptions::new()
+                    .append(true)
+                    .open(repo.join(".git/config"))
+                    .unwrap();
+                writeln!(config, "[extensions]\n\tworktreeConfig").unwrap();
+            } else {
+                run_git(&repo, &["config", "extensions.worktreeConfig", value]).unwrap();
+            }
+            let marker = repo.join("worktree-helper-invoked");
+            run_git(
+                &repo,
+                &[
+                    "config",
+                    "--worktree",
+                    "credential.helper",
+                    &format!("!sh -c 'printf invoked > \"{}\"'", marker.display()),
+                ],
+            )
+            .unwrap();
+
+            let error = git.fetch_origin_main(&repo).unwrap_err();
+            assert!(error.contains("credential.helper"), "{value}: {error}");
+            assert!(!marker.exists(), "{value}: helper executed");
+            assert_eq!(
+                git.rev_parse_optional(&repo, "refs/remotes/origin/main")
+                    .unwrap(),
+                None
+            );
+        }
+
+        for value in ["false", "no", "off", "0"] {
+            let git = GitService::new();
+            let repo = temp_dir(&format!("git-worktree-bool-disabled-{value}"));
+            let remote = bare_remote_with_skill(&format!("git-worktree-bool-remote-{value}"));
+            git.init_main(&repo).unwrap();
+            git.set_origin_url(&repo, remote.to_str().unwrap()).unwrap();
+            run_git(&repo, &["config", "extensions.worktreeConfig", value]).unwrap();
+            fs::write(
+                repo.join(".git/config.worktree"),
+                "[credential]\n\thelper = !false\n",
+            )
+            .unwrap();
+
+            git.fetch_origin_main(&repo).unwrap();
+            assert!(git
+                .rev_parse_optional(&repo, "refs/remotes/origin/main")
+                .unwrap()
+                .is_some());
+        }
+
+        let git = GitService::new();
+        let repo = temp_dir("git-worktree-bool-invalid");
+        git.init_main(&repo).unwrap();
+        git.set_origin_url(&repo, "https://github.com/acme/repo.git")
+            .unwrap();
+        run_git(&repo, &["config", "extensions.worktreeConfig", "sometimes"]).unwrap();
+        let error = git.fetch_origin_main(&repo).unwrap_err();
+        assert!(error.contains("inspect repository Git"), "{error}");
+        assert!(!repo.join(".git/refs/remotes/origin/main").exists());
     }
 
     #[test]

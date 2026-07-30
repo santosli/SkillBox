@@ -1666,6 +1666,102 @@ fn mutation_lock_expands_tilde_before_locking_across_working_directories() {
 }
 
 #[test]
+fn mutation_lock_canonicalizes_symlink_parent_before_legacy_root_selection() {
+    const ROLE: &str = "SKILLBOX_SYMLINK_PARENT_LOCK_ROLE";
+    const MANAGED_ROOT: &str = "SKILLBOX_SYMLINK_PARENT_MANAGED_ROOT";
+    const READY: &str = "SKILLBOX_SYMLINK_PARENT_LOCK_READY";
+    const RELEASE: &str = "SKILLBOX_SYMLINK_PARENT_LOCK_RELEASE";
+    if let Some(role) = std::env::var_os(ROLE) {
+        let root = PathBuf::from(std::env::var_os(MANAGED_ROOT).unwrap());
+        match acquire_user_skills_mutation_lock(&root) {
+            Ok(_lock) if role == "holder" => {
+                fs::write(std::env::var_os(READY).unwrap(), b"ready").unwrap();
+                let release = PathBuf::from(std::env::var_os(RELEASE).unwrap());
+                while !release.exists() {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+            Err(error) if role == "contender" => {
+                assert!(error.contains("Another user-skills mutation"), "{error}");
+            }
+            Ok(_) => panic!("contender unexpectedly acquired the legacy mutation lock"),
+            Err(error) => panic!("lock holder failed unexpectedly: {error}"),
+        }
+        return;
+    }
+
+    let root = temp_dir("symlink-parent-lock");
+    let home = root.join("home");
+    let home_alias = root.join("home-link");
+    fs::create_dir_all(&home).unwrap();
+    std::os::unix::fs::symlink(&home, &home_alias).unwrap();
+    let legacy_root = home.join("SkillBox");
+    make_skill(
+        &legacy_root.join("user-skills/legacy-demo"),
+        "legacy-demo",
+        "Legacy demo",
+    );
+    let barrier = temp_dir("symlink-parent-lock-barrier");
+    let ready = barrier.join("ready");
+    let release = barrier.join("release");
+    let holder_cwd = temp_dir("symlink-parent-holder-cwd");
+    let contender_cwd = temp_dir("symlink-parent-contender-cwd");
+    let executable = std::env::current_exe().unwrap();
+    let mut holder = Command::new(&executable)
+        .args([
+            "--exact",
+            "tests::mutation_lock_canonicalizes_symlink_parent_before_legacy_root_selection",
+            "--nocapture",
+        ])
+        .current_dir(&holder_cwd)
+        .env("HOME", &home)
+        .env("SKILLBOX_HOME", home_alias.join(".skillbox"))
+        .env(ROLE, "holder")
+        .env(MANAGED_ROOT, home_alias.join(".skillbox"))
+        .env(READY, &ready)
+        .env(RELEASE, &release)
+        .spawn()
+        .unwrap();
+    while !ready.exists() {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let contender = Command::new(&executable)
+        .args([
+            "--exact",
+            "tests::mutation_lock_canonicalizes_symlink_parent_before_legacy_root_selection",
+            "--nocapture",
+        ])
+        .current_dir(&contender_cwd)
+        .env("HOME", &home)
+        .env_remove("SKILLBOX_HOME")
+        .env(ROLE, "contender")
+        .env(MANAGED_ROOT, &legacy_root)
+        .env(READY, &ready)
+        .env(RELEASE, &release)
+        .output()
+        .unwrap();
+    assert!(
+        contender.status.success(),
+        "{}",
+        String::from_utf8_lossy(&contender.stderr)
+    );
+    fs::write(&release, b"release").unwrap();
+    assert!(holder.wait().unwrap().success());
+    let hidden_root = home.join(".skillbox");
+    assert!(fs::symlink_metadata(&hidden_root)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(
+        fs::canonicalize(home_alias.join(".skillbox")).unwrap(),
+        fs::canonicalize(&legacy_root).unwrap()
+    );
+    assert!(legacy_root.join(".user-skills-mutation.lock").is_file());
+    assert!(!holder_cwd.join("home-link/.skillbox").exists());
+    assert!(!contender_cwd.join("home-link/.skillbox").exists());
+}
+
+#[test]
 fn list_workspaces_initializes_empty_registry() {
     let managed_root = temp_dir("workspace-empty").join("SkillBox");
 

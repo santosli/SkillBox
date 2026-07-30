@@ -214,10 +214,48 @@ pub(crate) fn ensure_default_user_skills_gitignore(user_skills_root: &Path) -> R
 pub(crate) fn maybe_link_legacy_default_managed_root(root: &Path) -> Result<()> {
     let root = normalize_lexical_path(&expand_home(root.to_path_buf()));
     let default_root = normalize_lexical_path(&default_hidden_managed_root());
-    if root != default_root {
+    let root_identity = canonicalize_existing_parent_identity(&root)?;
+    let default_identity = canonicalize_existing_parent_identity(&default_root)?;
+    if root_identity != default_identity {
         return Ok(());
     }
-    link_legacy_managed_root_if_needed(&root, &legacy_managed_root()).map(|_| ())
+    link_legacy_managed_root_if_needed(&default_identity, &legacy_managed_root()).map(|_| ())
+}
+
+fn canonicalize_existing_parent_identity(path: &Path) -> Result<PathBuf> {
+    let mut current = path;
+    let mut missing = Vec::new();
+    loop {
+        match fs::canonicalize(current) {
+            Ok(mut canonical) => {
+                for component in missing.iter().rev() {
+                    canonical.push(component);
+                }
+                return Ok(normalize_lexical_path(&canonical));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let component = current.file_name().ok_or_else(|| {
+                    format!(
+                        "Unable to resolve managed root identity for {}.",
+                        path.display()
+                    )
+                })?;
+                missing.push(component.to_os_string());
+                current = current.parent().ok_or_else(|| {
+                    format!(
+                        "Unable to resolve managed root identity for {}.",
+                        path.display()
+                    )
+                })?;
+            }
+            Err(error) => {
+                return Err(format!(
+                    "Unable to resolve managed root identity for {}: {error}",
+                    path.display()
+                ))
+            }
+        }
+    }
 }
 
 pub(crate) fn link_legacy_managed_root_if_needed(

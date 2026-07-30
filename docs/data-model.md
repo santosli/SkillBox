@@ -96,9 +96,10 @@ rows、workspace registry、usage history 和 operation history 不属于该 reb
   fd-relative no-replace rename 保存到 `.git/skillbox/inbound-worktree-backups/`；
   recovery snapshot 的每级 parent 通过 no-follow directory handle 打开，receipt
   绑定每个 backup entry 的 device/inode/size/hash，restore 与 cleanup 使用原子
-  quarantine-then-verify；路径或 entry 在验证后被替换也不能把 backup/restore 重定向到
-  repo 外或误报恢复成功；snapshot 与 backup ref 一起保留，不进入 runtime 或 skill
-  index；
+  quarantine-then-verify；backup read 只接受 bounded、nonblocking、nofollow regular
+  file，拒绝 FIFO、special file、oversize 和读取期间增长。路径或 entry 在验证后被
+  替换也不能把 backup/restore 重定向到 repo 外或误报恢复成功；snapshot 与 backup ref
+  一起保留，不进入 runtime 或 skill index；
 - user-skills Git、managed skill mutation 与 deploy/undeploy 共享 mutation lock；
 - 文件写入、ref 更新或 reindex 失败时，core 只在 HEAD 与操作写集仍匹配预期状态时
   补偿；发现外部 mutation 时拒绝覆盖恢复；
@@ -111,7 +112,9 @@ rows、workspace registry、usage history 和 operation history 不属于该 reb
 - compensation 失败会作为 actionable error/operation result 暴露，不能静默忽略；
 - apply 主状态已成功但 index-lock ownership cleanup 异常时，result/operation 记录
   `completed_with_warnings`，保留外部 replacement lock，不把已完成的 Git/SQLite
-  状态错误标记为 rolled back；
+  状态错误标记为 rolled back；Settings workflow 持续显示 warning。index restore
+  temporary 使用 `.git` dirfd 下不可预测的 create-new/no-follow regular file，
+  index-lock release 使用 atomic exchange，ownership check 期间不留下 lock 空窗；
 - failure operation payload 保存 old/new SHA、backup ref、mutation phase 和
   compensation outcome；不保存 credentials、diff content 或 skill body。
 

@@ -558,8 +558,10 @@ Apply fast-forward:
   文件在替换或删除前以 fd-relative no-replace rename 移入 `.git/skillbox/` 内的
   operation-scoped recovery snapshot。snapshot parent chain 通过 no-follow directory
   handle 逐级打开；receipt 绑定 backup entry 的 device/inode/size/content hash，
-  restore/cleanup 先将 pathname 原子移入私有 quarantine 再核验身份。预置或并发换入的
-  symlink、非目录或 replacement entry 不能重定向恢复写入，也不能被误当成已恢复。
+  backup 只以 `NOFOLLOW|NONBLOCK` 打开受限大小的真实 regular file，并拒绝 FIFO、
+  special file、oversize 或读取期间增长的 entry；restore/cleanup 先将 pathname 原子
+  移入私有 quarantine 再核验身份。预置或并发换入的 symlink、非目录或 replacement
+  entry 不能重定向恢复写入，也不能被误当成已恢复。
   写入、ref 推进前后都会复核受审内容；检测到外部编辑时恢复或保留双方内容并要求人工
   处理，不静默覆盖。
 - Incoming add/rename/type-change 如果与本地 ignored 或 untracked path 发生 exact、
@@ -582,7 +584,10 @@ Apply fast-forward:
   和 lock cleanup；单项失败不会跳过其它恢复。若 Git/worktree/SQLite 已成功，但
   `.git/index.lock` 的 pathname 已被外部替换，apply 返回 succeeded result 加
   actionable warning，operation phase 记录 `completed_with_warnings`，不会伪装成普通
-  failed apply 或删除 replacement lock。
+  failed apply 或删除 replacement lock；Settings 的当前 Git workflow 会持续显示该
+  warning，直到用户 dismiss。index restore 使用 `.git` dirfd 下不可预测、
+  create-new/no-follow 的 private regular file；index-lock release 通过 atomic
+  exchange 保持 pathname 全程占位，ownership mismatch 时原子换回外部 lock。
 - Operation log 记录 aggregate old/new refs、backup ref、mutation phase 与
   compensation outcome，不记录 credentials、diff contents 或 skill bodies。
   Remote identity 必须去除 URL userinfo、query 和 fragment。
@@ -592,7 +597,9 @@ Apply fast-forward:
   helper 与 `ext` transport 均 fail closed。所有 origin/config/fetch preflight 共用
   bounded deadline 和 isolated process-group termination；按原顺序恢复用户
   global generic/URL-scoped credential helpers（包括 GitHub CLI blank reset）与
-  `core.sshCommand`。repo-local executable config 不得在 reviewed flow 中执行；global
+  `core.sshCommand`。`extensions.worktreeConfig` 通过 bounded Git boolean parser
+  识别 `true/yes/on/1` 与 implicit true；非法值 fail closed。repo-local executable
+  config 不得在 reviewed flow 中执行；global
   Git config 是用户受信任边界。helper/server stderr 只映射为有界分类错误，不直接进入
   UI、日志或 operation payload。
 

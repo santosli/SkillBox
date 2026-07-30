@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import test from 'node:test';
 import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
+import { createServer } from 'vite';
 import {
   beginReviewDialogFocus,
   canApplyUserSkillsInbound,
@@ -17,6 +18,7 @@ import {
   isReviewDialogFocusTarget,
   normalizeUserSkillsInboundPreview,
   normalizeUserSkillsInboundStatus,
+  normalizeUserSkillsInboundWarnings,
   runInboundReviewRequest,
   useInboundReviewRequestController
 } from './userSkillsInbound.js';
@@ -34,6 +36,11 @@ const dialogSource = fs.readFileSync(
   new URL('./components/userSkillsInbound.jsx', import.meta.url),
   'utf8'
 );
+
+function renderedText(node) {
+  if (typeof node === 'string') return node;
+  return (node.children || []).map(renderedText).join('');
+}
 
 test('normalizes inbound status and keeps worktree state separate from relation', () => {
   const status = normalizeUserSkillsInboundStatus({
@@ -157,8 +164,113 @@ test('inbound apply passes only structured preview authorization and keeps dirty
   assert.match(dialogSource, /Bootstrap safe/);
   assert.match(dialogSource, /Apply fast-forward/);
   assert.match(dialogSource, /aria-label="Incoming file diff"/);
-  assert.match(appSource, /const warnings = result\.warnings \|\| \[\]/);
+  assert.match(appSource, /const warnings = normalizeUserSkillsInboundWarnings\(result\.warnings\)/);
+  assert.match(appSource, /setUserSkillsInboundWarnings\(warnings\)/);
   assert.match(appSource, /warnings\.join\(' '\)/);
+});
+
+test('App keeps partial-success warnings visible in the real Settings workflow until dismissed', async () => {
+  assert.deepEqual(
+    normalizeUserSkillsInboundWarnings([' Deployment refresh was skipped. ', '', null]),
+    ['Deployment refresh was skipped.']
+  );
+  assert.match(
+    appSource,
+    /setInboundReviewDialog\(\(current\) => \(\{ \.\.\.current, open: false, applying: false \}\)\);[\s\S]*setUserSkillsInboundWarnings\(warnings\)/
+  );
+  assert.match(appSource, /userSkillsInboundWarnings=\{userSkillsInboundWarnings\}/);
+  assert.match(
+    appSource,
+    /onDismissUserSkillsInboundWarnings=\{\(\) => setUserSkillsInboundWarnings\(\[\]\)\}/
+  );
+
+  const vite = await createServer({
+    appType: 'custom',
+    root: new URL('..', import.meta.url).pathname,
+    server: { middlewareMode: true }
+  });
+
+  try {
+    const { SettingsPage } = await vite.ssrLoadModule('/src/components/settings.jsx');
+    const noop = () => {};
+
+    function Harness() {
+      const [warnings, setWarnings] = React.useState([
+        'Deployment refresh was skipped for Codex.'
+      ]);
+      const [status, setStatus] = React.useState('ready');
+
+      return React.createElement(
+        React.Fragment,
+        null,
+        React.createElement(SettingsPage, {
+          appUpdate: { state: 'idle' },
+          appUpdateInstallBlocked: false,
+          doctorReport: {},
+          paths: {},
+          preferences: {
+            remoteUpdateTimeoutSeconds: 30,
+            statusRefreshIntervalMinutes: 5
+          },
+          status,
+          usageHooks: [],
+          userSkillsInbound: normalizeUserSkillsInboundStatus({
+            relation: 'synced',
+            worktree_state: 'clean'
+          }),
+          userSkillsInboundWarnings: warnings,
+          userSkillsGit: {
+            branch: 'main',
+            remoteUrl: 'git@example.com:user/skills.git',
+            repoPath: '/tmp/user-skills'
+          },
+          onCheckAppUpdate: noop,
+          onCheckUserSkillsInbound: noop,
+          onDismissUserSkillsInboundWarnings: () => setWarnings([]),
+          onInstallAppUpdate: noop,
+          onInstallUsageHook: noop,
+          onOpenUsageHookConfig: noop,
+          onRefreshUsageHooks: noop,
+          onRepairStaleDeployments: noop,
+          onReviewUserSkillsInbound: noop,
+          onRunDoctor: noop,
+          onSaveRemoteUpdateTimeout: noop,
+          onSaveStatusRefreshInterval: noop,
+          onSaveUserSkillsRemote: noop
+        }),
+        React.createElement(
+          'button',
+          { onClick: () => setStatus('checking_inbound'), type: 'button' },
+          'Rerender Settings'
+        )
+      );
+    }
+
+    let renderer;
+    await act(async () => {
+      renderer = TestRenderer.create(React.createElement(Harness));
+    });
+
+    let alert = renderer.root.findByProps({ role: 'alert' });
+    assert.equal(alert.props['aria-live'], 'assertive');
+    assert.match(renderedText(alert), /Deployment refresh was skipped for Codex/);
+
+    await act(async () => {
+      renderer.root.findByProps({ children: 'Rerender Settings' }).props.onClick();
+    });
+    alert = renderer.root.findByProps({ role: 'alert' });
+    assert.match(renderedText(alert), /Deployment refresh was skipped for Codex/);
+
+    await act(async () => {
+      renderer.root
+        .findByProps({ 'aria-label': 'Dismiss incoming changes warnings' })
+        .props.onClick();
+    });
+    assert.equal(renderer.root.findAllByProps({ role: 'alert' }).length, 0);
+    renderer.unmount();
+  } finally {
+    await vite.close();
+  }
 });
 
 test('diverged review provides only external resolution actions', () => {

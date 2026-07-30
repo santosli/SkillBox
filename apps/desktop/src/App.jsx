@@ -139,6 +139,7 @@ import {
   invalidateUserSkillsInboundPreview,
   normalizeUserSkillsInboundPreview,
   normalizeUserSkillsInboundStatus,
+  normalizeUserSkillsInboundWarnings,
   useInboundReviewRequestController
 } from './userSkillsInbound.js';
 import {
@@ -317,6 +318,7 @@ export default function App() {
   });
   const [userSkillsGit, setUserSkillsGit] = useState(normalizeUserSkillsGitStatus(null));
   const [userSkillsInbound, setUserSkillsInbound] = useState(null);
+  const [userSkillsInboundWarnings, setUserSkillsInboundWarnings] = useState([]);
   const [usageHooks, setUsageHooks] = useState(normalizeUsageHookStatuses(null));
   const [doctorReport, setDoctorReport] = useState(normalizeDoctorReport(null));
   const [remoteSkillUpdates, setRemoteSkillUpdates] = useState(normalizeRemoteSkillUpdates(null));
@@ -1729,6 +1731,7 @@ export default function App() {
     if (!previewId || !inboundReviewDialog.preview?.canApply) return;
 
     setStatus('applying_inbound');
+    setUserSkillsInboundWarnings([]);
     setInboundReviewDialog((current) => ({ ...current, applying: true, error: '' }));
 
     if (!window.__TAURI_INTERNALS__) {
@@ -1772,7 +1775,8 @@ export default function App() {
       );
       setInboundReviewDialog((current) => ({ ...current, open: false, applying: false }));
       const changedCount = result.changed_skill_count ?? result.changedSkillCount ?? 0;
-      const warnings = result.warnings || [];
+      const warnings = normalizeUserSkillsInboundWarnings(result.warnings);
+      setUserSkillsInboundWarnings(warnings);
       setNotice(
         warnings.length
           ? `Applied ${changedCount} incoming skill change${changedCount === 1 ? '' : 's'} by fast-forward. ${warnings.join(' ')}`
@@ -3917,9 +3921,11 @@ export default function App() {
             preferences={preferences}
             status={status}
             usageHooks={usageHooks}
+            userSkillsInboundWarnings={userSkillsInboundWarnings}
             userSkillsInbound={userSkillsInbound}
             userSkillsGit={userSkillsGit}
             onCheckUserSkillsInbound={checkUserSkillsInbound}
+            onDismissUserSkillsInboundWarnings={() => setUserSkillsInboundWarnings([])}
             onCheckAppUpdate={() => checkAppUpdate()}
             onRunDoctor={runHealthCheck}
             onRepairStaleDeployments={repairStaleDeploymentRecords}
