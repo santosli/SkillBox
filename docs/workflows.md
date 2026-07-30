@@ -556,16 +556,17 @@ Apply fast-forward:
   last-write-wins 和 conflict-marker editing。
 - Apply 持有 `.git/index.lock`，使并发 `git add` / `git commit` fail closed；tracked
   文件在替换或删除前以 no-replace rename 移入 `.git/skillbox/` 内的 operation-scoped
-  recovery snapshot。写入、ref 推进前后都会复核受审内容；检测到外部编辑时恢复或保留
-  双方内容并要求人工处理，不静默覆盖。
+  recovery snapshot。snapshot parent chain 必须逐级是 canonical `.git` 内的真实目录；
+  预置 symlink/非目录会在 worktree mutation 前 blocked。写入、ref 推进前后都会复核
+  受审内容；检测到外部编辑时恢复或保留双方内容并要求人工处理，不静默覆盖。
 - Incoming add/rename/type-change 如果与本地 ignored 或 untracked path 发生 exact、
   ancestor 或 descendant 碰撞，Apply 必须在 mutation 前 blocked。普通
   `git status` 未显示 ignored 内容不等于可覆盖。
 - Inbound apply、outbound user-skills Git、deploy/undeploy 与其它 managed user-skill
   写操作共用 mutation lock；Save remote 与 inbound action 在 UI 也互斥。Apply 失败
   后旧 preview authorization 立即失效，必须 Refresh 并重新 review。
-- 通用 managed-layout 初始化在 user-skills mutation lock 活跃期间不得补写 Git ignore
-  defaults；显式 Git 初始化在持锁路径内完成该设置，避免与 remote-only bootstrap 竞争。
+- 通用 managed-layout/read 初始化不补写 Git ignore defaults；显式 Git 配置/同步在
+  持 mutation lock 的路径内完成该设置，避免与 remote-only bootstrap 竞争。
 - Git 成功后，Rust core transactionally reconcile SQLite 中全部 user-skill index
   rows，使其对应新的 repository snapshot。若 reindex 失败，必须补偿恢复旧 HEAD，
   保留 backup ref 并返回失败；补偿只在 HEAD 仍等于 expected applied SHA 且操作写集
@@ -574,6 +575,9 @@ Apply fast-forward:
 - Operation log 记录 aggregate old/new refs、backup ref、mutation phase 与
   compensation outcome，不记录 credentials、diff contents 或 skill bodies。
   Remote identity 必须去除 URL userinfo、query 和 fragment。
+- Network fetch/push 清空 repository-local credential helper 和 transport command
+  override，禁止 `ext` protocol，并只恢复用户 global credential helpers；repo-local
+  shell helper、SSH command 或 upload-pack 不得在 reviewed flow 中执行。
 
 分叉处理：
 

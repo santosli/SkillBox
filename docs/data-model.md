@@ -94,12 +94,15 @@ rows、workspace registry、usage history 和 operation history 不属于该 reb
   `main`；仓库 hook、filter、textconv、external diff 和 merge driver 不参与；
 - apply 持有 `.git/index.lock`，并在替换/删除 tracked 文件前把旧 worktree 内容以
   no-replace rename 保存到 `.git/skillbox/inbound-worktree-backups/`；该 recovery
-  snapshot 与 backup ref 一起保留，不进入 runtime 或 skill index；
+  snapshot 的每级 parent 必须是 canonical `.git` 内的真实目录，symlink/非目录立即
+  blocked；snapshot 与 backup ref 一起保留，不进入 runtime 或 skill index；
 - user-skills Git、managed skill mutation 与 deploy/undeploy 共享 mutation lock；
 - 文件写入、ref 更新或 reindex 失败时，core 只在 HEAD 与操作写集仍匹配预期状态时
   补偿；发现外部 mutation 时拒绝覆盖恢复；
 - remote-only 补偿删除本次写入并清空 index，恢复原有 generated `.gitignore`
   setup state，使 preview/apply 可以安全重试；
+- generated `.gitignore` 只由持有 mutation lock 的显式 Git 配置/同步流程写入；
+  通用 managed-layout/read 初始化不修改 Git worktree；
 - internal backup ref 保留，便于人工 recovery；
 - compensation 失败会作为 actionable error/operation result 暴露，不能静默忽略；
 - failure operation payload 保存 old/new SHA、backup ref、mutation phase 和

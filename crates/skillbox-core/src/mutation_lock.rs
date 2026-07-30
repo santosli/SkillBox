@@ -24,45 +24,27 @@ impl Drop for UserSkillsMutationLock {
 pub(crate) fn acquire_user_skills_mutation_lock(
     managed_root: &Path,
 ) -> Result<UserSkillsMutationLock> {
+    // Resolve the legacy default root before creating any marker in ~/.skillbox.
+    // Otherwise the lock file itself makes an empty migration stub look owned.
+    maybe_link_legacy_default_managed_root(managed_root)?;
     fs::create_dir_all(managed_root).map_err(|error| error.to_string())?;
+    let root = fs::canonicalize(managed_root).unwrap_or_else(|_| managed_root.to_path_buf());
     let lock = OpenOptions::new()
         .create(true)
         .read(true)
         .write(true)
         .truncate(false)
-        .open(managed_root.join(USER_SKILLS_MUTATION_LOCK))
+        .open(root.join(USER_SKILLS_MUTATION_LOCK))
         .map_err(|error| format!("Unable to open user-skills mutation lock: {error}"))?;
     lock.try_lock_exclusive().map_err(|_| {
         "Another user-skills mutation is already running. Wait for it to finish and retry."
             .to_string()
     })?;
-    let root = managed_root.to_path_buf();
     active_user_skills_mutations()
         .lock()
         .map_err(|_| "User-skills mutation lock state is unavailable.".to_string())?
         .insert(root.clone());
     Ok(UserSkillsMutationLock { file: lock, root })
-}
-
-pub(crate) fn user_skills_mutation_active(managed_root: &Path) -> bool {
-    if active_user_skills_mutations()
-        .lock()
-        .map(|active| active.contains(managed_root))
-        .unwrap_or(true)
-    {
-        return true;
-    }
-    let lock_path = managed_root.join(USER_SKILLS_MUTATION_LOCK);
-    let Ok(lock) = OpenOptions::new().read(true).write(true).open(lock_path) else {
-        return false;
-    };
-    match lock.try_lock_shared() {
-        Ok(()) => {
-            let _ = FileExt::unlock(&lock);
-            false
-        }
-        Err(_) => true,
-    }
 }
 
 fn active_user_skills_mutations() -> &'static Mutex<HashSet<PathBuf>> {

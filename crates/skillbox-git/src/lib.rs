@@ -1306,18 +1306,33 @@ impl GitService {
         timeout: Duration,
         label: &str,
     ) -> Result<Output, String> {
+        let trusted_credential_helpers = trusted_global_credential_helpers();
         let mut command = Command::new("git");
         command
             .arg("-c")
             .arg("core.hooksPath=/dev/null")
             .arg("-c")
+            .arg("credential.helper=")
+            .arg("-c")
             .arg("credential.interactive=false")
+            .arg("-c")
+            .arg("core.sshCommand=ssh")
+            .arg("-c")
+            .arg("remote.origin.uploadpack=git-upload-pack")
+            .arg("-c")
+            .arg("protocol.ext.allow=never");
+        for helper in trusted_credential_helpers {
+            command.arg("-c").arg(format!("credential.helper={helper}"));
+        }
+        command
             .arg("-C")
             .arg(repo)
             .args(args)
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("GIT_ASKPASS", "true")
             .env("GCM_INTERACTIVE", "never")
+            .env_remove("GIT_SSH")
+            .env_remove("GIT_SSH_COMMAND")
             .env("LC_ALL", "C");
         self.command_output_with_timeout(command, timeout, label)
     }
@@ -1561,6 +1576,25 @@ impl GitService {
             std::thread::sleep(Duration::from_millis(20));
         }
     }
+}
+
+fn trusted_global_credential_helpers() -> Vec<String> {
+    let output = Command::new("git")
+        .args(["config", "--global", "--get-all", "credential.helper"])
+        .env("LC_ALL", "C")
+        .output();
+    let Ok(output) = output else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 fn read_command_output_file(file: &mut fs::File) -> Result<Vec<u8>, String> {
@@ -2101,6 +2135,8 @@ fn strip_root_prefix(value: &str, root: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write as _;
+    use std::net::TcpListener;
     use std::path::PathBuf;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -2454,6 +2490,44 @@ mod tests {
             git.rev_parse_optional(&repo, "refs/remotes/origin/main")
                 .unwrap(),
             None
+        );
+    }
+
+    #[test]
+    fn network_fetch_does_not_execute_repository_credential_helper() {
+        let git = GitService::new();
+        let repo = temp_dir("git-network-credential-helper");
+        git.init_main(&repo).unwrap();
+        let marker = repo.join("credential-helper-invoked");
+        let helper = format!(
+            "!sh -c 'printf invoked > \"{}\"; printf \"username=x\\npassword=y\\n\"'",
+            marker.display()
+        );
+        run_git(&repo, &["config", "credential.helper", &helper]).unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request);
+            stream
+                .write_all(
+                    b"HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"test\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .unwrap();
+        });
+        git.set_origin_url(&repo, &format!("http://{address}/repo.git"))
+            .unwrap();
+
+        let error = git
+            .fetch_origin_main_with_timeout(&repo, Duration::from_secs(5))
+            .unwrap_err();
+        server.join().unwrap();
+        assert!(!error.is_empty());
+        assert!(
+            !marker.exists(),
+            "network fetch executed a repository-local credential helper"
         );
     }
 

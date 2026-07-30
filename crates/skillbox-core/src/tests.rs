@@ -2,6 +2,7 @@ use super::*;
 use rusqlite::OptionalExtension;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
+use std::process::Command;
 use std::sync::{Arc, Barrier};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1382,10 +1383,11 @@ fn default_managed_root_uses_hidden_skillbox_directory() {
 }
 
 #[test]
-fn ensure_managed_layout_writes_default_user_skills_gitignore() {
+fn explicit_git_setup_writes_default_user_skills_gitignore() {
     let managed_root = temp_dir("managed-layout-gitignore").join("SkillBox");
 
     let paths = ensure_managed_layout(&managed_root).unwrap();
+    ensure_default_user_skills_gitignore(&paths.user_skills_root).unwrap();
     let gitignore = fs::read_to_string(paths.user_skills_root.join(".gitignore")).unwrap();
 
     assert!(gitignore.contains(".DS_Store"));
@@ -1397,21 +1399,37 @@ fn ensure_managed_layout_writes_default_user_skills_gitignore() {
 }
 
 #[test]
-fn ensure_managed_layout_does_not_write_git_defaults_during_user_skills_mutation() {
+fn managed_layout_never_writes_git_defaults() {
     let managed_root = temp_dir("managed-layout-mutation-lock");
     let paths = managed_paths(&managed_root);
     fs::create_dir_all(&paths.user_skills_root).unwrap();
-    let mutation = acquire_user_skills_mutation_lock(&managed_root).unwrap();
 
     ensure_managed_layout(&managed_root).unwrap();
     assert!(!paths.user_skills_root.join(".gitignore").exists());
+}
 
-    drop(mutation);
+#[test]
+fn managed_layout_read_does_not_race_git_defaults_during_mutation() {
+    let managed_root = temp_dir("managed-layout-read-barrier");
+    let paths = managed_paths(&managed_root);
+    fs::create_dir_all(&paths.user_skills_root).unwrap();
+    let entered = Arc::new(Barrier::new(2));
+    let release = Arc::new(Barrier::new(2));
+    let worker_root = managed_root.clone();
+    let worker_entered = entered.clone();
+    let worker_release = release.clone();
+    let worker = std::thread::spawn(move || {
+        let _lock = acquire_user_skills_mutation_lock(&worker_root).unwrap();
+        worker_entered.wait();
+        worker_release.wait();
+    });
+
+    entered.wait();
     ensure_managed_layout(&managed_root).unwrap();
-    assert_eq!(
-        fs::read_to_string(paths.user_skills_root.join(".gitignore")).unwrap(),
-        DEFAULT_USER_SKILLS_GITIGNORE
-    );
+    assert!(!paths.user_skills_root.join(".gitignore").exists());
+    assert!(!paths.user_skills_root.join(".git/info/exclude").exists());
+    release.wait();
+    worker.join().unwrap();
 }
 
 #[test]
@@ -1422,6 +1440,7 @@ fn ensure_managed_layout_preserves_existing_user_skills_gitignore() {
     fs::write(user_skills_root.join(".gitignore"), "custom-ignore\n").unwrap();
 
     let paths = ensure_managed_layout(&managed_root).unwrap();
+    ensure_default_user_skills_gitignore(&paths.user_skills_root).unwrap();
     let gitignore = fs::read_to_string(paths.user_skills_root.join(".gitignore")).unwrap();
 
     assert_eq!(gitignore, "custom-ignore\n");
@@ -1432,6 +1451,7 @@ fn ensure_managed_layout_keeps_existing_user_skills_repo_clean() {
     let managed_root = temp_dir("managed-layout-clean-git-repo").join("SkillBox");
     let paths = ensure_managed_layout(&managed_root).unwrap();
     let repo = paths.user_skills_root;
+    ensure_default_user_skills_gitignore(&repo).unwrap();
     skillbox_git::GitService::new().init_main(&repo).unwrap();
     run_git(&repo, &["add", ".gitignore"]);
     run_git(
@@ -1460,7 +1480,7 @@ fn ensure_managed_layout_keeps_existing_user_skills_repo_clean() {
         ],
     );
 
-    ensure_managed_layout(&managed_root).unwrap();
+    ensure_default_user_skills_gitignore(&repo).unwrap();
 
     assert!(!repo.join(".gitignore").exists());
     assert!(fs::read_to_string(repo.join(".git/info/exclude"))
@@ -1496,6 +1516,58 @@ fn legacy_managed_root_is_linked_when_hidden_root_is_empty_stub() {
     assert_eq!(fs::read_link(&hidden_root).unwrap(), legacy_root);
     assert_eq!(state.skills.len(), 1);
     assert_eq!(state.skills[0].name, "demo");
+}
+
+#[test]
+fn mutation_lock_resolves_legacy_only_home_before_creating_lock_file() {
+    const CHILD_HOME: &str = "SKILLBOX_LEGACY_LOCK_TEST_HOME";
+    if let Some(home) = std::env::var_os(CHILD_HOME) {
+        let home = PathBuf::from(home);
+        let hidden_root = home.join(".skillbox");
+        let legacy_root = home.join("SkillBox");
+        let error = check_user_skills_inbound(&hidden_root).unwrap_err();
+        assert!(error.contains("not initialized"));
+        assert!(fs::symlink_metadata(&hidden_root)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            fs::canonicalize(&hidden_root).unwrap(),
+            fs::canonicalize(&legacy_root).unwrap()
+        );
+        assert!(legacy_root.join(".user-skills-mutation.lock").is_file());
+        assert!(!home.join(".skillbox.empty-backup-0").exists());
+        return;
+    }
+
+    let home = temp_dir("legacy-lock-real-home");
+    let legacy_root = home.join("SkillBox");
+    make_skill(
+        &legacy_root.join("user-skills/demo"),
+        "demo",
+        "Legacy-only demo",
+    );
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tests::mutation_lock_resolves_legacy_only_home_before_creating_lock_file",
+            "--nocapture",
+        ])
+        .env("HOME", &home)
+        .env_remove("SKILLBOX_HOME")
+        .env(CHILD_HOME, &home)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(fs::symlink_metadata(home.join(".skillbox"))
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert!(legacy_root.join(".user-skills-mutation.lock").is_file());
 }
 
 #[test]

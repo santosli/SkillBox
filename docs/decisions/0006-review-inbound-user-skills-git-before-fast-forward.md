@@ -62,6 +62,11 @@ and operation-owned paths remain unchanged; it refuses to erase unrelated
 concurrent work. Apply also holds the Git index lock and preserves replaced or
 deleted tracked files in an operation-scoped `.git/skillbox/` recovery snapshot,
 so concurrent staging or worktree edits fail closed instead of being overwritten.
+Recovery directories are created one real directory at a time beneath the
+canonical `.git` directory; a pre-existing symlink or non-directory in that
+chain blocks apply. Network Git clears repository-local credential helpers and
+transport command overrides, then restores only the user's global credential
+helpers, so a remote repository cannot inject authentication shell commands.
 Operation history stores aggregate commit/ref/count,
 mutation-phase, and compensation information, not credentials or diff content.
 Displayed remote identities remove userinfo, query, and fragment secrets.
