@@ -1,9 +1,11 @@
 use std::collections::HashMap;
-use std::fs;
-use std::io::Read;
+use std::fs::{self, OpenOptions};
+use std::io::{Read, Seek, SeekFrom};
+use std::os::unix::fs::PermissionsExt;
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
-use std::thread;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 const DEFAULT_LS_REMOTE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -15,6 +17,7 @@ const MAX_DIFF_BYTES_PER_FILE: usize = 256 * 1024;
 const MAX_TREE_ENTRIES: usize = 20_000;
 const MAX_SHOW_FILE_BYTES: usize = 2 * 1024 * 1024;
 const BACKUP_REF_PREFIX: &str = "refs/skillbox/backups/";
+static COMMAND_OUTPUT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitStatus {
@@ -108,6 +111,173 @@ impl GitService {
             dirty,
             raw_status,
         })
+    }
+
+    pub fn status_hardened(&self, repo: impl AsRef<Path>) -> Result<GitStatus, String> {
+        let repo = repo.as_ref();
+        if !repo.join(".git").exists() {
+            return Ok(GitStatus {
+                initialized: false,
+                branch: String::new(),
+                dirty: false,
+                raw_status: String::new(),
+            });
+        }
+        let branch = self.success_stdout(self.run_hardened_status_output(
+            repo,
+            &["branch", "--show-current"],
+            LOCAL_GIT_TIMEOUT,
+            "git branch",
+        )?)?;
+        let head = self.hardened_head(repo)?;
+        let index_dirty = match head.as_deref() {
+            Some(head) => {
+                let output = self.run_hardened_status_output(
+                    repo,
+                    &[
+                        "diff-index",
+                        "--cached",
+                        "--quiet",
+                        "--no-ext-diff",
+                        "--no-textconv",
+                        head,
+                        "--",
+                    ],
+                    LOCAL_GIT_TIMEOUT,
+                    "git diff-index",
+                )?;
+                if output.status.success() {
+                    false
+                } else if output.status.code() == Some(1) {
+                    true
+                } else {
+                    return Err(sanitize_git_error(
+                        String::from_utf8_lossy(&output.stderr).trim(),
+                    ));
+                }
+            }
+            None => {
+                let output = self.run_hardened_status_output(
+                    repo,
+                    &["ls-files", "-z", "--cached"],
+                    LOCAL_GIT_TIMEOUT,
+                    "git ls-files index",
+                )?;
+                !self.success_stdout_bytes(output)?.is_empty()
+            }
+        };
+        let worktree_dirty = match head.as_deref() {
+            Some(head) => {
+                let mut dirty = false;
+                for entry in self.hardened_tree_entries(repo, head)? {
+                    if !self.worktree_entry_matches(repo, &entry)? {
+                        dirty = true;
+                        break;
+                    }
+                }
+                dirty
+            }
+            None => false,
+        };
+        let untracked = self.untracked_paths(repo)?;
+        let dirty = index_dirty || worktree_dirty || !untracked.is_empty();
+        let mut raw_status = format!("## {}", branch.trim());
+        if index_dirty {
+            raw_status.push_str("\n!! index differs from HEAD");
+        }
+        if worktree_dirty {
+            raw_status.push_str("\n!! worktree differs from HEAD");
+        }
+        for path in untracked {
+            raw_status.push_str("\n?? ");
+            raw_status.push_str(&path);
+        }
+        Ok(GitStatus {
+            initialized: true,
+            branch: branch.trim().to_string(),
+            dirty,
+            raw_status,
+        })
+    }
+
+    fn worktree_entry_matches(&self, repo: &Path, entry: &GitTreeEntry) -> Result<bool, String> {
+        let target = repo.join(&entry.path);
+        let metadata = match fs::symlink_metadata(&target) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error.to_string()),
+        };
+        match entry.mode.as_str() {
+            "100644" | "100755" => {
+                if !metadata.is_file() || metadata.file_type().is_symlink() {
+                    return Ok(false);
+                }
+                let executable = metadata.permissions().mode() & 0o111 != 0;
+                let args = ["hash-object", "--no-filters", "--", entry.path.as_str()];
+                let output = self.run_hardened_status_output(
+                    repo,
+                    &args,
+                    LOCAL_GIT_TIMEOUT,
+                    "git hash-object",
+                )?;
+                let object_id = self.success_stdout(output)?;
+                Ok(object_id.trim() == entry.object_id && executable == (entry.mode == "100755"))
+            }
+            "120000" => {
+                if !metadata.file_type().is_symlink() {
+                    return Ok(false);
+                }
+                let args = ["cat-file", "blob", entry.object_id.as_str()];
+                let expected = self.success_stdout_bytes(self.run_hardened_status_output(
+                    repo,
+                    &args,
+                    LOCAL_GIT_TIMEOUT,
+                    "git cat-file",
+                )?)?;
+                Ok(fs::read_link(target)
+                    .map_err(|error| error.to_string())?
+                    .as_os_str()
+                    .as_encoded_bytes()
+                    == expected)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    fn hardened_head(&self, repo: &Path) -> Result<Option<String>, String> {
+        let output = self.run_hardened_status_output(
+            repo,
+            &[
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                "--end-of-options",
+                "HEAD^{commit}",
+            ],
+            LOCAL_GIT_TIMEOUT,
+            "git rev-parse",
+        )?;
+        if output.status.success() {
+            let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            return Ok((!sha.is_empty()).then_some(sha));
+        }
+        if output.status.code() == Some(1) {
+            return Ok(None);
+        }
+        Err(sanitize_git_error(
+            String::from_utf8_lossy(&output.stderr).trim(),
+        ))
+    }
+
+    fn hardened_tree_entries(
+        &self,
+        repo: &Path,
+        revision: &str,
+    ) -> Result<Vec<GitTreeEntry>, String> {
+        let args = ["ls-tree", "-r", "-z", "--full-tree", "--long", revision];
+        let output =
+            self.run_hardened_status_output(repo, &args, LOCAL_GIT_TIMEOUT, "git ls-tree")?;
+        parse_tree_entries(&self.success_stdout_bytes(output)?)
     }
 
     pub fn init_main(&self, repo: impl AsRef<Path>) -> Result<(), String> {
@@ -441,6 +611,166 @@ impl GitService {
     ) -> Result<(), String> {
         self.create_or_update_backup_ref(repo, backup_ref, target)?;
         Ok(())
+    }
+
+    pub fn update_main_ref_cas(
+        &self,
+        repo: impl AsRef<Path>,
+        new_revision: &str,
+        expected_revision: Option<&str>,
+    ) -> Result<String, String> {
+        let repo = repo.as_ref();
+        self.require_main_symbolic_head(repo)?;
+        let new_revision = self.require_commit(repo, new_revision)?;
+        let expected = match expected_revision {
+            Some(revision) => self.require_commit(repo, revision)?,
+            None => "0000000000000000000000000000000000000000".to_string(),
+        };
+        let args = [
+            "update-ref",
+            "refs/heads/main",
+            new_revision.as_str(),
+            expected.as_str(),
+        ];
+        let output =
+            self.run_output_with_timeout(repo, &args, LOCAL_GIT_TIMEOUT, "git update-ref main")?;
+        self.success_stdout(output)?;
+        Ok(new_revision)
+    }
+
+    pub fn delete_main_ref_cas(
+        &self,
+        repo: impl AsRef<Path>,
+        expected_revision: &str,
+    ) -> Result<(), String> {
+        let repo = repo.as_ref();
+        self.require_main_symbolic_head(repo)?;
+        let expected = self.require_commit(repo, expected_revision)?;
+        let args = ["update-ref", "-d", "refs/heads/main", expected.as_str()];
+        let output = self.run_output_with_timeout(
+            repo,
+            &args,
+            LOCAL_GIT_TIMEOUT,
+            "git update-ref delete main",
+        )?;
+        self.success_stdout(output)?;
+        Ok(())
+    }
+
+    pub fn read_tree(&self, repo: impl AsRef<Path>, revision: &str) -> Result<(), String> {
+        let repo = repo.as_ref();
+        let revision = self.require_commit(repo, revision)?;
+        let args = ["read-tree", revision.as_str()];
+        let output =
+            self.run_output_with_timeout(repo, &args, LOCAL_GIT_TIMEOUT, "git read-tree")?;
+        self.success_stdout(output)?;
+        Ok(())
+    }
+
+    pub fn read_empty_tree(&self, repo: impl AsRef<Path>) -> Result<(), String> {
+        let output = self.run_output_with_timeout(
+            repo.as_ref(),
+            &["read-tree", "--empty"],
+            LOCAL_GIT_TIMEOUT,
+            "git read-tree empty",
+        )?;
+        self.success_stdout(output)?;
+        Ok(())
+    }
+
+    pub fn prepare_index_tree(
+        &self,
+        repo: impl AsRef<Path>,
+        revision: Option<&str>,
+        index_path: &Path,
+    ) -> Result<(), String> {
+        let repo = repo.as_ref();
+        match fs::remove_file(index_path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.to_string()),
+        }
+        let index_path = index_path
+            .to_str()
+            .ok_or_else(|| "Git index path is not valid UTF-8.".to_string())?;
+        let revision = match revision {
+            Some(revision) => Some(self.require_commit(repo, revision)?),
+            None => None,
+        };
+        let args = revision
+            .as_deref()
+            .map(|revision| vec!["read-tree", revision])
+            .unwrap_or_else(|| vec!["read-tree", "--empty"]);
+        let output = self.run_output_with_timeout_env(
+            repo,
+            &args,
+            LOCAL_GIT_TIMEOUT,
+            "git prepare index tree",
+            &[("GIT_INDEX_FILE", index_path)],
+        )?;
+        self.success_stdout(output)?;
+        Ok(())
+    }
+
+    pub fn untracked_and_ignored_paths(
+        &self,
+        repo: impl AsRef<Path>,
+    ) -> Result<Vec<String>, String> {
+        let repo = repo.as_ref();
+        let mut paths = Vec::new();
+        for args in [
+            &["ls-files", "-z", "--others", "--exclude-standard"][..],
+            &[
+                "ls-files",
+                "-z",
+                "--others",
+                "--ignored",
+                "--exclude-standard",
+            ][..],
+        ] {
+            let output = self.run_output_with_timeout(
+                repo,
+                args,
+                LOCAL_GIT_TIMEOUT,
+                "git ls-files local content",
+            )?;
+            let bytes = self.success_stdout_bytes(output)?;
+            for path in bytes
+                .split(|byte| *byte == 0)
+                .filter(|path| !path.is_empty())
+            {
+                let path = std::str::from_utf8(path)
+                    .map_err(|_| "Git returned a non-UTF-8 local path.".to_string())?;
+                validate_git_tree_path(path)?;
+                paths.push(path.to_string());
+            }
+        }
+        paths.sort();
+        paths.dedup();
+        Ok(paths)
+    }
+
+    fn untracked_paths(&self, repo: &Path) -> Result<Vec<String>, String> {
+        let output = self.run_hardened_status_output(
+            repo,
+            &["ls-files", "-z", "--others", "--exclude-standard"],
+            LOCAL_GIT_TIMEOUT,
+            "git ls-files untracked",
+        )?;
+        let bytes = self.success_stdout_bytes(output)?;
+        let mut paths = Vec::new();
+        for path in bytes
+            .split(|byte| *byte == 0)
+            .filter(|path| !path.is_empty())
+        {
+            let path = std::str::from_utf8(path)
+                .map_err(|_| "Git returned a non-UTF-8 untracked path.".to_string())?;
+            validate_git_tree_path(path)?;
+            paths.push(path.to_string());
+        }
+        paths.sort();
+        paths.dedup();
+        Ok(paths)
     }
 
     pub fn fast_forward_only_merge(
@@ -978,6 +1308,10 @@ impl GitService {
     ) -> Result<Output, String> {
         let mut command = Command::new("git");
         command
+            .arg("-c")
+            .arg("core.hooksPath=/dev/null")
+            .arg("-c")
+            .arg("credential.interactive=false")
             .arg("-C")
             .arg(repo)
             .args(args)
@@ -998,6 +1332,32 @@ impl GitService {
         self.run_output_with_timeout_env(repo, args, timeout, label, &[])
     }
 
+    fn run_hardened_status_output(
+        &self,
+        repo: &Path,
+        args: &[&str],
+        timeout: Duration,
+        label: &str,
+    ) -> Result<Output, String> {
+        let mut command = Command::new("git");
+        command
+            .arg("--no-optional-locks")
+            .arg("-c")
+            .arg("core.hooksPath=/dev/null")
+            .arg("-c")
+            .arg("core.fsmonitor=false")
+            .arg("-c")
+            .arg("diff.external=")
+            .arg("-c")
+            .arg("interactive.diffFilter=")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .env("GIT_OPTIONAL_LOCKS", "0")
+            .env("LC_ALL", "C");
+        self.command_output_with_timeout(command, timeout, label)
+    }
+
     fn run_output_with_timeout_env(
         &self,
         repo: &Path,
@@ -1007,7 +1367,19 @@ impl GitService {
         env: &[(&str, &str)],
     ) -> Result<Output, String> {
         let mut command = Command::new("git");
-        command.arg("-C").arg(repo).args(args).env("LC_ALL", "C");
+        command
+            .arg("-c")
+            .arg("core.hooksPath=/dev/null")
+            .arg("-c")
+            .arg("diff.external=")
+            .arg("-c")
+            .arg("interactive.diffFilter=")
+            .arg("-c")
+            .arg("core.fsmonitor=false")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .env("LC_ALL", "C");
         command.envs(env.iter().copied());
         self.command_output_with_timeout(command, timeout, label)
     }
@@ -1020,7 +1392,19 @@ impl GitService {
         label: &str,
     ) -> Result<Output, String> {
         let mut command = Command::new("git");
-        command.arg("-C").arg(repo).args(args).env("LC_ALL", "C");
+        command
+            .arg("-c")
+            .arg("core.hooksPath=/dev/null")
+            .arg("-c")
+            .arg("diff.external=")
+            .arg("-c")
+            .arg("interactive.diffFilter=")
+            .arg("-c")
+            .arg("core.fsmonitor=false")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .env("LC_ALL", "C");
         self.command_output_with_timeout(command, timeout, label)
     }
 
@@ -1109,27 +1493,44 @@ impl GitService {
         timeout: Duration,
         label: &str,
     ) -> Result<Output, String> {
+        let output_id = COMMAND_OUTPUT_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let output_root = std::env::temp_dir().join(format!(
+            "skillbox-git-output-{}-{output_id}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&output_root).map_err(|error| error.to_string())?;
+        let stdout_path = output_root.join("stdout");
+        let stderr_path = output_root.join("stderr");
+        let mut stdout_file = OpenOptions::new()
+            .create_new(true)
+            .read(true)
+            .write(true)
+            .open(&stdout_path)
+            .map_err(|error| error.to_string())?;
+        let mut stderr_file = OpenOptions::new()
+            .create_new(true)
+            .read(true)
+            .write(true)
+            .open(&stderr_path)
+            .map_err(|error| error.to_string())?;
         let mut child = command
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(
+                stdout_file.try_clone().map_err(|error| error.to_string())?,
+            ))
+            .stderr(Stdio::from(
+                stderr_file.try_clone().map_err(|error| error.to_string())?,
+            ))
+            .process_group(0)
             .spawn()
             .map_err(|error| error.to_string())?;
-        let stdout = child.stdout.take().ok_or("Failed to capture Git stdout.")?;
-        let stderr = child.stderr.take().ok_or("Failed to capture Git stderr.")?;
-        let stdout_reader = read_pipe_in_background(stdout);
-        let stderr_reader = read_pipe_in_background(stderr);
         let started_at = Instant::now();
 
         loop {
             if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
-                let stdout = stdout_reader
-                    .join()
-                    .map_err(|_| "Git stdout reader failed.".to_string())?
-                    .map_err(|error| error.to_string())?;
-                let stderr = stderr_reader
-                    .join()
-                    .map_err(|_| "Git stderr reader failed.".to_string())?
-                    .map_err(|error| error.to_string())?;
+                let stdout = read_command_output_file(&mut stdout_file)?;
+                let stderr = read_command_output_file(&mut stderr_file)?;
+                let _ = fs::remove_dir_all(&output_root);
                 return Ok(Output {
                     status,
                     stdout,
@@ -1138,29 +1539,51 @@ impl GitService {
             }
 
             if started_at.elapsed() >= timeout {
-                let _ = child.kill();
+                terminate_process_group(child.id());
+                let cleanup_started = Instant::now();
+                while child
+                    .try_wait()
+                    .map_err(|error| error.to_string())?
+                    .is_none()
+                    && cleanup_started.elapsed() < Duration::from_millis(500)
+                {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                kill_process_group(child.id());
                 let _ = child.wait();
-                let _ = stdout_reader.join();
-                let _ = stderr_reader.join();
+                let _ = fs::remove_dir_all(&output_root);
                 return Err(format!(
                     "{label} timed out after {}",
                     format_duration(timeout)
                 ));
             }
 
-            thread::sleep(Duration::from_millis(20));
+            std::thread::sleep(Duration::from_millis(20));
         }
     }
 }
 
-fn read_pipe_in_background(
-    mut pipe: impl Read + Send + 'static,
-) -> thread::JoinHandle<std::io::Result<Vec<u8>>> {
-    thread::spawn(move || {
-        let mut bytes = Vec::new();
-        pipe.read_to_end(&mut bytes)?;
-        Ok(bytes)
-    })
+fn read_command_output_file(file: &mut fs::File) -> Result<Vec<u8>, String> {
+    file.seek(SeekFrom::Start(0))
+        .map_err(|error| error.to_string())?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    Ok(bytes)
+}
+
+fn terminate_process_group(pid: u32) {
+    // SAFETY: negative pid targets only the isolated process group created for this command.
+    unsafe {
+        libc::kill(-(pid as i32), libc::SIGTERM);
+    }
+}
+
+fn kill_process_group(pid: u32) {
+    // SAFETY: negative pid targets only the isolated process group created for this command.
+    unsafe {
+        libc::kill(-(pid as i32), libc::SIGKILL);
+    }
 }
 
 pub fn status(repo: impl AsRef<Path>) -> Result<GitStatus, String> {
@@ -1715,6 +2138,93 @@ mod tests {
     }
 
     #[test]
+    fn hardened_status_bypasses_repository_commands_and_detects_dirty_state() {
+        let git = GitService::new();
+        let repo = temp_dir("skillbox-git-hardened-status");
+        git.init_main(&repo).unwrap();
+        write_file(&repo.join("tracked.txt"), "original\n");
+        write_file(
+            &repo.join(".gitattributes"),
+            "tracked.txt filter=marker diff=marker\n",
+        );
+        git.add_all(&repo).unwrap();
+        git.commit(&repo, "Initial files").unwrap();
+
+        let git_dir = repo.join(".git");
+        let command_dir = git_dir.join("status-marker-commands");
+        fs::create_dir_all(&command_dir).unwrap();
+        let marker_command = |name: &str| {
+            let marker = git_dir.join(format!("{name}.invoked"));
+            let script = command_dir.join(name);
+            fs::write(
+                &script,
+                format!("#!/bin/sh\nprintf invoked > '{}'\ncat\n", marker.display()),
+            )
+            .unwrap();
+            let mut permissions = fs::metadata(&script).unwrap().permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&script, permissions).unwrap();
+            (script, marker)
+        };
+        let (clean_command, clean_marker) = marker_command("clean");
+        let (smudge_command, smudge_marker) = marker_command("smudge");
+        let (external_diff_command, external_diff_marker) = marker_command("external-diff");
+        let (textconv_command, textconv_marker) = marker_command("textconv");
+        let (fsmonitor_command, fsmonitor_marker) = marker_command("fsmonitor");
+        let hooks_dir = git_dir.join("status-marker-hooks");
+        fs::create_dir_all(&hooks_dir).unwrap();
+        let hook_marker = git_dir.join("hook.invoked");
+        let hook = hooks_dir.join("post-index-change");
+        fs::write(
+            &hook,
+            format!("#!/bin/sh\nprintf invoked > '{}'\n", hook_marker.display()),
+        )
+        .unwrap();
+        let mut hook_permissions = fs::metadata(&hook).unwrap().permissions();
+        hook_permissions.set_mode(0o755);
+        fs::set_permissions(&hook, hook_permissions).unwrap();
+
+        for (key, value) in [
+            ("filter.marker.clean", clean_command.as_path()),
+            ("filter.marker.smudge", smudge_command.as_path()),
+            ("diff.external", external_diff_command.as_path()),
+            ("diff.marker.textconv", textconv_command.as_path()),
+            ("core.fsmonitor", fsmonitor_command.as_path()),
+            ("core.hooksPath", hooks_dir.as_path()),
+        ] {
+            run_git(&repo, &["config", key, value.to_str().unwrap()]).unwrap();
+        }
+        run_git(&repo, &["config", "filter.marker.required", "true"]).unwrap();
+
+        let clean_status = git.status_hardened(&repo).unwrap();
+        assert!(!clean_status.dirty);
+
+        write_file(&repo.join("tracked.txt"), "modified\n");
+        write_file(&repo.join("untracked.txt"), "new\n");
+        let dirty_status = git.status_hardened(&repo).unwrap();
+
+        assert!(dirty_status.dirty);
+        assert!(dirty_status
+            .raw_status
+            .contains("!! worktree differs from HEAD"));
+        assert!(dirty_status.raw_status.contains("?? untracked.txt"));
+        for marker in [
+            clean_marker,
+            smudge_marker,
+            external_diff_marker,
+            textconv_marker,
+            fsmonitor_marker,
+            hook_marker,
+        ] {
+            assert!(
+                !marker.exists(),
+                "hardened status executed repository command marker {}",
+                marker.display()
+            );
+        }
+    }
+
+    #[test]
     fn remote_url_can_be_added_and_updated() {
         let temp = temp_dir("skillbox-git-remote");
         init_main(&temp).unwrap();
@@ -1804,6 +2314,35 @@ mod tests {
             .unwrap_err();
 
         assert!(error.contains("timed out"));
+    }
+
+    #[test]
+    fn command_timeout_terminates_descendant_process_group() {
+        let temp = temp_dir("git-timeout-descendant");
+        let marker = temp.join("descendant-survived");
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg("(sleep 1; printf survived > \"$1\") & wait")
+            .arg("sh")
+            .arg(&marker);
+
+        let started_at = Instant::now();
+        let error = GitService::new()
+            .command_output_with_timeout(
+                command,
+                std::time::Duration::from_millis(100),
+                "process tree",
+            )
+            .unwrap_err();
+
+        assert!(error.contains("timed out"));
+        assert!(started_at.elapsed() < Duration::from_secs(2));
+        std::thread::sleep(Duration::from_millis(1_100));
+        assert!(
+            !marker.exists(),
+            "the timed-out command must not leave a descendant running"
+        );
     }
 
     #[test]

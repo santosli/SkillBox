@@ -116,6 +116,7 @@ pub fn set_user_skills_git_remote(
     managed_root: impl AsRef<Path>,
 ) -> Result<UserSkillsGitStatus> {
     let managed_root = managed_root.as_ref().to_path_buf();
+    let _mutation_lock = acquire_user_skills_mutation_lock(&managed_root)?;
     audited_operation(
         OperationStart {
             operation_type: "set_user_skills_git_remote".to_string(),
@@ -154,6 +155,7 @@ fn set_user_skills_git_remote_unlogged(
 
     let paths = ensure_managed_layout(managed_root.to_path_buf())?;
     let repo = paths.user_skills_root;
+    ensure_default_user_skills_gitignore(&repo)?;
     let git = skillbox_git::GitService::new();
     if !git.status(&repo)?.initialized {
         git.init_main(&repo)?;
@@ -167,6 +169,7 @@ pub fn sync_user_skills_git(
     managed_root: impl AsRef<Path>,
 ) -> Result<UserSkillsSyncResult> {
     let managed_root = managed_root.as_ref().to_path_buf();
+    let _mutation_lock = acquire_user_skills_mutation_lock(&managed_root)?;
     let push = request.push;
     let selected_path_count = request
         .selected_paths
@@ -215,6 +218,7 @@ fn sync_user_skills_git_unlogged(
 ) -> Result<UserSkillsSyncResult> {
     let paths = ensure_managed_layout(managed_root.to_path_buf())?;
     let repo = paths.user_skills_root;
+    ensure_default_user_skills_gitignore(&repo)?;
     let git = skillbox_git::GitService::new();
     let before = git.status(&repo)?;
     let initialized = !before.initialized;

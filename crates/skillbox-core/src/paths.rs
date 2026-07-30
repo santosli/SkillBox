@@ -185,7 +185,9 @@ pub fn ensure_managed_layout(root: impl Into<PathBuf>) -> Result<ManagedPaths> {
     maybe_link_legacy_default_managed_root(&root)?;
     let paths = managed_paths(root);
     fs::create_dir_all(&paths.user_skills_root).map_err(|error| error.to_string())?;
-    ensure_default_user_skills_gitignore(&paths.user_skills_root)?;
+    if !user_skills_mutation_active(&paths.root) {
+        ensure_default_user_skills_gitignore(&paths.user_skills_root)?;
+    }
     fs::create_dir_all(&paths.remote_skills_root).map_err(|error| error.to_string())?;
     init_database(&paths.database_path)?;
     Ok(paths)

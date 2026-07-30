@@ -208,7 +208,9 @@ pub fn import_candidates(
     items: Vec<ImportRequestItem>,
     managed_root: impl AsRef<Path>,
 ) -> Result<ImportBatchResult> {
-    let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
+    let managed_root = managed_root.as_ref().to_path_buf();
+    let _mutation_lock = acquire_user_skills_mutation_lock(&managed_root)?;
+    let paths = ensure_managed_layout(managed_root)?;
     let mut imported = Vec::new();
     let mut errors = Vec::new();
 
@@ -357,6 +359,7 @@ pub fn revert_import(
     managed_root: impl AsRef<Path>,
 ) -> Result<RevertImportResult> {
     let managed_root = managed_root.as_ref().to_path_buf();
+    let _mutation_lock = acquire_user_skills_mutation_lock(&managed_root)?;
     let paths = ensure_managed_layout(managed_root.clone())?;
     let record = hydrate_import_record(
         &paths,

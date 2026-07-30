@@ -161,6 +161,7 @@ pub fn import_skill(
 ) -> Result<ImportedSkill> {
     let source_dir = expand_home(source_dir.as_ref().to_path_buf());
     let managed_root = managed_root.as_ref().to_path_buf();
+    let _mutation_lock = acquire_user_skills_mutation_lock(&managed_root)?;
     let entity_name = source_dir
         .file_name()
         .and_then(|name| name.to_str())
@@ -258,6 +259,7 @@ pub fn change_skill_kind(
     managed_root: impl AsRef<Path>,
 ) -> Result<ImportedSkill> {
     let managed_root = managed_root.as_ref().to_path_buf();
+    let _mutation_lock = acquire_user_skills_mutation_lock(&managed_root)?;
     audited_operation(
         OperationStart {
             operation_type: "change_skill_kind".to_string(),
@@ -592,6 +594,15 @@ pub(crate) fn deploy_skill(
     target_root: impl AsRef<Path>,
 ) -> Result<Deployment> {
     let managed_root = managed_root.as_ref().to_path_buf();
+    let _mutation_lock = acquire_user_skills_mutation_lock(&managed_root)?;
+    deploy_skill_with_lock_held(skill_name, &managed_root, target_root)
+}
+
+pub(crate) fn deploy_skill_with_lock_held(
+    skill_name: &str,
+    managed_root: &Path,
+    target_root: impl AsRef<Path>,
+) -> Result<Deployment> {
     let target_root = expand_home(target_root.as_ref().to_path_buf());
     audited_operation(
         OperationStart {
@@ -602,8 +613,8 @@ pub(crate) fn deploy_skill(
             summary: format!("Deploy {skill_name}"),
             payload: serde_json::json!({"targetRoot": target_root}),
         },
-        &managed_root,
-        || deploy_skill_unlogged(skill_name, &managed_root, &target_root),
+        managed_root,
+        || deploy_skill_unlogged(skill_name, managed_root, &target_root),
         |result| {
             (
                 format!("Deployed {}", result.skill_name),
@@ -673,6 +684,7 @@ pub fn undeploy_skill(
     target_root: impl AsRef<Path>,
 ) -> Result<Deployment> {
     let managed_root = managed_root.as_ref().to_path_buf();
+    let _mutation_lock = acquire_user_skills_mutation_lock(&managed_root)?;
     let target_root = expand_home(target_root.as_ref().to_path_buf());
     audited_operation(
         OperationStart {
@@ -711,6 +723,7 @@ pub fn delete_skill(
     managed_root: impl AsRef<Path>,
 ) -> Result<DeleteSkillResult> {
     let managed_root = managed_root.as_ref().to_path_buf();
+    let _mutation_lock = acquire_user_skills_mutation_lock(&managed_root)?;
     let skill_name = request.skill_name.clone();
     let actor = request.actor.clone();
     audited_operation(

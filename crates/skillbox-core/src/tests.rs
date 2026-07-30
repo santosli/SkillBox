@@ -1397,6 +1397,24 @@ fn ensure_managed_layout_writes_default_user_skills_gitignore() {
 }
 
 #[test]
+fn ensure_managed_layout_does_not_write_git_defaults_during_user_skills_mutation() {
+    let managed_root = temp_dir("managed-layout-mutation-lock");
+    let paths = managed_paths(&managed_root);
+    fs::create_dir_all(&paths.user_skills_root).unwrap();
+    let mutation = acquire_user_skills_mutation_lock(&managed_root).unwrap();
+
+    ensure_managed_layout(&managed_root).unwrap();
+    assert!(!paths.user_skills_root.join(".gitignore").exists());
+
+    drop(mutation);
+    ensure_managed_layout(&managed_root).unwrap();
+    assert_eq!(
+        fs::read_to_string(paths.user_skills_root.join(".gitignore")).unwrap(),
+        DEFAULT_USER_SKILLS_GITIGNORE
+    );
+}
+
+#[test]
 fn ensure_managed_layout_preserves_existing_user_skills_gitignore() {
     let managed_root = temp_dir("managed-layout-preserve-gitignore").join("SkillBox");
     let user_skills_root = managed_root.join("user-skills");
@@ -5088,6 +5106,48 @@ optional-runtime-field: preserved
         .unwrap()
         .file_type()
         .is_symlink());
+}
+
+#[test]
+fn deployment_compatibility_apply_holds_the_shared_mutation_lock_during_revalidation() {
+    let root = temp_dir("deployment-compatibility-shared-lock");
+    let source = root.join("source/demo");
+    let managed_root = root.join("SkillBox");
+    let target_root = root.join("project/.codex/skills");
+    fs::create_dir_all(&target_root).unwrap();
+    make_skill(&source, "demo", "Demo skill");
+    import_skill(&source, SkillKind::User, &managed_root).unwrap();
+    add_workspace(
+        WorkspaceAddRequest {
+            path: target_root.clone(),
+            kind: WorkspaceKind::User,
+        },
+        &managed_root,
+    )
+    .unwrap();
+    let preview = preview_skill_deployment(
+        DeploymentCompatibilityPreviewRequest {
+            skill_name: "demo".to_string(),
+            target_root: target_root.clone(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+    let _lock = acquire_user_skills_mutation_lock(&managed_root).unwrap();
+
+    let error = apply_skill_deployment(
+        DeploymentCompatibilityApplyRequest {
+            skill_name: "demo".to_string(),
+            target_root: target_root.clone(),
+            preview_id: preview.preview_id,
+            confirm_warnings: false,
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+
+    assert!(error.contains("Another user-skills mutation"));
+    assert!(!target_root.join("demo").exists());
 }
 
 #[test]

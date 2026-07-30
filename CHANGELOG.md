@@ -15,6 +15,9 @@ version tags such as `v0.3.0`.
 - Validate incoming skill trees, disclose affected runtime deployments, block
   deployed deletes or renames, create pre-apply backup refs, and reconcile the
   user-skill index after a successful fast-forward.
+- Block collisions with ignored or untracked local content, isolate the flow
+  from repository hooks/filters/merge drivers, serialize managed mutations, and
+  use compare-and-swap recovery that never discards unrelated Git work.
 - Add matching Rust CLI, Tauri, and desktop review surfaces while preserving the
   existing outbound commit-and-push behavior.
 

@@ -26,8 +26,8 @@ Inbound updates use three explicit stages:
 2. **Review incoming changes** validates the remote tree and presents the
    repository-wide skill/file diff, deployment impact, and conflict diagnosis.
 3. **Apply fast-forward** requires the reviewed `preview_id`, re-fetches and
-   revalidates every bound input, creates a backup ref, and changes the
-   worktree only through a fast-forward.
+   revalidates every bound input, creates a backup ref, materializes only the
+   reviewed Git blobs, and advances `main` with a compare-and-swap ref update.
 
 The relation model is `unknown`, `synced`, `ahead`, `behind`, `diverged`,
 `remote_only`, or `no_remote_branch`, while worktree state is independently
@@ -42,7 +42,9 @@ The preview identity binds the local and remote commit identities, merge base,
 sanitized remote and branch, worktree state, validated incoming snapshot, file
 changes, and deployment impact. Apply rejects stale or mismatched state before
 working-tree writes. Incoming trees reject invalid skills, unsafe paths and file
-types, Git metadata, traversal, and escaping symlinks.
+types, Git metadata, traversal, and escaping symlinks. Incoming added, renamed,
+or type-changing paths also reject collisions with ignored or untracked local
+content, including ancestor and descendant collisions.
 
 An update to a deployed skill is allowed only after the preview discloses its
 targets. Deleting or renaming a deployed skill is blocked in v0.7; users must
@@ -51,10 +53,18 @@ undeploy it first. A local unborn repository may initialize from remote
 
 Before apply, when a local HEAD exists, SkillBox creates
 `refs/skillbox/backups/inbound/<operation-id>` at that commit. After Git
-advances, the user-skill SQLite index is reconciled transactionally. If
-reindexing fails, SkillBox compensates the Git worktree back to the old state
-and keeps any backup ref for recovery. Operation history stores aggregate
-commit/ref/count information, not credentials or diff content.
+advances, the user-skill SQLite index is reconciled transactionally. Apply,
+outbound Git, managed user-skill mutations, and deploy/undeploy share one
+mutation lock. The inbound materializer does not execute repository hooks,
+filters, textconv, external diff, or merge drivers. If a mutation or reindex
+fails, SkillBox compensates only while HEAD still equals the expected commit
+and operation-owned paths remain unchanged; it refuses to erase unrelated
+concurrent work. Apply also holds the Git index lock and preserves replaced or
+deleted tracked files in an operation-scoped `.git/skillbox/` recovery snapshot,
+so concurrent staging or worktree edits fail closed instead of being overwritten.
+Operation history stores aggregate commit/ref/count,
+mutation-phase, and compensation information, not credentials or diff content.
+Displayed remote identities remove userinfo, query, and fragment secrets.
 
 ## Consequences
 
@@ -69,3 +79,5 @@ commit/ref/count information, not credentials or diff content.
 - v0.7 is intentionally limited to `origin/main`.
 - Backup refs are an internal recovery aid, not an automatic history rewrite or
   a substitute for normal Git conflict resolution.
+- Conflict diagnosis is derived from commit/tree changes and never executes a
+  repository-configured merge driver.

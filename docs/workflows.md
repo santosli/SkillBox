@@ -549,18 +549,37 @@ Apply fast-forward:
 - `ahead`、`synced`、`diverged`、`unknown`、`no_remote_branch` 不得通过该 API
   修改 working tree。
 - Apply 在旧 HEAD 创建
-  `refs/skillbox/backups/inbound/<operation-id>`，随后使用 fixed-argument
-  fast-forward-only Git primitive。禁止 auto merge、rebase、reset、force-push、
-  stash、last-write-wins 和 conflict-marker editing。
+  `refs/skillbox/backups/inbound/<operation-id>`。Rust core 从已验证 commit 的 Git
+  blobs 直接物化受审文件，更新 index，并用 compare-and-swap 将 `main` 从预期旧
+  SHA 推进到受审 remote SHA。入站流程不运行仓库 hook、filter、textconv、external
+  diff 或 merge driver。禁止 auto merge、rebase、reset、force-push、stash、
+  last-write-wins 和 conflict-marker editing。
+- Apply 持有 `.git/index.lock`，使并发 `git add` / `git commit` fail closed；tracked
+  文件在替换或删除前以 no-replace rename 移入 `.git/skillbox/` 内的 operation-scoped
+  recovery snapshot。写入、ref 推进前后都会复核受审内容；检测到外部编辑时恢复或保留
+  双方内容并要求人工处理，不静默覆盖。
+- Incoming add/rename/type-change 如果与本地 ignored 或 untracked path 发生 exact、
+  ancestor 或 descendant 碰撞，Apply 必须在 mutation 前 blocked。普通
+  `git status` 未显示 ignored 内容不等于可覆盖。
+- Inbound apply、outbound user-skills Git、deploy/undeploy 与其它 managed user-skill
+  写操作共用 mutation lock；Save remote 与 inbound action 在 UI 也互斥。Apply 失败
+  后旧 preview authorization 立即失效，必须 Refresh 并重新 review。
+- 通用 managed-layout 初始化在 user-skills mutation lock 活跃期间不得补写 Git ignore
+  defaults；显式 Git 初始化在持锁路径内完成该设置，避免与 remote-only bootstrap 竞争。
 - Git 成功后，Rust core transactionally reconcile SQLite 中全部 user-skill index
   rows，使其对应新的 repository snapshot。若 reindex 失败，必须补偿恢复旧 HEAD，
-  保留 backup ref 并返回失败；不能留下已 advance Git + stale user index 的静默状态。
-- Operation log 记录 aggregate old/new refs、backup ref 与 changed counts，不记录
-  credentials、diff contents 或 skill bodies。
+  保留 backup ref 并返回失败；补偿只在 HEAD 仍等于 expected applied SHA 且操作写集
+  未被并发改变时执行，不能 reset 掉外部 commit。Remote-only 补偿还必须清空 index，
+  恢复为可重试的 unborn state。
+- Operation log 记录 aggregate old/new refs、backup ref、mutation phase 与
+  compensation outcome，不记录 credentials、diff contents 或 skill bodies。
+  Remote identity 必须去除 URL userinfo、query 和 fragment。
 
 分叉处理：
 
-- `diverged` 没有 Apply success path。用户需在 SkillBox 外使用正常 Git 工具
+- `diverged` 没有 Apply success path。只通过 commit/tree diff 生成 bounded
+  both-changed files/skills 与 likely-conflict 诊断，不执行 remote `.gitattributes`
+  选择的 merge driver。用户需在 SkillBox 外使用正常 Git 工具
   fetch/merge/rebase 并检查冲突，完成后回到 SkillBox 点 Refresh/Check remote。
 - 该手动解决过程不改变 outbound `sync-user-skills` 的 `push_failed` 语义：
   outbound push rejected 时仍保留 local commit。

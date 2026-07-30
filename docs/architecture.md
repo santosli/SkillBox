@@ -110,7 +110,8 @@ cargo run -p skillbox-cli --offline -- <command>
 - `marketplace.rs` Claude marketplace 候选搜索
 - `git_sync.rs` user-skills Git outbound commit/push 编排
 - `inbound_git_sync.rs` user-skills Git fetch、relation、remote-tree review、
-  stale-preview fast-forward、backup ref 与 index reconciliation
+  stale-preview verified blob materialization、compare-and-swap ref advance、
+  compensation、backup ref 与 index reconciliation
 - `usage.rs` usage 事件规范化、`confirmed/inferred/reference` evidence、单向升级与有界 provenance、Calls/stats、coverage、aggregate-only `usage-audit` 和 source-aware Import preview
 - `usage_backfill.rs` 只从本机 Codex session rollout 的显式用户输入载体解析完整 `<skill>` 块或 `[$skill](.../SKILL.md)` 链接，作为逐回合 `inferred` invocation；忽略 catalog、普通 prose、assistant/tool/shell payload 与 output，按 turn + 规范化 name/path 去重，并用 session `cwd` 恢复 workspace identity
 - `usage_backfill_claude.rs` 只从本机 Claude Code project JSONL 的原生 Skill tool/command attribution 恢复 `confirmed` 事件，解析真实 `SKILL.md`，不复制消息正文
@@ -158,8 +159,10 @@ cargo run -p skillbox-cli --offline -- <command>
 - 读取仓库是否初始化、当前分支、dirty 状态和原始 status。
 - 提供 init、origin 读取/设置、add、commit、push、`ls-remote`，以及固定
   `origin/main` fetch、ref 解析、merge base、ahead/behind、ancestor、
-  tree/diff、backup ref、merge-tree diagnostics 和 fast-forward 等可复用原语。
-- 集中处理 Git 网络命令的非交互环境变量、有界 timeout 和 stderr 返回。
+  tree/blob/diff、backup ref、index read-tree 和 compare-and-swap ref 等可复用原语。
+- 集中处理 Git 命令的非交互环境变量、hooks/external diff 隔离、有界 timeout、
+  独立 process group、整组终止和 stderr 返回；inbound 通过直接读取 validated blobs
+  避免 checkout filter。
 - 不负责 managed store 级别的提交策略；`~/.skillbox/user-skills` 的同步编排在 `skillbox-core`。
 
 repo-local 开发脚本可以保留少量自用 Git 调用，例如 Git hooks 安装；这些不是 SkillBox 产品运行时边界。
@@ -218,10 +221,21 @@ impact。Apply 显式重新 fetch/recompute；任何输入变化都会让 `previ
 Git 更新按 repository-wide snapshot 应用，不提供逐 skill 选择。已部署 skill 的
 update 会展示 target；已部署 skill 的 delete/rename 在 v0.7 被阻止，必须先
 undeploy。Apply 在旧 HEAD 创建 `refs/skillbox/backups/inbound/<operation-id>`，
-fast-forward 后 transactionally reconcile user rows in SQLite。若 reindex 失败，
-core 会把 Git worktree 补偿回旧 HEAD 并保留 backup ref。该过程不自动 merge、
-rebase、reset、force-push、stash 或解决 conflict；`diverged` 只返回 aggregate
-conflict diagnosis，用户需在应用外使用正常 Git 工具处理。
+随后从已验证的 Git blob 直接物化受审文件，并用 compare-and-swap 推进 `main` ref；
+入站流程不会执行仓库 hook、filter、textconv、external diff 或 merge driver。Rust core
+在整个 apply 窗口持有 user-skills 共享 mutation lock，阻止 outbound Git、deploy、
+undeploy 与其它 managed user-skill 写操作并发改变受审状态，同时持有 Git index lock
+阻止并发 stage/commit。tracked worktree 内容先移入 `.git/skillbox/` 的 operation-scoped
+recovery snapshot，再以 no-replace 方式写入。若文件写入、ref 推进或
+SQLite reindex 失败，core 只在 HEAD 仍等于预期 commit 且操作写集未被外部改变时补偿
+回旧状态，并保留 backup ref；发现并发 mutation 时拒绝覆盖恢复。该过程不自动 merge、
+rebase、reset、force-push、stash 或解决 conflict；`diverged` 只从 commit/tree diff
+返回 aggregate conflict diagnosis，用户需在应用外使用正常 Git 工具处理。
+
+Preview 会在 working-tree write 前检查 incoming add/rename/type-change 与本地 ignored
+或 untracked 内容的 exact/ancestor/descendant 碰撞。碰撞必须 blocked，不能依赖普通
+`git status` 的 clean 结论覆盖本地内容。Remote URL 对 UI、error 与 operation history
+只暴露移除 userinfo、query 和 fragment 后的 identity。
 
 GitHub remote source 可以是仓库中的 skill 子目录，也可以是根目录包含 `SKILL.md` 的 standalone repository。后者在 metadata 中显式记录为 `root: true`，preview、install、update 和 deploy 共用同一份清理后的 repository worktree snapshot；Git checkout 的 `.git` metadata 不进入 managed store，逃逸 source root 的 symlink 在 copy 边界被拒绝。
 

@@ -88,11 +88,22 @@ rows、workspace registry、usage history 和 operation history 不属于该 reb
 这是 Git + SQLite 两种持久化边界的补偿式 saga，不是一个跨系统 transaction：
 
 - remote tree validation 在 working-tree write 前完成；
-- Git advance 后若 reindex 失败，core 把 worktree 补偿回旧 HEAD；
+- incoming paths 与 ignored/untracked local content 的 exact/ancestor/descendant
+  collision 在 write 前阻止；
+- validated Git blobs 直接物化到受审路径，index 更新后以 compare-and-swap 推进
+  `main`；仓库 hook、filter、textconv、external diff 和 merge driver 不参与；
+- apply 持有 `.git/index.lock`，并在替换/删除 tracked 文件前把旧 worktree 内容以
+  no-replace rename 保存到 `.git/skillbox/inbound-worktree-backups/`；该 recovery
+  snapshot 与 backup ref 一起保留，不进入 runtime 或 skill index；
+- user-skills Git、managed skill mutation 与 deploy/undeploy 共享 mutation lock；
+- 文件写入、ref 更新或 reindex 失败时，core 只在 HEAD 与操作写集仍匹配预期状态时
+  补偿；发现外部 mutation 时拒绝覆盖恢复；
+- remote-only 补偿删除本次写入并清空 index，恢复原有 generated `.gitignore`
+  setup state，使 preview/apply 可以安全重试；
 - internal backup ref 保留，便于人工 recovery；
 - compensation 失败会作为 actionable error/operation result 暴露，不能静默忽略；
-- operation payload 只保存 old/new SHA、backup ref 和 aggregate changed counts，
-  不保存 credentials、diff content 或 skill body。
+- failure operation payload 保存 old/new SHA、backup ref、mutation phase 和
+  compensation outcome；不保存 credentials、diff content 或 skill body。
 
 已部署 skill 的 update 可在 preview 明确列出 target 后应用。已部署 skill 的 delete
 或 rename 在 v0.7 阻止 apply，要求先 undeploy；这样 runtime symlink 不会因 repository

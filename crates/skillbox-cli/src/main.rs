@@ -573,7 +573,7 @@ fn usage_ranking_request(
 fn user_skills_inbound_apply_request(
     args: &[String],
 ) -> Result<skillbox_core::UserSkillsInboundApplyRequest, String> {
-    let preview_id = option(args, "--preview-id").ok_or_else(|| {
+    let preview_id = required_option_value(args, "--preview-id").map_err(|_| {
         "Inbound preview is required. Run `skillbox user-skills-inbound-preview` first, then pass --preview-id <id>."
             .to_string()
     })?;
@@ -581,6 +581,18 @@ fn user_skills_inbound_apply_request(
         preview_id: Some(preview_id),
         actor: "cli".to_string(),
     })
+}
+
+fn required_option_value(args: &[String], name: &str) -> Result<String, String> {
+    let index = args
+        .iter()
+        .position(|argument| argument == name)
+        .ok_or_else(|| format!("Missing required option: {name}"))?;
+    let value = args
+        .get(index + 1)
+        .filter(|value| !value.trim().is_empty() && !value.starts_with("--"))
+        .ok_or_else(|| format!("Missing value for {name}"))?;
+    Ok(value.clone())
 }
 
 fn help_text() -> &'static str {
@@ -847,6 +859,18 @@ mod tests {
 
         assert!(error.contains("Inbound preview is required"));
         assert!(error.contains("user-skills-inbound-preview"));
+    }
+
+    #[test]
+    fn inbound_apply_request_rejects_another_flag_as_preview_id() {
+        let error = user_skills_inbound_apply_request(&[
+            "--preview-id".to_string(),
+            "--managed-root".to_string(),
+            "/tmp/SkillBox".to_string(),
+        ])
+        .unwrap_err();
+
+        assert!(error.contains("Inbound preview is required"));
     }
 
     #[test]
