@@ -845,3 +845,50 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `cargo test -p skillbox-core --offline skill_user_metadata`
 - `node --test apps/desktop/src/skillUserMetadata.test.js`
 - `npm --workspace apps/desktop run build`
+
+## 18. CLI And Desktop Capability Matrix
+
+Both interfaces call the same Rust core for filesystem, Git, GitHub, SQLite,
+migration, compatibility, and recovery behavior. “Both” below means the
+workflow exists in both interfaces; presentation can differ because the CLI
+returns structured JSON while the desktop provides interactive review.
+
+| Workflow | Rust CLI | Desktop | Notes |
+| --- | --- | --- | --- |
+| Initialize/read the managed store | Full | Full | CLI exposes `init` and `paths`; desktop initializes on startup and shows managed roots in Settings. |
+| Scan common or explicit roots | Full | Full | CLI `scan` accepts explicit roots for automation; desktop scans common roots and registered workspaces. |
+| Review and import existing skills | Partial | Full | CLI `import` accepts one validated source directory. Desktop groups scan candidates, shows duplicate/source context, and supports reviewed deploy-back. |
+| Preview-confirmed GitHub install | Full | Full | Both require an install preview ID; warning targets require explicit confirmation. |
+| Runtime profiles and deployment compatibility | Full | Full | CLI exposes `runtime-profiles`, `deploy-preview`, and `deploy`; desktop shows profile metadata and an interactive compatibility review. |
+| Undeploy and reviewed skill deletion | Full | Full | Both share overwrite, ownership, stale-preview, and confirmation protections. |
+| Remote source binding, update, rollback, and versions | Full | Full | Desktop provides all-file visual review; CLI returns structured diff/version data. |
+| User-skills Git status and outbound sync | Full | Full | Desktop adds selected-file diff review. Neither interface pulls, merges, rebases, or resolves divergence automatically. |
+| Workspaces | Partial | Full | CLI lists/scans/adds/forgets exact roots. Desktop also previews a project directory, initializes one selected supported root, and offers the native folder picker. |
+| Usage rankings and local history sync | Full | Full | Both use the same confirmed/inferred/reference evidence model and provider backfills. |
+| Aggregate usage diagnostics | Full | Limited | CLI `usage-audit` is the automation-oriented aggregate report. Desktop exposes the relevant coverage summary and disclosure, not the complete diagnostic JSON. |
+| Usage hook status/install | Full | Full | CLI supports Codex and Claude Code hook automation; desktop exposes the supported hook controls in Settings. |
+| History and operation audit | Partial | Full | CLI exposes operation rows plus separate usage/ranking surfaces; desktop combines Calls, References, and operations in one History timeline. |
+| Doctor and safe stale-record cleanup | Full | Full | Both share the read-only health report and bounded cleanup behavior. |
+| Import record inspection and revert | Full | Full | Desktop places interactive review in Skill Detail; CLI uses `import-records` and `revert-import`. |
+| App update check/install | Not available | Full | Signed updater state and install/restart are packaged-app interactions. CLI releases are installed through the distribution channel. |
+| UI preferences, favorites, and tags | Not available | Full | These are desktop interaction preferences persisted through Rust/Tauri. |
+
+Intentionally unsupported in both interfaces:
+
+- automatic Git pull/merge/rebase or an in-app merge editor;
+- silent overwrite of non-symlink runtime content;
+- deployment without a fresh compatibility preview;
+- native non-`SKILL.md` Claude, OpenClaw, Cursor, Claude Code, or Copilot
+  format adapters;
+- provider-account analytics or fabricated usage totals.
+
+Maintenance check:
+
+```sh
+cargo run -p skillbox-cli --offline -- --help
+rg -n "#\\[tauri::command\\]|invoke_handler|invoke\\(" \
+  apps/desktop/src-tauri/src apps/desktop/src/App.jsx
+```
+
+Update this matrix whenever a CLI command, Tauri command, or desktop workflow
+changes its user-visible availability.

@@ -920,7 +920,12 @@ test('compact call labels stay short while usage explanations retain local scope
   assert.match(historyPageSource, /id:\s*'skill_usage',[\s\S]*label:\s*'Calls'/);
   assert.match(historyPageSource, /id:\s*'usage_reference',[\s\S]*label:\s*'References'/);
   assert.doesNotMatch(historyPageSource, /label:\s*'Locally observed calls'/);
-  assert.match(historyPageSource, /Calls, history references, and SkillBox operations will appear here\./);
+  assert.match(
+    historyPageSource,
+    /Calls, history references, imports, updates, deploys, and other SkillBox operations will appear here\./
+  );
+  assert.match(historyPageSource, /filter === 'all' \? 'No history yet'/);
+  assert.match(historyPageSource, /Try another history filter or sync local histories\./);
   assert.match(skillCardSource, /\{skill\.usageCount\} calls/);
   assert.doesNotMatch(skillCardSource, /locally observed calls/i);
   assert.match(appSource, /className="candidateUsage">[\s\S]*Calls \{candidate\.usageCount \|\| 0\}/);

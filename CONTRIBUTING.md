@@ -225,6 +225,12 @@ CI also runs dependency security checks:
 
 Dependabot checks npm, Cargo, and GitHub Actions dependencies weekly.
 
+For docs-only changes, run `git diff --check` and the relevant local validator
+such as `node site/validate.mjs`. UI-copy changes should run their focused
+desktop source/layout test. Keep the full Rust, npm, audit, and security checks
+visible in the pull request template and mark applicability honestly rather
+than claiming checks that were not run.
+
 ## Starter Issues
 
 Issues labeled `good first issue` should be small, testable, and avoid

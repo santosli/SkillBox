@@ -97,7 +97,7 @@ export function HistoryPage({
           <strong>{filter === 'all' ? 'No history yet' : `No ${tabs.find((tab) => tab.id === filter)?.label.toLowerCase() || 'history'} yet`}</strong>
           <span>
             {filter === 'all'
-              ? 'Calls, history references, and SkillBox operations will appear here.'
+              ? 'Calls, history references, imports, updates, deploys, and other SkillBox operations will appear here.'
               : 'Try another history filter or sync local histories.'}
           </span>
         </div>

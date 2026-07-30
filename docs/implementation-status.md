@@ -43,25 +43,22 @@
 
 ## Next Implementation Targets
 
-The `0.6` implementation scope is complete; release status remains separate
-from implementation status and is tracked in `docs/release.md`. The next milestones follow
-[the versioned evolution path](roadmap.md#versioned-evolution-path):
+The `0.6` implementation and release qualification are complete. SkillBox
+`v0.6.1` is the shipped runtime-profile and evidence-aware usage release. The
+next milestones follow [the versioned evolution path](roadmap.md#versioned-evolution-path):
 
-### 0.6.x — Runtime Profile Qualification
+### 0.7 — Safe Sync, Deployment, And Recovery
 
-- Keep Rust core, CLI, Tauri, and desktop compatibility results aligned.
-- Exercise schema-v6 backfill and profile detection against supported prior
-  databases without requiring a rescan.
-- Keep unknown optional frontmatter read-only and preserved; do not turn
-  warnings into automatic rewrites.
+- Add reviewed inbound user-skills Git updates with explicit
+  ahead/behind/diverged states and no automatic conflict merge.
+- Add copy-snapshot deployment as an explicit, compatibility-checked
+  alternative without weakening the current symlink protections.
+- Strengthen backup inspection, restore previews, and recovery auditing.
+- Keep runtime profiles, schema-v6 workspace migration, schema-v7 evidence
+  classification, and Calls/reference semantics backward compatible.
 - Keep native non-`SKILL.md` formats behind the future adapter boundary.
-- Complete release automation and distribution read-back before marking 0.6 as
-  shipped.
-- Keep schema-v7 evidence migrations, Calls/reference reconciliation, stronger-evidence
-  upgrades, and aggregate-only audit output qualified against prior local databases
-  without silently scanning agent histories.
 
-### 0.7 And Later
+### Later Milestones
 
 - Add FTS-backed search across skills, operations, and usage history.
 - Add remote source provenance and trust classification without treating

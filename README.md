@@ -226,6 +226,7 @@ New core business logic should go into Rust crates. React should call structured
 - [Architecture](docs/architecture.md)
 - [Data model](docs/data-model.md)
 - [Workflows](docs/workflows.md)
+- [CLI and Desktop capability matrix](docs/workflows.md#18-cli-and-desktop-capability-matrix)
 - [Implementation status](docs/implementation-status.md)
 - [Contributing](CONTRIBUTING.md)
 - [Managed store ADR](docs/decisions/0001-managed-store-is-source-of-truth.md)
