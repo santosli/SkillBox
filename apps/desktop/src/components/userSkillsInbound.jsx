@@ -1,8 +1,10 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Copy, FolderOpen, RefreshCw, ShieldAlert, X } from 'lucide-react';
 import { GitDiffView } from '../GitDiffView.jsx';
 import {
   canApplyUserSkillsInbound,
+  beginReviewDialogFocus,
+  handleReviewDialogKeyDown,
   inboundFileLabel,
   inboundRelationLabel
 } from '../userSkillsInbound.js';
@@ -24,6 +26,11 @@ export function UserSkillsInboundReviewDialog({
   onOpenRepository,
   onRefresh
 }) {
+  const dialogRef = useRef(null);
+  const closeButtonRef = useRef(null);
+  const restoreFocusRef = useRef(
+    typeof document === 'undefined' ? null : document.activeElement
+  );
   const preview = dialog.preview;
   const activeFile =
     preview?.files.find((file) => file.path === dialog.activePath) ||
@@ -37,6 +44,11 @@ export function UserSkillsInboundReviewDialog({
     preview?.status.relation === 'remote_only' && isDirty && Boolean(preview?.canApply);
   const isDirtyBlocking = isDirty && !preview?.canApply;
 
+  useEffect(
+    () => beginReviewDialogFocus(closeButtonRef.current, restoreFocusRef.current),
+    []
+  );
+
   return (
     <div
       className="modalBackdrop"
@@ -47,7 +59,15 @@ export function UserSkillsInboundReviewDialog({
         aria-labelledby="user-skills-inbound-title"
         aria-modal="true"
         className="syncDialog gitCommitDialog inboundReviewDialog"
+        ref={dialogRef}
         role="dialog"
+        onKeyDown={(event) =>
+          handleReviewDialogKeyDown(event, {
+            dialogElement: dialogRef.current,
+            onClose,
+            closeDisabled: dialog.applying
+          })
+        }
       >
         <div className="importSheetHeader">
           <div>
@@ -61,6 +81,7 @@ export function UserSkillsInboundReviewDialog({
             aria-label="Close incoming changes review"
             className="iconButton"
             disabled={dialog.applying}
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
           >
@@ -128,6 +149,8 @@ export function UserSkillsInboundReviewDialog({
                         {preview.files.length ? (
                           preview.files.map((file) => (
                             <button
+                              aria-current={activeFile?.path === file.path ? 'true' : undefined}
+                              aria-pressed={activeFile?.path === file.path}
                               className={
                                 activeFile?.path === file.path
                                   ? 'gitFileRow remoteFileRow active'
@@ -255,9 +278,15 @@ function InboundChangeSummary({ preview }) {
 }
 
 function ConflictDiagnosis({ analysis }) {
+  const groups = [
+    ['Skills changed by both', analysis?.bothChangedSkills || []],
+    ['Files changed by both', analysis?.bothChangedFiles || []],
+    ['Likely conflict files', analysis?.likelyConflictFiles || []]
+  ];
+
   return (
     <div className="inboundConflictDiagnosis">
-      <div>
+      <div className="inboundConflictHeader">
         <ShieldAlert aria-hidden="true" />
         <span>
           <strong>Local and remote histories have diverged</strong>
@@ -279,10 +308,33 @@ function ConflictDiagnosis({ analysis }) {
           <dd>{analysis?.bothChangedSkills.length || 0}</dd>
         </div>
         <div>
+          <dt>Files changed by both</dt>
+          <dd>{analysis?.bothChangedFiles.length || 0}</dd>
+        </div>
+        <div>
           <dt>Likely conflict files</dt>
           <dd>{analysis?.likelyConflictFiles.length || 0}</dd>
         </div>
       </dl>
+      <div className="inboundConflictLists">
+        {groups.map(([label, items]) =>
+          items.length ? (
+            <details key={label}>
+              <summary>
+                {label} ({items.length})
+              </summary>
+              <ul>
+                {items.slice(0, 8).map((item) => (
+                  <li key={item}>
+                    <code>{item}</code>
+                  </li>
+                ))}
+              </ul>
+              {items.length > 8 ? <small>Showing 8 of {items.length} items.</small> : null}
+            </details>
+          ) : null
+        )}
+      </div>
     </div>
   );
 }

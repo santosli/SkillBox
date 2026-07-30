@@ -433,7 +433,13 @@ function UserSkillsGitSettingsForm({
   const [remoteUrl, setRemoteUrl] = useState(userSkillsGit.remoteUrl || '');
   const [saveStatus, setSaveStatus] = useState('idle');
   const [message, setMessage] = useState('');
-  const inboundBusy = status === 'checking_inbound' || status === 'previewing_inbound';
+  const inboundOperationBusy = [
+    'checking_inbound',
+    'previewing_inbound',
+    'applying_inbound'
+  ].includes(status);
+  const remoteSaveBusy = saveStatus === 'saving';
+  const inboundBusy = inboundOperationBusy || remoteSaveBusy;
   const canReviewInbound = canReviewUserSkillsInbound(userSkillsInbound, inboundBusy);
 
   useEffect(() => {
@@ -442,6 +448,7 @@ function UserSkillsGitSettingsForm({
 
   async function submit(event) {
     event.preventDefault();
+    if (inboundOperationBusy || remoteSaveBusy) return;
     setSaveStatus('saving');
     setMessage('');
 
@@ -537,7 +544,11 @@ function UserSkillsGitSettingsForm({
       </div>
       <div className="settingsActions">
         {message ? <span className={saveStatus === 'error' ? 'settingsError' : 'settingsSaved'}>{message}</span> : <span />}
-        <button className="button primary" disabled={status === 'syncing' || saveStatus === 'saving'} type="submit">
+        <button
+          className="button primary"
+          disabled={status === 'syncing' || inboundOperationBusy || remoteSaveBusy}
+          type="submit"
+        >
           {saveStatus === 'saving' ? 'Saving...' : 'Save remote'}
         </button>
       </div>

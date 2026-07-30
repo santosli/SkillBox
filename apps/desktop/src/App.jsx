@@ -136,6 +136,7 @@ import {
   waitForNextPaint
 } from './userSkillsGitSync.js';
 import {
+  invalidateUserSkillsInboundPreview,
   normalizeUserSkillsInboundPreview,
   normalizeUserSkillsInboundStatus
 } from './userSkillsInbound.js';
@@ -1769,13 +1770,15 @@ export default function App() {
       );
       setStatus('ready');
     } catch (applyError) {
+      const applyMessage =
+        applyError?.message ||
+        String(applyError) ||
+        'Unable to apply incoming user skills.';
       setInboundReviewDialog((current) => ({
         ...current,
         applying: false,
-        error:
-          applyError.message ||
-          String(applyError) ||
-          'Unable to apply incoming user skills. Refresh the preview and try again.'
+        preview: invalidateUserSkillsInboundPreview(current.preview),
+        error: `${applyMessage} Refresh to review the current repository state.`
       }));
       setStatus('ready');
     }

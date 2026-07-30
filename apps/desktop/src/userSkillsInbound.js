@@ -114,6 +114,65 @@ export function canApplyUserSkillsInbound(preview, busy = false) {
   return !busy && Boolean(preview?.canApply && preview?.previewId);
 }
 
+export function invalidateUserSkillsInboundPreview(preview) {
+  return preview
+    ? {
+        ...preview,
+        canApply: false,
+        previewId: ''
+      }
+    : null;
+}
+
+export function beginReviewDialogFocus(initialFocus, restoreFocus) {
+  initialFocus?.focus();
+  return () => {
+    if (restoreFocus && restoreFocus.isConnected !== false) {
+      restoreFocus.focus();
+    }
+  };
+}
+
+export function handleReviewDialogKeyDown(
+  event,
+  { dialogElement, onClose, closeDisabled = false }
+) {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!closeDisabled) {
+      onClose();
+    }
+    return;
+  }
+
+  if (event.key !== 'Tab') return;
+
+  const focusable = Array.from(
+    dialogElement?.querySelectorAll(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    ) || []
+  ).filter((element) => element.getAttribute?.('aria-hidden') !== 'true');
+
+  if (focusable.length === 0) {
+    event.preventDefault();
+    return;
+  }
+
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  const activeElement = dialogElement?.ownerDocument?.activeElement;
+  const activeIsInside = Boolean(activeElement && dialogElement?.contains(activeElement));
+
+  if (event.shiftKey && (!activeIsInside || activeElement === first)) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (!activeIsInside || activeElement === last)) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
 export function inboundFileLabel(file) {
   const labels = {
     A: 'Added',

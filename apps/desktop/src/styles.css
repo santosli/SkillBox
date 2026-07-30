@@ -3785,14 +3785,14 @@ dd {
 }
 
 .inboundBlockingNotice > svg,
-.inboundConflictDiagnosis > div > svg {
+.inboundConflictHeader > svg {
   width: 18px;
   height: 18px;
   flex: 0 0 auto;
 }
 
 .inboundBlockingNotice > div,
-.inboundConflictDiagnosis > div > span {
+.inboundConflictHeader > span {
   display: grid;
   gap: 3px;
 }
@@ -3912,7 +3912,7 @@ dd {
   padding: 14px;
 }
 
-.inboundConflictDiagnosis > div {
+.inboundConflictHeader {
   display: flex;
   align-items: flex-start;
   gap: 10px;
@@ -3920,7 +3920,7 @@ dd {
 
 .inboundConflictDiagnosis dl {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px;
   margin: 0;
 }
@@ -3942,6 +3942,46 @@ dd {
   margin: 0;
   font-size: 16px;
   font-weight: 720;
+}
+
+.inboundConflictLists {
+  display: grid;
+  gap: 8px;
+}
+
+.inboundConflictLists details {
+  border: 1px solid color-mix(in srgb, var(--skillbox-amber-border) 72%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--skillbox-surface) 72%, transparent);
+}
+
+.inboundConflictLists summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 680;
+  padding: 8px 9px;
+}
+
+.inboundConflictLists ul {
+  display: grid;
+  max-height: 180px;
+  gap: 4px;
+  overflow: auto;
+  margin: 0;
+  padding: 0 9px 8px 26px;
+}
+
+.inboundConflictLists code {
+  overflow-wrap: anywhere;
+  color: var(--skillbox-text-secondary);
+  font-size: 11px;
+}
+
+.inboundConflictLists small {
+  display: block;
+  color: var(--skillbox-text-muted);
+  font-size: 11px;
+  padding: 0 9px 8px;
 }
 
 .inboundReviewFooter {

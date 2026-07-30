@@ -2,9 +2,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 import {
+  beginReviewDialogFocus,
   canApplyUserSkillsInbound,
   canReviewUserSkillsInbound,
+  handleReviewDialogKeyDown,
   inboundRelationLabel,
+  invalidateUserSkillsInboundPreview,
   normalizeUserSkillsInboundPreview,
   normalizeUserSkillsInboundStatus
 } from './userSkillsInbound.js';
@@ -48,6 +51,22 @@ test('review supports incoming and diverged states but apply trusts core can_app
   assert.equal(canApplyUserSkillsInbound({ canApply: true, previewId: 'preview-1' }), true);
   assert.equal(canApplyUserSkillsInbound({ canApply: false, previewId: 'preview-1' }), false);
   assert.equal(canApplyUserSkillsInbound({ canApply: true, previewId: '' }), false);
+});
+
+test('apply failure invalidation revokes the preview authorization until refresh', () => {
+  const preview = { canApply: true, previewId: 'preview-1', files: [] };
+  const invalidated = invalidateUserSkillsInboundPreview(preview);
+
+  assert.equal(invalidated.canApply, false);
+  assert.equal(invalidated.previewId, '');
+  assert.deepEqual(invalidated.files, []);
+  assert.equal(canApplyUserSkillsInbound(invalidated), false);
+  assert.equal(preview.previewId, 'preview-1');
+  assert.match(
+    appSource,
+    /preview:\s*invalidateUserSkillsInboundPreview\(current\.preview\)/
+  );
+  assert.match(appSource, /Refresh to review the current repository state/);
 });
 
 test('normalizes repository-wide preview and conflict diagnostics', () => {
@@ -118,6 +137,108 @@ test('diverged review provides only external resolution actions', () => {
   assert.match(dialogSource, /aria-label="Copy repository path"/);
   assert.match(dialogSource, /\sRefresh\s/);
   assert.doesNotMatch(dialogSource, /Keep local|Accept remote|Merge now/);
+});
+
+test('diverged review exposes bounded expandable conflict lists', () => {
+  assert.match(dialogSource, /\['Skills changed by both', analysis\?\.bothChangedSkills \|\| \[\]\]/);
+  assert.match(dialogSource, /\['Files changed by both', analysis\?\.bothChangedFiles \|\| \[\]\]/);
+  assert.match(dialogSource, /\['Likely conflict files', analysis\?\.likelyConflictFiles \|\| \[\]\]/);
+  assert.match(dialogSource, /<details key=\{label\}>/);
+  assert.match(dialogSource, /<summary>/);
+  assert.match(dialogSource, /items\.slice\(0, 8\)\.map/);
+  assert.match(dialogSource, /Showing 8 of \{items\.length\} items/);
+});
+
+test('review dialog manages initial focus, Escape, focus trap, and focus restore', () => {
+  const ownerDocument = { activeElement: null };
+  const focusable = (name) => ({
+    name,
+    isConnected: true,
+    getAttribute: () => null,
+    focus() {
+      ownerDocument.activeElement = this;
+    }
+  });
+  const restore = focusable('restore');
+  const first = focusable('first');
+  const last = focusable('last');
+  const dialogElement = {
+    ownerDocument,
+    contains: (element) => [first, last].includes(element),
+    querySelectorAll: () => [first, last]
+  };
+  const event = (key, shiftKey = false) => ({
+    key,
+    shiftKey,
+    prevented: false,
+    stopped: false,
+    preventDefault() {
+      this.prevented = true;
+    },
+    stopPropagation() {
+      this.stopped = true;
+    }
+  });
+
+  const cleanup = beginReviewDialogFocus(first, restore);
+  assert.equal(ownerDocument.activeElement, first);
+
+  ownerDocument.activeElement = last;
+  const forwardTab = event('Tab');
+  handleReviewDialogKeyDown(forwardTab, { dialogElement, onClose() {} });
+  assert.equal(forwardTab.prevented, true);
+  assert.equal(ownerDocument.activeElement, first);
+
+  const backwardTab = event('Tab', true);
+  handleReviewDialogKeyDown(backwardTab, { dialogElement, onClose() {} });
+  assert.equal(backwardTab.prevented, true);
+  assert.equal(ownerDocument.activeElement, last);
+
+  let closeCount = 0;
+  const escape = event('Escape');
+  handleReviewDialogKeyDown(escape, {
+    dialogElement,
+    onClose() {
+      closeCount += 1;
+    }
+  });
+  assert.equal(closeCount, 1);
+  assert.equal(escape.prevented, true);
+  assert.equal(escape.stopped, true);
+
+  const blockedEscape = event('Escape');
+  handleReviewDialogKeyDown(blockedEscape, {
+    dialogElement,
+    closeDisabled: true,
+    onClose() {
+      closeCount += 1;
+    }
+  });
+  assert.equal(closeCount, 1);
+  assert.equal(blockedEscape.prevented, true);
+  assert.equal(blockedEscape.stopped, true);
+
+  cleanup();
+  assert.equal(ownerDocument.activeElement, restore);
+  assert.match(dialogSource, /ref=\{closeButtonRef\}/);
+  assert.match(
+    dialogSource,
+    /aria-current=\{activeFile\?\.path === file\.path \? 'true' : undefined\}/
+  );
+  assert.match(dialogSource, /aria-pressed=\{activeFile\?\.path === file\.path\}/);
+});
+
+test('Save remote and inbound operations disable each other', () => {
+  assert.match(
+    settingsSource,
+    /'checking_inbound',[\s\S]*'previewing_inbound',[\s\S]*'applying_inbound'/
+  );
+  assert.match(settingsSource, /const inboundBusy = inboundOperationBusy \|\| remoteSaveBusy/);
+  assert.match(settingsSource, /if \(inboundOperationBusy \|\| remoteSaveBusy\) return/);
+  assert.match(
+    settingsSource,
+    /disabled=\{status === 'syncing' \|\| inboundOperationBusy \|\| remoteSaveBusy\}/
+  );
 });
 
 test('browser fixtures expose deterministic behind, dirty, diverged, and safe bootstrap states', () => {
