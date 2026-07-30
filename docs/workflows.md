@@ -443,6 +443,8 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 
 ## 11. Sync User-Skills Git
 
+### Outbound Commit And Push
+
 触发条件：
 
 - Rust CLI 入口：`skillbox sync-user-skills [--remote <git-url>] [--message <msg>] [--no-push]`。
@@ -489,6 +491,92 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - `cargo run -p skillbox-cli --offline -- user-skills-status --managed-root <temp-skillbox-root>`
 - `cargo run -p skillbox-cli --offline -- sync-user-skills --managed-root <temp-skillbox-root> --remote <bare-repo-path> --message "test sync"`
 - UI 路径变更时，手动验证 commit review dialog、diff preview、默认 commit message、文件选择、shared remote 提示和 push failure 状态。
+
+### Reviewed Inbound Fast-Forward
+
+v0.7 Draft contract:
+
+- Rust CLI:
+  - `skillbox user-skills-inbound-check`
+  - `skillbox user-skills-inbound-preview`
+  - `skillbox user-skills-inbound-apply --preview-id <id>`
+- Tauri:
+  - `check_user_skills_inbound`
+  - `preview_user_skills_inbound`
+  - `apply_user_skills_inbound`
+- Desktop Settings 的 `User skills Git` 区域使用 `Check remote`、
+  `Review incoming changes`、`Apply fast-forward` 三个明确术语。
+
+Check remote:
+
+- 只由用户或 CLI 显式触发；v0.7 不在 startup/background 自动 fetch。
+- 固定 fetch configured `origin/main`。remote 未配置、`origin/main` 不存在、
+  auth/network failure 或 timeout 必须返回 actionable structured state/error。
+- fetch 只更新 remote-tracking refs，不修改 working tree、index 或 SQLite skill
+  rows。
+- 分开返回 worktree `clean/dirty` 和 history relation：
+  `unknown/synced/ahead/behind/diverged/remote_only/no_remote_branch`。
+- 同时返回 local/remote/merge-base SHA、ahead/behind counts、fetch timestamp/error、
+  sanitized remote URL 和 branch；不得在 UI/log 中暴露 credentials。
+
+Review incoming changes:
+
+- 再次显式 fetch/recompute，并提供 repository-wide review；不提供 selective
+  per-skill apply。
+- 将 remote changes 分组为 added/updated/deleted/renamed skills 与 repository
+  files，提供有界 file diff。
+- remote tree 是不可信输入。Preview 必须验证 `SKILL.md`/skill name、entry/file/tree
+  大小、路径和文件类型，拒绝 `.git` content、traversal、unsafe files 和 escaping
+  symlinks。
+- Preview 列出受影响的 deployed runtime/profile targets。已部署 skill 的 update
+  可以继续 review；已部署 skill 的 delete/rename 必须 blocked，并提示先
+  undeploy。未部署 skill 的 delete 可以 apply。
+- `preview_id` 绑定 local HEAD、remote SHA、merge base、remote URL、branch、
+  worktree state、validated tree、diff/change grouping 和 deployment impact。
+- `dirty + behind` 仍可展示 incoming review，但 Apply 必须 disabled。
+- `diverged` 只显示 local-only/remote-only commit counts、双方修改的 files/skills
+  和 likely conflicts。允许 Open repository、Copy repository path、Refresh；
+  不提供 Keep local / Accept remote 或内置 merge editor。
+
+Apply fast-forward:
+
+- 必须提供当前 `preview_id`；apply 会重新 fetch、重新计算 relation/tree/deployment
+  state，任何 local HEAD、remote SHA/URL/branch、dirty state 或 target state 变化都
+  以 stale preview 拒绝。
+- 只允许 clean `behind`，或 local unborn 且没有 user content 的安全
+  `remote_only` bootstrap。生成的默认 `.gitignore` 可以被识别为非 user content；
+  其它未提交文件/skill 都阻止 bootstrap。
+- `ahead`、`synced`、`diverged`、`unknown`、`no_remote_branch` 不得通过该 API
+  修改 working tree。
+- Apply 在旧 HEAD 创建
+  `refs/skillbox/backups/inbound/<operation-id>`，随后使用 fixed-argument
+  fast-forward-only Git primitive。禁止 auto merge、rebase、reset、force-push、
+  stash、last-write-wins 和 conflict-marker editing。
+- Git 成功后，Rust core transactionally reconcile SQLite 中全部 user-skill index
+  rows，使其对应新的 repository snapshot。若 reindex 失败，必须补偿恢复旧 HEAD，
+  保留 backup ref 并返回失败；不能留下已 advance Git + stale user index 的静默状态。
+- Operation log 记录 aggregate old/new refs、backup ref 与 changed counts，不记录
+  credentials、diff contents 或 skill bodies。
+
+分叉处理：
+
+- `diverged` 没有 Apply success path。用户需在 SkillBox 外使用正常 Git 工具
+  fetch/merge/rebase 并检查冲突，完成后回到 SkillBox 点 Refresh/Check remote。
+- 该手动解决过程不改变 outbound `sync-user-skills` 的 `push_failed` 语义：
+  outbound push rejected 时仍保留 local commit。
+
+完成验证：
+
+- `cargo test -p skillbox-git --offline`
+- `cargo test -p skillbox-core --offline inbound`
+- 两个 local clones + bare remote 验证 behind preview、backup ref、fast-forward 与
+  SQLite reindex。
+- 验证 dirty/stale/diverged/remote-only/invalid tree/deployed delete-or-rename
+  blockers 不修改 working tree 或 managed/index state。
+- `cargo run -p skillbox-cli --offline -- user-skills-inbound-check --managed-root <temp-skillbox-root>`
+- `cargo run -p skillbox-cli --offline -- user-skills-inbound-preview --managed-root <temp-skillbox-root>`
+- `cargo run -p skillbox-cli --offline -- user-skills-inbound-apply --preview-id <id> --managed-root <temp-skillbox-root>`
+- Desktop 手动验证 behind review、dirty+behind、diverged diagnostics 与窄 viewport。
 
 ## 12. Add Agent Adapter
 
@@ -862,7 +950,8 @@ returns structured JSON while the desktop provides interactive review.
 | Runtime profiles and deployment compatibility | Full | Full | CLI exposes `runtime-profiles`, `deploy-preview`, and `deploy`; desktop shows profile metadata and an interactive compatibility review. |
 | Undeploy and reviewed skill deletion | Full | Full | Both share overwrite, ownership, stale-preview, and confirmation protections. |
 | Remote source binding, update, rollback, and versions | Full | Full | Desktop provides all-file visual review; CLI returns structured diff/version data. |
-| User-skills Git status and outbound sync | Full | Full | Desktop adds selected-file diff review. Neither interface pulls, merges, rebases, or resolves divergence automatically. |
+| User-skills Git status and outbound commit/push | Full | Full | Desktop adds selected-file diff review. Existing push defaults and `push_failed` semantics remain unchanged. |
+| Reviewed inbound user-skills fast-forward (Unreleased v0.7 Draft) | Full | Full | Both use Check -> Preview -> Apply with the same Rust validation and stale-preview contract. Desktop adds visual repository/skill/deployment review and conflict diagnostics. Neither interface auto-merges, rebases, resets, stashes, or resolves divergence. |
 | Workspaces | Partial | Full | CLI lists/scans/adds/forgets exact roots. Desktop also previews a project directory, initializes one selected supported root, and offers the native folder picker. |
 | Usage rankings and local history sync | Full | Full | Both use the same confirmed/inferred/reference evidence model and provider backfills. |
 | Aggregate usage diagnostics | Full | Limited | CLI `usage-audit` is the automation-oriented aggregate report. Desktop exposes the relevant coverage summary and disclosure, not the complete diagnostic JSON. |

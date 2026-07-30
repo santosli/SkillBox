@@ -53,6 +53,52 @@ managed store 是跨 agent 的真相源，不绑定 Codex、Claude、Cursor、Co
 当前实现仍以 `SKILL.md` 目录作为可读写单位。Claude、OpenClaw、Cursor、Claude Code、Copilot 等 agent 可能使用不同的原生文件格式；
 支持这些格式时，应由 adapter 把原生格式映射到 SkillBox 的规范化记录，而不是让 UI 或 workflow 分别维护 schema。
 
+## User-Skills Git State And Recovery
+
+`~/.skillbox/user-skills` 同时是 user skill managed root 和一个共享 Git
+repository。v0.7 入站同步不新增 SQLite schema；Git commit/ref 是 repository
+内容 identity，SQLite `skills` rows 是可重建索引。
+
+入站 status 分成两个正交维度：
+
+- worktree：`clean` 或 `dirty`；
+- relation：`unknown`、`synced`、`ahead`、`behind`、`diverged`、
+  `remote_only` 或 `no_remote_branch`。
+
+Status/preview 同时返回 local SHA、remote SHA、merge-base SHA、
+ahead/behind counts、`origin/main` branch、sanitized remote URL 和 fetch
+timestamp/error。`dirty + behind` 等组合是合法状态：可以 review，但不能 apply。
+
+Preview 是 repository-wide snapshot，不是逐 skill patch。`preview_id` 至少绑定
+local HEAD、remote SHA、merge base、remote URL、branch、worktree state、validated
+remote tree、file/skill changes 和 affected deployments。Apply 会重新 fetch 并重算；
+任一 identity/state 变化都必须拒绝旧 preview。
+
+Apply 前，已有 local HEAD 会保存到：
+
+```text
+refs/skillbox/backups/inbound/<operation-id>
+```
+
+随后只允许 `behind` 的 fast-forward，或在本地没有 user content 时执行
+`remote_only` bootstrap。Git 成功后，Rust core 在一个 SQLite transaction 中删除并
+重建 `type=user` 的 skill index，使其对应新的完整 repository snapshot。remote skill
+rows、workspace registry、usage history 和 operation history 不属于该 rebuild。
+
+这是 Git + SQLite 两种持久化边界的补偿式 saga，不是一个跨系统 transaction：
+
+- remote tree validation 在 working-tree write 前完成；
+- Git advance 后若 reindex 失败，core 把 worktree 补偿回旧 HEAD；
+- internal backup ref 保留，便于人工 recovery；
+- compensation 失败会作为 actionable error/operation result 暴露，不能静默忽略；
+- operation payload 只保存 old/new SHA、backup ref 和 aggregate changed counts，
+  不保存 credentials、diff content 或 skill body。
+
+已部署 skill 的 update 可在 preview 明确列出 target 后应用。已部署 skill 的 delete
+或 rename 在 v0.7 阻止 apply，要求先 undeploy；这样 runtime symlink 不会因 repository
+级变更成为 dangling target。无 local history 且只有生成 `.gitignore` 的 repository
+可以 safe bootstrap；已有 user content 时必须阻止。
+
 ## Remote Source Metadata
 
 远程 skill 的来源元数据保存在 `remote-skills/<skill-name>/source.json`。
@@ -258,7 +304,7 @@ compatibility preview 是派生的只读结果，不另建持久表；其 `previ
 `profile_id/root_key/format` 和 deployment mode。unknown optional frontmatter
 保留在原始 `SKILL.md` 中并返回 warning，compatibility engine 不 rewrite source。
 
-`operations` 记录会改变用户 skill 内容、managed store、runtime、Git state、workspace registry 或 hook 配置的主要动作。Rust core 统一写入，UI 只能读取展示或通过结构化命令触发新记录；记录从 UI 视角 append-only，MVP 不做自动清理。`payload_json` 保存操作细节，例如 from/to version、changed paths、backup path、affected deployments、commit SHA 或失败恢复状态，但不保存 Git credentials 或 hook 配置正文。低风险 UI metadata、自动 cache/index refresh 和纯读取操作不写 operation history。
+`operations` 记录会改变用户 skill 内容、managed store、runtime、Git state、workspace registry 或 hook 配置的主要动作。Rust core 统一写入，UI 只能读取展示或通过结构化命令触发新记录；记录从 UI 视角 append-only，MVP 不做自动清理。`payload_json` 保存操作细节，例如 from/to version、changed paths、backup path/ref、affected deployments、old/new commit SHA、aggregate changed counts 或失败恢复状态，但不保存 Git credentials、review diff/skill body 或 hook 配置正文。低风险 UI metadata、remote fetch/ref refresh、自动 cache/index refresh 和纯读取操作不写 operation history。
 
 `import_records` 记录本地 import 且 deploy back 到 source 成功后的可恢复状态。每个 imported skill 一条记录，`source_path` 是被替换成 SkillBox symlink 的 runtime 原路径，`backup_path` 是 import 前移动到 `backups/imports` 的原目录。`status=active` 的记录可以通过 `revert_import` 恢复；`status=reverted` 表示 backup 已恢复回 source path。`legacy=1` 表示记录由旧 deployments/backups 证据链保守 reconcile 得到。
 

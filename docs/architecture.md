@@ -108,7 +108,9 @@ cargo run -p skillbox-cli --offline -- <command>
 - `workspaces.rs` workspace registry 发现、注册与扫描
 - `remote.rs` GitHub install preview/apply、remote source 绑定、update check、diff 预览、版本切换
 - `marketplace.rs` Claude marketplace 候选搜索
-- `git_sync.rs` user-skills Git 同步编排
+- `git_sync.rs` user-skills Git outbound commit/push 编排
+- `inbound_git_sync.rs` user-skills Git fetch、relation、remote-tree review、
+  stale-preview fast-forward、backup ref 与 index reconciliation
 - `usage.rs` usage 事件规范化、`confirmed/inferred/reference` evidence、单向升级与有界 provenance、Calls/stats、coverage、aggregate-only `usage-audit` 和 source-aware Import preview
 - `usage_backfill.rs` 只从本机 Codex session rollout 的显式用户输入载体解析完整 `<skill>` 块或 `[$skill](.../SKILL.md)` 链接，作为逐回合 `inferred` invocation；忽略 catalog、普通 prose、assistant/tool/shell payload 与 output，按 turn + 规范化 name/path 去重，并用 session `cwd` 恢复 workspace identity
 - `usage_backfill_claude.rs` 只从本机 Claude Code project JSONL 的原生 Skill tool/command attribution 恢复 `confirmed` 事件，解析真实 `SKILL.md`，不复制消息正文
@@ -135,6 +137,8 @@ cargo run -p skillbox-cli --offline -- <command>
 - GitHub install preview/apply, GitHub-only remote source search, manual binding, update check, version listing, diff preview, update/rollback apply, and operation logging.
 - SQLite schema migration、升级前备份、完整性校验、基础表和索引写入。
 - 用户 favorites/tags 的 SQLite 持久化和桌面 legacy local-storage 迁移。
+- 共享 user-skills repository 的 outbound commit/push，以及显式
+  Check remote -> Review incoming changes -> Apply fast-forward 入站编排。
 - managed store、deployment、workspace、import backup 和 metadata 的只读 Doctor 检查。
 - 用户偏好读取与写入。
 - skill usage 事件记录、evidence/provenance 升级、普通/System source identity、
@@ -152,7 +156,9 @@ cargo run -p skillbox-cli --offline -- <command>
 - 通过 `GitService` 作为 Rust 产品运行时唯一的 Git 服务边界。
 - 用结构化参数执行 `git -C <repo> ...`，不拼接 shell 字符串。
 - 读取仓库是否初始化、当前分支、dirty 状态和原始 status。
-- 提供 init、origin 读取/设置、add、commit、push、`ls-remote` 等可复用 Git 原语。
+- 提供 init、origin 读取/设置、add、commit、push、`ls-remote`，以及固定
+  `origin/main` fetch、ref 解析、merge base、ahead/behind、ancestor、
+  tree/diff、backup ref、merge-tree diagnostics 和 fast-forward 等可复用原语。
 - 集中处理 Git 网络命令的非交互环境变量、有界 timeout 和 stderr 返回。
 - 不负责 managed store 级别的提交策略；`~/.skillbox/user-skills` 的同步编排在 `skillbox-core`。
 
@@ -201,6 +207,22 @@ frontmatter，读取 profile capability，检查 target ownership，并返回
 任一变化都要求重新 preview。unknown optional frontmatter 只告警且原样保留，不自动
 rewrite；runtime 目录中已有的非 symlink skill 不能被静默覆盖。
 
+`~/.skillbox/user-skills` 的入站 Git 更新是 managed-store mutation，不是通用
+`git pull`。Rust core 分开返回 worktree 的 `clean/dirty` 与历史 relation
+`unknown/synced/ahead/behind/diverged/remote_only/no_remote_branch`。只有
+`behind` 或安全的 `remote_only` 可以在 clean worktree 上生成可 apply preview。
+Preview 对完整 remote tree 做 skill/path/file/symlink 验证，并绑定 local/remote
+SHA、merge base、sanitized remote、branch、worktree state、change set 与 deployment
+impact。Apply 显式重新 fetch/recompute；任何输入变化都会让 `preview_id` stale。
+
+Git 更新按 repository-wide snapshot 应用，不提供逐 skill 选择。已部署 skill 的
+update 会展示 target；已部署 skill 的 delete/rename 在 v0.7 被阻止，必须先
+undeploy。Apply 在旧 HEAD 创建 `refs/skillbox/backups/inbound/<operation-id>`，
+fast-forward 后 transactionally reconcile user rows in SQLite。若 reindex 失败，
+core 会把 Git worktree 补偿回旧 HEAD 并保留 backup ref。该过程不自动 merge、
+rebase、reset、force-push、stash 或解决 conflict；`diverged` 只返回 aggregate
+conflict diagnosis，用户需在应用外使用正常 Git 工具处理。
+
 GitHub remote source 可以是仓库中的 skill 子目录，也可以是根目录包含 `SKILL.md` 的 standalone repository。后者在 metadata 中显式记录为 `root: true`，preview、install、update 和 deploy 共用同一份清理后的 repository worktree snapshot；Git checkout 的 `.git` metadata 不进入 managed store，逃逸 source root 的 symlink 在 copy 边界被拒绝。
 
 重复候选只在名称、`SKILL.md` hash、推断类型、状态、冲突结果和完整导入快照均一致时合并；快照忽略顶层 `.git`，并覆盖其它路径、文件内容、Unix mode 与 symlink target。已 imported 的多个 runtime symlink 仅在解析到同一 managed `real_path` 时作为 alias 合并。primary 来源沿扫描 root 顺序选择；其它实体来源保留在 `additional_source_paths`，仅用于 review/search，不会在本次操作中被修改。导入只备份 primary、替换其 managed symlink 并写入 import record。仅 `SKILL.md` 相同但脚本、权限或资源不同的目录不能合并或复用；User 和 Remote 的已有 managed target 都必须通过完整快照校验。
@@ -213,11 +235,14 @@ GitHub remote source 可以是仓库中的 skill 子目录，也可以是根目�
 - Rust CLI 有 `init`、`version`、`paths`、`scan`、`parse-github-url`、
   `runtime-profiles`、`install-preview`、`install`、`import`、
   `deploy-preview`、preview-confirmed `deploy`、`user-skills-status`、
-  `sync-user-skills`、`check-remote-updates`，并保留 `check-updates` 和
-  `rollback` 兼容别名。
+  `sync-user-skills`、`user-skills-inbound-check`、
+  `user-skills-inbound-preview`、`user-skills-inbound-apply`、
+  `check-remote-updates`，并保留 `check-updates` 和 `rollback` 兼容别名。
 - Rust CLI 有 `remote-source-candidates`、`remote-source-preview`、`bind-remote-source`、`remote-versions`、`remote-preview-change`、`remote-apply-change`、`usage-record`、`usage-rankings`、`usage-audit`、各 provider history backfill、`usage-hook`、`usage-hook-status`、`usage-hook-install`、`doctor` 和 `operations`。
 - Rust CLI 有 `workspaces`、`workspace-scan`、`workspace-add`、`workspace-forget` 来管理 workspace registry。
-- Rust core 和 Tauri 已覆盖 `~/.skillbox/user-skills` 的共享 remote Git 同步。
+- Rust core、CLI 和 Tauri 已覆盖 `~/.skillbox/user-skills` 的 outbound Git
+  commit/push；reviewed inbound `origin/main` fast-forward 已实现并处于 v0.7
+  Draft qualification，尚未作为 released capability 声明。
 - Rust core 已覆盖 remote skill 的 GitHub install preview/apply、GitHub update check、source binding、diff preview、update/rollback apply 和 operation log。
 - Rust core 和 Tauri 已覆盖 usage stats 显式上报，以及 Codex App、Codex CLI、Claude Code CLI 的 Stop hook 注入入口。schema v7 把本机 evidence 分为 `confirmed`、`inferred` 和 `reference`；用户可见 `Calls` 只包含前两类，History references 单独展示。Rankings 支持 time range、User/Remote/System skill type、Agent 和 Workspace 的结构化过滤，并返回同一过滤快照内的 evidence totals、时间覆盖和可重叠 provenance source counts，以及 Codex、Claude Code、Cursor 最近一次 history scan 的文件/session 数。桌面 `Sync histories` 顺序调用三个 provider；单个 provider 失败不会撤销其他 provider 已成功写入或升级的幂等事件。
 - Codex 本地 store 没有稳定的 provider-native skill-run total。Codex 结构化逐回合 skill carrier 只能作为 defensible `inferred` Calls；`usage-audit` 明确报告这个已知 undercount，不读取或返回聊天正文。

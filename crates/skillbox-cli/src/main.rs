@@ -169,6 +169,16 @@ fn run(args: Vec<String>) -> Result<(), String> {
         "user-skills-status" => print_json(&skillbox_core::user_skills_git_status(managed_root(
             command_args,
         ))?),
+        "user-skills-inbound-check" => print_json(&skillbox_core::check_user_skills_inbound(
+            managed_root(command_args),
+        )?),
+        "user-skills-inbound-preview" => print_json(&skillbox_core::preview_user_skills_inbound(
+            managed_root(command_args),
+        )?),
+        "user-skills-inbound-apply" => print_json(&skillbox_core::apply_user_skills_inbound(
+            user_skills_inbound_apply_request(command_args)?,
+            managed_root(command_args),
+        )?),
         "check-remote-updates" | "check-updates" => {
             let skill_name = positional(command_args).into_iter().next();
             if let Some(skill_name) = skill_name {
@@ -560,6 +570,19 @@ fn usage_ranking_request(
     })
 }
 
+fn user_skills_inbound_apply_request(
+    args: &[String],
+) -> Result<skillbox_core::UserSkillsInboundApplyRequest, String> {
+    let preview_id = option(args, "--preview-id").ok_or_else(|| {
+        "Inbound preview is required. Run `skillbox user-skills-inbound-preview` first, then pass --preview-id <id>."
+            .to_string()
+    })?;
+    Ok(skillbox_core::UserSkillsInboundApplyRequest {
+        preview_id: Some(preview_id),
+        actor: "cli".to_string(),
+    })
+}
+
 fn help_text() -> &'static str {
     "SkillBox Rust CLI
 
@@ -579,6 +602,9 @@ Commands:
   skillbox delete-preview <skill-name> [--managed-root <path>]
   skillbox delete <skill-name> --preview-id <id> --confirm <skill-name> [--managed-root <path>]
   skillbox user-skills-status [--managed-root <path>]
+  skillbox user-skills-inbound-check [--managed-root <path>]
+  skillbox user-skills-inbound-preview [--managed-root <path>]
+  skillbox user-skills-inbound-apply --preview-id <id> [--managed-root <path>]
   skillbox check-remote-updates [skill-name] [--managed-root <path>]
   skillbox check-updates [skill-name] [--managed-root <path>]
   skillbox remote-source-candidates <skill-name> [--managed-root <path>]
@@ -804,6 +830,76 @@ mod tests {
 
         assert!(help.contains("skillbox import-records [--skill <name>]"));
         assert!(help.contains("skillbox revert-import <import-record-id>"));
+    }
+
+    #[test]
+    fn help_lists_explicit_user_skills_inbound_flow() {
+        let help = help_text();
+
+        assert!(help.contains("skillbox user-skills-inbound-check"));
+        assert!(help.contains("skillbox user-skills-inbound-preview"));
+        assert!(help.contains("skillbox user-skills-inbound-apply --preview-id <id>"));
+    }
+
+    #[test]
+    fn inbound_apply_request_requires_preview_id() {
+        let error = user_skills_inbound_apply_request(&[]).unwrap_err();
+
+        assert!(error.contains("Inbound preview is required"));
+        assert!(error.contains("user-skills-inbound-preview"));
+    }
+
+    #[test]
+    fn inbound_apply_request_preserves_structured_preview_identity() {
+        let request = user_skills_inbound_apply_request(&[
+            "--preview-id".to_string(),
+            "inbound-preview-123".to_string(),
+        ])
+        .unwrap();
+
+        assert_eq!(request.preview_id.as_deref(), Some("inbound-preview-123"));
+        assert_eq!(request.actor, "cli");
+    }
+
+    #[test]
+    fn inbound_commands_route_check_preview_and_apply_to_core() {
+        let root = temp_dir("cli-user-skills-inbound");
+        let managed_root = root.join("SkillBox");
+        skillbox_core::ensure_managed_layout(&managed_root).unwrap();
+        let remote = bare_user_skills_remote("cli-user-skills-inbound-origin", "demo");
+        let repo = managed_root.join("user-skills");
+        skillbox_core::set_user_skills_git_remote(
+            skillbox_core::UserSkillsGitRemoteRequest {
+                remote_url: remote.to_string_lossy().to_string(),
+            },
+            &managed_root,
+        )
+        .unwrap();
+
+        run(vec![
+            "user-skills-inbound-check".to_string(),
+            "--managed-root".to_string(),
+            managed_root.to_string_lossy().to_string(),
+        ])
+        .unwrap();
+        run(vec![
+            "user-skills-inbound-preview".to_string(),
+            "--managed-root".to_string(),
+            managed_root.to_string_lossy().to_string(),
+        ])
+        .unwrap();
+
+        let preview = skillbox_core::preview_user_skills_inbound(&managed_root).unwrap();
+        run(vec![
+            "user-skills-inbound-apply".to_string(),
+            "--preview-id".to_string(),
+            preview.preview_id,
+            "--managed-root".to_string(),
+            managed_root.to_string_lossy().to_string(),
+        ])
+        .unwrap();
+
+        assert!(repo.join("demo/SKILL.md").is_file());
     }
 
     #[test]
@@ -1182,6 +1278,42 @@ mod tests {
                 "commit",
                 "-m",
                 "Add skill",
+            ],
+        );
+        run_git(
+            &work,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
+        run_git(&work, &["push", "-u", "origin", "main"]);
+        remote
+    }
+
+    fn bare_user_skills_remote(label: &str, skill_name: &str) -> PathBuf {
+        let remote = temp_dir(label).join("remote.git");
+        run_git(
+            remote.parent().unwrap(),
+            &["init", "--bare", remote.to_str().unwrap()],
+        );
+        let work = temp_dir(&format!("{label}-work"));
+        run_git(&work, &["init", "-b", "main"]);
+        let skill_dir = work.join(skill_name);
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            format!("---\nname: {skill_name}\ndescription: Demo skill\n---\n"),
+        )
+        .unwrap();
+        run_git(&work, &["add", "."]);
+        run_git(
+            &work,
+            &[
+                "-c",
+                "user.name=SkillBox",
+                "-c",
+                "user.email=skillbox@example.invalid",
+                "commit",
+                "-m",
+                "Add user skill",
             ],
         );
         run_git(

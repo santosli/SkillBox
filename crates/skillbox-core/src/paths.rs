@@ -196,6 +196,19 @@ pub(crate) fn ensure_default_user_skills_gitignore(user_skills_root: &Path) -> R
     if gitignore_path.exists() {
         return Ok(());
     }
+    if user_skills_root.join(".git").is_dir() {
+        let exclude_path = user_skills_root.join(".git/info/exclude");
+        let mut existing = fs::read_to_string(&exclude_path).unwrap_or_default();
+        if !existing.contains("# SkillBox managed defaults") {
+            if !existing.is_empty() && !existing.ends_with('\n') {
+                existing.push('\n');
+            }
+            existing.push_str("# SkillBox managed defaults\n");
+            existing.push_str(DEFAULT_USER_SKILLS_GITIGNORE);
+            fs::write(exclude_path, existing).map_err(|error| error.to_string())?;
+        }
+        return Ok(());
+    }
     fs::write(gitignore_path, DEFAULT_USER_SKILLS_GITIGNORE).map_err(|error| error.to_string())
 }
 

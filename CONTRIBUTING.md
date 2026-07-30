@@ -129,6 +129,12 @@ For UI changes, also run the app and verify the affected workflow manually.
   identity from path strings or usage `agent_id`.
 - Profile changes require migration/backfill coverage, valid/warning/blocked/
   malformed fixtures, CLI/Tauri parity, and stale-preview deployment tests.
+- User-skills inbound Git changes must preserve the reviewed
+  Check remote -> Review incoming changes -> Apply fast-forward boundary.
+  Keep worktree state separate from branch relation; bind apply to a fresh
+  preview; validate remote trees before writes; preserve backup/ref and index
+  compensation tests. Do not add automatic merge, rebase, reset, force-push,
+  stash, background fetch, or conflict resolution.
 - Standard desktop top-level pages should use the shared `PageFrame` component.
   It fills the available content width by default; narrower page widths must be
   an explicit page-specific exception. Settings keeps its constrained workbench

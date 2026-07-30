@@ -1410,6 +1410,48 @@ fn ensure_managed_layout_preserves_existing_user_skills_gitignore() {
 }
 
 #[test]
+fn ensure_managed_layout_keeps_existing_user_skills_repo_clean() {
+    let managed_root = temp_dir("managed-layout-clean-git-repo").join("SkillBox");
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    let repo = paths.user_skills_root;
+    skillbox_git::GitService::new().init_main(&repo).unwrap();
+    run_git(&repo, &["add", ".gitignore"]);
+    run_git(
+        &repo,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Track defaults",
+        ],
+    );
+    run_git(&repo, &["rm", ".gitignore"]);
+    run_git(
+        &repo,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Remove tracked defaults",
+        ],
+    );
+
+    ensure_managed_layout(&managed_root).unwrap();
+
+    assert!(!repo.join(".gitignore").exists());
+    assert!(fs::read_to_string(repo.join(".git/info/exclude"))
+        .unwrap()
+        .contains("# SkillBox managed defaults"));
+    assert!(!skillbox_git::GitService::new().status(&repo).unwrap().dirty);
+}
+
+#[test]
 fn legacy_managed_root_is_linked_when_hidden_root_is_empty_stub() {
     let root = temp_dir("legacy-managed-root-link");
     let hidden_root = root.join(".skillbox");

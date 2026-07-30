@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
+use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use std::thread;
@@ -8,6 +9,12 @@ use std::time::{Duration, Instant};
 const DEFAULT_LS_REMOTE_TIMEOUT: Duration = Duration::from_secs(30);
 const FETCH_REF_TIMEOUT: Duration = Duration::from_secs(30);
 const PUSH_TIMEOUT: Duration = Duration::from_secs(30);
+const LOCAL_GIT_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_REF_DIFF_FILES: usize = 500;
+const MAX_DIFF_BYTES_PER_FILE: usize = 256 * 1024;
+const MAX_TREE_ENTRIES: usize = 20_000;
+const MAX_SHOW_FILE_BYTES: usize = 2 * 1024 * 1024;
+const BACKUP_REF_PREFIX: &str = "refs/skillbox/backups/";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitStatus {
@@ -29,6 +36,40 @@ pub struct GitDiffFile {
     pub old_path: Option<String>,
     pub status: String,
     pub diff: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitAheadBehind {
+    pub ahead: u64,
+    pub behind: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitTreeEntry {
+    pub mode: String,
+    pub object_type: String,
+    pub object_id: String,
+    pub size: Option<u64>,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitBackupRef {
+    pub reference: String,
+    pub target: String,
+    pub previous_target: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitMergeTreeAnalysis {
+    pub tree_id: String,
+    pub conflict_files: Vec<String>,
+}
+
+impl GitMergeTreeAnalysis {
+    pub fn is_clean(&self) -> bool {
+        self.conflict_files.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,6 +177,518 @@ impl GitService {
         Ok(())
     }
 
+    pub fn fetch_origin_main(&self, repo: impl AsRef<Path>) -> Result<Option<String>, String> {
+        self.fetch_origin_main_with_timeout(repo, FETCH_REF_TIMEOUT)
+    }
+
+    pub fn fetch_origin_main_with_timeout(
+        &self,
+        repo: impl AsRef<Path>,
+        timeout: Duration,
+    ) -> Result<Option<String>, String> {
+        let repo = repo.as_ref();
+        let args = [
+            "fetch",
+            "--no-tags",
+            "--force",
+            "origin",
+            "refs/heads/main:refs/remotes/origin/main",
+        ];
+        let output = self.run_network_output(repo, &args, timeout, "git fetch origin main")?;
+        if output.status.success() {
+            return self.rev_parse_optional(repo, "refs/remotes/origin/main");
+        }
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("couldn't find remote ref refs/heads/main") {
+            self.delete_ref_if_present(repo, "refs/remotes/origin/main")?;
+            return Ok(None);
+        }
+
+        Err(sanitize_git_error(stderr.trim()))
+    }
+
+    pub fn rev_parse_optional(
+        &self,
+        repo: impl AsRef<Path>,
+        revision: &str,
+    ) -> Result<Option<String>, String> {
+        validate_git_revision_arg(revision)?;
+        let revision = format!("{revision}^{{commit}}");
+        let args = [
+            "rev-parse".to_string(),
+            "--verify".to_string(),
+            "--quiet".to_string(),
+            "--end-of-options".to_string(),
+            revision,
+        ];
+        let output = self.run_owned_output_with_timeout(
+            repo.as_ref(),
+            &args,
+            LOCAL_GIT_TIMEOUT,
+            "git rev-parse",
+        )?;
+        if output.status.success() {
+            let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            return Ok((!sha.is_empty()).then_some(sha));
+        }
+        if output.status.code() == Some(1) {
+            return Ok(None);
+        }
+        Err(sanitize_git_error(
+            String::from_utf8_lossy(&output.stderr).trim(),
+        ))
+    }
+
+    pub fn merge_base(
+        &self,
+        repo: impl AsRef<Path>,
+        left: &str,
+        right: &str,
+    ) -> Result<Option<String>, String> {
+        let repo = repo.as_ref();
+        let left = self.require_commit(repo, left)?;
+        let right = self.require_commit(repo, right)?;
+        let args = ["merge-base", "--", left.as_str(), right.as_str()];
+        let output =
+            self.run_output_with_timeout(repo, &args, LOCAL_GIT_TIMEOUT, "git merge-base")?;
+        if output.status.success() {
+            return Ok(Some(
+                String::from_utf8_lossy(&output.stdout).trim().to_string(),
+            ));
+        }
+        if output.status.code() == Some(1) {
+            return Ok(None);
+        }
+        Err(sanitize_git_error(
+            String::from_utf8_lossy(&output.stderr).trim(),
+        ))
+    }
+
+    pub fn ahead_behind(
+        &self,
+        repo: impl AsRef<Path>,
+        local: &str,
+        upstream: &str,
+    ) -> Result<(u64, u64), String> {
+        let counts = self.ahead_behind_summary(repo, local, upstream)?;
+        Ok((counts.ahead, counts.behind))
+    }
+
+    pub fn ahead_behind_summary(
+        &self,
+        repo: impl AsRef<Path>,
+        local: &str,
+        upstream: &str,
+    ) -> Result<GitAheadBehind, String> {
+        let repo = repo.as_ref();
+        let local = self.require_commit(repo, local)?;
+        let upstream = self.require_commit(repo, upstream)?;
+        let range = format!("{local}...{upstream}");
+        let args = ["rev-list", "--left-right", "--count", range.as_str()];
+        let output =
+            self.run_output_with_timeout(repo, &args, LOCAL_GIT_TIMEOUT, "git rev-list")?;
+        let counts = self.success_stdout(output)?;
+        let mut parts = counts.split_whitespace();
+        let ahead = parts
+            .next()
+            .ok_or("Git did not return an ahead count.")?
+            .parse::<u64>()
+            .map_err(|_| "Git returned an invalid ahead count.".to_string())?;
+        let behind = parts
+            .next()
+            .ok_or("Git did not return a behind count.")?
+            .parse::<u64>()
+            .map_err(|_| "Git returned an invalid behind count.".to_string())?;
+        Ok(GitAheadBehind { ahead, behind })
+    }
+
+    pub fn commit_count(&self, repo: impl AsRef<Path>, revision: &str) -> Result<u32, String> {
+        let repo = repo.as_ref();
+        let revision = self.require_commit(repo, revision)?;
+        let args = ["rev-list", "--count", revision.as_str()];
+        let output =
+            self.run_output_with_timeout(repo, &args, LOCAL_GIT_TIMEOUT, "git rev-list")?;
+        self.success_stdout(output)?
+            .trim()
+            .parse::<u32>()
+            .map_err(|_| "Git returned an invalid commit count.".to_string())
+    }
+
+    pub fn is_ancestor(
+        &self,
+        repo: impl AsRef<Path>,
+        ancestor: &str,
+        descendant: &str,
+    ) -> Result<bool, String> {
+        let repo = repo.as_ref();
+        let ancestor = self.require_commit(repo, ancestor)?;
+        let descendant = self.require_commit(repo, descendant)?;
+        let args = [
+            "merge-base",
+            "--is-ancestor",
+            ancestor.as_str(),
+            descendant.as_str(),
+        ];
+        let output =
+            self.run_output_with_timeout(repo, &args, LOCAL_GIT_TIMEOUT, "git merge-base")?;
+        match output.status.code() {
+            Some(0) => Ok(true),
+            Some(1) => Ok(false),
+            _ => Err(sanitize_git_error(
+                String::from_utf8_lossy(&output.stderr).trim(),
+            )),
+        }
+    }
+
+    pub fn diff_refs(
+        &self,
+        repo: impl AsRef<Path>,
+        old_revision: &str,
+        new_revision: &str,
+    ) -> Result<Vec<GitDiffFile>, String> {
+        let repo = repo.as_ref();
+        let old_sha = self.require_commit(repo, old_revision)?;
+        let new_sha = self.require_commit(repo, new_revision)?;
+        let args = [
+            "diff",
+            "--name-status",
+            "-z",
+            "-M",
+            "--no-ext-diff",
+            old_sha.as_str(),
+            new_sha.as_str(),
+        ];
+        let output =
+            self.run_output_with_timeout(repo, &args, LOCAL_GIT_TIMEOUT, "git diff refs")?;
+        let name_status = self.success_stdout_bytes(output)?;
+        let entries = parse_name_status_z(&name_status)?;
+        if entries.len() > MAX_REF_DIFF_FILES {
+            return Err(format!(
+                "Git diff contains more than {MAX_REF_DIFF_FILES} files."
+            ));
+        }
+
+        entries
+            .into_iter()
+            .map(|(status, old_path, path)| {
+                let mut args = vec![
+                    "diff".to_string(),
+                    "--no-ext-diff".to_string(),
+                    "--no-textconv".to_string(),
+                    "--no-color".to_string(),
+                    "-M".to_string(),
+                    "--unified=3".to_string(),
+                    old_sha.clone(),
+                    new_sha.clone(),
+                    "--".to_string(),
+                ];
+                if let Some(previous) = old_path.as_ref() {
+                    args.push(previous.clone());
+                }
+                args.push(path.clone());
+                let output = self.run_owned_output_with_timeout(
+                    repo,
+                    &args,
+                    LOCAL_GIT_TIMEOUT,
+                    "git diff file",
+                )?;
+                let diff = self.success_stdout_bytes(output)?;
+                Ok(GitDiffFile {
+                    path,
+                    old_path,
+                    status,
+                    diff: bounded_lossy_text(&diff, MAX_DIFF_BYTES_PER_FILE),
+                })
+            })
+            .collect()
+    }
+
+    pub fn create_or_update_backup_ref(
+        &self,
+        repo: impl AsRef<Path>,
+        backup_ref: &str,
+        target: &str,
+    ) -> Result<GitBackupRef, String> {
+        validate_backup_ref(backup_ref)?;
+        let repo = repo.as_ref();
+        let target = self.require_commit(repo, target)?;
+        let previous_target = self.rev_parse_optional(repo, backup_ref)?;
+        let mut args = vec![
+            "update-ref".to_string(),
+            "--create-reflog".to_string(),
+            backup_ref.to_string(),
+            target.clone(),
+        ];
+        if let Some(previous) = previous_target.as_ref() {
+            args.push(previous.clone());
+        }
+        let output =
+            self.run_owned_output_with_timeout(repo, &args, LOCAL_GIT_TIMEOUT, "git update-ref")?;
+        self.success_stdout(output)?;
+        Ok(GitBackupRef {
+            reference: backup_ref.to_string(),
+            target,
+            previous_target,
+        })
+    }
+
+    pub fn create_backup_ref(
+        &self,
+        repo: impl AsRef<Path>,
+        backup_ref: &str,
+        target: &str,
+    ) -> Result<(), String> {
+        self.create_or_update_backup_ref(repo, backup_ref, target)?;
+        Ok(())
+    }
+
+    pub fn fast_forward_only_merge(
+        &self,
+        repo: impl AsRef<Path>,
+        target: &str,
+    ) -> Result<String, String> {
+        let repo = repo.as_ref();
+        let target = self.require_commit(repo, target)?;
+        let args = [
+            "merge",
+            "--ff-only",
+            "--no-edit",
+            "--no-verify",
+            target.as_str(),
+        ];
+        let output = self.run_output_with_timeout_env(
+            repo,
+            &args,
+            LOCAL_GIT_TIMEOUT,
+            "git merge --ff-only",
+            &[("GIT_EDITOR", "true"), ("GIT_MERGE_AUTOEDIT", "no")],
+        )?;
+        self.success_stdout(output)?;
+        self.require_commit(repo, "HEAD")
+    }
+
+    pub fn fast_forward_only(&self, repo: impl AsRef<Path>, target: &str) -> Result<(), String> {
+        self.fast_forward_only_merge(repo, target)?;
+        Ok(())
+    }
+
+    pub fn initialize_unborn_main_from_ref(
+        &self,
+        repo: impl AsRef<Path>,
+        target: &str,
+    ) -> Result<String, String> {
+        let repo = repo.as_ref();
+        let target = self.require_commit(repo, target)?;
+        if self.rev_parse_optional(repo, "HEAD")?.is_some() {
+            return Err("Git repository already has a HEAD commit.".to_string());
+        }
+        self.require_main_symbolic_head(repo)?;
+        let status = self.worktree_status_porcelain(repo)?;
+        if !status.is_empty() && status != b"?? .gitignore\0" {
+            return Err(
+                "Unborn Git repository must be empty except for an untracked .gitignore."
+                    .to_string(),
+            );
+        }
+
+        let args = [
+            "checkout",
+            "--no-guess",
+            "--no-track",
+            "-b",
+            "main",
+            target.as_str(),
+        ];
+        let output = self.run_output_with_timeout(
+            repo,
+            &args,
+            LOCAL_GIT_TIMEOUT,
+            "git checkout unborn main",
+        )?;
+        self.success_stdout(output)?;
+        self.require_commit(repo, "HEAD")
+    }
+
+    pub fn bootstrap_from_ref(
+        &self,
+        repo: impl AsRef<Path>,
+        branch: &str,
+        target: &str,
+    ) -> Result<(), String> {
+        validate_main_branch(branch)?;
+        self.initialize_unborn_main_from_ref(repo, target)?;
+        Ok(())
+    }
+
+    pub fn restore_worktree_to_ref(
+        &self,
+        repo: impl AsRef<Path>,
+        branch: &str,
+        old_revision: &str,
+    ) -> Result<String, String> {
+        validate_main_branch(branch)?;
+        let repo = repo.as_ref();
+        self.require_main_symbolic_head(repo)?;
+        let current = self.require_commit(repo, "HEAD")?;
+        let old = self.require_commit(repo, old_revision)?;
+        if !self.worktree_status_porcelain(repo)?.is_empty() {
+            return Err("Cannot restore a dirty Git worktree.".to_string());
+        }
+        if !self.is_ancestor(repo, &old, &current)? {
+            return Err(
+                "Compensation restore target must be an ancestor of the current HEAD.".to_string(),
+            );
+        }
+        if old == current {
+            return Ok(current);
+        }
+
+        let args = ["checkout", "--no-guess", "-B", "main", old.as_str()];
+        let output = self.run_output_with_timeout(
+            repo,
+            &args,
+            LOCAL_GIT_TIMEOUT,
+            "git checkout compensation ref",
+        )?;
+        self.success_stdout(output)?;
+        self.require_commit(repo, "HEAD")
+    }
+
+    pub fn restore_unborn_main(
+        &self,
+        repo: impl AsRef<Path>,
+        expected_current: &str,
+    ) -> Result<(), String> {
+        let repo = repo.as_ref();
+        self.require_main_symbolic_head(repo)?;
+        let current = self.require_commit(repo, "HEAD")?;
+        let expected = self.require_commit(repo, expected_current)?;
+        if current != expected {
+            return Err("Git HEAD changed before unborn compensation.".to_string());
+        }
+        if !self.worktree_status_porcelain(repo)?.is_empty() {
+            return Err("Cannot restore an unborn state from a dirty Git worktree.".to_string());
+        }
+        let entries = self.list_tree(repo, &current)?;
+        for entry in &entries {
+            if entry.object_type != "blob" || !matches!(entry.mode.as_str(), "100644" | "100755") {
+                return Err(
+                    "Cannot restore unborn state with unsupported tracked file types.".to_string(),
+                );
+            }
+            validate_git_tree_path(&entry.path)?;
+            let metadata = fs::symlink_metadata(repo.join(&entry.path)).map_err(|error| {
+                format!("Unable to inspect tracked path during restore: {error}")
+            })?;
+            if !metadata.is_file() {
+                return Err(
+                    "Cannot restore unborn state because a tracked path changed type.".to_string(),
+                );
+            }
+        }
+        let output = self.run_output_with_timeout(
+            repo,
+            &["update-ref", "-d", "refs/heads/main", current.as_str()],
+            LOCAL_GIT_TIMEOUT,
+            "git update-ref",
+        )?;
+        self.success_stdout(output)?;
+        for entry in entries {
+            let path = repo.join(&entry.path);
+            fs::remove_file(&path)
+                .map_err(|error| format!("Unable to remove compensated tracked file: {error}"))?;
+            remove_empty_parents(&path, repo)?;
+        }
+        Ok(())
+    }
+
+    pub fn merge_tree_analysis(
+        &self,
+        repo: impl AsRef<Path>,
+        left: &str,
+        right: &str,
+    ) -> Result<GitMergeTreeAnalysis, String> {
+        let repo = repo.as_ref();
+        let left = self.require_commit(repo, left)?;
+        let right = self.require_commit(repo, right)?;
+        let args = [
+            "merge-tree",
+            "--write-tree",
+            "--name-only",
+            "-z",
+            "--no-messages",
+            left.as_str(),
+            right.as_str(),
+        ];
+        let output =
+            self.run_output_with_timeout(repo, &args, LOCAL_GIT_TIMEOUT, "git merge-tree")?;
+        if !matches!(output.status.code(), Some(0 | 1)) {
+            return Err(sanitize_git_error(
+                String::from_utf8_lossy(&output.stderr).trim(),
+            ));
+        }
+        parse_merge_tree_analysis(&output.stdout)
+    }
+
+    pub fn list_tree(
+        &self,
+        repo: impl AsRef<Path>,
+        revision: &str,
+    ) -> Result<Vec<GitTreeEntry>, String> {
+        let repo = repo.as_ref();
+        let sha = self.require_commit(repo, revision)?;
+        let args = ["ls-tree", "-r", "-z", "--full-tree", "--long", sha.as_str()];
+        let output = self.run_output_with_timeout(repo, &args, LOCAL_GIT_TIMEOUT, "git ls-tree")?;
+        let stdout = self.success_stdout_bytes(output)?;
+        parse_tree_entries(&stdout)
+    }
+
+    pub fn show_file(
+        &self,
+        repo: impl AsRef<Path>,
+        revision: &str,
+        path: &str,
+    ) -> Result<Option<Vec<u8>>, String> {
+        validate_git_tree_path(path)?;
+        let repo = repo.as_ref();
+        let sha = self.require_commit(repo, revision)?;
+        let object = format!("{sha}:{path}");
+        let check_args = ["cat-file", "-e", object.as_str()];
+        let check =
+            self.run_output_with_timeout(repo, &check_args, LOCAL_GIT_TIMEOUT, "git cat-file")?;
+        if check.status.code() == Some(1) || check.status.code() == Some(128) {
+            return Ok(None);
+        }
+        self.success_stdout(check)?;
+
+        let size_args = ["cat-file", "-s", object.as_str()];
+        let size_output =
+            self.run_output_with_timeout(repo, &size_args, LOCAL_GIT_TIMEOUT, "git cat-file")?;
+        let size = self
+            .success_stdout(size_output)?
+            .trim()
+            .parse::<u64>()
+            .map_err(|_| "Git returned an invalid blob size.".to_string())?;
+        if size > MAX_SHOW_FILE_BYTES as u64 {
+            return Err(format!(
+                "Git file exceeds the {MAX_SHOW_FILE_BYTES} byte preview limit."
+            ));
+        }
+
+        let args = ["cat-file", "blob", object.as_str()];
+        let output =
+            self.run_output_with_timeout(repo, &args, LOCAL_GIT_TIMEOUT, "git cat-file")?;
+        let content = self.success_stdout_bytes(output)?;
+        if content.len() as u64 != size {
+            return Err(format!(
+                "Git blob size changed while reading preview: expected {size} bytes, got {}.",
+                content.len()
+            ));
+        }
+        Ok(Some(content))
+    }
+
     pub fn changed_files(&self, repo: impl AsRef<Path>) -> Result<Vec<GitChangedFile>, String> {
         let output = self.run(
             repo.as_ref(),
@@ -231,7 +784,9 @@ impl GitService {
         let output = self.command_output_with_timeout(command, timeout, "git ls-remote")?;
 
         if !output.status.success() {
-            return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+            return Err(sanitize_git_error(
+                String::from_utf8_lossy(&output.stderr).trim(),
+            ));
         }
 
         Ok(String::from_utf8_lossy(&output.stdout)
@@ -403,6 +958,24 @@ impl GitService {
         timeout: Duration,
         label: &str,
     ) -> Result<String, String> {
+        let output = self.run_network_output(repo, args, timeout, label)?;
+
+        if !output.status.success() {
+            return Err(sanitize_git_error(
+                String::from_utf8_lossy(&output.stderr).trim(),
+            ));
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    fn run_network_output(
+        &self,
+        repo: &Path,
+        args: &[&str],
+        timeout: Duration,
+        label: &str,
+    ) -> Result<Output, String> {
         let mut command = Command::new("git");
         command
             .arg("-C")
@@ -410,14 +983,91 @@ impl GitService {
             .args(args)
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("GIT_ASKPASS", "true")
-            .env("GCM_INTERACTIVE", "never");
-        let output = self.command_output_with_timeout(command, timeout, label)?;
+            .env("GCM_INTERACTIVE", "never")
+            .env("LC_ALL", "C");
+        self.command_output_with_timeout(command, timeout, label)
+    }
 
+    fn run_output_with_timeout(
+        &self,
+        repo: &Path,
+        args: &[&str],
+        timeout: Duration,
+        label: &str,
+    ) -> Result<Output, String> {
+        self.run_output_with_timeout_env(repo, args, timeout, label, &[])
+    }
+
+    fn run_output_with_timeout_env(
+        &self,
+        repo: &Path,
+        args: &[&str],
+        timeout: Duration,
+        label: &str,
+        env: &[(&str, &str)],
+    ) -> Result<Output, String> {
+        let mut command = Command::new("git");
+        command.arg("-C").arg(repo).args(args).env("LC_ALL", "C");
+        command.envs(env.iter().copied());
+        self.command_output_with_timeout(command, timeout, label)
+    }
+
+    fn run_owned_output_with_timeout(
+        &self,
+        repo: &Path,
+        args: &[String],
+        timeout: Duration,
+        label: &str,
+    ) -> Result<Output, String> {
+        let mut command = Command::new("git");
+        command.arg("-C").arg(repo).args(args).env("LC_ALL", "C");
+        self.command_output_with_timeout(command, timeout, label)
+    }
+
+    fn success_stdout(&self, output: Output) -> Result<String, String> {
+        Ok(String::from_utf8_lossy(&self.success_stdout_bytes(output)?).to_string())
+    }
+
+    fn success_stdout_bytes(&self, output: Output) -> Result<Vec<u8>, String> {
         if !output.status.success() {
-            return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+            return Err(sanitize_git_error(
+                String::from_utf8_lossy(&output.stderr).trim(),
+            ));
         }
+        Ok(output.stdout)
+    }
 
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    fn require_commit(&self, repo: &Path, revision: &str) -> Result<String, String> {
+        self.rev_parse_optional(repo, revision)?
+            .ok_or_else(|| format!("Git revision does not exist: {revision}"))
+    }
+
+    fn delete_ref_if_present(&self, repo: &Path, reference: &str) -> Result<(), String> {
+        if self.rev_parse_optional(repo, reference)?.is_none() {
+            return Ok(());
+        }
+        let args = ["update-ref", "-d", reference];
+        let output =
+            self.run_output_with_timeout(repo, &args, LOCAL_GIT_TIMEOUT, "git update-ref")?;
+        self.success_stdout(output)?;
+        Ok(())
+    }
+
+    fn require_main_symbolic_head(&self, repo: &Path) -> Result<(), String> {
+        let args = ["symbolic-ref", "--quiet", "--short", "HEAD"];
+        let output =
+            self.run_output_with_timeout(repo, &args, LOCAL_GIT_TIMEOUT, "git symbolic-ref")?;
+        let branch = self.success_stdout(output)?;
+        if branch.trim() != "main" {
+            return Err("Git operation requires the symbolic main branch.".to_string());
+        }
+        Ok(())
+    }
+
+    fn worktree_status_porcelain(&self, repo: &Path) -> Result<Vec<u8>, String> {
+        let args = ["status", "--porcelain=v1", "-z", "--untracked-files=all"];
+        let output = self.run_output_with_timeout(repo, &args, LOCAL_GIT_TIMEOUT, "git status")?;
+        self.success_stdout_bytes(output)
     }
 
     fn run_with_config(&self, repo: &Path, args: &[&str]) -> Result<String, String> {
@@ -464,20 +1114,34 @@ impl GitService {
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|error| error.to_string())?;
+        let stdout = child.stdout.take().ok_or("Failed to capture Git stdout.")?;
+        let stderr = child.stderr.take().ok_or("Failed to capture Git stderr.")?;
+        let stdout_reader = read_pipe_in_background(stdout);
+        let stderr_reader = read_pipe_in_background(stderr);
         let started_at = Instant::now();
 
         loop {
-            if child
-                .try_wait()
-                .map_err(|error| error.to_string())?
-                .is_some()
-            {
-                return child.wait_with_output().map_err(|error| error.to_string());
+            if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
+                let stdout = stdout_reader
+                    .join()
+                    .map_err(|_| "Git stdout reader failed.".to_string())?
+                    .map_err(|error| error.to_string())?;
+                let stderr = stderr_reader
+                    .join()
+                    .map_err(|_| "Git stderr reader failed.".to_string())?
+                    .map_err(|error| error.to_string())?;
+                return Ok(Output {
+                    status,
+                    stdout,
+                    stderr,
+                });
             }
 
             if started_at.elapsed() >= timeout {
                 let _ = child.kill();
                 let _ = child.wait();
+                let _ = stdout_reader.join();
+                let _ = stderr_reader.join();
                 return Err(format!(
                     "{label} timed out after {}",
                     format_duration(timeout)
@@ -487,6 +1151,16 @@ impl GitService {
             thread::sleep(Duration::from_millis(20));
         }
     }
+}
+
+fn read_pipe_in_background(
+    mut pipe: impl Read + Send + 'static,
+) -> thread::JoinHandle<std::io::Result<Vec<u8>>> {
+    thread::spawn(move || {
+        let mut bytes = Vec::new();
+        pipe.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    })
 }
 
 pub fn status(repo: impl AsRef<Path>) -> Result<GitStatus, String> {
@@ -615,6 +1289,233 @@ fn validate_git_reference_arg(reference: &str) -> Result<(), String> {
         return Err("Git reference must not start with '-'.".to_string());
     }
     Ok(())
+}
+
+fn validate_git_revision_arg(revision: &str) -> Result<(), String> {
+    if revision.is_empty() {
+        return Err("Git revision is required.".to_string());
+    }
+    if revision.len() > 1024 {
+        return Err("Git revision is too long.".to_string());
+    }
+    if revision.starts_with('-')
+        || revision.chars().any(|character| {
+            character.is_whitespace()
+                || character.is_control()
+                || !matches!(
+                    character,
+                    'a'..='z'
+                        | 'A'..='Z'
+                        | '0'..='9'
+                        | '/'
+                        | '.'
+                        | '-'
+                        | '_'
+                )
+        })
+        || revision.contains("..")
+        || revision.ends_with('.')
+        || revision.ends_with('/')
+        || revision.contains("//")
+    {
+        return Err("Git revision contains unsupported syntax.".to_string());
+    }
+    Ok(())
+}
+
+fn validate_backup_ref(reference: &str) -> Result<(), String> {
+    validate_git_revision_arg(reference)?;
+    if !reference.starts_with(BACKUP_REF_PREFIX)
+        || reference == BACKUP_REF_PREFIX
+        || reference.ends_with(".lock")
+        || reference
+            .split('/')
+            .any(|component| component.is_empty() || component.starts_with('.'))
+    {
+        return Err(format!(
+            "Backup ref must be under {BACKUP_REF_PREFIX} and use a valid ref name."
+        ));
+    }
+    Ok(())
+}
+
+fn validate_main_branch(branch: &str) -> Result<(), String> {
+    if branch != "main" && branch != "refs/heads/main" {
+        return Err("Git apply primitive only supports the main branch.".to_string());
+    }
+    Ok(())
+}
+
+fn validate_git_tree_path(path: &str) -> Result<(), String> {
+    if path.is_empty() || path.len() > 4096 {
+        return Err("Git tree path is invalid.".to_string());
+    }
+    if path.contains(':')
+        || path.contains('\\')
+        || path.chars().any(char::is_control)
+        || Path::new(path).is_absolute()
+    {
+        return Err("Git tree path is invalid.".to_string());
+    }
+    for component in Path::new(path).components() {
+        match component {
+            std::path::Component::Normal(value) if value != ".git" => {}
+            _ => return Err("Git tree path must be a safe repository-relative path.".to_string()),
+        }
+    }
+    Ok(())
+}
+
+fn remove_empty_parents(path: &Path, boundary: &Path) -> Result<(), String> {
+    let mut current = path.parent();
+    while let Some(directory) = current {
+        if directory == boundary || directory == boundary.join(".git") {
+            break;
+        }
+        match fs::remove_dir(directory) {
+            Ok(()) => current = directory.parent(),
+            Err(error) if error.kind() == std::io::ErrorKind::DirectoryNotEmpty => break,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                current = directory.parent()
+            }
+            Err(error) => return Err(format!("Unable to prune compensated directory: {error}")),
+        }
+    }
+    Ok(())
+}
+
+fn parse_name_status_z(output: &[u8]) -> Result<Vec<(String, Option<String>, String)>, String> {
+    let fields = output
+        .split(|byte| *byte == 0)
+        .filter(|field| !field.is_empty())
+        .map(|field| {
+            std::str::from_utf8(field)
+                .map(str::to_string)
+                .map_err(|_| "Git diff returned a non-UTF-8 path.".to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut fields = fields.into_iter();
+    let mut entries = Vec::new();
+    while let Some(status_code) = fields.next() {
+        let status = status_code
+            .chars()
+            .next()
+            .ok_or("Git diff returned an empty status.")?
+            .to_string();
+        if matches!(status.as_str(), "R" | "C") {
+            let old_path = fields
+                .next()
+                .ok_or("Git diff omitted the old rename path.")?;
+            let path = fields
+                .next()
+                .ok_or("Git diff omitted the new rename path.")?;
+            entries.push((status, Some(old_path), path));
+        } else {
+            let path = fields.next().ok_or("Git diff omitted a file path.")?;
+            entries.push((status, None, path));
+        }
+    }
+    Ok(entries)
+}
+
+fn parse_merge_tree_analysis(output: &[u8]) -> Result<GitMergeTreeAnalysis, String> {
+    let mut fields = output.split(|byte| *byte == 0);
+    let tree_id = fields
+        .next()
+        .filter(|field| !field.is_empty())
+        .ok_or("Git merge-tree omitted the result tree.")?;
+    let tree_id = std::str::from_utf8(tree_id)
+        .map_err(|_| "Git merge-tree returned a non-UTF-8 tree id.")?
+        .trim()
+        .to_string();
+    let conflict_files = fields
+        .filter(|field| !field.is_empty())
+        .map(|field| {
+            std::str::from_utf8(field)
+                .map(str::to_string)
+                .map_err(|_| "Git merge-tree returned a non-UTF-8 path.".to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(GitMergeTreeAnalysis {
+        tree_id,
+        conflict_files,
+    })
+}
+
+fn parse_tree_entries(output: &[u8]) -> Result<Vec<GitTreeEntry>, String> {
+    let records = output
+        .split(|byte| *byte == 0)
+        .filter(|record| !record.is_empty())
+        .collect::<Vec<_>>();
+    if records.len() > MAX_TREE_ENTRIES {
+        return Err(format!(
+            "Git tree contains more than {MAX_TREE_ENTRIES} entries."
+        ));
+    }
+
+    records
+        .into_iter()
+        .map(|record| {
+            let record = std::str::from_utf8(record)
+                .map_err(|_| "Git tree returned a non-UTF-8 path.".to_string())?;
+            let (metadata, path) = record
+                .split_once('\t')
+                .ok_or("Git tree returned an invalid entry.")?;
+            let mut metadata = metadata.split_whitespace();
+            let mode = metadata
+                .next()
+                .ok_or("Git tree omitted an entry mode.")?
+                .to_string();
+            let object_type = metadata
+                .next()
+                .ok_or("Git tree omitted an object type.")?
+                .to_string();
+            let object_id = metadata
+                .next()
+                .ok_or("Git tree omitted an object id.")?
+                .to_string();
+            let size = match metadata.next().ok_or("Git tree omitted an entry size.")? {
+                "-" => None,
+                value => Some(
+                    value
+                        .parse::<u64>()
+                        .map_err(|_| "Git tree returned an invalid entry size.".to_string())?,
+                ),
+            };
+            Ok(GitTreeEntry {
+                mode,
+                object_type,
+                object_id,
+                size,
+                path: path.to_string(),
+            })
+        })
+        .collect()
+}
+
+fn bounded_lossy_text(bytes: &[u8], limit: usize) -> String {
+    if bytes.len() <= limit {
+        return String::from_utf8_lossy(bytes).to_string();
+    }
+    let mut text = String::from_utf8_lossy(&bytes[..limit]).to_string();
+    text.push_str("\n[diff truncated by SkillBox]\n");
+    text
+}
+
+fn sanitize_git_error(message: &str) -> String {
+    let mut sanitized = message.to_string();
+    while let Some(scheme_end) = sanitized.find("://") {
+        let start = sanitized[..scheme_end]
+            .rfind(|character: char| character.is_whitespace() || matches!(character, '\'' | '"'))
+            .map_or(0, |index| index + 1);
+        let end = sanitized[scheme_end + 3..]
+            .find(|character: char| {
+                character.is_whitespace() || matches!(character, '\'' | '"' | ')' | ']')
+            })
+            .map_or(sanitized.len(), |index| scheme_end + 3 + index);
+        sanitized.replace_range(start..end, "<redacted-remote>");
+    }
+    sanitized
 }
 
 pub fn diff_no_index_tree(
@@ -985,6 +1886,269 @@ mod tests {
         assert!(!push_source.contains("run(repo.as_ref(), args)"));
     }
 
+    #[test]
+    fn fetch_origin_main_updates_tracking_ref_and_supports_missing_remote_main() {
+        let git = GitService::new();
+        let remote = bare_remote_with_skill("git-inbound-fetch");
+        let repo = temp_dir("git-inbound-fetch-client");
+        git.init_main(&repo).unwrap();
+        git.set_origin_url(&repo, remote.to_str().unwrap()).unwrap();
+
+        let fetched = git.fetch_origin_main(&repo).unwrap().unwrap();
+        assert_eq!(
+            git.rev_parse_optional(&repo, "refs/remotes/origin/main")
+                .unwrap(),
+            Some(fetched)
+        );
+        assert_eq!(git.rev_parse_optional(&repo, "HEAD").unwrap(), None);
+
+        let empty_remote = temp_dir("git-inbound-empty").join("remote.git");
+        Command::new("git")
+            .args(["init", "--bare"])
+            .arg(&empty_remote)
+            .output()
+            .unwrap();
+        git.set_origin_url(&repo, empty_remote.to_str().unwrap())
+            .unwrap();
+        assert_eq!(git.fetch_origin_main(&repo).unwrap(), None);
+        assert_eq!(
+            git.rev_parse_optional(&repo, "refs/remotes/origin/main")
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn graph_primitives_report_divergence_and_optional_unborn_refs() {
+        let git = GitService::new();
+        let repo = temp_dir("git-inbound-graph");
+        git.init_main(&repo).unwrap();
+        assert_eq!(git.rev_parse_optional(&repo, "HEAD").unwrap(), None);
+
+        write_file(&repo.join("base.txt"), "base\n");
+        let base = commit_all(&repo, "base");
+        write_file(&repo.join("local.txt"), "local\n");
+        let local = commit_all(&repo, "local");
+        run_git(&repo, &["checkout", "-b", "remote", &base]).unwrap();
+        write_file(&repo.join("remote.txt"), "remote\n");
+        let remote = commit_all(&repo, "remote");
+
+        assert_eq!(
+            git.merge_base(&repo, &local, &remote).unwrap(),
+            Some(base.clone())
+        );
+        assert_eq!(git.ahead_behind(&repo, &local, &remote).unwrap(), (1, 1));
+        assert_eq!(
+            git.ahead_behind_summary(&repo, &local, &remote).unwrap(),
+            GitAheadBehind {
+                ahead: 1,
+                behind: 1
+            }
+        );
+        assert_eq!(git.commit_count(&repo, &local).unwrap(), 2);
+        assert!(git.is_ancestor(&repo, &base, &local).unwrap());
+        assert!(!git.is_ancestor(&repo, &local, &remote).unwrap());
+        assert_eq!(
+            git.rev_parse_optional(&repo, "refs/heads/missing").unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn diff_refs_preserves_rename_metadata_and_bounds_file_diff() {
+        let git = GitService::new();
+        let repo = temp_dir("git-inbound-diff");
+        git.init_main(&repo).unwrap();
+        write_file(&repo.join("old.txt"), "rename me\n");
+        write_file(
+            &repo.join("large.txt"),
+            &format!("{}\n", "a".repeat(300_000)),
+        );
+        let old = commit_all(&repo, "old");
+        run_git(&repo, &["mv", "old.txt", "new.txt"]).unwrap();
+        write_file(
+            &repo.join("large.txt"),
+            &format!("{}\n", "b".repeat(300_000)),
+        );
+        let new = commit_all(&repo, "new");
+
+        let files = git.diff_refs(&repo, &old, &new).unwrap();
+        let renamed = files.iter().find(|file| file.path == "new.txt").unwrap();
+        assert_eq!(renamed.old_path.as_deref(), Some("old.txt"));
+        assert_eq!(renamed.status, "R");
+        let large = files.iter().find(|file| file.path == "large.txt").unwrap();
+        assert!(large.diff.contains("[diff truncated by SkillBox]"));
+        assert!(large.diff.len() <= MAX_DIFF_BYTES_PER_FILE + 64);
+    }
+
+    #[test]
+    fn backup_ref_is_namespaced_and_updates_with_previous_target() {
+        let git = GitService::new();
+        let repo = temp_dir("git-inbound-backup");
+        git.init_main(&repo).unwrap();
+        write_file(&repo.join("one"), "one");
+        let first = commit_all(&repo, "first");
+        write_file(&repo.join("two"), "two");
+        let second = commit_all(&repo, "second");
+
+        let created = git
+            .create_or_update_backup_ref(&repo, "refs/skillbox/backups/before-sync", &first)
+            .unwrap();
+        assert_eq!(created.previous_target, None);
+        let updated = git
+            .create_or_update_backup_ref(&repo, "refs/skillbox/backups/before-sync", &second)
+            .unwrap();
+        assert_eq!(updated.previous_target, Some(first));
+        assert_eq!(updated.target, second);
+        assert!(git
+            .create_or_update_backup_ref(&repo, "refs/heads/main", "HEAD")
+            .unwrap_err()
+            .contains(BACKUP_REF_PREFIX));
+    }
+
+    #[test]
+    fn fast_forward_and_compensation_restore_enforce_ancestor_boundary() {
+        let git = GitService::new();
+        let repo = temp_dir("git-inbound-apply");
+        git.init_main(&repo).unwrap();
+        write_file(&repo.join("file"), "old\n");
+        let old = commit_all(&repo, "old");
+        write_file(&repo.join("file"), "new\n");
+        let new = commit_all(&repo, "new");
+        run_git(&repo, &["checkout", "-B", "main", &old]).unwrap();
+
+        assert_eq!(git.fast_forward_only_merge(&repo, &new).unwrap(), new);
+        assert_eq!(fs::read_to_string(repo.join("file")).unwrap(), "new\n");
+        assert_eq!(
+            git.restore_worktree_to_ref(&repo, "main", &old).unwrap(),
+            old
+        );
+        assert_eq!(fs::read_to_string(repo.join("file")).unwrap(), "old\n");
+        assert!(git
+            .restore_worktree_to_ref(&repo, "main", &new)
+            .unwrap_err()
+            .contains("must be an ancestor"));
+
+        write_file(&repo.join("dirty"), "dirty");
+        assert!(git
+            .restore_worktree_to_ref(&repo, "main", "HEAD")
+            .unwrap_err()
+            .contains("dirty"));
+    }
+
+    #[test]
+    fn unborn_initialization_requires_empty_main_worktree() {
+        let git = GitService::new();
+        let source = temp_dir("git-inbound-unborn-source");
+        git.init_main(&source).unwrap();
+        write_file(&source.join("remote.txt"), "remote\n");
+        let target = commit_all(&source, "remote");
+
+        let repo = temp_dir("git-inbound-unborn");
+        git.init_main(&repo).unwrap();
+        run_git(&repo, &["fetch", source.to_str().unwrap(), &target]).unwrap();
+        write_file(&repo.join("unexpected.txt"), "local\n");
+        assert!(git
+            .initialize_unborn_main_from_ref(&repo, &target)
+            .unwrap_err()
+            .contains("must be empty"));
+        fs::remove_file(repo.join("unexpected.txt")).unwrap();
+        write_file(&repo.join(".gitignore"), ".DS_Store\n");
+
+        assert_eq!(
+            git.initialize_unborn_main_from_ref(&repo, &target).unwrap(),
+            target
+        );
+        assert_eq!(
+            fs::read_to_string(repo.join("remote.txt")).unwrap(),
+            "remote\n"
+        );
+        assert!(repo.join(".gitignore").exists());
+        assert!(git
+            .initialize_unborn_main_from_ref(&repo, "HEAD")
+            .unwrap_err()
+            .contains("already has a HEAD"));
+    }
+
+    #[test]
+    fn unborn_compensation_removes_only_reviewed_tracked_tree() {
+        let git = GitService::new();
+        let source = temp_dir("git-inbound-unborn-restore-source");
+        git.init_main(&source).unwrap();
+        fs::create_dir_all(source.join("demo")).unwrap();
+        write_file(&source.join("demo/SKILL.md"), "demo\n");
+        let target = commit_all(&source, "remote");
+        let repo = temp_dir("git-inbound-unborn-restore");
+        git.init_main(&repo).unwrap();
+        run_git(&repo, &["fetch", source.to_str().unwrap(), &target]).unwrap();
+        git.initialize_unborn_main_from_ref(&repo, &target).unwrap();
+
+        git.restore_unborn_main(&repo, &target).unwrap();
+
+        assert_eq!(git.rev_parse_optional(&repo, "HEAD").unwrap(), None);
+        assert!(!repo.join("demo").exists());
+        assert!(repo.join(".git").is_dir());
+    }
+
+    #[test]
+    fn merge_tree_analysis_reports_conflicts_without_moving_head() {
+        let git = GitService::new();
+        let repo = temp_dir("git-inbound-merge-tree");
+        git.init_main(&repo).unwrap();
+        write_file(&repo.join("file"), "base\n");
+        let base = commit_all(&repo, "base");
+        write_file(&repo.join("file"), "left\n");
+        let left = commit_all(&repo, "left");
+        run_git(&repo, &["checkout", "-b", "right", &base]).unwrap();
+        write_file(&repo.join("file"), "right\n");
+        let right = commit_all(&repo, "right");
+        let head_before = git.rev_parse_optional(&repo, "HEAD").unwrap();
+
+        let analysis = git.merge_tree_analysis(&repo, &left, &right).unwrap();
+        assert!(!analysis.is_clean());
+        assert_eq!(analysis.conflict_files, vec!["file"]);
+        assert_eq!(git.rev_parse_optional(&repo, "HEAD").unwrap(), head_before);
+        assert_eq!(fs::read_to_string(repo.join("file")).unwrap(), "right\n");
+    }
+
+    #[test]
+    fn list_tree_and_show_file_offer_read_only_bounded_preview() {
+        let git = GitService::new();
+        let repo = temp_dir("git-inbound-tree-preview");
+        git.init_main(&repo).unwrap();
+        fs::create_dir_all(repo.join("skills/demo")).unwrap();
+        write_file(&repo.join("skills/demo/SKILL.md"), "name: demo\n");
+        let sha = commit_all(&repo, "tree");
+
+        let entries = git.list_tree(&repo, &sha).unwrap();
+        assert!(entries.iter().any(|entry| {
+            entry.path == "skills/demo/SKILL.md"
+                && entry.object_type == "blob"
+                && entry.mode == "100644"
+                && entry.size == Some(11)
+        }));
+        assert_eq!(
+            git.show_file(&repo, &sha, "skills/demo/SKILL.md").unwrap(),
+            Some(b"name: demo\n".to_vec())
+        );
+        assert_eq!(git.show_file(&repo, &sha, "missing").unwrap(), None);
+        for invalid in ["../outside", "/absolute", ".git/config", "bad:selector"] {
+            assert!(git.show_file(&repo, &sha, invalid).is_err());
+        }
+        assert_eq!(git.rev_parse_optional(&repo, "HEAD").unwrap(), Some(sha));
+    }
+
+    #[test]
+    fn git_errors_redact_remote_urls_with_credentials() {
+        let error = sanitize_git_error(
+            "fatal: unable to access 'https://user:secret@example.com/repo.git/': denied",
+        );
+        assert!(!error.contains("user"));
+        assert!(!error.contains("secret"));
+        assert!(!error.contains("example.com"));
+        assert!(error.contains("<redacted-remote>"));
+    }
+
     fn temp_dir(prefix: &str) -> PathBuf {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -997,6 +2161,24 @@ mod tests {
 
     fn write_file(path: &Path, content: &str) {
         fs::write(path, content).unwrap();
+    }
+
+    fn run_git(repo: &Path, args: &[&str]) -> Result<String, String> {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .output()
+            .map_err(|error| error.to_string())?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    fn commit_all(repo: &Path, message: &str) -> String {
+        run_git(repo, &["add", "."]).unwrap();
+        GitService::new().commit(repo, message).unwrap()
     }
 
     fn bare_remote_with_skill(label: &str) -> PathBuf {
