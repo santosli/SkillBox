@@ -225,6 +225,7 @@ docs/                      architecture, data model, workflows, ADRs
 - [Architecture](docs/architecture.md)
 - [Data model](docs/data-model.md)
 - [Workflows](docs/workflows.md)
+- [CLI 与 Desktop 能力矩阵](docs/workflows.md#18-cli-and-desktop-capability-matrix)
 - [Implementation status](docs/implementation-status.md)
 - [Contributing](CONTRIBUTING.md)
 - [Managed store ADR](docs/decisions/0001-managed-store-is-source-of-truth.md)

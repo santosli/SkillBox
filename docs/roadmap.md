@@ -4,10 +4,10 @@ SkillBox is early-stage software. This roadmap describes the public direction,
 not a date-based commitment. Implementation details can change as the app gets
 more real-world use.
 
-## Current Focus: 0.6.x
+## Current Focus: 0.7
 
-The 0.6 development line makes `SKILL.md` deployment targets explicit and
-portable without moving runtime knowledge into React:
+SkillBox `v0.6.1` is shipped. The 0.6 line made `SKILL.md` deployment targets
+explicit and portable without moving runtime knowledge into React:
 
 - a versioned Rust runtime-profile registry for Agents, Codex, Claude Code,
   Cursor, and exact custom `SKILL.md` roots;
@@ -15,30 +15,30 @@ portable without moving runtime knowledge into React:
 - read-only frontmatter and deployment compatibility previews;
 - stale-preview protection and explicit confirmation before runtime writes.
 
-The implementation scope is complete. Release qualification and the currently
-shipped version and distribution assets are tracked in `docs/release.md`; a
-version is not considered shipped until the release workflow and its
-distribution checks succeed.
+The runtime-profile and evidence-aware usage work passed release qualification
+through the signed and notarized `v0.6.1` distribution. The current release
+identity and distribution invariants remain documented in `docs/release.md`.
+
+The next implementation target is 0.7: reviewed inbound sync, safer deployment
+choices, and stronger recovery. These capabilities are planned, not shipped.
 
 ## Near-Term Priorities
 
 These are the next areas where focused contributions are most useful:
 
-- **Rust CLI and desktop parity.** Keep CLI behavior and desktop Tauri commands
-  aligned on the shared Rust core.
-- **Search and navigation.** After 0.5, add FTS-backed search for skills,
-  operations, and usage history on top of the versioned SQLite schema.
-- **Runtime profile qualification.** Exercise profile migration and
-  compatibility results against real-world `SKILL.md` libraries while keeping
-  native non-`SKILL.md` adapters out of the 0.6 boundary.
-- **Usage evidence qualification.** Exercise schema-v7 migration, evidence
-  upgrades, aggregate-only diagnostics, and Calls/reference reconciliation
-  against prior local databases without silently scanning private histories.
-- **Remote trust.** After 0.5, preserve source provenance and show explicit
-  trust state before install or update without using popularity as proof of
-  safety.
-- **User-skills inbound sync.** Report ahead/behind/diverged Git state and allow
-  reviewed fast-forward updates without automatically merging conflicts.
+- **Reviewed inbound sync.** Report ahead/behind/diverged Git state and allow
+  explicit fast-forward updates without automatically merging conflicts.
+- **Deployment portability.** Add copy-snapshot deployment as an explicit
+  alternative to the current compatibility-checked symlink path.
+- **Recovery workflows.** Strengthen restore previews, backup inspection, and
+  audit evidence without deleting or overwriting user content silently.
+- **Rust CLI and desktop parity.** Keep shared workflows aligned on the Rust
+  core while documenting intentional CLI automation and desktop interaction
+  differences.
+- **Search and navigation.** Add FTS-backed search for skills, operations, and
+  usage history on top of the versioned SQLite schema.
+- **Remote trust.** Preserve source provenance and show explicit trust state
+  before install or update without using popularity as proof of safety.
 - **Dependency hygiene.** Keep Tauri, Vite, Rust crates, and GitHub Actions
   current without weakening the local safety model.
 - **Documentation polish.** Keep screenshots, install instructions, and safety

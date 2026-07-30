@@ -51,4 +51,14 @@ After Pages deploys, submit the sitemap URL to search consoles if you want faste
 https://santosli.github.io/SkillBox/sitemap.xml
 ```
 
-Google Search Console and Bing Webmaster Tools can both use that sitemap. Indexing is not immediate; use a query such as `site:santosli.github.io/SkillBox` later to check whether the page has been discovered.
+Maintainer follow-up after a homepage or public metadata change:
+
+- Submit the sitemap to Google Search Console.
+- Submit the same sitemap to Bing Webmaster Tools.
+- Check the GitHub repository About website URL, repository topics, and social
+  preview image.
+- After deployment, verify the public sitemap URL and use a query such as
+  `site:santosli.github.io/SkillBox` later to check discovery.
+
+These are manual external actions, not CI steps. Do not commit search-console
+credentials, verification secrets, analytics scripts, or tracking pixels.
