@@ -124,11 +124,58 @@ export function invalidateUserSkillsInboundPreview(preview) {
     : null;
 }
 
-export function beginReviewDialogFocus(initialFocus, restoreFocus) {
-  initialFocus?.focus();
+export function createInboundReviewRequestGate() {
+  let generation = 0;
+
+  return {
+    begin() {
+      generation += 1;
+      return generation;
+    },
+    cancel() {
+      generation += 1;
+    },
+    runIfCurrent(requestGeneration, callback) {
+      if (requestGeneration !== generation) return false;
+      callback();
+      return true;
+    }
+  };
+}
+
+export function isReviewDialogFocusTarget(element) {
+  if (
+    !element ||
+    typeof element.focus !== 'function' ||
+    element.isConnected !== true ||
+    element.disabled ||
+    element.hidden ||
+    element.getAttribute?.('aria-disabled') === 'true' ||
+    element.getAttribute?.('aria-hidden') === 'true'
+  ) {
+    return false;
+  }
+
+  if (element.matches?.(':disabled')) return false;
+
+  const ownerWindow = element.ownerDocument?.defaultView;
+  const style = ownerWindow?.getComputedStyle?.(element);
+  if (style && (style.display === 'none' || ['hidden', 'collapse'].includes(style.visibility))) {
+    return false;
+  }
+
+  return !(typeof element.getClientRects === 'function' && element.getClientRects().length === 0);
+}
+
+export function beginReviewDialogFocus(initialFocus, restoreFocus, fallbackFocus) {
+  if (isReviewDialogFocusTarget(initialFocus)) {
+    initialFocus.focus();
+  }
   return () => {
-    if (restoreFocus && restoreFocus.isConnected !== false) {
+    if (isReviewDialogFocusTarget(restoreFocus)) {
       restoreFocus.focus();
+    } else if (isReviewDialogFocusTarget(fallbackFocus)) {
+      fallbackFocus.focus();
     }
   };
 }

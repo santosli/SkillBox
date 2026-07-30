@@ -24,7 +24,8 @@ export function UserSkillsInboundReviewDialog({
   onClose,
   onCopyRepositoryPath,
   onOpenRepository,
-  onRefresh
+  onRefresh,
+  restoreFocusFallback
 }) {
   const dialogRef = useRef(null);
   const closeButtonRef = useRef(null);
@@ -45,7 +46,12 @@ export function UserSkillsInboundReviewDialog({
   const isDirtyBlocking = isDirty && !preview?.canApply;
 
   useEffect(
-    () => beginReviewDialogFocus(closeButtonRef.current, restoreFocusRef.current),
+    () =>
+      beginReviewDialogFocus(
+        closeButtonRef.current,
+        restoreFocusRef.current,
+        restoreFocusFallback
+      ),
     []
   );
 

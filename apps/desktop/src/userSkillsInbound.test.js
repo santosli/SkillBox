@@ -5,9 +5,11 @@ import {
   beginReviewDialogFocus,
   canApplyUserSkillsInbound,
   canReviewUserSkillsInbound,
+  createInboundReviewRequestGate,
   handleReviewDialogKeyDown,
   inboundRelationLabel,
   invalidateUserSkillsInboundPreview,
+  isReviewDialogFocusTarget,
   normalizeUserSkillsInboundPreview,
   normalizeUserSkillsInboundStatus
 } from './userSkillsInbound.js';
@@ -150,11 +152,20 @@ test('diverged review exposes bounded expandable conflict lists', () => {
 });
 
 test('review dialog manages initial focus, Escape, focus trap, and focus restore', () => {
-  const ownerDocument = { activeElement: null };
+  const ownerDocument = {
+    activeElement: null,
+    defaultView: {
+      getComputedStyle: () => ({ display: 'block', visibility: 'visible' })
+    }
+  };
   const focusable = (name) => ({
     name,
     isConnected: true,
+    disabled: false,
+    hidden: false,
+    ownerDocument,
     getAttribute: () => null,
+    getClientRects: () => [{}],
     focus() {
       ownerDocument.activeElement = this;
     }
@@ -226,6 +237,112 @@ test('review dialog manages initial focus, Escape, focus trap, and focus restore
     /aria-current=\{activeFile\?\.path === file\.path \? 'true' : undefined\}/
   );
   assert.match(dialogSource, /aria-pressed=\{activeFile\?\.path === file\.path\}/);
+});
+
+test('Cancel and Escape invalidate late inbound preview success and error', async () => {
+  const deferred = () => {
+    let resolve;
+    let reject;
+    const promise = new Promise((resolvePromise, rejectPromise) => {
+      resolve = resolvePromise;
+      reject = rejectPromise;
+    });
+    return { promise, reject, resolve };
+  };
+  const event = (key) => ({
+    key,
+    preventDefault() {},
+    stopPropagation() {}
+  });
+  const runPreview = async (gate, request, pending, mutations) => {
+    try {
+      const result = await pending.promise;
+      gate.runIfCurrent(request, () => mutations.push(`success:${result}`));
+    } catch (error) {
+      gate.runIfCurrent(request, () => mutations.push(`error:${error.message}`));
+    }
+  };
+
+  for (const closeMethod of ['Cancel', 'Escape']) {
+    for (const outcome of ['success', 'error']) {
+      const gate = createInboundReviewRequestGate();
+      const mutations = [];
+      const pending = deferred();
+      const request = gate.begin();
+      const run = runPreview(gate, request, pending, mutations);
+
+      if (closeMethod === 'Escape') {
+        handleReviewDialogKeyDown(event('Escape'), {
+          dialogElement: null,
+          onClose() {
+            gate.cancel();
+          }
+        });
+      } else {
+        gate.cancel();
+      }
+
+      if (outcome === 'success') {
+        pending.resolve('preview');
+      } else {
+        pending.reject(new Error('network failed'));
+      }
+      await run;
+      assert.deepEqual(mutations, [], `${closeMethod} must ignore late ${outcome}`);
+    }
+  }
+
+  assert.match(appSource, /const requestGeneration = inboundReviewRequestGateRef\.current\.begin\(\)/);
+  assert.match(appSource, /inboundReviewRequestGateRef\.current\.cancel\(\)/);
+  assert.match(
+    appSource,
+    /runIfCurrent\(requestGeneration,\s*\(\) => \{[\s\S]*setInboundReviewDialog/
+  );
+});
+
+test('focus restore skips stale triggers and uses a visible stable fallback', () => {
+  const ownerDocument = {
+    activeElement: null,
+    defaultView: {
+      getComputedStyle: (element) => ({
+        display: element.display || 'block',
+        visibility: element.visibility || 'visible'
+      })
+    }
+  };
+  const target = (name, overrides = {}) => ({
+    name,
+    isConnected: true,
+    disabled: false,
+    hidden: false,
+    ownerDocument,
+    getAttribute: () => null,
+    getClientRects: () => [{}],
+    focus() {
+      ownerDocument.activeElement = this;
+    },
+    ...overrides
+  });
+
+  const initial = target('close');
+  const fallback = target('content');
+  for (const staleTrigger of [
+    target('detached', { isConnected: false }),
+    target('disabled', { disabled: true }),
+    target('hidden', { getClientRects: () => [] }),
+    target('aria-disabled', {
+      getAttribute: (name) => (name === 'aria-disabled' ? 'true' : null)
+    })
+  ]) {
+    const cleanup = beginReviewDialogFocus(initial, staleTrigger, fallback);
+    cleanup();
+    assert.equal(ownerDocument.activeElement, fallback);
+  }
+
+  assert.equal(isReviewDialogFocusTarget(target('visible')), true);
+  assert.equal(isReviewDialogFocusTarget(target('display-none', { display: 'none' })), false);
+  assert.match(appSource, /restoreFocusFallback=\{contentRef\.current\}/);
+  assert.match(appSource, /className="content" ref=\{contentRef\} tabIndex=\{-1\}/);
 });
 
 test('Save remote and inbound operations disable each other', () => {

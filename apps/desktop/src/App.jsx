@@ -136,6 +136,7 @@ import {
   waitForNextPaint
 } from './userSkillsGitSync.js';
 import {
+  createInboundReviewRequestGate,
   invalidateUserSkillsInboundPreview,
   normalizeUserSkillsInboundPreview,
   normalizeUserSkillsInboundStatus
@@ -342,6 +343,7 @@ export default function App() {
     activePath: '',
     error: ''
   });
+  const inboundReviewRequestGateRef = useRef(createInboundReviewRequestGate());
   const [workspaceDialog, setWorkspaceDialog] = useState({
     open: false,
     path: '',
@@ -1664,6 +1666,7 @@ export default function App() {
   }
 
   async function openUserSkillsInboundReview() {
+    const requestGeneration = inboundReviewRequestGateRef.current.begin();
     setInboundReviewDialog({
       open: true,
       loading: true,
@@ -1679,42 +1682,58 @@ export default function App() {
       const preview = normalizeUserSkillsInboundPreview(
         previewUserSkillsInbound(inboundPreviewMode)
       );
-      setUserSkillsInbound(preview.status);
-      setInboundReviewDialog({
-        open: true,
-        loading: false,
-        applying: false,
-        preview,
-        activePath: preview.files[0]?.path || '',
-        error: ''
+      inboundReviewRequestGateRef.current.runIfCurrent(requestGeneration, () => {
+        setUserSkillsInbound(preview.status);
+        setInboundReviewDialog({
+          open: true,
+          loading: false,
+          applying: false,
+          preview,
+          activePath: preview.files[0]?.path || '',
+          error: ''
+        });
+        setStatus('prototype');
       });
-      setStatus('prototype');
       return;
     }
 
     try {
       const result = await invoke('preview_user_skills_inbound');
       const preview = normalizeUserSkillsInboundPreview(result);
-      setUserSkillsInbound(preview.status);
-      setInboundReviewDialog({
-        open: true,
-        loading: false,
-        applying: false,
-        preview,
-        activePath: preview.files[0]?.path || '',
-        error: ''
+      inboundReviewRequestGateRef.current.runIfCurrent(requestGeneration, () => {
+        setUserSkillsInbound(preview.status);
+        setInboundReviewDialog({
+          open: true,
+          loading: false,
+          applying: false,
+          preview,
+          activePath: preview.files[0]?.path || '',
+          error: ''
+        });
+        setStatus('ready');
       });
-      setStatus('ready');
     } catch (previewError) {
-      setInboundReviewDialog((current) => ({
-        ...current,
-        loading: false,
-        error:
-          previewError.message ||
-          String(previewError) ||
-          'Unable to preview incoming user skills.'
-      }));
-      setStatus('ready');
+      inboundReviewRequestGateRef.current.runIfCurrent(requestGeneration, () => {
+        setInboundReviewDialog((current) => ({
+          ...current,
+          loading: false,
+          error:
+            previewError.message ||
+            String(previewError) ||
+            'Unable to preview incoming user skills.'
+        }));
+        setStatus('ready');
+      });
+    }
+  }
+
+  function closeUserSkillsInboundReview() {
+    inboundReviewRequestGateRef.current.cancel();
+    setInboundReviewDialog((current) =>
+      current.applying ? current : { ...current, open: false, loading: false, error: '' }
+    );
+    if (!inboundReviewDialog.applying && status === 'previewing_inbound') {
+      setStatus(window.__TAURI_INTERNALS__ ? 'ready' : 'prototype');
     }
   }
 
@@ -3897,7 +3916,7 @@ export default function App() {
         </div>
       </aside>
 
-      <section className="content" ref={contentRef}>
+      <section className="content" ref={contentRef} tabIndex={-1}>
         {page === 'settings' ? (
           <SettingsPage
             appUpdate={appUpdate}
@@ -4132,12 +4151,9 @@ export default function App() {
             setInboundReviewDialog((current) => ({ ...current, activePath }))
           }
           onApply={applyUserSkillsInbound}
-          onClose={() =>
-            setInboundReviewDialog((current) =>
-              current.applying ? current : { ...current, open: false, error: '' }
-            )
-          }
+          onClose={closeUserSkillsInboundReview}
           onCopyRepositoryPath={copyUserSkillsRepositoryPath}
+          restoreFocusFallback={contentRef.current}
           onOpenRepository={openUserSkillsRepository}
           onRefresh={openUserSkillsInboundReview}
         />
