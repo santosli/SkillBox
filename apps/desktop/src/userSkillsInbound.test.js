@@ -10,6 +10,7 @@ import {
   createInboundReviewRequestController,
   createInboundReviewRequestGate,
   handleReviewDialogKeyDown,
+  InboundReviewLiveFeedback,
   inboundConflictDiagnosticGroups,
   inboundRelationLabel,
   invalidateUserSkillsInboundPreview,
@@ -98,6 +99,7 @@ test('normalizes repository-wide preview and conflict diagnostics', () => {
       }
     ],
     conflict_analysis: {
+      available: true,
       local_only_commits: 1,
       remote_only_commits: 2,
       both_changed_files: ['review-docs/SKILL.md'],
@@ -109,7 +111,25 @@ test('normalizes repository-wide preview and conflict diagnostics', () => {
   assert.equal(preview.previewId, 'preview-1');
   assert.equal(preview.skillChanges[0].affectedDeployments[0].profileName, 'Codex');
   assert.equal(preview.conflictAnalysis.remoteOnlyCommits, 2);
+  assert.equal(preview.conflictAnalysis.available, true);
   assert.deepEqual(preview.conflictAnalysis.likelyConflictFiles, ['review-docs/SKILL.md']);
+});
+
+test('unrelated histories expose conflict analysis as unavailable instead of zero conflicts', () => {
+  const preview = normalizeUserSkillsInboundPreview({
+    status: { relation: 'diverged' },
+    conflict_analysis: {
+      available: false,
+      unavailable_reason: 'Conflict analysis is unavailable because the histories have no merge base.',
+      local_only_commits: 2,
+      remote_only_commits: 3
+    }
+  });
+
+  assert.equal(preview.conflictAnalysis.available, false);
+  assert.match(preview.conflictAnalysis.unavailableReason, /no merge base/);
+  assert.match(dialogSource, /Conflict analysis unavailable/);
+  assert.match(dialogSource, /analysis\.unavailableReason/);
 });
 
 test('Settings exposes explicit inbound check and review without changing outbound sync', () => {
@@ -137,6 +157,8 @@ test('inbound apply passes only structured preview authorization and keeps dirty
   assert.match(dialogSource, /Bootstrap safe/);
   assert.match(dialogSource, /Apply fast-forward/);
   assert.match(dialogSource, /aria-label="Incoming file diff"/);
+  assert.match(appSource, /const warnings = result\.warnings \|\| \[\]/);
+  assert.match(appSource, /warnings\.join\(' '\)/);
 });
 
 test('diverged review provides only external resolution actions', () => {
@@ -366,37 +388,154 @@ test('disposing the production inbound review controller cancels pending App wor
 
 });
 
-test('unmounting the inbound review hook cancels pending callbacks', async () => {
-  const pending = {};
-  pending.promise = new Promise((resolve) => {
-    pending.resolve = resolve;
-  });
-  const mutations = [];
+test('react-test-renderer StrictMode replay installs a live controller and unmount cancels late work', async () => {
+  const deferred = () => {
+    let resolve;
+    let reject;
+    const promise = new Promise((resolvePromise, rejectPromise) => {
+      resolve = resolvePromise;
+      reject = rejectPromise;
+    });
+    return { promise, reject, resolve };
+  };
+
+  for (const lateOutcome of ['success', 'error']) {
+    const pendingPreviews = [];
+    const mutations = [];
+    let controllerRef;
+
+    function Harness() {
+      controllerRef = useInboundReviewRequestController();
+      React.useEffect(() => {
+        const pending = deferred();
+        pendingPreviews.push(pending);
+        controllerRef.current.run({
+          loadPreview: () => pending.promise,
+          onSuccess: (result) => mutations.push(`success:${result}`),
+          onError: (error) => mutations.push(`error:${error.message}`)
+        });
+      }, [controllerRef]);
+      return null;
+    }
+
+    let renderer;
+    await act(async () => {
+      renderer = TestRenderer.create(
+        React.createElement(React.StrictMode, null, React.createElement(Harness))
+      );
+    });
+
+    // React 18's test renderer does not automatically replay passive effects,
+    // so invoke its recorded StrictMode cleanup/setup cycle on the mounted fiber.
+    const harnessFiber = renderer.root.findByType(Harness)._fiber;
+    const lastEffect = harnessFiber.updateQueue.lastEffect;
+    const effects = [];
+    let effect = lastEffect.next;
+    do {
+      effects.push(effect);
+      effect = effect.next;
+    } while (effect !== lastEffect.next);
+
+    await act(async () => {
+      for (const passiveEffect of effects) {
+        passiveEffect.destroy?.();
+      }
+      for (const passiveEffect of effects) {
+        passiveEffect.destroy = passiveEffect.create?.();
+      }
+    });
+
+    assert.equal(pendingPreviews.length, 2);
+    await act(async () => {
+      pendingPreviews[0].resolve('stale preview');
+      pendingPreviews[1].resolve('replayed preview');
+      await Promise.all(pendingPreviews.map((pending) => pending.promise));
+    });
+    assert.deepEqual(mutations, ['success:replayed preview']);
+
+    const late = deferred();
+    const lateRun = controllerRef.current.run({
+      loadPreview: () => late.promise,
+      onSuccess: (result) => mutations.push(`success:${result}`),
+      onError: (error) => mutations.push(`error:${error.message}`)
+    });
+
+    await act(async () => {
+      renderer.unmount();
+    });
+    if (lateOutcome === 'success') {
+      late.resolve('after unmount');
+    } else {
+      late.reject(new Error('after unmount'));
+    }
+    assert.equal(await lateRun, false);
+    assert.deepEqual(mutations, ['success:replayed preview']);
+  }
+
+  assert.match(appSource, /useInboundReviewRequestController\(\)/);
+});
+
+test('inbound preview and apply states expose live accessibility feedback', async () => {
+  assert.match(
+    dialogSource,
+    /<InboundReviewLiveFeedback\s+applying=\{dialog\.applying\}\s+error=\{dialog\.error\}\s+loading=\{dialog\.loading\}/
+  );
 
   function Harness() {
-    const controllerRef = useInboundReviewRequestController();
-    React.useEffect(() => {
-      controllerRef.current.run({
-        loadPreview: () => pending.promise,
-        onSuccess: (result) => mutations.push(`success:${result}`),
-        onError: (error) => mutations.push(`error:${error.message}`)
-      });
-    }, [controllerRef]);
-    return null;
+    const [feedback, setFeedback] = React.useState({
+      loading: true,
+      applying: false,
+      error: ''
+    });
+    return React.createElement(
+      React.Fragment,
+      null,
+      React.createElement(InboundReviewLiveFeedback, feedback),
+      React.createElement(
+        'button',
+        {
+          onClick: () =>
+            setFeedback({ loading: false, applying: true, error: '' })
+        },
+        'Apply'
+      ),
+      React.createElement(
+        'button',
+        {
+          onClick: () =>
+            setFeedback({
+              loading: false,
+              applying: false,
+              error: 'Unable to apply incoming changes.'
+            })
+        },
+        'Fail'
+      )
+    );
   }
 
   let renderer;
   await act(async () => {
     renderer = TestRenderer.create(React.createElement(Harness));
   });
-  await act(async () => {
-    renderer.unmount();
-    pending.resolve('preview');
-    await pending.promise;
-  });
+  const previewStatus = renderer.root.findByProps({ role: 'status' });
+  assert.equal(previewStatus.props['aria-live'], 'polite');
+  assert.equal(previewStatus.children.join(''), 'Checking remote repository...');
 
-  assert.deepEqual(mutations, []);
-  assert.match(appSource, /useInboundReviewRequestController\(\)/);
+  const [applyButton, failButton] = renderer.root.findAllByType('button');
+  await act(async () => {
+    applyButton.props.onClick();
+  });
+  const applyStatus = renderer.root.findByProps({ role: 'status' });
+  assert.equal(applyStatus.children.join(''), 'Applying incoming changes...');
+
+  await act(async () => {
+    failButton.props.onClick();
+  });
+  const alert = renderer.root.findByProps({ role: 'alert' });
+  assert.equal(alert.props['aria-live'], 'assertive');
+  assert.equal(alert.children.join(''), 'Unable to apply incoming changes.');
+  renderer.unmount();
 });
 
 test('focus restore skips stale triggers and uses a visible stable fallback', () => {

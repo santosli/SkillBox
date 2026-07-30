@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { createElement, Fragment, useEffect, useRef } from 'react';
 
 const relationLabels = {
   unknown: 'Unknown',
@@ -66,6 +66,8 @@ export function normalizeUserSkillsInboundPreview(value) {
   const rawConflict = source.conflict_analysis || source.conflictAnalysis;
   const conflictAnalysis = rawConflict
     ? {
+        available: Boolean(rawConflict.available ?? true),
+        unavailableReason: rawConflict.unavailable_reason || rawConflict.unavailableReason || '',
         localOnlyCommits: Number(rawConflict.local_only_commits ?? rawConflict.localOnlyCommits ?? 0),
         remoteOnlyCommits: Number(
           rawConflict.remote_only_commits ?? rawConflict.remoteOnlyCommits ?? 0
@@ -173,16 +175,54 @@ export function createInboundReviewRequestController() {
 
 export function useInboundReviewRequestController() {
   const controllerRef = useRef(null);
-  if (controllerRef.current === null) {
-    controllerRef.current = createInboundReviewRequestController();
-  }
-  useEffect(
-    () => () => {
-      controllerRef.current.dispose();
-    },
-    []
-  );
+  useEffect(() => {
+    const controller = createInboundReviewRequestController();
+    controllerRef.current = controller;
+
+    return () => {
+      controller.dispose();
+      if (controllerRef.current === controller) {
+        controllerRef.current = null;
+      }
+    };
+  }, []);
   return controllerRef;
+}
+
+export function InboundReviewLiveFeedback({ loading, applying, error }) {
+  const busyMessage = applying
+    ? 'Applying incoming changes...'
+    : loading
+      ? 'Checking remote repository...'
+      : '';
+
+  return createElement(
+    Fragment,
+    null,
+    busyMessage
+      ? createElement(
+          'div',
+          {
+            'aria-atomic': 'true',
+            'aria-live': 'polite',
+            className: 'loadingNotice',
+            role: 'status'
+          },
+          busyMessage
+        )
+      : null,
+    error
+      ? createElement(
+          'div',
+          {
+            'aria-live': 'assertive',
+            className: 'formError remoteDialogError',
+            role: 'alert'
+          },
+          error
+        )
+      : null
+  );
 }
 
 export async function runInboundReviewRequest({

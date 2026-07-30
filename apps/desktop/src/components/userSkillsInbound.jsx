@@ -5,6 +5,7 @@ import {
   canApplyUserSkillsInbound,
   beginReviewDialogFocus,
   handleReviewDialogKeyDown,
+  InboundReviewLiveFeedback,
   inboundConflictDiagnosticGroups,
   inboundFileLabel,
   inboundRelationLabel
@@ -97,7 +98,11 @@ export function UserSkillsInboundReviewDialog({
         </div>
 
         <div className="gitCommitDialogBody inboundReviewBody">
-          {dialog.loading ? <div className="loadingNotice">Checking remote repository...</div> : null}
+          <InboundReviewLiveFeedback
+            applying={dialog.applying}
+            error={dialog.error}
+            loading={dialog.loading}
+          />
           {preview ? (
             <>
               <div className="inboundReviewSummary">
@@ -206,7 +211,6 @@ export function UserSkillsInboundReviewDialog({
               ) : null}
             </>
           ) : null}
-          {dialog.error ? <div className="formError remoteDialogError">{dialog.error}</div> : null}
         </div>
 
         <div className="remoteImportFooter remoteDialogFooter inboundReviewFooter">
@@ -285,6 +289,20 @@ function InboundChangeSummary({ preview }) {
 }
 
 function ConflictDiagnosis({ analysis }) {
+  if (analysis && !analysis.available) {
+    return (
+      <div className="inboundConflictDiagnosis">
+        <div className="inboundConflictHeader">
+          <ShieldAlert aria-hidden="true" />
+          <span>
+            <strong>Conflict analysis unavailable</strong>
+            {analysis.unavailableReason ||
+              'SkillBox could not compare these histories safely. Resolve them with normal Git tooling, then Refresh.'}
+          </span>
+        </div>
+      </div>
+    );
+  }
   const groups = inboundConflictDiagnosticGroups(analysis);
 
   return (

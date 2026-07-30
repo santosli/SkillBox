@@ -1771,8 +1771,12 @@ export default function App() {
             })
       );
       setInboundReviewDialog((current) => ({ ...current, open: false, applying: false }));
+      const changedCount = result.changed_skill_count ?? result.changedSkillCount ?? 0;
+      const warnings = result.warnings || [];
       setNotice(
-        `Applied ${result.changed_skill_count ?? result.changedSkillCount ?? 0} incoming skill change${(result.changed_skill_count ?? result.changedSkillCount ?? 0) === 1 ? '' : 's'} by fast-forward.`
+        warnings.length
+          ? `Applied ${changedCount} incoming skill change${changedCount === 1 ? '' : 's'} by fast-forward. ${warnings.join(' ')}`
+          : `Applied ${changedCount} incoming skill change${changedCount === 1 ? '' : 's'} by fast-forward.`
       );
       setStatus('ready');
     } catch (applyError) {
