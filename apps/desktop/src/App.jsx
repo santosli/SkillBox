@@ -136,11 +136,10 @@ import {
   waitForNextPaint
 } from './userSkillsGitSync.js';
 import {
-  createInboundReviewRequestGate,
   invalidateUserSkillsInboundPreview,
   normalizeUserSkillsInboundPreview,
   normalizeUserSkillsInboundStatus,
-  runInboundReviewRequest
+  useInboundReviewRequestController
 } from './userSkillsInbound.js';
 import {
   normalizeWorkspace,
@@ -344,7 +343,7 @@ export default function App() {
     activePath: '',
     error: ''
   });
-  const inboundReviewRequestGateRef = useRef(createInboundReviewRequestGate());
+  const inboundReviewRequestControllerRef = useInboundReviewRequestController();
   const [workspaceDialog, setWorkspaceDialog] = useState({
     open: false,
     path: '',
@@ -1667,8 +1666,6 @@ export default function App() {
   }
 
   async function openUserSkillsInboundReview() {
-    const gate = inboundReviewRequestGateRef.current;
-    const requestGeneration = gate.begin();
     const browserPreview = !window.__TAURI_INTERNALS__;
     setInboundReviewDialog({
       open: true,
@@ -1680,9 +1677,7 @@ export default function App() {
     });
     setStatus('previewing_inbound');
 
-    await runInboundReviewRequest({
-      gate,
-      requestGeneration,
+    await inboundReviewRequestControllerRef.current.run({
       loadPreview: async () => {
         if (browserPreview) {
           const inboundPreviewMode =
@@ -1720,7 +1715,7 @@ export default function App() {
   }
 
   function closeUserSkillsInboundReview() {
-    inboundReviewRequestGateRef.current.cancel();
+    inboundReviewRequestControllerRef.current.cancel();
     setInboundReviewDialog((current) =>
       current.applying ? current : { ...current, open: false, loading: false, error: '' }
     );

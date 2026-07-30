@@ -1,3 +1,5 @@
+import { useEffect, useRef } from 'react';
+
 const relationLabels = {
   unknown: 'Unknown',
   synced: 'Synced',
@@ -143,6 +145,46 @@ export function createInboundReviewRequestGate() {
   };
 }
 
+export function createInboundReviewRequestController() {
+  const gate = createInboundReviewRequestGate();
+  let disposed = false;
+
+  return {
+    cancel() {
+      gate.cancel();
+    },
+    dispose() {
+      disposed = true;
+      gate.cancel();
+    },
+    run({ loadPreview, onSuccess, onError }) {
+      if (disposed) return Promise.resolve(false);
+      const requestGeneration = gate.begin();
+      return runInboundReviewRequest({
+        gate,
+        requestGeneration,
+        loadPreview,
+        onSuccess,
+        onError
+      });
+    }
+  };
+}
+
+export function useInboundReviewRequestController() {
+  const controllerRef = useRef(null);
+  if (controllerRef.current === null) {
+    controllerRef.current = createInboundReviewRequestController();
+  }
+  useEffect(
+    () => () => {
+      controllerRef.current.dispose();
+    },
+    []
+  );
+  return controllerRef;
+}
+
 export async function runInboundReviewRequest({
   gate,
   requestGeneration,
@@ -156,6 +198,26 @@ export async function runInboundReviewRequest({
   } catch (error) {
     return gate.runIfCurrent(requestGeneration, () => onError(error));
   }
+}
+
+export function inboundConflictDiagnosticGroups(analysis) {
+  return [
+    {
+      id: 'both-changed-skills',
+      label: 'Skills changed on both sides',
+      items: analysis?.bothChangedSkills || []
+    },
+    {
+      id: 'both-changed-files',
+      label: 'Files changed on both sides',
+      items: analysis?.bothChangedFiles || []
+    },
+    {
+      id: 'likely-conflicts',
+      label: 'Likely conflict files',
+      items: analysis?.likelyConflictFiles || []
+    }
+  ];
 }
 
 export function isReviewDialogFocusTarget(element) {

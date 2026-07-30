@@ -1,18 +1,23 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
+import React from 'react';
+import TestRenderer, { act } from 'react-test-renderer';
 import {
   beginReviewDialogFocus,
   canApplyUserSkillsInbound,
   canReviewUserSkillsInbound,
+  createInboundReviewRequestController,
   createInboundReviewRequestGate,
   handleReviewDialogKeyDown,
+  inboundConflictDiagnosticGroups,
   inboundRelationLabel,
   invalidateUserSkillsInboundPreview,
   isReviewDialogFocusTarget,
   normalizeUserSkillsInboundPreview,
   normalizeUserSkillsInboundStatus,
-  runInboundReviewRequest
+  runInboundReviewRequest,
+  useInboundReviewRequestController
 } from './userSkillsInbound.js';
 import {
   previewUserSkillsInbound,
@@ -143,10 +148,29 @@ test('diverged review provides only external resolution actions', () => {
 });
 
 test('diverged review exposes bounded expandable conflict lists', () => {
-  assert.match(dialogSource, /\['Skills changed by both', analysis\?\.bothChangedSkills \|\| \[\]\]/);
-  assert.match(dialogSource, /\['Files changed by both', analysis\?\.bothChangedFiles \|\| \[\]\]/);
-  assert.match(dialogSource, /\['Likely conflict files', analysis\?\.likelyConflictFiles \|\| \[\]\]/);
-  assert.match(dialogSource, /<details key=\{label\}>/);
+  const groups = inboundConflictDiagnosticGroups({
+    bothChangedSkills: ['demo'],
+    bothChangedFiles: ['demo/removed.md'],
+    likelyConflictFiles: []
+  });
+  assert.deepEqual(groups[0], {
+    id: 'both-changed-skills',
+    label: 'Skills changed on both sides',
+    items: ['demo']
+  });
+  assert.deepEqual(groups[1], {
+    id: 'both-changed-files',
+    label: 'Files changed on both sides',
+    items: ['demo/removed.md']
+  });
+  assert.deepEqual(groups[2], {
+    id: 'likely-conflicts',
+    label: 'Likely conflict files',
+    items: []
+  });
+  assert.notStrictEqual(groups[1].items, groups[2].items);
+  assert.match(dialogSource, /inboundConflictDiagnosticGroups\(analysis\)/);
+  assert.match(dialogSource, /<details key=\{id\}>/);
   assert.match(dialogSource, /<summary>/);
   assert.match(dialogSource, /items\.slice\(0, 8\)\.map/);
   assert.match(dialogSource, /Showing 8 of \{items\.length\} items/);
@@ -290,9 +314,89 @@ test('Cancel and Escape invalidate late inbound preview success and error', asyn
     }
   }
 
-  assert.match(appSource, /const gate = inboundReviewRequestGateRef\.current/);
-  assert.match(appSource, /await runInboundReviewRequest\(\{/);
-  assert.match(appSource, /inboundReviewRequestGateRef\.current\.cancel\(\)/);
+  assert.match(appSource, /await inboundReviewRequestControllerRef\.current\.run\(\{/);
+  assert.match(appSource, /inboundReviewRequestControllerRef\.current\.cancel\(\)/);
+});
+
+test('disposing the production inbound review controller cancels pending App work', async () => {
+  const deferred = () => {
+    let resolve;
+    let reject;
+    const promise = new Promise((resolvePromise, rejectPromise) => {
+      resolve = resolvePromise;
+      reject = rejectPromise;
+    });
+    return { promise, reject, resolve };
+  };
+
+  for (const outcome of ['success', 'error']) {
+    const controller = createInboundReviewRequestController();
+    const pending = deferred();
+    const mutations = [];
+    const run = controller.run({
+      loadPreview: () => pending.promise,
+      onSuccess: (result) => mutations.push(`success:${result}`),
+      onError: (error) => mutations.push(`error:${error.message}`)
+    });
+
+    controller.dispose();
+    if (outcome === 'success') {
+      pending.resolve('preview');
+    } else {
+      pending.reject(new Error('network failed'));
+    }
+
+    assert.equal(await run, false);
+    assert.deepEqual(mutations, []);
+
+    let loadedAfterDispose = false;
+    assert.equal(
+      await controller.run({
+        loadPreview: async () => {
+          loadedAfterDispose = true;
+          return 'late';
+        },
+        onSuccess() {},
+        onError() {}
+      }),
+      false
+    );
+    assert.equal(loadedAfterDispose, false);
+  }
+
+});
+
+test('unmounting the inbound review hook cancels pending callbacks', async () => {
+  const pending = {};
+  pending.promise = new Promise((resolve) => {
+    pending.resolve = resolve;
+  });
+  const mutations = [];
+
+  function Harness() {
+    const controllerRef = useInboundReviewRequestController();
+    React.useEffect(() => {
+      controllerRef.current.run({
+        loadPreview: () => pending.promise,
+        onSuccess: (result) => mutations.push(`success:${result}`),
+        onError: (error) => mutations.push(`error:${error.message}`)
+      });
+    }, [controllerRef]);
+    return null;
+  }
+
+  let renderer;
+  await act(async () => {
+    renderer = TestRenderer.create(React.createElement(Harness));
+  });
+  await act(async () => {
+    renderer.unmount();
+    pending.resolve('preview');
+    await pending.promise;
+  });
+
+  assert.deepEqual(mutations, []);
+  assert.match(appSource, /useInboundReviewRequestController\(\)/);
 });
 
 test('focus restore skips stale triggers and uses a visible stable fallback', () => {

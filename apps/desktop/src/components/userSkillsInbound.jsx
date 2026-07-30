@@ -5,6 +5,7 @@ import {
   canApplyUserSkillsInbound,
   beginReviewDialogFocus,
   handleReviewDialogKeyDown,
+  inboundConflictDiagnosticGroups,
   inboundFileLabel,
   inboundRelationLabel
 } from '../userSkillsInbound.js';
@@ -284,11 +285,7 @@ function InboundChangeSummary({ preview }) {
 }
 
 function ConflictDiagnosis({ analysis }) {
-  const groups = [
-    ['Skills changed by both', analysis?.bothChangedSkills || []],
-    ['Files changed by both', analysis?.bothChangedFiles || []],
-    ['Likely conflict files', analysis?.likelyConflictFiles || []]
-  ];
+  const groups = inboundConflictDiagnosticGroups(analysis);
 
   return (
     <div className="inboundConflictDiagnosis">
@@ -323,9 +320,9 @@ function ConflictDiagnosis({ analysis }) {
         </div>
       </dl>
       <div className="inboundConflictLists">
-        {groups.map(([label, items]) =>
+        {groups.map(({ id, label, items }) =>
           items.length ? (
-            <details key={label}>
+            <details key={id}>
               <summary>
                 {label} ({items.length})
               </summary>
