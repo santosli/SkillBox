@@ -54,6 +54,75 @@ export const previewImportCandidates = [
   }
 ];
 
+export const previewImportCandidateGroups = [
+  {
+    id: 'skill-release-helper',
+    name: 'release-helper',
+    description: 'Prepare release notes and verify project release assets.',
+    usageCount: 6,
+    requiresReview: true,
+    selectedVariantId: null,
+    variants: [
+      {
+        id: 'variant-release-user',
+        candidate: previewImportCandidates[0],
+        locations: [
+          {
+            sourcePath: '~/.agents/skills/release-helper',
+            sourceRoot: '~/.agents/skills',
+            realPath: '~/Library/Application Support/SkillFixtures/release-helper',
+            isSymlink: true,
+            symlinkTargetPath: '~/Library/Application Support/SkillFixtures/release-helper'
+          },
+          {
+            sourcePath: '~/Projects/demo-app/.cursor/skills/release-helper',
+            sourceRoot: '~/Projects/demo-app/.cursor/skills',
+            realPath: '~/Library/Application Support/SkillFixtures/release-helper',
+            isSymlink: true,
+            symlinkTargetPath: '~/Library/Application Support/SkillFixtures/release-helper'
+          }
+        ]
+      },
+      {
+        id: 'variant-release-remote',
+        candidate: {
+          ...previewImportCandidates[0],
+          sourcePath: '~/.codex/skills/release-helper',
+          sourceRoot: '~/.codex/skills',
+          suggestedType: 'remote',
+          skillType: 'remote',
+          suggestionReason: 'inside ~/.codex/skills'
+        },
+        locations: [
+          {
+            sourcePath: '~/.codex/skills/release-helper',
+            sourceRoot: '~/.codex/skills',
+            realPath: '~/.codex/skills/release-helper',
+            isSymlink: false
+          }
+        ]
+      }
+    ]
+  },
+  ...previewImportCandidates.slice(1).map((candidate, index) => ({
+    id: `skill-preview-${index}`,
+    name: candidate.name,
+    description: candidate.description,
+    usageCount: candidate.usageCount || 0,
+    selectedVariantId: candidate.isSelected ? `variant-preview-${index}` : null,
+    variants: [{
+      id: `variant-preview-${index}`,
+      candidate,
+      locations: [{
+        sourcePath: candidate.sourcePath,
+        sourceRoot: candidate.sourceRoot,
+        realPath: candidate.sourcePath,
+        isSymlink: false
+      }]
+    }]
+  }))
+];
+
 export const previewWorkspaces = [
   {
     canonical_path: '/Users/example/.codex/skills',

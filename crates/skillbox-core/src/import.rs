@@ -95,6 +95,7 @@ pub fn scan_import_candidates(
                 .then_with(|| left.source_path.cmp(&right.source_path))
         })
     });
+    let groups = group_import_candidates(&candidates, &usage_by_skill);
     dedupe_import_candidates(&mut candidates);
     candidates.sort_by(|left, right| {
         left.name
@@ -104,8 +105,158 @@ pub fn scan_import_candidates(
     Ok(ImportCandidateScan {
         roots: scan.roots,
         candidates,
+        groups,
         errors: scan.errors,
     })
+}
+
+pub(crate) fn group_import_candidates(
+    candidates: &[ImportCandidate],
+    usage_by_skill: &HashMap<String, UsageSummary>,
+) -> Vec<ImportCandidateGroup> {
+    let mut grouped = BTreeMap::<String, Vec<ImportCandidate>>::new();
+    for candidate in candidates {
+        grouped
+            .entry(candidate.name.to_ascii_lowercase())
+            .or_default()
+            .push(candidate.clone());
+    }
+
+    grouped
+        .into_iter()
+        .map(|(normalized_name, candidates)| {
+            build_import_candidate_group(&normalized_name, candidates, usage_by_skill)
+        })
+        .collect()
+}
+
+fn build_import_candidate_group(
+    normalized_name: &str,
+    candidates: Vec<ImportCandidate>,
+    usage_by_skill: &HashMap<String, UsageSummary>,
+) -> ImportCandidateGroup {
+    let mut variants: Vec<(String, ImportCandidateVariant)> = Vec::new();
+
+    for candidate in candidates {
+        let signature = import_candidate_variant_signature(&candidate);
+        let location = import_candidate_location(&candidate);
+        if let Some((_, variant)) = variants
+            .iter_mut()
+            .find(|(existing_signature, _)| existing_signature == &signature)
+        {
+            if !variant.locations.contains(&location) {
+                variant.locations.push(location);
+            }
+            continue;
+        }
+
+        let variant_id = format!("variant-{}", &sha256(&signature)[..16]);
+        let mut variant_candidate = candidate;
+        variant_candidate.additional_source_paths.clear();
+        variants.push((
+            signature,
+            ImportCandidateVariant {
+                id: variant_id,
+                candidate: variant_candidate,
+                locations: vec![location],
+            },
+        ));
+    }
+
+    let mut variants = variants
+        .into_iter()
+        .map(|(_, mut variant)| {
+            variant.candidate.source_path = variant.locations[0].source_path.clone();
+            variant.candidate.source_root = variant.locations[0].source_root.clone();
+            variant.candidate.real_path = variant.locations[0].real_path.clone();
+            variant.candidate.is_symlink = variant.locations[0].is_symlink;
+            variant.candidate.symlink_target_path =
+                variant.locations[0].symlink_target_path.clone();
+            variant.candidate.additional_source_paths = variant
+                .locations
+                .iter()
+                .skip(1)
+                .map(|location| location.source_path.clone())
+                .collect();
+            variant
+        })
+        .collect::<Vec<_>>();
+
+    let importable_variant_ids = variants
+        .iter()
+        .filter(|variant| {
+            variant.candidate.import_status == ImportCandidateStatus::Importable
+                && variant.candidate.conflict.is_none()
+        })
+        .map(|variant| variant.id.clone())
+        .collect::<Vec<_>>();
+    let selected_variant_id =
+        (importable_variant_ids.len() == 1).then(|| importable_variant_ids[0].clone());
+    for variant in &mut variants {
+        variant.candidate.is_selected = selected_variant_id.as_deref() == Some(&variant.id);
+    }
+
+    let name = variants
+        .first()
+        .map(|variant| variant.candidate.name.clone())
+        .unwrap_or_else(|| normalized_name.to_string());
+    let description = variants
+        .iter()
+        .find_map(|variant| {
+            (!variant.candidate.description.trim().is_empty())
+                .then(|| variant.candidate.description.clone())
+        })
+        .unwrap_or_default();
+    let usage_count = usage_by_skill
+        .get(&name)
+        .map(|usage| usage.usage_count)
+        .unwrap_or_else(|| {
+            variants
+                .iter()
+                .map(|variant| variant.candidate.usage_count)
+                .max()
+                .unwrap_or_default()
+        });
+
+    ImportCandidateGroup {
+        id: format!("skill-{}", &sha256(normalized_name)[..16]),
+        name,
+        description,
+        usage_count,
+        requires_review: importable_variant_ids.len() > 1,
+        selected_variant_id,
+        variants,
+    }
+}
+
+fn import_candidate_variant_signature(candidate: &ImportCandidate) -> String {
+    let source_identity = if candidate.import_status == ImportCandidateStatus::Imported {
+        format!("managed:{}", candidate.real_path.display())
+    } else {
+        match skill_directory_snapshot_hash(&candidate.real_path) {
+            Ok(snapshot) => format!("snapshot:{snapshot}"),
+            Err(_) => format!("unavailable:{}", candidate.real_path.display()),
+        }
+    };
+    format!(
+        "{}\n{}\n{:?}\n{:?}\n{}\n{}",
+        candidate.name.to_ascii_lowercase(),
+        candidate.content_hash,
+        candidate.suggested_type,
+        candidate.import_status,
+        candidate.conflict.as_deref().unwrap_or_default(),
+        source_identity,
+    )
+}
+
+fn import_candidate_location(candidate: &ImportCandidate) -> ImportCandidateLocation {
+    ImportCandidateLocation {
+        source_path: candidate.source_path.clone(),
+        source_root: candidate.source_root.clone(),
+        real_path: candidate.real_path.clone(),
+        is_symlink: candidate.is_symlink,
+        symlink_target_path: candidate.symlink_target_path.clone(),
+    }
 }
 
 pub(crate) fn dedupe_import_candidates(candidates: &mut Vec<ImportCandidate>) {
@@ -209,6 +360,7 @@ pub fn import_candidates(
     managed_root: impl AsRef<Path>,
 ) -> Result<ImportBatchResult> {
     let mutation_lock = acquire_user_skills_mutation_lock(managed_root.as_ref())?;
+    validate_unique_import_request_names(&items)?;
     let paths = ensure_managed_layout(mutation_lock.truth_root().to_path_buf())?;
     let mut imported = Vec::new();
     let mut errors = Vec::new();
@@ -222,6 +374,24 @@ pub fn import_candidates(
     }
 
     Ok(ImportBatchResult { imported, errors })
+}
+
+fn validate_unique_import_request_names(items: &[ImportRequestItem]) -> Result<()> {
+    let mut names = HashSet::new();
+    for item in items {
+        let source_path = expand_home(item.source_path.clone());
+        let Ok(skill) = read_skill(&source_path) else {
+            continue;
+        };
+        let normalized_name = skill.name.to_ascii_lowercase();
+        if !names.insert(normalized_name) {
+            return Err(format!(
+                "Import review may select only one source variant for skill {}.",
+                skill.name
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn import_one_candidate(

@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
-import { Search } from 'lucide-react';
+import { ChevronDown, MapPin, Search } from 'lucide-react';
 import codexAppIcon from '../assets/codex-app-icon.png';
 import codexCliIcon from '../assets/codex-cli-icon.png';
 import {
-  filterImportCandidatesByQuery,
-  filterWorkspaceSkillCandidates,
-  visibleImportCandidates,
-  workspaceSkillTabs
+  filterImportCandidateGroups,
+  filterImportCandidateGroupsByQuery,
+  importCandidateGroupLocationCount,
+  importCandidateGroupStatus,
+  importCandidateGroupTabs,
+  isSelectableImportCandidateGroup,
+  selectedImportCandidate
 } from '../importCandidates.js';
 import {
   candidateImportSourcePaths,
@@ -186,21 +189,21 @@ export function LocalImportConfirmationDialog({
 }
 
 export function ImportReview({
-  candidates,
+  groups,
   errors = [],
   onClose,
   onImport,
   onToggleAll,
   onToggleSelected,
+  onSelectVariant,
   onTypeChange,
   status,
   subtitle = 'Confirm each skill type before SkillBox copies it into the managed store.',
   title = 'Import Review'
 }) {
-  const visibleCandidates = visibleImportCandidates(candidates);
-  const selectableCount = visibleCandidates.filter(isImportableCandidate).length;
-  const selectedCount = visibleCandidates.filter(
-    (candidate) => candidate.isSelected && isImportableCandidate(candidate)
+  const selectableCount = groups.filter(isSelectableImportCandidateGroup).length;
+  const selectedCount = groups.filter(
+    (group) => group.isSelected && isSelectableImportCandidateGroup(group)
   ).length;
   const isAllSelected = selectableCount > 0 && selectedCount === selectableCount;
 
@@ -227,15 +230,16 @@ export function ImportReview({
               {errors.length} scan {errors.length === 1 ? 'issue' : 'issues'} found.
             </div>
           ) : null}
-          {visibleCandidates.length === 0 && errors.length === 0 ? (
+          {groups.length === 0 && errors.length === 0 ? (
             <div className="emptyState dashboardEmptyState workspaceSkillEmptyState">
               <strong>No skills found</strong>
               <span>This workspace has no importable SKILL.md directories yet.</span>
             </div>
           ) : null}
-          {visibleCandidates.length > 0 ? (
+          {groups.length > 0 ? (
             <CandidateReviewList
-              candidates={visibleCandidates}
+              groups={groups}
+              onSelectVariant={onSelectVariant}
               onToggleSelected={onToggleSelected}
               onTypeChange={onTypeChange}
             />
@@ -273,12 +277,12 @@ export function ImportReview({
   );
 }
 
-function CandidateReviewList({ candidates, onToggleSelected, onTypeChange }) {
+function CandidateReviewList({ groups, onSelectVariant, onToggleSelected, onTypeChange }) {
   const [activeTab, setActiveTab] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const searchedCandidates = filterImportCandidatesByQuery(candidates, searchQuery);
-  const tabs = workspaceSkillTabs(searchedCandidates);
-  const filteredCandidates = filterWorkspaceSkillCandidates(searchedCandidates, activeTab);
+  const searchedGroups = filterImportCandidateGroupsByQuery(groups, searchQuery);
+  const tabs = importCandidateGroupTabs(searchedGroups);
+  const filteredGroups = filterImportCandidateGroups(searchedGroups, activeTab);
 
   return (
     <>
@@ -305,11 +309,12 @@ function CandidateReviewList({ candidates, onToggleSelected, onTypeChange }) {
           onTabChange={setActiveTab}
         />
       </div>
-      {filteredCandidates.length > 0 ? (
-        filteredCandidates.map((candidate) => (
-          <CandidateRow
-            candidate={candidate}
-            key={candidate.sourcePath}
+      {filteredGroups.length > 0 ? (
+        filteredGroups.map((group) => (
+          <CandidateGroupCard
+            group={group}
+            key={group.id}
+            onSelectVariant={onSelectVariant}
             onToggleSelected={onToggleSelected}
             onTypeChange={onTypeChange}
           />
@@ -344,72 +349,112 @@ function WorkspaceSkillTabs({ activeTab, tabs, onTabChange }) {
   );
 }
 
-function CandidateRow({ candidate, onToggleSelected, onTypeChange }) {
+function CandidateGroupCard({ group, onSelectVariant, onToggleSelected, onTypeChange }) {
+  const [expanded, setExpanded] = useState(false);
+  const candidate = selectedImportCandidate(group) || group.variants[0]?.candidate;
+  const status = importCandidateGroupStatus(group);
+  const locationCount = importCandidateGroupLocationCount(group);
+  const disclosureId = `${group.id}-locations`;
+
   return (
-    <div className={candidateRowClass(candidate)}>
+    <div className={candidateRowClass(candidate || {})}>
       <label className="candidateCheck">
         <input
-          checked={candidate.isSelected}
-          disabled={!isImportableCandidate(candidate)}
+          checked={group.isSelected}
+          disabled={!isSelectableImportCandidateGroup(group)}
           type="checkbox"
-          onChange={() => onToggleSelected(candidate)}
+          aria-label={`Select ${group.name} for import`}
+          onChange={() => onToggleSelected(group)}
         />
         <span />
       </label>
 
       <div className="candidateMain">
         <div className="candidateTitle">
-          <strong>{candidate.name}</strong>
-          <SourceIcon candidate={candidate} />
-          <Badge tone="slate">
-            {candidate.skillType === 'user' ? 'User skill' : 'Remote skill'}
-          </Badge>
-          {candidate.importStatus === 'system' ? <Badge tone="slate">System</Badge> : null}
-          {candidate.importStatus === 'imported' ? <Badge tone="slate">Imported</Badge> : null}
-          {candidate.conflict ? <Badge tone="red">Conflict</Badge> : null}
+          <strong>{group.name}</strong>
+          {candidate ? <SourceIcon candidate={candidate} /> : null}
+          <Badge tone="slate">{locationCount} {locationCount === 1 ? 'location' : 'locations'}</Badge>
+          {status.imported ? <Badge tone="slate">Imported</Badge> : null}
+          {status.system ? <Badge tone="slate">System</Badge> : null}
+          {status.conflict ? <Badge tone="red">Conflict</Badge> : null}
+          {group.requiresReview && !group.selectedVariantId ? <Badge tone="amber">Needs review</Badge> : null}
         </div>
-        <small>{candidate.description || 'No description in SKILL.md'}</small>
-        <span className="candidatePath">
-          <span>Path</span>
-          <code>{compactPath(candidate.sourcePath)}</code>
-        </span>
-        {candidate.isSymlink ? (
-          <span className="candidateSymlinkSource">
-            <span>Symlink source</span>
-            <code>{compactPath(candidate.symlinkTargetPath || candidate.realPath || '')}</code>
-          </span>
-        ) : null}
-        {candidate.additionalSourcePaths?.length > 0 ? (
-          <details className="candidateDuplicateSources">
-            <summary>
-              Also found in {candidate.additionalSourcePaths.length}{' '}
-              {candidate.additionalSourcePaths.length === 1 ? 'other location' : 'other locations'} (not changed)
-            </summary>
-            {candidate.additionalSourcePaths.map((sourcePath) => (
-              <code key={sourcePath}>{compactPath(sourcePath)}</code>
-            ))}
-          </details>
+        <small>{group.description || 'No description in SKILL.md'}</small>
+        <button
+          aria-controls={disclosureId}
+          aria-expanded={expanded}
+          className="candidateLocationsDisclosure"
+          type="button"
+          onClick={() => setExpanded((current) => !current)}
+        >
+          <MapPin aria-hidden="true" />
+          <span>Found in {locationCount} {locationCount === 1 ? 'location' : 'locations'}</span>
+          <ChevronDown aria-hidden="true" className={expanded ? 'expanded' : ''} />
+        </button>
+        {expanded ? (
+          <div className="candidateVariants" id={disclosureId}>
+            {group.variants.map((variant, variantIndex) => {
+              const importable = isImportableCandidate(variant.candidate);
+              const selected = group.selectedVariantId === variant.id;
+              return (
+                <div className={`candidateVariant ${selected ? 'selected' : ''}`} key={variant.id}>
+                  <label className="candidateVariantChoice">
+                    <input
+                      checked={selected}
+                      disabled={!importable}
+                      name={`${group.id}-variant`}
+                      type="radio"
+                      value={variant.id}
+                      onChange={() => onSelectVariant(group, variant)}
+                    />
+                    <span>
+                      Variant {variantIndex + 1}
+                      {selected ? ' · selected for import' : ''}
+                    </span>
+                  </label>
+                  <div className="candidateVariantMeta">
+                    <Badge tone="slate">
+                      {variant.candidate.skillType === 'user' ? 'User suggestion' : 'Remote suggestion'}
+                    </Badge>
+                    <Badge tone={variant.candidate.conflict ? 'red' : 'slate'}>
+                      {variant.candidate.conflict || variant.candidate.importStatus}
+                    </Badge>
+                  </div>
+                  {variant.locations.map((location) => (
+                    <div className="candidateLocation" key={location.sourcePath}>
+                      <span>{location.isSymlink ? 'Runtime symlink' : 'Skill folder'}</span>
+                      <code>{compactPath(location.sourcePath)}</code>
+                      {location.isSymlink ? (
+                        <small>Source: {compactPath(location.symlinkTargetPath || location.realPath)}</small>
+                      ) : null}
+                    </div>
+                  ))}
+                  {variant.candidate.conflict ? <p>{variant.candidate.conflict}</p> : null}
+                </div>
+              );
+            })}
+          </div>
         ) : null}
         <span className="candidateUsage">
-          Calls {candidate.usageCount || 0}
+          Calls {group.usageCount || 0}
         </span>
-        {candidateStatusNote(candidate) ? <p>{candidateStatusNote(candidate)}</p> : null}
+        {candidate && candidateStatusNote(candidate) ? <p>{candidateStatusNote(candidate)}</p> : null}
       </div>
 
-      <div className="candidateTypeSwitch" role="group" aria-label={`${candidate.name} type`}>
+      <div className="candidateTypeSwitch" role="group" aria-label={`${group.name} type`}>
         <button
-          className={candidate.skillType === 'user' ? 'active' : ''}
-          disabled={!isImportableCandidate(candidate)}
+          className={candidate?.skillType === 'user' ? 'active' : ''}
+          disabled={!isSelectableImportCandidateGroup(group)}
           type="button"
-          onClick={() => onTypeChange(candidate, 'user')}
+          onClick={() => onTypeChange(group, 'user')}
         >
           User
         </button>
         <button
-          className={candidate.skillType === 'remote' ? 'active' : ''}
-          disabled={!isImportableCandidate(candidate)}
+          className={candidate?.skillType === 'remote' ? 'active' : ''}
+          disabled={!isSelectableImportCandidateGroup(group)}
           type="button"
-          onClick={() => onTypeChange(candidate, 'remote')}
+          onClick={() => onTypeChange(group, 'remote')}
         >
           Remote
         </button>

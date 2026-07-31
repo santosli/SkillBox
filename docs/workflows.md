@@ -51,7 +51,9 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 根据路径和内容推断类型：当前 `.agents/skills` 倾向 user，`.codex/skills` 倾向 remote，`.system` 默认不选中，包含 GitHub 来源信息的未知目录倾向 remote。
 - 对名称、`SKILL.md` hash、推断类型、状态、冲突结果以及完整导入快照都一致的实体副本进行分组；快照忽略顶层 `.git`，但覆盖其它文件、Unix mode、目录和 symlink。仅 `SKILL.md` 相同而脚本、权限或资源不同的候选保持分离。
 - 已 imported 的多个 runtime symlink 只有解析到同一个 managed `real_path` 时才作为 alias 合并。
-- 分组候选按扫描 root 顺序保留一个 primary `source_path`，并通过 `additional_source_paths` 保留其它实体来源。Import Review 显示来源数量和可展开路径，搜索会匹配任一来源，并明确其它副本在本次操作中不会改变。
+- Rust 先按规范化 skill name 输出一组，再按完整目录快照、推断类型、状态和冲突划分 variants。等价副本是一个 variant 的 locations；同名但有实质差异的来源仍在同一张卡片内，并标记 `Needs review`。
+- Import Review 默认折叠 locations；展开后显示每个路径、symlink source、类型建议、状态和冲突。搜索匹配任一 variant/location，tab、Select all 和结果摘要按 group 计数。
+- 只有唯一安全 importable variant 时才预选。多个 material variants 必须由用户用 radio 明确选择一个，User/Remote 只作用于该 variant。Desktop 只提交所选 primary `source_path`，core 拒绝同一批次为同名 skill 提交多个来源；其它 locations 不会被修改。
 - agent adapter 引入后，候选项还应携带 `agent_id`、原生格式和 target scope。
 - 检查 managed target 是否冲突。
 - user skill 复制到 `~/.skillbox/user-skills/<name>`。

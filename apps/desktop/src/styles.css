@@ -6426,6 +6426,108 @@ dd {
   margin: 5px 0 0 14px;
 }
 
+.candidateLocationsDisclosure {
+  display: inline-flex;
+  max-width: 100%;
+  min-height: 30px;
+  margin-top: 8px;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--skillbox-text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+  padding: 0;
+  text-align: left;
+}
+
+.candidateLocationsDisclosure svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+}
+
+.candidateLocationsDisclosure svg:last-child {
+  transition: transform 140ms ease;
+}
+
+.candidateLocationsDisclosure svg:last-child.expanded {
+  transform: rotate(180deg);
+}
+
+.candidateVariants {
+  display: grid;
+  margin-top: 8px;
+  gap: 8px;
+}
+
+.candidateVariant {
+  min-width: 0;
+  border-top: 1px solid var(--skillbox-border-soft);
+  padding-top: 8px;
+}
+
+.candidateVariant.selected {
+  border-top-color: var(--skillbox-blue-border);
+}
+
+.candidateVariantChoice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--skillbox-text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.candidateVariantChoice input {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  accent-color: var(--skillbox-blue);
+}
+
+.candidateVariantChoice input:disabled + span {
+  color: var(--skillbox-text-muted);
+}
+
+.candidateVariantMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 7px 0;
+}
+
+.candidateLocation {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 3px 8px;
+  align-items: baseline;
+  padding: 5px 0;
+}
+
+.candidateLocation > span {
+  color: var(--skillbox-text-secondary);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.candidateLocation code {
+  margin: 0;
+}
+
+.candidateLocation small {
+  grid-column: 2;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .candidatePath span,
 .candidateSymlinkSource span {
   color: var(--skillbox-text-secondary);
@@ -6832,5 +6934,13 @@ dd {
   .candidateTypeSwitch {
     grid-column: 2;
     width: max-content;
+  }
+
+  .candidateLocation {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .candidateLocation small {
+    grid-column: 1;
   }
 }

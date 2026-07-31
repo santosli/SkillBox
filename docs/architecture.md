@@ -103,7 +103,7 @@ cargo run -p skillbox-cli --offline -- <command>
 - `skills.rs` `SKILL.md` 解析、扫描、导入、symlink 部署
 - `runtime_profiles.rs` versioned runtime profile registry、root precedence 和 capability policy
 - `compatibility.rs` read-only frontmatter/target compatibility preview 与 stale-preview apply
-- `import.rs` import candidates 扫描、类型推断、整目录重复候选分组、冲突与备份
+- `import.rs` import candidates 扫描、类型推断、Rust-owned skill group / variant / location 分组、冲突与备份
 - `state.rs` managed state 聚合与用户偏好
 - `workspaces.rs` workspace registry 发现、注册与扫描
 - `remote.rs` GitHub install preview/apply、remote source 绑定、update check、diff 预览、版本切换
@@ -132,7 +132,7 @@ cargo run -p skillbox-cli --offline -- <command>
 - workspace registry 的发现、手动添加、扫描统计和 forget 操作。
 - runtime profile registry、structured frontmatter preservation 和部署 compatibility 判定。
 - user/remote skill 导入。
-- import candidates 扫描、类型推断、整目录快照去重和冲突检测。分组后的候选保留 primary `source_path` 与 `additional_source_paths`；React 展示全部来源，但只把 primary 作为结构化 import item 提交，避免一次 review 隐式创建多个不可单独 revert 的 active imports。
+- import candidates 扫描、类型推断、整目录快照去重和冲突检测。Rust 按规范化 skill name 生成稳定 group/variant ids；严格等价副本成为同一 variant 的 locations，同名但快照、类型、状态或冲突不同的来源仍是同卡片内的独立 variants。React 只展示 Rust 结果并提交明确选中的 variant primary，core 同时拒绝一次请求为同名 skill 提交多个来源。
 - preview-confirmed symlink 部署和部署索引。
 - import backup 与 source 替换为 symlink。
 - GitHub install preview/apply, GitHub-only remote source search, manual binding, update check, version listing, diff preview, update/rollback apply, and operation logging.
@@ -272,7 +272,7 @@ Preview 会在 working-tree write 前检查 incoming add/rename/type-change 与�
 
 GitHub remote source 可以是仓库中的 skill 子目录，也可以是根目录包含 `SKILL.md` 的 standalone repository。后者在 metadata 中显式记录为 `root: true`，preview、install、update 和 deploy 共用同一份清理后的 repository worktree snapshot；Git checkout 的 `.git` metadata 不进入 managed store，逃逸 source root 的 symlink 在 copy 边界被拒绝。
 
-重复候选只在名称、`SKILL.md` hash、推断类型、状态、冲突结果和完整导入快照均一致时合并；快照忽略顶层 `.git`，并覆盖其它路径、文件内容、Unix mode 与 symlink target。已 imported 的多个 runtime symlink 仅在解析到同一 managed `real_path` 时作为 alias 合并。primary 来源沿扫描 root 顺序选择；其它实体来源保留在 `additional_source_paths`，仅用于 review/search，不会在本次操作中被修改。导入只备份 primary、替换其 managed symlink 并写入 import record。仅 `SKILL.md` 相同但脚本、权限或资源不同的目录不能合并或复用；User 和 Remote 的已有 managed target 都必须通过完整快照校验。
+重复候选只在名称、`SKILL.md` hash、推断类型、状态、冲突结果和完整导入快照均一致时合并；快照忽略顶层 `.git`，并覆盖其它路径、文件内容、Unix mode 与 symlink target。相同 canonical source 的 runtime symlink 和不同真实路径的相同完整快照可成为一个 variant 的 locations；已 imported aliases 仍必须解析到同一 managed `real_path`。primary 来源沿扫描 root 顺序选择。Calls 使用 Rust 的按 skill 去重 aggregate，不把 locations 或 variants 直接相加。其它位置仅用于 review/search，不会在本次操作中被修改。多个 material variants 不预选，必须显式单选；导入只备份所选 primary、替换其 managed symlink 并写入 import record。
 
 ## 当前状态与目标状态
 

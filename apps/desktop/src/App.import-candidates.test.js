@@ -1,9 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  filterImportCandidateGroups,
+  filterImportCandidateGroupsByQuery,
   filterImportCandidatesByQuery,
   filterWorkspaceSkillCandidates,
+  importCandidateGroupLocationCount,
+  importCandidateGroupTabs,
+  normalizeImportCandidateGroup,
+  normalizeImportCandidateGroups,
   normalizeImportCandidate,
+  selectedImportCandidates,
+  selectImportCandidateVariant,
+  toggleImportCandidateGroupSelection,
   visibleImportCandidates,
   workspaceSkillTabs
 } from './importCandidates.js';
@@ -139,6 +148,131 @@ test('normalizes grouped import candidate source paths', () => {
   assert.deepEqual(candidate.additionalSourcePaths, [
     '/Users/example/project/.agents/skills/dbs'
   ]);
+});
+
+test('normalizes Rust-owned import groups without inferring variant equivalence', () => {
+  const group = normalizeImportCandidateGroup({
+    id: 'skill-hyperframes',
+    name: 'hyperframes',
+    description: 'Create product videos.',
+    usage_count: 8,
+    requires_review: true,
+    selected_variant_id: null,
+    variants: [
+      {
+        id: 'variant-user',
+        candidate: {
+          name: 'hyperframes',
+          source_path: '/Users/example/.agents/skills/hyperframes',
+          suggested_type: 'user',
+          import_status: 'importable'
+        },
+        locations: [
+          {
+            source_path: '/Users/example/.agents/skills/hyperframes',
+            real_path: '/Users/example/src/hyperframes',
+            is_symlink: true,
+            symlink_target_path: '/Users/example/src/hyperframes'
+          },
+          {
+            source_path: '/Users/example/.cursor/skills/hyperframes',
+            real_path: '/Users/example/src/hyperframes',
+            is_symlink: true,
+            symlink_target_path: '/Users/example/src/hyperframes'
+          }
+        ]
+      },
+      {
+        id: 'variant-remote',
+        candidate: {
+          name: 'hyperframes',
+          source_path: '/Users/example/.codex/skills/hyperframes',
+          suggested_type: 'remote',
+          import_status: 'importable'
+        },
+        locations: [
+          {
+            source_path: '/Users/example/.codex/skills/hyperframes',
+            real_path: '/Users/example/src/hyperframes',
+            is_symlink: true,
+            symlink_target_path: '/Users/example/src/hyperframes'
+          }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(group.variants.length, 2);
+  assert.equal(importCandidateGroupLocationCount(group), 3);
+  assert.equal(group.requiresReview, true);
+  assert.equal(group.selectedVariantId, null);
+  assert.equal(group.isSelected, false);
+  assert.deepEqual(selectedImportCandidates([group]), []);
+});
+
+test('variant review requires an explicit Rust variant choice and submits one primary', () => {
+  const [group] = normalizeImportCandidateGroups([
+    {
+      id: 'skill-demo',
+      name: 'demo',
+      requires_review: true,
+      variants: [
+        {
+          id: 'variant-a',
+          candidate: { name: 'demo', source_path: '/first/demo', import_status: 'importable' },
+          locations: [{ source_path: '/first/demo' }, { source_path: '/copy/demo' }]
+        },
+        {
+          id: 'variant-b',
+          candidate: { name: 'demo', source_path: '/second/demo', import_status: 'importable' },
+          locations: [{ source_path: '/second/demo' }]
+        }
+      ]
+    }
+  ]);
+
+  assert.deepEqual(selectedImportCandidates([group]), []);
+  const selected = selectImportCandidateVariant([group], group.id, 'variant-b');
+  assert.deepEqual(importRequestItems(selectedImportCandidates(selected)), [
+    { source_path: '/second/demo', skill_type: 'user', deploy_back_to_source: true }
+  ]);
+});
+
+test('group search tabs and select-all count one skill while matching every location', () => {
+  const groups = normalizeImportCandidateGroups([
+    {
+      id: 'skill-demo',
+      name: 'demo',
+      selected_variant_id: 'variant-demo',
+      variants: [{
+        id: 'variant-demo',
+        candidate: { name: 'demo', source_path: '/one/demo', import_status: 'importable', is_selected: false },
+        locations: [
+          { source_path: '/one/demo' },
+          { source_path: '/project/.cursor/skills/demo', is_symlink: true, symlink_target_path: '/one/demo' }
+        ]
+      }]
+    },
+    {
+      id: 'skill-system',
+      name: 'system-skill',
+      variants: [{
+        id: 'variant-system',
+        candidate: { name: 'system-skill', source_path: '/system', import_status: 'system' },
+        locations: [{ source_path: '/system' }]
+      }]
+    }
+  ]);
+
+  assert.deepEqual(importCandidateGroupTabs(groups), [
+    { id: 'all', label: 'All', count: 2 },
+    { id: 'unimported', label: 'Unimported', count: 1 },
+    { id: 'imported', label: 'Imported', count: 0 },
+    { id: 'system', label: 'System', count: 1 }
+  ]);
+  assert.deepEqual(filterImportCandidateGroups(groups, 'system').map((group) => group.name), ['system-skill']);
+  assert.deepEqual(filterImportCandidateGroupsByQuery(groups, 'cursor skills').map((group) => group.name), ['demo']);
+  assert.deepEqual(toggleImportCandidateGroupSelection(groups).map((group) => group.isSelected), [true, false]);
 });
 
 test('builds workspace skill tabs and separates unimported, imported, and system skills', () => {
