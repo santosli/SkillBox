@@ -7,6 +7,8 @@ version tags such as `v0.3.0`.
 
 ## Unreleased
 
+- Group Import Review candidates by normalized skill name, keep equivalent copies as locations of one Rust-qualified variant, require explicit selection when same-name variants differ, and submit at most one source per skill.
+
 - Add explicit inbound user-skills Git updates through Check remote, reviewed
   repository-wide diffs, and preview-confirmed fast-forward apply.
 - Report worktree cleanliness separately from synced/ahead/behind/diverged,

@@ -9912,6 +9912,16 @@ fn scan_import_candidates_groups_identical_copied_skills_across_roots() {
     assert_eq!(demo.additional_source_paths, vec![project_source.clone()]);
     assert_eq!(demo.import_status, ImportCandidateStatus::Importable);
     assert!(demo.is_selected);
+    assert_eq!(candidates.groups.len(), 1);
+    let group = &candidates.groups[0];
+    assert_eq!(group.name, "demo");
+    assert_eq!(group.variants.len(), 1);
+    assert_eq!(group.variants[0].locations.len(), 2);
+    assert_eq!(
+        group.selected_variant_id.as_deref(),
+        Some(group.variants[0].id.as_str())
+    );
+    assert!(!group.requires_review);
 
     let reversed = scan_import_candidates(&[project_root, global_root], &managed_root).unwrap();
     let reversed_demo = candidate(&reversed.candidates, "demo");
@@ -9939,6 +9949,56 @@ fn scan_import_candidates_keeps_same_skill_md_with_different_assets_separate() {
         .candidates
         .iter()
         .all(|candidate| candidate.additional_source_paths.is_empty()));
+    assert_eq!(candidates.groups.len(), 1);
+    assert_eq!(candidates.groups[0].variants.len(), 2);
+    assert!(candidates.groups[0].requires_review);
+    assert!(candidates.groups[0].selected_variant_id.is_none());
+    assert!(candidates.groups[0]
+        .variants
+        .iter()
+        .all(|variant| !variant.candidate.is_selected));
+}
+
+#[test]
+fn scan_import_candidates_groups_runtime_aliases_by_skill_with_explicit_variants() {
+    let root = temp_dir("candidate-runtime-alias-group");
+    let agents_root = root.join("home/.agents/skills");
+    let codex_root = root.join("home/.codex/skills");
+    let cursor_root = root.join("home/.cursor/skills");
+    let shared_source = agents_root.join("hyperframes");
+    let managed_root = root.join("SkillBox");
+    make_skill(&shared_source, "hyperframes", "Create product videos");
+    fs::create_dir_all(&codex_root).unwrap();
+    fs::create_dir_all(&cursor_root).unwrap();
+    symlink_dir(&shared_source, &codex_root.join("hyperframes")).unwrap();
+    symlink_dir(&shared_source, &cursor_root.join("hyperframes")).unwrap();
+
+    let scan =
+        scan_import_candidates(&[agents_root, codex_root, cursor_root], &managed_root).unwrap();
+
+    assert_eq!(scan.groups.len(), 1);
+    let group = &scan.groups[0];
+    assert_eq!(group.name, "hyperframes");
+    assert_eq!(group.variants.len(), 2);
+    assert_eq!(
+        group
+            .variants
+            .iter()
+            .map(|variant| variant.locations.len())
+            .sum::<usize>(),
+        3
+    );
+    assert!(group.requires_review);
+    assert!(group.selected_variant_id.is_none());
+    assert_eq!(
+        group
+            .variants
+            .iter()
+            .flat_map(|variant| &variant.locations)
+            .filter(|location| location.is_symlink)
+            .count(),
+        2
+    );
 }
 
 #[test]
@@ -9998,25 +10058,29 @@ fn import_candidates_reuses_identical_user_target_without_deployments() {
     make_skill(&first_source, "demo", "Demo skill");
     make_skill(&second_source, "demo", "Demo skill");
 
-    let result = import_candidates(
-        vec![
-            ImportRequestItem {
-                source_path: first_source.clone(),
-                skill_type: SkillKind::User,
-                deploy_back_to_source: false,
-            },
-            ImportRequestItem {
-                source_path: second_source.clone(),
-                skill_type: SkillKind::User,
-                deploy_back_to_source: false,
-            },
-        ],
+    let first_result = import_candidates(
+        vec![ImportRequestItem {
+            source_path: first_source.clone(),
+            skill_type: SkillKind::User,
+            deploy_back_to_source: false,
+        }],
+        &managed_root,
+    )
+    .unwrap();
+    let second_result = import_candidates(
+        vec![ImportRequestItem {
+            source_path: second_source.clone(),
+            skill_type: SkillKind::User,
+            deploy_back_to_source: false,
+        }],
         &managed_root,
     )
     .unwrap();
 
-    assert!(result.errors.is_empty());
-    assert_eq!(result.imported.len(), 2);
+    assert!(first_result.errors.is_empty());
+    assert!(second_result.errors.is_empty());
+    assert_eq!(first_result.imported.len(), 1);
+    assert_eq!(second_result.imported.len(), 1);
     assert!(first_source.is_dir());
     assert!(second_source.is_dir());
     let records = list_import_records(
@@ -10027,6 +10091,41 @@ fn import_candidates_reuses_identical_user_target_without_deployments() {
     )
     .unwrap();
     assert!(records.records.is_empty());
+}
+
+#[test]
+fn import_candidates_rejects_multiple_sources_for_one_skill_before_writing() {
+    let root = temp_dir("candidate-one-variant-only");
+    let first_source = root.join("first/demo");
+    let second_source = root.join("second/demo");
+    let managed_root = root.join("SkillBox");
+    make_skill(&first_source, "demo", "First demo");
+    make_skill(&second_source, "demo", "Second demo");
+    fs::write(first_source.join("prompt.md"), "first\n").unwrap();
+    fs::write(second_source.join("prompt.md"), "second\n").unwrap();
+
+    let error = import_candidates(
+        vec![
+            ImportRequestItem {
+                source_path: first_source.clone(),
+                skill_type: SkillKind::User,
+                deploy_back_to_source: true,
+            },
+            ImportRequestItem {
+                source_path: second_source.clone(),
+                skill_type: SkillKind::Remote,
+                deploy_back_to_source: true,
+            },
+        ],
+        &managed_root,
+    )
+    .unwrap_err();
+
+    assert!(error.contains("only one source variant for skill demo"));
+    assert!(first_source.is_dir());
+    assert!(second_source.is_dir());
+    assert!(!managed_root.join("user-skills/demo").exists());
+    assert!(!managed_root.join("remote-skills/demo").exists());
 }
 
 #[test]
@@ -10781,6 +10880,9 @@ fn scan_import_candidates_keeps_distinct_imported_targets_separate() {
         candidates.candidates[0].real_path,
         candidates.candidates[1].real_path
     );
+    assert_eq!(candidates.groups.len(), 1);
+    assert_eq!(candidates.groups[0].variants.len(), 2);
+    assert!(candidates.groups[0].selected_variant_id.is_none());
 }
 
 #[test]
@@ -10839,6 +10941,7 @@ fn scan_import_candidates_uses_total_usage_for_imported_skills() {
     let demo = candidate(&candidates.candidates, "demo");
     assert_eq!(demo.import_status, ImportCandidateStatus::Imported);
     assert_eq!(demo.usage_count, 2);
+    assert_eq!(candidates.groups[0].usage_count, 2);
 }
 
 #[test]
@@ -10905,24 +11008,28 @@ fn remote_import_rejects_same_skill_md_with_different_assets() {
     fs::write(first_source.join("prompt.md"), "first\n").unwrap();
     fs::write(second_source.join("prompt.md"), "second\n").unwrap();
 
+    let first_result = import_candidates(
+        vec![ImportRequestItem {
+            source_path: first_source.clone(),
+            skill_type: SkillKind::Remote,
+            deploy_back_to_source: true,
+        }],
+        &managed_root,
+    )
+    .unwrap();
     let result = import_candidates(
-        vec![
-            ImportRequestItem {
-                source_path: first_source.clone(),
-                skill_type: SkillKind::Remote,
-                deploy_back_to_source: true,
-            },
-            ImportRequestItem {
-                source_path: second_source.clone(),
-                skill_type: SkillKind::Remote,
-                deploy_back_to_source: true,
-            },
-        ],
+        vec![ImportRequestItem {
+            source_path: second_source.clone(),
+            skill_type: SkillKind::Remote,
+            deploy_back_to_source: true,
+        }],
         &managed_root,
     )
     .unwrap();
 
-    assert_eq!(result.imported.len(), 1);
+    assert_eq!(first_result.imported.len(), 1);
+    assert!(first_result.errors.is_empty());
+    assert!(result.imported.is_empty());
     assert_eq!(result.errors.len(), 1);
     assert!(fs::symlink_metadata(&first_source)
         .unwrap()

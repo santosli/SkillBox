@@ -43,8 +43,13 @@ import {
   normalizeStaleDeploymentRepairResult
 } from './doctor.js';
 import {
+  normalizeImportCandidateGroups,
   normalizeImportCandidate,
-  visibleImportCandidates
+  selectedImportCandidates,
+  selectImportCandidateVariant,
+  toggleImportCandidateGroup,
+  toggleImportCandidateGroupSelection,
+  updateImportCandidateGroupType
 } from './importCandidates.js';
 import {
   appUpdateNotice,
@@ -60,8 +65,7 @@ import {
   isHttpUrl,
   isImportableCandidate,
   remoteImportCandidate,
-  shouldConfirmLocalImport,
-  toggleImportCandidateSelection
+  shouldConfirmLocalImport
 } from './importFlow.js';
 import {
   clearLegacyDashboardMetadata,
@@ -78,6 +82,7 @@ import {
   previewCandidatesForWorkspace,
   previewHistory,
   previewImportCandidates,
+  previewImportCandidateGroups,
   previewPaths,
   previewSkills,
   previewUsageRankings,
@@ -1001,10 +1006,7 @@ export default function App() {
         setWorkspaces(normalizeWorkspaces(previewWorkspaces));
         setImportReview({
           open: true,
-          candidates: applyPreviewImportStatuses(
-            previewImportCandidates.map(normalizeImportCandidate),
-            skills
-          ),
+          candidates: normalizeImportCandidateGroups(previewImportCandidateGroups),
           errors: [],
           title: 'Import Review',
           subtitle: 'Confirm each skill type before SkillBox copies it into the managed store.',
@@ -1017,7 +1019,7 @@ export default function App() {
 
       const scan = await invoke('scan_import_candidates');
       const workspaceRows = await invoke('list_workspaces').catch(() => []);
-      const candidates = (scan.candidates || []).map(normalizeImportCandidate);
+      const candidates = normalizeImportCandidateGroups(scan.groups || [], scan.candidates || []);
       setWorkspaces(normalizeWorkspaces(workspaceRows));
 
       setImportReview({
@@ -1201,26 +1203,22 @@ export default function App() {
     setImportReview((current) => ({ ...current, open: false }));
   }
 
-  function updateImportCandidate(sourcePath, patch) {
+  function updateImportCandidateGroup(groupId, updater) {
     setImportReview((current) => ({
       ...current,
-      candidates: current.candidates.map((candidate) =>
-        candidate.sourcePath === sourcePath ? { ...candidate, ...patch } : candidate
-      )
+      candidates: updater(current.candidates, groupId)
     }));
   }
 
   function toggleAllImportCandidates() {
     setImportReview((current) => ({
       ...current,
-      candidates: toggleImportCandidateSelection(current.candidates, visibleImportCandidates(current.candidates))
+      candidates: toggleImportCandidateGroupSelection(current.candidates)
     }));
   }
 
   async function importSelectedCandidates() {
-    const selected = visibleImportCandidates(importReview.candidates).filter(
-      (candidate) => candidate.isSelected && isImportableCandidate(candidate)
-    );
+    const selected = selectedImportCandidates(importReview.candidates);
     if (selected.length === 0) {
       setNotice('Select at least one candidate without conflicts to import.');
       return;
@@ -3662,10 +3660,11 @@ export default function App() {
     setNotice('');
 
     if (!window.__TAURI_INTERNALS__) {
-      const candidates = applyPreviewImportStatuses(
+      const previewCandidates = applyPreviewImportStatuses(
         previewCandidatesForWorkspace(workspace).map(normalizeImportCandidate),
         skills
       );
+      const candidates = normalizeImportCandidateGroups([], previewCandidates);
 
       setImportReview({
         open: true,
@@ -3681,7 +3680,7 @@ export default function App() {
     try {
       const scan = await invoke('scan_workspace_import_candidates', { path: workspace.path });
       const workspaceRows = await invoke('list_workspaces').catch(() => []);
-      const candidates = (scan.candidates || []).map(normalizeImportCandidate);
+      const candidates = normalizeImportCandidateGroups(scan.groups || [], scan.candidates || []);
 
       setWorkspaces(normalizeWorkspaces(workspaceRows));
       setImportReview({
@@ -4188,17 +4187,24 @@ export default function App() {
 
       {importReview.open ? (
         <ImportReview
-          candidates={importReview.candidates}
+          groups={importReview.candidates}
           errors={importReview.errors}
           onClose={closeImportReview}
           onImport={importSelectedCandidates}
           onToggleAll={toggleAllImportCandidates}
-          onToggleSelected={(candidate) =>
-            isImportableCandidate(candidate)
-              ? updateImportCandidate(candidate.sourcePath, { isSelected: !candidate.isSelected })
-              : null
+          onSelectVariant={(group, variant) =>
+            updateImportCandidateGroup(group.id, (groups) =>
+              selectImportCandidateVariant(groups, group.id, variant.id)
+            )
           }
-          onTypeChange={(candidate, skillType) => updateImportCandidate(candidate.sourcePath, { skillType })}
+          onToggleSelected={(group) =>
+            updateImportCandidateGroup(group.id, (groups) => toggleImportCandidateGroup(groups, group.id))
+          }
+          onTypeChange={(group, skillType) =>
+            updateImportCandidateGroup(group.id, (groups) =>
+              updateImportCandidateGroupType(groups, group.id, skillType)
+            )
+          }
           status={status}
           subtitle={importReview.subtitle}
           title={importReview.title}

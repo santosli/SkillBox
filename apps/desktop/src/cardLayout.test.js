@@ -431,22 +431,22 @@ test('workspace skill tabs stay visible instead of collapsing into a scrollbar',
   assert.doesNotMatch(workspaceSkillTabsRule, /overflow-x:\s*auto;/);
 });
 
-test('import candidate path uses a labeled metadata row', () => {
-  const candidateRowSource = appSource.match(
-    /function CandidateRow\(\{ candidate, onToggleSelected, onTypeChange \}\)\s*\{(?<body>[\s\S]*?)\n\}/
+test('import candidate groups disclose locations and use radio variant selection', () => {
+  const groupSource = appSource.match(
+    /function CandidateGroupCard\(\{ group, onSelectVariant, onToggleSelected, onTypeChange \}\)\s*\{(?<body>[\s\S]*?)\n\}/
   )?.groups.body || '';
-  const candidatePathMetaRule = css.match(/\.candidatePath,\s*\.candidateSymlinkSource\s*\{(?<body>[^}]*)\}/s)
-    ?.groups.body || '';
-  const candidatePathRule = css.match(/\.candidatePath\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
-  const candidatePathCodeRule = css.match(/\.candidatePath code,\s*\.candidateSymlinkSource code\s*\{(?<body>[^}]*)\}/s)
-    ?.groups.body || '';
+  const disclosureRule = css.match(/\.candidateLocationsDisclosure\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const locationRule = css.match(/\.candidateLocation\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
 
-  assert.match(candidateRowSource, /className="candidatePath"/);
-  assert.match(candidateRowSource, /<span>Path<\/span>/);
-  assert.match(candidateRowSource, /<code>\{compactPath\(candidate\.sourcePath\)\}<\/code>/);
-  assert.match(candidatePathMetaRule, /white-space:\s*nowrap;/);
-  assert.match(candidatePathRule, /margin-top:\s*7px;/);
-  assert.match(candidatePathCodeRule, /display:\s*inline;/);
+  assert.match(groupSource, /aria-controls=\{disclosureId\}/);
+  assert.match(groupSource, /aria-expanded=\{expanded\}/);
+  assert.match(groupSource, /Found in \{locationCount\}/);
+  assert.match(groupSource, /type="radio"/);
+  assert.match(groupSource, /name=\{`\$\{group\.id\}-variant`\}/);
+  assert.match(groupSource, /onSelectVariant\(group, variant\)/);
+  assert.match(groupSource, /Source: \{compactPath\(location\.symlinkTargetPath \|\| location\.realPath\)\}/);
+  assert.match(disclosureRule, /display:\s*inline-flex;/);
+  assert.match(locationRule, /grid-template-columns:\s*96px minmax\(0,\s*1fr\);/);
 });
 
 test('import review uses the shared searchable candidate list template', () => {
@@ -469,7 +469,7 @@ test('import review uses the shared searchable candidate list template', () => {
   assert.match(candidateReviewListSource, /role="searchbox"/);
   assert.match(candidateReviewListSource, /type="text"/);
   assert.doesNotMatch(candidateReviewListSource, /type="search"/);
-  assert.match(candidateReviewListSource, /workspaceSkillTabs\(searchedCandidates\)/);
+  assert.match(candidateReviewListSource, /importCandidateGroupTabs\(searchedGroups\)/);
   assert.match(searchRule, /width:\s*100%;/);
 });
 
@@ -503,12 +503,12 @@ test('remote source binding dialog keeps long candidate lists inside the viewpor
   assert.match(candidateListRule, /overflow-y:\s*auto;/);
 });
 
-test('import review uses all candidates by default in the shared review list', () => {
+test('import review uses all candidate groups by default in the shared review list', () => {
   assert.match(
     appSource,
     /const \[activeTab,\s*setActiveTab\]\s*=\s*useState\('all'\);/
   );
-  assert.match(appSource, /const filteredCandidates = filterWorkspaceSkillCandidates\(searchedCandidates,\s*activeTab\);/);
+  assert.match(appSource, /const filteredGroups = filterImportCandidateGroups\(searchedGroups,\s*activeTab\);/);
 });
 
 test('workspace cards show the shared workspace icon beside the workspace name', () => {
@@ -939,7 +939,7 @@ test('compact call labels stay short while usage explanations retain local scope
   assert.match(historyPageSource, /Try another history filter or sync local histories\./);
   assert.match(skillCardSource, /\{skill\.usageCount\} calls/);
   assert.doesNotMatch(skillCardSource, /locally observed calls/i);
-  assert.match(appSource, /className="candidateUsage">[\s\S]*Calls \{candidate\.usageCount \|\| 0\}/);
+  assert.match(appSource, /className="candidateUsage">[\s\S]*Calls \{group\.usageCount \|\| 0\}/);
   assert.match(appSource, /Calls:\s*<strong>\{workspace\.usageCount\}<\/strong>/);
   assert.match(appSource, /<strong>No calls in this range<\/strong>/);
   assert.match(appSource, /<caption className="srOnly">Skills ranked by calls<\/caption>/);

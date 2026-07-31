@@ -1060,6 +1060,33 @@ pub struct ImportCandidate {
     pub usage_count: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ImportCandidateLocation {
+    pub source_path: PathBuf,
+    pub source_root: Option<PathBuf>,
+    pub real_path: PathBuf,
+    pub is_symlink: bool,
+    pub symlink_target_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ImportCandidateVariant {
+    pub id: String,
+    pub candidate: ImportCandidate,
+    pub locations: Vec<ImportCandidateLocation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ImportCandidateGroup {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub usage_count: usize,
+    pub requires_review: bool,
+    pub selected_variant_id: Option<String>,
+    pub variants: Vec<ImportCandidateVariant>,
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ImportCandidateStatus {
@@ -1072,6 +1099,7 @@ pub enum ImportCandidateStatus {
 pub struct ImportCandidateScan {
     pub roots: Vec<PathBuf>,
     pub candidates: Vec<ImportCandidate>,
+    pub groups: Vec<ImportCandidateGroup>,
     pub errors: Vec<ScanError>,
 }
 
