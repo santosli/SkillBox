@@ -22,6 +22,12 @@
 - Implemented a first CLI surface for the planned commands.
 - Added a Tauri + React desktop shell with scan and path bridge commands.
 - Implemented Rust/Tauri user-skills Git sync for the shared `~/.skillbox/user-skills` repository, including Settings-managed remote configuration, per-skill dirty status, desktop commit review with diff preview, generated Conventional Commit messages, and selected-file commits.
+- Implemented explicit inbound user-skills Git synchronization on `main` through
+  Check remote -> Review incoming changes -> Apply fast-forward, with separate
+  worktree/relation state, stale-preview rejection, untrusted-tree validation,
+  deployed deletion/rename blockers, backup refs, and independent Git/SQLite
+  recovery auditing. This implementation is newer than the shipped `v0.6.1`
+  release and remains unreleased.
 - Implemented Rust/Tauri/CLI remote skill update status checks, Dashboard status refresh, last-checked timestamps, and configurable 5-minute auto refresh.
 - Implemented GitHub-only remote source search/binding, immutable remote version listing, all-file diff preview, update/rollback apply, and permanent operation logging in Rust core, Rust CLI, Tauri commands, and desktop review dialogs.
 - Implemented network-backed GitHub install preview/apply in Rust core, Rust CLI, and desktop UI, including first-install diff review, preview identity checks, version snapshots, `current` symlink updates, source metadata, optional CLI deploy, and legacy CLI aliases.
@@ -49,8 +55,8 @@ next milestones follow [the versioned evolution path](roadmap.md#versioned-evolu
 
 ### 0.7 — Safe Sync, Deployment, And Recovery
 
-- Reviewed inbound user-skills Git is implemented on the active Draft change
-  set pending qualification. It separates clean/dirty worktree state from
+- Reviewed inbound user-skills Git is implemented on `main` but remains
+  unreleased after `v0.6.1`. It separates clean/dirty worktree state from
   unknown/synced/ahead/behind/diverged/remote-only/no-remote-branch relation,
   then uses Check remote -> Review incoming changes -> Apply fast-forward.
 - The inbound implementation validates the complete remote skill tree, binds a
@@ -69,6 +75,18 @@ next milestones follow [the versioned evolution path](roadmap.md#versioned-evolu
 
 ### Later Milestones
 
+- Plan [Git-backed Skill Collections](https://github.com/santosli/SkillBox/issues/46)
+  for `v0.8.0`, after the v0.7.0 inbound-sync release. A collection is a
+  canonical Git repository/worktree source plus reviewed ref/HEAD; child
+  `SKILL.md` directories remain independently selectable and deployable. The
+  planned phases are local repository grouping, persistence and child
+  relationships, one-fetch GitHub multi-skill preview/apply, and
+  commit-consistent collection update/rollback.
+- Collection scans must remain read-only. Apply must revalidate repository
+  identity, HEAD/ref, and tree snapshot; execute no hooks, submodules, filters,
+  scripts, or arbitrary shell; and preserve existing path, overwrite,
+  duplicate-name, backup, and recovery protections. No collection phase is
+  currently implemented.
 - Add FTS-backed search across skills, operations, and usage history.
 - Add remote source provenance and trust classification without treating
   popularity as verification.
