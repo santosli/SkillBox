@@ -4,7 +4,7 @@ SkillBox is early-stage software. This roadmap describes the public direction,
 not a date-based commitment. Implementation details can change as the app gets
 more real-world use.
 
-## Current Focus: 0.7
+## Current Focus: 0.6.x
 
 SkillBox `v0.6.1` is shipped. The 0.6 line made `SKILL.md` deployment targets
 explicit and portable without moving runtime knowledge into React:
