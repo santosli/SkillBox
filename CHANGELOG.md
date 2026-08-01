@@ -9,6 +9,15 @@ version tags such as `v0.3.0`.
 
 - No unreleased changes.
 
+## 0.7.0
+
+- Add explicit inbound user-skills Git updates through Check remote, Review incoming changes, and preview-confirmed fast-forward Apply, with clear clean, dirty, ahead, behind, diverged, remote-only, and missing-branch states.
+- Keep inbound Git resolution deliberate: SkillBox never auto-merges, rebases, resets, stashes, force-pushes, or resolves conflicts, and it validates incoming trees, affected deployments, stale previews, backup refs, Git/SQLite recovery, and concurrent local changes before reporting success.
+- Group same-name Import Review candidates into one skill card, collapse equivalent repository/runtime locations into one Rust-qualified variant, keep materially different variants explicit, and submit at most one primary source per skill.
+- Keep mixed User/Remote advice as one content variant and require an explicit, accessible Skill type choice before import rather than manufacturing duplicate variants.
+- Align resolved, required, and disabled Skill type controls to one stable width with evenly split User/Remote actions and responsive narrow-layout behavior.
+- Refresh supporting documentation, GitHub Actions, desktop dependencies, and release maintenance without changing the local-first review-before-write safety model.
+
 ## 0.6.1
 
 - Classify local skill usage evidence as confirmed, inferred, or reference while keeping Calls focused on confirmed and defensible inferred invocations.
