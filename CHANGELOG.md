@@ -7,45 +7,7 @@ version tags such as `v0.3.0`.
 
 ## Unreleased
 
-- Group Import Review candidates by normalized skill name, keep equivalent copies as locations of one Rust-qualified variant, require explicit selection when same-name variants differ, and submit at most one source per skill.
-- Keep mixed User/Remote import suggestions inside one content-equivalent variant and present the explicit classification choice as a labeled required action instead of manufacturing duplicate variants.
-
-- Add explicit inbound user-skills Git updates through Check remote, reviewed
-  repository-wide diffs, and preview-confirmed fast-forward apply.
-- Report worktree cleanliness separately from synced/ahead/behind/diverged,
-  remote-only, and missing-remote-branch states without automatic conflict
-  resolution.
-- Validate incoming skill trees, disclose affected runtime deployments, block
-  deployed deletes or renames, create pre-apply backup refs, and reconcile the
-  user-skill index after a successful fast-forward.
-- Block collisions with ignored or untracked local content, isolate the flow
-  from repository hooks/filters/merge drivers, serialize managed mutations, and
-  use compare-and-swap recovery that never discards unrelated Git work.
-- Harden recovery with identity-bound quarantine restores, atomic generated-file
-  handling, bounded Git preflight, an explicit transport allowlist, and
-  structured partial-success warnings when only lock cleanup is contested.
-- Reject FIFO, special, oversized, or changing recovery entries; restore the Git
-  index through private no-follow files and release index locks without opening
-  a third-party lock window.
-- Keep partial-success warnings visible in Settings and parse Git worktree-config
-  booleans through Git's complete boolean semantics before network access.
-- Bind compensation to the exact reviewed Git index, preserve concurrent
-  replacement indexes, reject repository-defined `remote.*.vcs` helpers, and
-  keep successful applies successful when audit finalization or read-only UI
-  refresh reports a warning.
-- Pin every shared user-skills mutation to its canonical managed root, bind
-  index recovery to exact content, require atomic-exchange support before
-  mutation, reject push URL rewrites, and prevent stale async refreshes from
-  overwriting newer Git state.
-- Resolve relative and symlink-parent managed-root aliases before locking,
-  reject custom-helper origin URLs, gate every status refresh branch from
-  function entry, and detect plain worktree edits after reindex before
-  reporting a successful inbound apply.
-- Snapshot the user-skill SQLite index inside the reindex transaction and
-  restore it independently from Git recovery when final consistency fails,
-  with separate audited outcomes for partial database recovery.
-- Add matching Rust CLI, Tauri, and desktop review surfaces while preserving the
-  existing outbound commit-and-push behavior.
+- No unreleased changes.
 
 ## 0.6.1
 
