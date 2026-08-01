@@ -8,7 +8,7 @@ version tags such as `v0.3.0`.
 ## Unreleased
 
 - Group Import Review candidates by normalized skill name, keep equivalent copies as locations of one Rust-qualified variant, require explicit selection when same-name variants differ, and submit at most one source per skill.
-- Keep mixed User/Remote import suggestions inside one content-equivalent variant and require an explicit classification choice instead of manufacturing duplicate variants.
+- Keep mixed User/Remote import suggestions inside one content-equivalent variant and present the explicit classification choice as a labeled required action instead of manufacturing duplicate variants.
 
 - Add explicit inbound user-skills Git updates through Check remote, reviewed
   repository-wide diffs, and preview-confirmed fast-forward apply.

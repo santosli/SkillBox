@@ -361,6 +361,8 @@ function CandidateGroupCard({ group, onSelectVariant, onToggleSelected, onTypeCh
   const status = importCandidateGroupStatus(group);
   const locationCount = importCandidateGroupLocationCount(group);
   const disclosureId = `${group.id}-locations`;
+  const typeLabelId = `${group.id}-type-label`;
+  const typeHelpId = `${group.id}-type-help`;
 
   return (
     <div className={candidateRowClass(candidate || {})}>
@@ -387,9 +389,6 @@ function CandidateGroupCard({ group, onSelectVariant, onToggleSelected, onTypeCh
           {needsTypeChoice ? <Badge tone="amber">Mixed type suggestions</Badge> : null}
         </div>
         <small>{group.description || 'No description in SKILL.md'}</small>
-        {needsTypeChoice ? (
-          <p className="candidateTypeReviewNote">Choose User or Remote before importing this skill.</p>
-        ) : null}
         <button
           aria-controls={disclosureId}
           aria-expanded={expanded}
@@ -461,23 +460,42 @@ function CandidateGroupCard({ group, onSelectVariant, onToggleSelected, onTypeCh
         {candidate && candidateStatusNote(candidate) ? <p>{candidateStatusNote(candidate)}</p> : null}
       </div>
 
-      <div className="candidateTypeSwitch" role="group" aria-label={`${group.name} type`}>
-        <button
-          className={selectedVariant?.selectedType === 'user' ? 'active' : ''}
-          disabled={!canClassifyImportCandidateGroup(group)}
-          type="button"
-          onClick={() => onTypeChange(group, 'user')}
+      <div className={`candidateTypeAction ${needsTypeChoice ? 'required' : ''}`}>
+        <div className="candidateTypeActionHeader">
+          <span id={typeLabelId}>Skill type</span>
+          {needsTypeChoice ? <strong>Required</strong> : null}
+        </div>
+        {needsTypeChoice ? (
+          <p id={typeHelpId}>Choose where SkillBox should manage this skill.</p>
+        ) : null}
+        <div
+          aria-describedby={needsTypeChoice ? typeHelpId : undefined}
+          aria-labelledby={typeLabelId}
+          aria-required={needsTypeChoice}
+          className="candidateTypeSwitch"
+          role="radiogroup"
         >
-          User
-        </button>
-        <button
-          className={selectedVariant?.selectedType === 'remote' ? 'active' : ''}
-          disabled={!canClassifyImportCandidateGroup(group)}
-          type="button"
-          onClick={() => onTypeChange(group, 'remote')}
-        >
-          Remote
-        </button>
+          <button
+            aria-checked={selectedVariant?.selectedType === 'user'}
+            className={selectedVariant?.selectedType === 'user' ? 'active' : ''}
+            disabled={!canClassifyImportCandidateGroup(group)}
+            role="radio"
+            type="button"
+            onClick={() => onTypeChange(group, 'user')}
+          >
+            User
+          </button>
+          <button
+            aria-checked={selectedVariant?.selectedType === 'remote'}
+            className={selectedVariant?.selectedType === 'remote' ? 'active' : ''}
+            disabled={!canClassifyImportCandidateGroup(group)}
+            role="radio"
+            type="button"
+            onClick={() => onTypeChange(group, 'remote')}
+          >
+            Remote
+          </button>
+        </div>
       </div>
     </div>
   );

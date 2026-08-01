@@ -437,6 +437,9 @@ test('import candidate groups disclose locations and use radio variant selection
   )?.groups.body || '';
   const disclosureRule = css.match(/\.candidateLocationsDisclosure\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const locationRule = css.match(/\.candidateLocation\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const typeActionRule = css.match(/\.candidateTypeAction\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const requiredTypeActionRule = css.match(/\.candidateTypeAction\.required\s*\{(?<body>[^}]*)\}/s)
+    ?.groups.body || '';
 
   assert.match(groupSource, /aria-controls=\{disclosureId\}/);
   assert.match(groupSource, /aria-expanded=\{expanded\}/);
@@ -447,12 +450,26 @@ test('import candidate groups disclose locations and use radio variant selection
   assert.match(groupSource, /onSelectVariant\(group, variant\)/);
   assert.match(groupSource, /Source: \{compactPath\(location\.symlinkTargetPath \|\| location\.realPath\)\}/);
   assert.match(groupSource, /Mixed type suggestions/);
-  assert.match(groupSource, /Choose User or Remote before importing this skill/);
+  assert.match(groupSource, /id=\{typeLabelId\}>Skill type/);
+  assert.match(groupSource, /<strong>Required<\/strong>/);
+  assert.match(groupSource, /Choose where SkillBox should manage this skill/);
+  assert.match(groupSource, /aria-describedby=\{needsTypeChoice \? typeHelpId : undefined\}/);
+  assert.match(groupSource, /aria-labelledby=\{typeLabelId\}/);
+  assert.match(groupSource, /aria-required=\{needsTypeChoice\}/);
+  assert.match(groupSource, /role="radiogroup"/);
+  assert.match(groupSource, /role="radio"/);
+  assert.match(groupSource, /aria-checked=\{selectedVariant\?\.selectedType === 'user'\}/);
+  assert.match(groupSource, /aria-checked=\{selectedVariant\?\.selectedType === 'remote'\}/);
+  assert.doesNotMatch(groupSource, /Choose User or Remote before importing this skill/);
   assert.match(groupSource, /selectedVariant\?\.selectedType === 'user'/);
   assert.match(groupSource, /selectedVariant\?\.selectedType === 'remote'/);
   assert.match(groupSource, /disabled=\{!canClassifyImportCandidateGroup\(group\)\}/);
   assert.match(disclosureRule, /display:\s*inline-flex;/);
   assert.match(locationRule, /grid-template-columns:\s*96px minmax\(0,\s*1fr\);/);
+  assert.match(typeActionRule, /display:\s*grid;/);
+  assert.match(typeActionRule, /min-width:\s*142px;/);
+  assert.match(requiredTypeActionRule, /border-color:\s*var\(--skillbox-amber-border\);/);
+  assert.match(requiredTypeActionRule, /background:\s*var\(--skillbox-surface-orange\);/);
 });
 
 test('import review uses the shared searchable candidate list template', () => {
