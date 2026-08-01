@@ -6501,12 +6501,6 @@ dd {
   margin: 7px 0;
 }
 
-.candidateTypeReviewNote {
-  margin: 2px 0 0;
-  color: var(--skillbox-amber-text);
-  font-size: 12px;
-}
-
 .candidateLocation {
   display: grid;
   min-width: 0;
@@ -6599,6 +6593,46 @@ dd {
 .candidateTypeSwitch button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+.candidateTypeAction {
+  display: grid;
+  min-width: 142px;
+  justify-items: start;
+  gap: 5px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.candidateTypeAction.required {
+  border-color: var(--skillbox-amber-border);
+  background: var(--skillbox-surface-orange);
+}
+
+.candidateTypeActionHeader {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--skillbox-text-secondary);
+  font-size: 11px;
+  font-weight: 720;
+}
+
+.candidateTypeActionHeader strong {
+  color: var(--skillbox-amber-text);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.candidateTypeAction p {
+  max-width: 190px;
+  margin: 0;
+  color: var(--skillbox-amber-text);
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .importSheetFooter {
@@ -6942,9 +6976,9 @@ dd {
     grid-template-columns: 28px minmax(0, 1fr);
   }
 
-  .candidateTypeSwitch {
+  .candidateTypeAction {
     grid-column: 2;
-    width: max-content;
+    width: min(100%, 320px);
   }
 
   .candidateLocation {
