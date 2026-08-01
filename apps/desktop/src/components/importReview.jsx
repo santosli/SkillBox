@@ -3,13 +3,15 @@ import { ChevronDown, MapPin, Search } from 'lucide-react';
 import codexAppIcon from '../assets/codex-app-icon.png';
 import codexCliIcon from '../assets/codex-cli-icon.png';
 import {
+  canClassifyImportCandidateGroup,
   filterImportCandidateGroups,
   filterImportCandidateGroupsByQuery,
   importCandidateGroupLocationCount,
   importCandidateGroupStatus,
   importCandidateGroupTabs,
   isSelectableImportCandidateGroup,
-  selectedImportCandidate
+  selectedImportCandidate,
+  selectedImportCandidateVariant
 } from '../importCandidates.js';
 import {
   candidateImportSourcePaths,
@@ -352,6 +354,10 @@ function WorkspaceSkillTabs({ activeTab, tabs, onTabChange }) {
 function CandidateGroupCard({ group, onSelectVariant, onToggleSelected, onTypeChange }) {
   const [expanded, setExpanded] = useState(false);
   const candidate = selectedImportCandidate(group) || group.variants[0]?.candidate;
+  const selectedVariant = selectedImportCandidateVariant(group);
+  const needsTypeChoice = Boolean(
+    selectedVariant?.requiresTypeReview && !selectedVariant.selectedType
+  );
   const status = importCandidateGroupStatus(group);
   const locationCount = importCandidateGroupLocationCount(group);
   const disclosureId = `${group.id}-locations`;
@@ -378,8 +384,12 @@ function CandidateGroupCard({ group, onSelectVariant, onToggleSelected, onTypeCh
           {status.system ? <Badge tone="slate">System</Badge> : null}
           {status.conflict ? <Badge tone="red">Conflict</Badge> : null}
           {group.requiresReview && !group.selectedVariantId ? <Badge tone="amber">Needs review</Badge> : null}
+          {needsTypeChoice ? <Badge tone="amber">Mixed type suggestions</Badge> : null}
         </div>
         <small>{group.description || 'No description in SKILL.md'}</small>
+        {needsTypeChoice ? (
+          <p className="candidateTypeReviewNote">Choose User or Remote before importing this skill.</p>
+        ) : null}
         <button
           aria-controls={disclosureId}
           aria-expanded={expanded}
@@ -398,23 +408,29 @@ function CandidateGroupCard({ group, onSelectVariant, onToggleSelected, onTypeCh
               const selected = group.selectedVariantId === variant.id;
               return (
                 <div className={`candidateVariant ${selected ? 'selected' : ''}`} key={variant.id}>
-                  <label className="candidateVariantChoice">
-                    <input
-                      checked={selected}
-                      disabled={!importable}
-                      name={`${group.id}-variant`}
-                      type="radio"
-                      value={variant.id}
-                      onChange={() => onSelectVariant(group, variant)}
-                    />
-                    <span>
-                      Variant {variantIndex + 1}
-                      {selected ? ' · selected for import' : ''}
-                    </span>
-                  </label>
+                  {group.variants.length > 1 ? (
+                    <label className="candidateVariantChoice">
+                      <input
+                        checked={selected}
+                        disabled={!importable}
+                        name={`${group.id}-variant`}
+                        type="radio"
+                        value={variant.id}
+                        onChange={() => onSelectVariant(group, variant)}
+                      />
+                      <span>
+                        Variant {variantIndex + 1}
+                        {selected ? ' · selected for import' : ''}
+                      </span>
+                    </label>
+                  ) : null}
                   <div className="candidateVariantMeta">
                     <Badge tone="slate">
-                      {variant.candidate.skillType === 'user' ? 'User suggestion' : 'Remote suggestion'}
+                      {variant.requiresTypeReview
+                        ? 'Mixed type suggestions'
+                        : variant.suggestedTypes[0] === 'remote'
+                          ? 'Remote suggestion'
+                          : 'User suggestion'}
                     </Badge>
                     <Badge tone={variant.candidate.conflict ? 'red' : 'slate'}>
                       {variant.candidate.conflict || variant.candidate.importStatus}
@@ -427,6 +443,10 @@ function CandidateGroupCard({ group, onSelectVariant, onToggleSelected, onTypeCh
                       {location.isSymlink ? (
                         <small>Source: {compactPath(location.symlinkTargetPath || location.realPath)}</small>
                       ) : null}
+                      <small className="candidateLocationSuggestion">
+                        {location.suggestedType === 'remote' ? 'Remote suggestion' : 'User suggestion'}
+                        {location.suggestionReason ? ` · ${location.suggestionReason}` : ''}
+                      </small>
                     </div>
                   ))}
                   {variant.candidate.conflict ? <p>{variant.candidate.conflict}</p> : null}
@@ -443,16 +463,16 @@ function CandidateGroupCard({ group, onSelectVariant, onToggleSelected, onTypeCh
 
       <div className="candidateTypeSwitch" role="group" aria-label={`${group.name} type`}>
         <button
-          className={candidate?.skillType === 'user' ? 'active' : ''}
-          disabled={!isSelectableImportCandidateGroup(group)}
+          className={selectedVariant?.selectedType === 'user' ? 'active' : ''}
+          disabled={!canClassifyImportCandidateGroup(group)}
           type="button"
           onClick={() => onTypeChange(group, 'user')}
         >
           User
         </button>
         <button
-          className={candidate?.skillType === 'remote' ? 'active' : ''}
-          disabled={!isSelectableImportCandidateGroup(group)}
+          className={selectedVariant?.selectedType === 'remote' ? 'active' : ''}
+          disabled={!canClassifyImportCandidateGroup(group)}
           type="button"
           onClick={() => onTypeChange(group, 'remote')}
         >

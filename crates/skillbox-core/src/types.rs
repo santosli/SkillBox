@@ -1067,6 +1067,8 @@ pub struct ImportCandidateLocation {
     pub real_path: PathBuf,
     pub is_symlink: bool,
     pub symlink_target_path: Option<PathBuf>,
+    pub suggested_type: SkillKind,
+    pub suggestion_reason: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1074,6 +1076,9 @@ pub struct ImportCandidateVariant {
     pub id: String,
     pub candidate: ImportCandidate,
     pub locations: Vec<ImportCandidateLocation>,
+    pub suggested_types: Vec<SkillKind>,
+    pub requires_type_review: bool,
+    pub selected_type: Option<SkillKind>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

@@ -40,7 +40,9 @@ export function normalizeImportCandidateLocation(location = {}) {
     sourceRoot: location.sourceRoot || location.source_root || '',
     realPath: location.realPath || location.real_path || '',
     isSymlink: Boolean(location.isSymlink ?? location.is_symlink),
-    symlinkTargetPath: location.symlinkTargetPath || location.symlink_target_path || ''
+    symlinkTargetPath: location.symlinkTargetPath || location.symlink_target_path || '',
+    suggestedType: location.suggestedType || location.suggested_type || '',
+    suggestionReason: location.suggestionReason || location.suggestion_reason || ''
   };
 }
 
@@ -51,15 +53,24 @@ export function normalizeImportCandidateGroup(group) {
     const locationCopies = locations
       .map((location) => location.sourcePath)
       .filter((path) => path && path !== candidate.sourcePath);
+    const suggestedTypes = variant.suggestedTypes || variant.suggested_types || [candidate.suggestedType];
+    const requiresTypeReview = Boolean(variant.requiresTypeReview ?? variant.requires_type_review);
+    const selectedType = variant.selectedType ?? variant.selected_type ?? (
+      requiresTypeReview ? null : suggestedTypes[0] || candidate.suggestedType
+    );
     return {
       id: variant.id || `variant-${index}-${candidate.sourcePath}`,
       candidate: {
         ...candidate,
+        skillType: selectedType || candidate.skillType,
         additionalSourcePaths: [...new Set([...candidate.additionalSourcePaths, ...locationCopies])]
       },
       locations: locations.length > 0
         ? locations
-        : [normalizeImportCandidateLocation(candidate)]
+        : [normalizeImportCandidateLocation(candidate)],
+      suggestedTypes,
+      requiresTypeReview,
+      selectedType
     };
   });
   const selectedVariantId = group.selectedVariantId || group.selected_variant_id || null;
@@ -73,7 +84,7 @@ export function normalizeImportCandidateGroup(group) {
     requiresReview: Boolean(group.requiresReview ?? group.requires_review),
     selectedVariantId,
     variants,
-    isSelected: Boolean(selectedVariant?.candidate.isSelected)
+    isSelected: Boolean(selectedVariant?.candidate.isSelected && selectedVariant.selectedType)
   };
 }
 
@@ -97,12 +108,28 @@ export function normalizeImportCandidateGroups(groups = [], candidates = []) {
 }
 
 export function selectedImportCandidate(group) {
-  return group.variants.find((variant) => variant.id === group.selectedVariantId)?.candidate || null;
+  const variant = selectedImportCandidateVariant(group);
+  return variant
+    ? { ...variant.candidate, skillType: variant.selectedType || variant.candidate.skillType }
+    : null;
+}
+
+export function selectedImportCandidateVariant(group) {
+  return group.variants.find((variant) => variant.id === group.selectedVariantId) || null;
+}
+
+export function canClassifyImportCandidateGroup(group) {
+  const variant = selectedImportCandidateVariant(group);
+  return Boolean(
+    variant
+    && variant.candidate.importStatus === 'importable'
+    && !variant.candidate.conflict
+  );
 }
 
 export function isSelectableImportCandidateGroup(group) {
-  const candidate = selectedImportCandidate(group);
-  return Boolean(candidate && candidate.importStatus === 'importable' && !candidate.conflict);
+  const variant = selectedImportCandidateVariant(group);
+  return Boolean(canClassifyImportCandidateGroup(group) && variant.selectedType);
 }
 
 export function toggleImportCandidateGroup(groups, groupId) {
@@ -118,7 +145,11 @@ export function selectImportCandidateVariant(groups, groupId, variantId) {
     if (!variant || variant.candidate.importStatus !== 'importable' || variant.candidate.conflict) {
       return group;
     }
-    return { ...group, selectedVariantId: variantId, isSelected: true };
+    return {
+      ...group,
+      selectedVariantId: variantId,
+      isSelected: Boolean(variant.selectedType)
+    };
   });
 }
 
@@ -126,8 +157,13 @@ export function updateImportCandidateGroupType(groups, groupId, skillType) {
   return groups.map((group) => group.id === groupId
     ? {
         ...group,
+        isSelected: canClassifyImportCandidateGroup(group),
         variants: group.variants.map((variant) => variant.id === group.selectedVariantId
-          ? { ...variant, candidate: { ...variant.candidate, skillType } }
+          ? {
+              ...variant,
+              selectedType: skillType,
+              candidate: { ...variant.candidate, skillType }
+            }
           : variant)
       }
     : group);
@@ -190,11 +226,14 @@ export function filterImportCandidateGroupsByQuery(groups = [], query = '') {
         variant.candidate.importStatus,
         variant.candidate.conflict,
         variant.candidate.suggestionReason,
+        ...variant.suggestedTypes,
         ...variant.locations.flatMap((location) => [
           location.sourcePath,
           location.sourceRoot,
           location.realPath,
-          location.symlinkTargetPath
+          location.symlinkTargetPath,
+          location.suggestedType,
+          location.suggestionReason
         ])
       ])
     ].filter(Boolean).join(' ').toLowerCase();

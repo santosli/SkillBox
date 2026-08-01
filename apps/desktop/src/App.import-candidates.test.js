@@ -13,6 +13,7 @@ import {
   selectedImportCandidates,
   selectImportCandidateVariant,
   toggleImportCandidateGroupSelection,
+  updateImportCandidateGroupType,
   visibleImportCandidates,
   workspaceSkillTabs
 } from './importCandidates.js';
@@ -150,64 +151,93 @@ test('normalizes grouped import candidate source paths', () => {
   ]);
 });
 
-test('normalizes Rust-owned import groups without inferring variant equivalence', () => {
+test('normalizes Rust-owned mixed type suggestions without splitting one content variant', () => {
   const group = normalizeImportCandidateGroup({
-    id: 'skill-hyperframes',
-    name: 'hyperframes',
+    id: 'skill-general-video',
+    name: 'general-video',
     description: 'Create product videos.',
     usage_count: 8,
-    requires_review: true,
-    selected_variant_id: null,
+    requires_review: false,
+    selected_variant_id: 'variant-shared',
     variants: [
       {
-        id: 'variant-user',
+        id: 'variant-shared',
+        requires_type_review: true,
+        selected_type: null,
+        suggested_types: ['user', 'remote'],
         candidate: {
-          name: 'hyperframes',
-          source_path: '/Users/example/.agents/skills/hyperframes',
+          name: 'general-video',
+          source_path: '/Users/example/.agents/skills/general-video',
           suggested_type: 'user',
-          import_status: 'importable'
+          import_status: 'importable',
+          is_selected: false
         },
         locations: [
           {
-            source_path: '/Users/example/.agents/skills/hyperframes',
-            real_path: '/Users/example/src/hyperframes',
-            is_symlink: true,
-            symlink_target_path: '/Users/example/src/hyperframes'
+            source_path: '/Users/example/.agents/skills/general-video',
+            real_path: '/Users/example/.agents/skills/general-video',
+            suggested_type: 'user',
+            suggestion_reason: 'inside ~/.agents/skills'
           },
           {
-            source_path: '/Users/example/.cursor/skills/hyperframes',
-            real_path: '/Users/example/src/hyperframes',
-            is_symlink: true,
-            symlink_target_path: '/Users/example/src/hyperframes'
-          }
-        ]
-      },
-      {
-        id: 'variant-remote',
-        candidate: {
-          name: 'hyperframes',
-          source_path: '/Users/example/.codex/skills/hyperframes',
-          suggested_type: 'remote',
-          import_status: 'importable'
-        },
-        locations: [
+            source_path: '/Users/example/.claude/skills/general-video',
+            real_path: '/Users/example/.claude/skills/general-video',
+            suggested_type: 'user',
+            suggestion_reason: 'Needs confirm'
+          },
           {
-            source_path: '/Users/example/.codex/skills/hyperframes',
-            real_path: '/Users/example/src/hyperframes',
+            source_path: '/Users/example/.cursor/skills/general-video',
+            real_path: '/Users/example/.claude/skills/general-video',
             is_symlink: true,
-            symlink_target_path: '/Users/example/src/hyperframes'
+            symlink_target_path: '/Users/example/.claude/skills/general-video',
+            suggested_type: 'user',
+            suggestion_reason: 'Needs confirm'
+          },
+          {
+            source_path: '/Users/example/.codex/skills/general-video',
+            real_path: '/Users/example/.claude/skills/general-video',
+            is_symlink: true,
+            symlink_target_path: '/Users/example/.claude/skills/general-video',
+            suggested_type: 'remote',
+            suggestion_reason: 'inside ~/.codex/skills'
           }
         ]
       }
     ]
   });
 
-  assert.equal(group.variants.length, 2);
-  assert.equal(importCandidateGroupLocationCount(group), 3);
-  assert.equal(group.requiresReview, true);
-  assert.equal(group.selectedVariantId, null);
+  assert.equal(group.variants.length, 1);
+  assert.equal(importCandidateGroupLocationCount(group), 4);
+  assert.equal(group.requiresReview, false);
+  assert.equal(group.selectedVariantId, 'variant-shared');
+  assert.equal(group.variants[0].requiresTypeReview, true);
+  assert.equal(group.variants[0].selectedType, null);
+  assert.deepEqual(group.variants[0].locations.map((location) => location.sourcePath), [
+    '/Users/example/.agents/skills/general-video',
+    '/Users/example/.claude/skills/general-video',
+    '/Users/example/.cursor/skills/general-video',
+    '/Users/example/.codex/skills/general-video'
+  ]);
+  assert.deepEqual(
+    group.variants[0].locations
+      .filter((location) => location.isSymlink)
+      .map((location) => location.symlinkTargetPath),
+    [
+      '/Users/example/.claude/skills/general-video',
+      '/Users/example/.claude/skills/general-video'
+    ]
+  );
   assert.equal(group.isSelected, false);
   assert.deepEqual(selectedImportCandidates([group]), []);
+
+  const classified = updateImportCandidateGroupType([group], group.id, 'remote');
+  assert.deepEqual(importRequestItems(selectedImportCandidates(classified)), [
+    {
+      source_path: '/Users/example/.agents/skills/general-video',
+      skill_type: 'remote',
+      deploy_back_to_source: true
+    }
+  ]);
 });
 
 test('variant review requires an explicit Rust variant choice and submits one primary', () => {
