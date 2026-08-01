@@ -159,6 +159,9 @@ fn build_import_candidate_group(
                 id: variant_id,
                 candidate: variant_candidate,
                 locations: vec![location],
+                suggested_types: Vec::new(),
+                requires_type_review: false,
+                selected_type: None,
             },
         ));
     }
@@ -178,6 +181,22 @@ fn build_import_candidate_group(
                 .skip(1)
                 .map(|location| location.source_path.clone())
                 .collect();
+            variant.suggested_types =
+                variant
+                    .locations
+                    .iter()
+                    .fold(Vec::new(), |mut suggested_types, location| {
+                        if !suggested_types.contains(&location.suggested_type) {
+                            suggested_types.push(location.suggested_type);
+                        }
+                        suggested_types
+                    });
+            variant.requires_type_review = variant.suggested_types.len() > 1;
+            variant.selected_type = if variant.requires_type_review {
+                None
+            } else {
+                variant.suggested_types.first().copied()
+            };
             variant
         })
         .collect::<Vec<_>>();
@@ -193,7 +212,8 @@ fn build_import_candidate_group(
     let selected_variant_id =
         (importable_variant_ids.len() == 1).then(|| importable_variant_ids[0].clone());
     for variant in &mut variants {
-        variant.candidate.is_selected = selected_variant_id.as_deref() == Some(&variant.id);
+        variant.candidate.is_selected =
+            selected_variant_id.as_deref() == Some(&variant.id) && variant.selected_type.is_some();
     }
 
     let name = variants
@@ -239,10 +259,9 @@ fn import_candidate_variant_signature(candidate: &ImportCandidate) -> String {
         }
     };
     format!(
-        "{}\n{}\n{:?}\n{:?}\n{}\n{}",
+        "{}\n{}\n{:?}\n{}\n{}",
         candidate.name.to_ascii_lowercase(),
         candidate.content_hash,
-        candidate.suggested_type,
         candidate.import_status,
         candidate.conflict.as_deref().unwrap_or_default(),
         source_identity,
@@ -256,6 +275,8 @@ fn import_candidate_location(candidate: &ImportCandidate) -> ImportCandidateLoca
         real_path: candidate.real_path.clone(),
         is_symlink: candidate.is_symlink,
         symlink_target_path: candidate.symlink_target_path.clone(),
+        suggested_type: candidate.suggested_type,
+        suggestion_reason: candidate.suggestion_reason.clone(),
     }
 }
 

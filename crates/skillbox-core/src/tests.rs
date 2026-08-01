@@ -9960,44 +9960,74 @@ fn scan_import_candidates_keeps_same_skill_md_with_different_assets_separate() {
 }
 
 #[test]
-fn scan_import_candidates_groups_runtime_aliases_by_skill_with_explicit_variants() {
-    let root = temp_dir("candidate-runtime-alias-group");
+fn scan_import_candidates_groups_mixed_type_suggestions_without_splitting_content() {
+    let root = temp_dir("candidate-mixed-type-suggestion-group");
     let agents_root = root.join("home/.agents/skills");
+    let claude_root = root.join("home/.claude/skills");
     let codex_root = root.join("home/.codex/skills");
     let cursor_root = root.join("home/.cursor/skills");
-    let shared_source = agents_root.join("hyperframes");
+    let agents_source = agents_root.join("general-video");
+    let claude_source = claude_root.join("general-video");
     let managed_root = root.join("SkillBox");
-    make_skill(&shared_source, "hyperframes", "Create product videos");
+    make_skill(&agents_source, "general-video", "Create product videos");
+    make_skill(&claude_source, "general-video", "Create product videos");
     fs::create_dir_all(&codex_root).unwrap();
     fs::create_dir_all(&cursor_root).unwrap();
-    symlink_dir(&shared_source, &codex_root.join("hyperframes")).unwrap();
-    symlink_dir(&shared_source, &cursor_root.join("hyperframes")).unwrap();
+    symlink_dir(&claude_source, &codex_root.join("general-video")).unwrap();
+    symlink_dir(&claude_source, &cursor_root.join("general-video")).unwrap();
 
-    let scan =
-        scan_import_candidates(&[agents_root, codex_root, cursor_root], &managed_root).unwrap();
+    let scan = scan_import_candidates(
+        &[agents_root, claude_root, cursor_root, codex_root],
+        &managed_root,
+    )
+    .unwrap();
 
     assert_eq!(scan.groups.len(), 1);
     let group = &scan.groups[0];
-    assert_eq!(group.name, "hyperframes");
-    assert_eq!(group.variants.len(), 2);
+    assert_eq!(group.name, "general-video");
+    assert_eq!(group.variants.len(), 1);
+    assert_eq!(group.variants[0].locations.len(), 4);
+    assert_eq!(group.variants[0].candidate.source_path, agents_source);
+    assert!(!group.requires_review);
     assert_eq!(
-        group
-            .variants
-            .iter()
-            .map(|variant| variant.locations.len())
-            .sum::<usize>(),
-        3
+        group.selected_variant_id.as_deref(),
+        Some(group.variants[0].id.as_str())
     );
-    assert!(group.requires_review);
-    assert!(group.selected_variant_id.is_none());
+    assert!(group.variants[0].requires_type_review);
     assert_eq!(
-        group
-            .variants
+        group.variants[0].suggested_types,
+        vec![SkillKind::User, SkillKind::Remote]
+    );
+    assert_eq!(group.variants[0].selected_type, None);
+    assert!(!group.variants[0].candidate.is_selected);
+    assert_eq!(
+        group.variants[0]
+            .locations
             .iter()
-            .flat_map(|variant| &variant.locations)
             .filter(|location| location.is_symlink)
             .count(),
         2
+    );
+    assert_eq!(
+        group.variants[0]
+            .locations
+            .iter()
+            .filter(|location| location.suggested_type == SkillKind::Remote)
+            .count(),
+        1
+    );
+    assert_eq!(
+        group.variants[0]
+            .locations
+            .iter()
+            .map(|location| location.source_path.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            root.join("home/.agents/skills/general-video"),
+            root.join("home/.claude/skills/general-video"),
+            root.join("home/.cursor/skills/general-video"),
+            root.join("home/.codex/skills/general-video"),
+        ]
     );
 }
 

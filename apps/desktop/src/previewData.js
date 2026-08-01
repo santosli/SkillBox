@@ -56,49 +56,58 @@ export const previewImportCandidates = [
 
 export const previewImportCandidateGroups = [
   {
-    id: 'skill-release-helper',
-    name: 'release-helper',
-    description: 'Prepare release notes and verify project release assets.',
+    id: 'skill-general-video',
+    name: 'general-video',
+    description: 'Create product videos with an editable composition workflow.',
     usageCount: 6,
-    requiresReview: true,
-    selectedVariantId: null,
+    requiresReview: false,
+    selectedVariantId: 'variant-general-video',
     variants: [
       {
-        id: 'variant-release-user',
-        candidate: previewImportCandidates[0],
-        locations: [
-          {
-            sourcePath: '~/.agents/skills/release-helper',
-            sourceRoot: '~/.agents/skills',
-            realPath: '~/Library/Application Support/SkillFixtures/release-helper',
-            isSymlink: true,
-            symlinkTargetPath: '~/Library/Application Support/SkillFixtures/release-helper'
-          },
-          {
-            sourcePath: '~/Projects/demo-app/.cursor/skills/release-helper',
-            sourceRoot: '~/Projects/demo-app/.cursor/skills',
-            realPath: '~/Library/Application Support/SkillFixtures/release-helper',
-            isSymlink: true,
-            symlinkTargetPath: '~/Library/Application Support/SkillFixtures/release-helper'
-          }
-        ]
-      },
-      {
-        id: 'variant-release-remote',
+        id: 'variant-general-video',
+        requiresTypeReview: true,
+        selectedType: null,
+        suggestedTypes: ['user', 'remote'],
         candidate: {
           ...previewImportCandidates[0],
-          sourcePath: '~/.codex/skills/release-helper',
-          sourceRoot: '~/.codex/skills',
-          suggestedType: 'remote',
-          skillType: 'remote',
-          suggestionReason: 'inside ~/.codex/skills'
+          name: 'general-video',
+          sourcePath: '~/.agents/skills/general-video',
+          isSelected: false
         },
         locations: [
           {
-            sourcePath: '~/.codex/skills/release-helper',
+            sourcePath: '~/.agents/skills/general-video',
+            sourceRoot: '~/.agents/skills',
+            realPath: '~/.agents/skills/general-video',
+            isSymlink: false,
+            suggestedType: 'user',
+            suggestionReason: 'inside ~/.agents/skills'
+          },
+          {
+            sourcePath: '~/.claude/skills/general-video',
+            sourceRoot: '~/.claude/skills',
+            realPath: '~/.claude/skills/general-video',
+            isSymlink: false,
+            suggestedType: 'user',
+            suggestionReason: 'Needs confirm'
+          },
+          {
+            sourcePath: '~/.cursor/skills/general-video',
+            sourceRoot: '~/.cursor/skills',
+            realPath: '~/.claude/skills/general-video',
+            isSymlink: true,
+            symlinkTargetPath: '~/.claude/skills/general-video',
+            suggestedType: 'user',
+            suggestionReason: 'Needs confirm'
+          },
+          {
+            sourcePath: '~/.codex/skills/general-video',
             sourceRoot: '~/.codex/skills',
-            realPath: '~/.codex/skills/release-helper',
-            isSymlink: false
+            realPath: '~/.claude/skills/general-video',
+            isSymlink: true,
+            symlinkTargetPath: '~/.claude/skills/general-video',
+            suggestedType: 'remote',
+            suggestionReason: 'inside ~/.codex/skills'
           }
         ]
       }

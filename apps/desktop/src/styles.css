@@ -6501,6 +6501,12 @@ dd {
   margin: 7px 0;
 }
 
+.candidateTypeReviewNote {
+  margin: 2px 0 0;
+  color: var(--skillbox-amber-text);
+  font-size: 12px;
+}
+
 .candidateLocation {
   display: grid;
   min-width: 0;
@@ -6526,6 +6532,11 @@ dd {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.candidateLocation .candidateLocationSuggestion {
+  color: var(--skillbox-text-secondary);
+  white-space: normal;
 }
 
 .candidatePath span,

@@ -442,9 +442,15 @@ test('import candidate groups disclose locations and use radio variant selection
   assert.match(groupSource, /aria-expanded=\{expanded\}/);
   assert.match(groupSource, /Found in \{locationCount\}/);
   assert.match(groupSource, /type="radio"/);
+  assert.match(groupSource, /group\.variants\.length > 1/);
   assert.match(groupSource, /name=\{`\$\{group\.id\}-variant`\}/);
   assert.match(groupSource, /onSelectVariant\(group, variant\)/);
   assert.match(groupSource, /Source: \{compactPath\(location\.symlinkTargetPath \|\| location\.realPath\)\}/);
+  assert.match(groupSource, /Mixed type suggestions/);
+  assert.match(groupSource, /Choose User or Remote before importing this skill/);
+  assert.match(groupSource, /selectedVariant\?\.selectedType === 'user'/);
+  assert.match(groupSource, /selectedVariant\?\.selectedType === 'remote'/);
+  assert.match(groupSource, /disabled=\{!canClassifyImportCandidateGroup\(group\)\}/);
   assert.match(disclosureRule, /display:\s*inline-flex;/);
   assert.match(locationRule, /grid-template-columns:\s*96px minmax\(0,\s*1fr\);/);
 });
