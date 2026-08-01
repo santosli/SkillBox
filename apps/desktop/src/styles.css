@@ -6597,7 +6597,9 @@ dd {
 
 .candidateTypeAction {
   display: grid;
-  min-width: 142px;
+  width: 208px;
+  box-sizing: border-box;
+  justify-self: end;
   justify-items: start;
   gap: 5px;
   border: 1px solid transparent;
@@ -6633,6 +6635,15 @@ dd {
   color: var(--skillbox-amber-text);
   font-size: 11px;
   line-height: 1.35;
+}
+
+.candidateTypeAction .candidateTypeSwitch {
+  width: 100%;
+}
+
+.candidateTypeAction .candidateTypeSwitch button {
+  min-width: 0;
+  flex: 1 1 0;
 }
 
 .importSheetFooter {
@@ -6979,6 +6990,7 @@ dd {
   .candidateTypeAction {
     grid-column: 2;
     width: min(100%, 320px);
+    justify-self: start;
   }
 
   .candidateLocation {
