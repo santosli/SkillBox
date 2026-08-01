@@ -440,6 +440,11 @@ test('import candidate groups disclose locations and use radio variant selection
   const typeActionRule = css.match(/\.candidateTypeAction\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const requiredTypeActionRule = css.match(/\.candidateTypeAction\.required\s*\{(?<body>[^}]*)\}/s)
     ?.groups.body || '';
+  const typeActionSwitchRule = css.match(/\.candidateTypeAction \.candidateTypeSwitch\s*\{(?<body>[^}]*)\}/s)
+    ?.groups.body || '';
+  const typeActionButtonRule = css.match(
+    /\.candidateTypeAction \.candidateTypeSwitch button\s*\{(?<body>[^}]*)\}/s
+  )?.groups.body || '';
 
   assert.match(groupSource, /aria-controls=\{disclosureId\}/);
   assert.match(groupSource, /aria-expanded=\{expanded\}/);
@@ -467,9 +472,13 @@ test('import candidate groups disclose locations and use radio variant selection
   assert.match(disclosureRule, /display:\s*inline-flex;/);
   assert.match(locationRule, /grid-template-columns:\s*96px minmax\(0,\s*1fr\);/);
   assert.match(typeActionRule, /display:\s*grid;/);
-  assert.match(typeActionRule, /min-width:\s*142px;/);
+  assert.match(typeActionRule, /width:\s*208px;/);
+  assert.match(typeActionRule, /box-sizing:\s*border-box;/);
+  assert.match(typeActionRule, /justify-self:\s*end;/);
   assert.match(requiredTypeActionRule, /border-color:\s*var\(--skillbox-amber-border\);/);
   assert.match(requiredTypeActionRule, /background:\s*var\(--skillbox-surface-orange\);/);
+  assert.match(typeActionSwitchRule, /width:\s*100%;/);
+  assert.match(typeActionButtonRule, /flex:\s*1 1 0;/);
 });
 
 test('import review uses the shared searchable candidate list template', () => {
