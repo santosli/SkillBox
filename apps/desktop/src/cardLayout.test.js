@@ -1145,7 +1145,16 @@ test('rankings is an accessible top-level page separate from history', () => {
   assert.doesNotMatch(loadHistorySource, /list_skill_usage_rankings|Promise\.all/);
   assert.match(tauriSource, /async fn list_skill_usage_rankings/);
   assert.match(tauriSource, /skillbox_core::list_skill_usage_rankings/);
-  assert.match(css, /\.historyTypeTabs\s*\{[^}]*repeat\(3,/s);
+  assert.match(css, /\.historyTypeTabs\s*\{[^}]*repeat\(4,/s);
+  assert.match(
+    css,
+    /@media \(max-width: 1180px\) \{[\s\S]*?\.historyTypeTabs\s*\{[^}]*grid-template-columns:\s*repeat\(2,/s
+  );
+  assert.match(
+    css,
+    /@media \(max-width: 1180px\) \{[\s\S]*?\.historyTypeTabs\s*\{[^}]*height:\s*auto;[\s\S]*?min-height:\s*46px;/s
+  );
+  assert.doesNotMatch(css, /\.historyTypeTabs\s*\{[^}]*repeat\(3,/s);
   assert.match(css, /\.usageRankingTable\s*\{/);
   assert.match(css, /\.usageRankingTopGrid\s*\{/);
   assert.match(css, /\.usageRankingTopCard\.leader\s*\{/);
