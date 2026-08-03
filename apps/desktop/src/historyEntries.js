@@ -1,5 +1,34 @@
 import { numberOrZero } from './skills.js';
 
+export const HISTORY_PAGE_LIMIT = 200;
+
+const HISTORY_FILTER_KINDS = Object.freeze({
+  all: null,
+  skill_usage: 'skill_usage',
+  usage_reference: 'usage_reference',
+  operation: 'operation'
+});
+
+export function historyFilterKind(filter = 'all') {
+  return HISTORY_FILTER_KINDS[filter] || null;
+}
+
+export function historyRequestForFilter(filter = 'all') {
+  const request = { limit: HISTORY_PAGE_LIMIT };
+  const kind = historyFilterKind(filter);
+  if (kind) request.kind = kind;
+  return request;
+}
+
+export function isHistoryRequestCurrent(currentRequestId, requestId) {
+  return currentRequestId === requestId;
+}
+
+export function filterHistoryEntries(entries = [], filter = 'all') {
+  const kind = historyFilterKind(filter);
+  return kind ? entries.filter((entry) => entry.kind === kind) : entries;
+}
+
 export function normalizeHistory(result = {}) {
   const entries = (result?.entries || []).map((entry) => ({
     id: entry.id || '',

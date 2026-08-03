@@ -909,7 +909,16 @@ test('history page combines skill usage and operation logs', () => {
   assert.match(historyPageSource, /<PageTitleRow[\s\S]*actions=\{\([\s\S]*onClick=\{onRefresh\}/);
   assert.match(historyPageSource, /className="dashboardFilterBar pageTypeFilterBar" aria-label="History filters"[\s\S]*className="dashboardTypeTabs historyTypeTabs"/);
   assert.doesNotMatch(historyPageSource, /dashboardControlRow historyControlRow/);
-  assert.match(appSource, /invoke\('list_history',\s*\{ request: \{ limit: 200 \} \}\)/);
+  assert.match(appSource, /historyRequestForFilter\(nextFilter\)/);
+  assert.match(appSource, /request: historyRequestForFilter\(nextFilter\)/);
+  assert.match(appSource, /const historyRequestRef = useRef\(0\);/);
+  assert.match(
+    appSource,
+    /const requestId = historyRequestRef\.current \+ 1;[\s\S]*historyRequestRef\.current = requestId;/
+  );
+  assert.match(appSource, /isHistoryRequestCurrent\(historyRequestRef\.current, requestId\)/);
+  assert.match(appSource, /onFilter=\{loadHistory\}/);
+  assert.match(appSource, /onRefresh=\{loadHistory\}/);
   assert.match(appSource, /page === 'history'/);
   assert.match(appSource, /function normalizeHistory/);
   assert.match(appSource, /skillUsageCount/);
@@ -920,7 +929,10 @@ test('history page combines skill usage and operation logs', () => {
   assert.match(appSource, /const rowSubtitle = historyRowSubtitle\(entry, isUsage \|\| isReference\);/);
   assert.match(appSource, /function historyRowSubtitle\(entry, isUsage\)/);
   assert.match(appSource, /const defaultOperationSubtitle = entry\.operationType && entry\.actor/);
-  assert.match(appSource, /const groupedEntries = groupHistoryEntriesByDay\(filteredEntries\)/);
+  assert.match(appSource, /const groupedEntries = groupHistoryEntriesByDay\(entries\)/);
+  assert.doesNotMatch(historyPageSource, /entries\.filter\(\(entry\) => entry\.kind === filter\)/);
+  assert.match(historyPageSource, /Loading history\.\.\./);
+  assert.match(historyPageSource, /role="status" aria-live="polite"/);
   assert.match(appSource, /function groupHistoryEntriesByDay/);
   assert.match(appSource, /className="historyDayBlock"/);
   assert.match(appSource, /function HistoryRow/);
@@ -1140,7 +1152,7 @@ test('rankings is an accessible top-level page separate from history', () => {
   assert.match(appSource, /includeUnmanaged: true/);
   assert.match(appSource, /Not imported/);
   assert.match(appSource, /Includes skills not imported into SkillBox/);
-  const loadHistorySource = appComponentSource.match(/async function loadHistory\(\)[\s\S]*?function openRankings/)?.[0] || '';
+  const loadHistorySource = appComponentSource.match(/async function loadHistory\(nextFilter = historyFilter\)[\s\S]*?function openRankings/)?.[0] || '';
   assert.match(loadHistorySource, /invoke\('list_history'/);
   assert.doesNotMatch(loadHistorySource, /list_skill_usage_rankings|Promise\.all/);
   assert.match(tauriSource, /async fn list_skill_usage_rankings/);

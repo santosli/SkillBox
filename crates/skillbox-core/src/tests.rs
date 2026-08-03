@@ -7030,6 +7030,76 @@ fn history_lists_skill_usage_and_operations_together() {
 }
 
 #[test]
+fn history_kind_query_finds_older_references_beyond_mixed_page_limit() {
+    let root = temp_dir("history-kind-query-limit");
+    let managed_root = root.join("SkillBox");
+    let runtime_root = root.join("project").join(".codex").join("skills");
+    fs::create_dir_all(&runtime_root).unwrap();
+
+    for index in 0..205 {
+        record_test_call(
+            RecordSkillUsageRequest {
+                skill_name: format!("recent-call-{index}"),
+                agent_id: "codex".to_string(),
+                runtime_root: runtime_root.clone(),
+                event_id: Some(format!("recent-call-event-{index}")),
+                used_at: Some("2026-07-31T23:59:00Z".to_string()),
+                prompt_excerpt: None,
+                metadata: Some(serde_json::json!({"source": "agent_hook"})),
+            },
+            &managed_root,
+        )
+        .unwrap();
+    }
+    record_skill_usage(
+        RecordSkillUsageRequest {
+            skill_name: "older-reference".to_string(),
+            agent_id: "codex".to_string(),
+            runtime_root: runtime_root.clone(),
+            event_id: Some("older-reference-event".to_string()),
+            used_at: Some("2026-07-01T00:00:00Z".to_string()),
+            prompt_excerpt: None,
+            metadata: None,
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    let all_history = list_history(
+        HistoryFilter {
+            limit: Some(200),
+            ..HistoryFilter::default()
+        },
+        &managed_root,
+    )
+    .unwrap();
+    let references = list_history(
+        HistoryFilter {
+            kind: Some(HistoryEntryKind::UsageReference),
+            limit: Some(200),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    assert_eq!(all_history.skill_usage_count, 205);
+    assert_eq!(all_history.skill_reference_count, 1);
+    assert_eq!(all_history.entries.len(), 200);
+    assert!(all_history
+        .entries
+        .iter()
+        .all(|entry| entry.kind == HistoryEntryKind::SkillUsage));
+    assert_eq!(references.skill_usage_count, 205);
+    assert_eq!(references.skill_reference_count, 1);
+    assert_eq!(references.entries.len(), 1);
+    assert_eq!(
+        references.entries[0].skill_name.as_deref(),
+        Some("older-reference")
+    );
+    assert_eq!(references.entries[0].kind, HistoryEntryKind::UsageReference);
+}
+
+#[test]
 fn history_abbreviates_full_sha_values_in_operation_titles() {
     let managed_root = temp_dir("history-short-sha").join("SkillBox");
     let from_sha = "690f15cac7b4c055c5ab109c79ed9259934081";

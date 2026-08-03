@@ -1,4 +1,5 @@
 import { compactPath, defaultSkillStatus, joinPath } from './skills.js';
+import { filterHistoryEntries } from './historyEntries.js';
 
 export const previewPaths = {
   root: '~/.skillbox',
@@ -472,56 +473,58 @@ export function previewUserSkillsInbound(mode = 'behind') {
   };
 }
 
-export function previewHistory() {
+export function previewHistory(filter = 'all') {
   const now = Date.now();
+  const entries = [
+    {
+      id: 'preview-usage-release-helper',
+      kind: 'skill_usage',
+      timestamp: new Date(now - 12 * 60 * 1000).toISOString(),
+      title: 'Skill call: release-helper',
+      subtitle: 'codex in ~/.agents/skills',
+      skill_name: 'release-helper',
+      agent_id: 'codex',
+      runtime_root: '~/.agents/skills'
+    },
+    {
+      id: 'preview-operation-install',
+      kind: 'operation',
+      timestamp: Math.floor((now - 42 * 60 * 1000) / 1000).toString(),
+      title: 'Installed docs-reviewer',
+      subtitle: 'install_remote_skill by desktop',
+      status: 'succeeded',
+      operation_type: 'install_remote_skill',
+      actor: 'desktop',
+      entity_type: 'skill',
+      entity_name: 'docs-reviewer'
+    },
+    {
+      id: 'preview-reference-research-digest',
+      kind: 'usage_reference',
+      timestamp: new Date(now - 70 * 60 * 1000).toISOString(),
+      title: 'History reference: research-digest',
+      subtitle: 'cursor in ~/.cursor/skills',
+      skill_name: 'research-digest',
+      agent_id: 'cursor',
+      runtime_root: '~/.cursor/skills'
+    },
+    {
+      id: 'preview-usage-design-audit',
+      kind: 'skill_usage',
+      timestamp: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+      title: 'Skill call: design-audit',
+      subtitle: 'claude-code in ~/.claude/skills',
+      skill_name: 'design-audit',
+      agent_id: 'claude-code',
+      runtime_root: '~/.claude/skills'
+    }
+  ];
+
   return {
     skill_usage_count: 3,
     skill_reference_count: 1,
     operation_count: 2,
-    entries: [
-      {
-        id: 'preview-usage-release-helper',
-        kind: 'skill_usage',
-        timestamp: new Date(now - 12 * 60 * 1000).toISOString(),
-        title: 'Skill call: release-helper',
-        subtitle: 'codex in ~/.agents/skills',
-        skill_name: 'release-helper',
-        agent_id: 'codex',
-        runtime_root: '~/.agents/skills'
-      },
-      {
-        id: 'preview-operation-install',
-        kind: 'operation',
-        timestamp: Math.floor((now - 42 * 60 * 1000) / 1000).toString(),
-        title: 'Installed docs-reviewer',
-        subtitle: 'install_remote_skill by desktop',
-        status: 'succeeded',
-        operation_type: 'install_remote_skill',
-        actor: 'desktop',
-        entity_type: 'skill',
-        entity_name: 'docs-reviewer'
-      },
-      {
-        id: 'preview-reference-research-digest',
-        kind: 'usage_reference',
-        timestamp: new Date(now - 70 * 60 * 1000).toISOString(),
-        title: 'History reference: research-digest',
-        subtitle: 'cursor in ~/.cursor/skills',
-        skill_name: 'research-digest',
-        agent_id: 'cursor',
-        runtime_root: '~/.cursor/skills'
-      },
-      {
-        id: 'preview-usage-design-audit',
-        kind: 'skill_usage',
-        timestamp: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
-        title: 'Skill call: design-audit',
-        subtitle: 'claude-code in ~/.claude/skills',
-        skill_name: 'design-audit',
-        agent_id: 'claude-code',
-        runtime_root: '~/.claude/skills'
-      }
-    ]
+    entries: filterHistoryEntries(entries, filter)
   };
 }
 

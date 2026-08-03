@@ -38,11 +38,9 @@ export function HistoryPage({
     },
     { id: 'operation', label: 'Operations', count: numberOrZero(history.operationCount) }
   ];
-  const filteredEntries =
-    filter === 'all' ? entries : entries.filter((entry) => entry.kind === filter);
-  const groupedEntries = groupHistoryEntriesByDay(filteredEntries);
   const isLoading = status === 'loading_history';
-  const visibleCount = filteredEntries.length;
+  const groupedEntries = groupHistoryEntriesByDay(entries);
+  const visibleCount = isLoading ? 0 : entries.length;
 
   return (
     <PageFrame ariaLabel="History">
@@ -76,7 +74,12 @@ export function HistoryPage({
         </div>
       </div>
 
-      {filteredEntries.length > 0 ? (
+      {isLoading ? (
+        <div className="emptyState dashboardEmptyState historyEmptyState" role="status" aria-live="polite">
+          <strong>Loading history...</strong>
+          <span>Loading the selected history filter.</span>
+        </div>
+      ) : entries.length > 0 ? (
         <div className="historyTimeline" aria-label="History entries">
           {groupedEntries.map((group) => (
             <section className="historyDayBlock" key={group.key} aria-label={`${group.label} history`}>

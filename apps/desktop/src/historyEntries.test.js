@@ -1,7 +1,47 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { groupHistoryEntriesByDay } from './historyEntries.js';
+import {
+  filterHistoryEntries,
+  groupHistoryEntriesByDay,
+  isHistoryRequestCurrent,
+  historyRequestForFilter
+} from './historyEntries.js';
+
+test('maps History filters to bounded server-side queries', () => {
+  assert.deepEqual(historyRequestForFilter('all'), { limit: 200 });
+  assert.deepEqual(historyRequestForFilter('skill_usage'), {
+    limit: 200,
+    kind: 'skill_usage'
+  });
+  assert.deepEqual(historyRequestForFilter('usage_reference'), {
+    limit: 200,
+    kind: 'usage_reference'
+  });
+  assert.deepEqual(historyRequestForFilter('operation'), {
+    limit: 200,
+    kind: 'operation'
+  });
+});
+
+test('preview history filtering uses the same selected-kind contract', () => {
+  const entries = [
+    { id: 'call', kind: 'skill_usage' },
+    { id: 'reference', kind: 'usage_reference' },
+    { id: 'operation', kind: 'operation' }
+  ];
+
+  assert.deepEqual(
+    filterHistoryEntries(entries, 'usage_reference').map((entry) => entry.id),
+    ['reference']
+  );
+  assert.deepEqual(filterHistoryEntries(entries, 'all'), entries);
+});
+
+test('stale History responses and errors cannot pass the request generation gate', () => {
+  assert.equal(isHistoryRequestCurrent(2, 1), false);
+  assert.equal(isHistoryRequestCurrent(2, 2), true);
+});
 
 test('groups entries from the same calendar day together', () => {
   const groups = groupHistoryEntriesByDay([
