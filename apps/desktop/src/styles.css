@@ -1638,7 +1638,7 @@ button {
 .historyTypeTabs {
   width: 580px;
   flex: 0 0 auto;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .usageRankingPanel {
@@ -6722,6 +6722,13 @@ dd {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
+  .historyTypeTabs {
+    width: min(580px, 100%);
+    height: auto;
+    min-height: 46px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .sideStack {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -6865,7 +6872,7 @@ dd {
 
   .historyTypeTabs {
     width: 100%;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .usageRankingControls {

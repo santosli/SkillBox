@@ -37,7 +37,11 @@ import {
   deriveDashboardSkill,
   normalizeEditableTags
 } from './dashboardMetadata.js';
-import { normalizeHistory } from './historyEntries.js';
+import {
+  historyRequestForFilter,
+  isHistoryRequestCurrent,
+  normalizeHistory
+} from './historyEntries.js';
 import {
   normalizeDoctorReport,
   normalizeStaleDeploymentRepairResult
@@ -451,6 +455,7 @@ export default function App() {
   const appUpdateAutoCheckedRef = useRef(false);
   const usageRankingRequestRef = useRef(0);
   const rankingImportRequestRef = useRef(0);
+  const historyRequestRef = useRef(0);
   const authoritativeGenerationRef = useRef(0);
   const pageRef = useRef(page);
   const dismissNotice = () => setNotice('');
@@ -1941,6 +1946,9 @@ export default function App() {
     if (nextPage !== 'rankings') {
       cancelUsageRankingRequest();
     }
+    if (nextPage !== 'history') {
+      historyRequestRef.current += 1;
+    }
     setPage(nextPage);
   }
 
@@ -1960,24 +1968,33 @@ export default function App() {
   function openHistory() {
     setSelectedName('');
     navigateToPage('history');
-    void loadHistory();
+    void loadHistory(historyFilter);
   }
 
-  async function loadHistory() {
+  async function loadHistory(nextFilter = historyFilter) {
+    const requestId = historyRequestRef.current + 1;
+    historyRequestRef.current = requestId;
+    setHistoryFilter(nextFilter);
     setError('');
+    setHistory((current) => ({ ...current, entries: [] }));
 
     if (!window.__TAURI_INTERNALS__) {
-      setHistory(normalizeHistory(previewHistory()));
+      if (!isHistoryRequestCurrent(historyRequestRef.current, requestId)) return;
+      setHistory(normalizeHistory(previewHistory(nextFilter)));
       setStatus('prototype');
       return;
     }
 
     setStatus('loading_history');
     try {
-      const historyResult = await invoke('list_history', { request: { limit: 200 } });
+      const historyResult = await invoke('list_history', {
+        request: historyRequestForFilter(nextFilter)
+      });
+      if (!isHistoryRequestCurrent(historyRequestRef.current, requestId)) return;
       setHistory(normalizeHistory(historyResult));
       setStatus('ready');
     } catch (historyError) {
+      if (!isHistoryRequestCurrent(historyRequestRef.current, requestId)) return;
       setError(historyError.message || String(historyError) || 'Unable to load history.');
       setStatus('ready');
     }
@@ -4069,7 +4086,7 @@ export default function App() {
             filter={historyFilter}
             history={history}
             status={status}
-            onFilter={setHistoryFilter}
+            onFilter={loadHistory}
             onRefresh={loadHistory}
           />
         ) : page === 'rankings' ? (
