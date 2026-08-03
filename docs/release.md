@@ -3,6 +3,13 @@
 SkillBox releases target macOS 14+ and publish a signed, notarized, universal
 DMG plus Tauri updater artifacts through GitHub Releases.
 
+The DMG itself is a release artifact and must be submitted to Apple notarization,
+reach `Accepted`, be stapled, and pass both `xcrun stapler validate` and
+`spctl --assess --type open -vv --context context:primary-signature` before it
+can be published. The primary-signature context is required for a disk-image
+Gatekeeper assessment. App-level signing and mounted-app checks do not replace
+these DMG-level checks.
+
 ## Release Identity
 
 - Publishing account: `santosli`
@@ -64,8 +71,9 @@ The command:
 - runs the `Release` workflow once through `workflow_dispatch` as a no-publish
   dry run;
 - creates and pushes the `v<version>` tag;
-- waits for the tag-triggered Release workflow to build, notarize, mount,
-  verify, publish, upload updater artifacts, and upload checksums;
+- waits for the tag-triggered Release workflow to build, submit the DMG to
+  notarization, wait for `Accepted`, staple and validate the DMG, mount and
+  verify the app, publish, upload updater artifacts, and upload checksums;
 - reads the published DMG checksum from GitHub Releases;
 - verifies the published release includes the DMG, updater archive, updater
   signature, and `latest.json`;
@@ -92,6 +100,13 @@ GitHub release labels.
 ## Smoke Test
 
 - Install the DMG on a fresh macOS user profile.
+- Verify the downloaded DMG itself before opening it:
+
+  ```sh
+  xcrun stapler validate SkillBox_<version>_universal.dmg
+  spctl --assess --type open -vv --context context:primary-signature SkillBox_<version>_universal.dmg
+  ```
+
 - Verify Gatekeeper accepts the app:
 
   ```sh
