@@ -117,6 +117,16 @@ export function assertReleaseAssets(release, version) {
   }
 }
 
+export function canResumeReleaseTag({ tagSha, remoteTagSha, releaseExists, tagIsAncestor }) {
+  return Boolean(
+    tagSha &&
+      remoteTagSha &&
+      tagSha === remoteTagSha &&
+      releaseExists &&
+      tagIsAncestor
+  );
+}
+
 export function extractChangelogEntry(content, version) {
   const lines = String(content).split('\n');
   const header = `## ${normalizeVersion(version)}`;
@@ -497,6 +507,39 @@ function latestWorkflowRunId({ branch, event, headSha }) {
   return run.databaseId;
 }
 
+function releaseExists(tag) {
+  const result = spawnSync('gh', ['release', 'view', tag, '--repo', REPOSITORY, '--json', 'tagName'], {
+    cwd: process.cwd(),
+    stdio: 'ignore'
+  });
+  return result.status === 0;
+}
+
+function remoteTagSha(tag) {
+  const result = capture('git', ['ls-remote', 'origin', `refs/tags/${tag}^{}`]);
+  return result.split(/\s+/)[0] || '';
+}
+
+function resumeExistingReleaseTag(tag, headSha) {
+  const tagSha = capture('git', ['rev-list', '-n', '1', tag]);
+  const upstreamTagSha = remoteTagSha(tag);
+  const tagIsAncestor = spawnSync('git', ['merge-base', '--is-ancestor', tagSha, headSha], {
+    cwd: process.cwd(),
+    stdio: 'ignore'
+  }).status === 0;
+
+  if (!canResumeReleaseTag({
+    tagSha,
+    remoteTagSha: upstreamTagSha,
+    releaseExists: releaseExists(tag),
+    tagIsAncestor
+  })) {
+    throw new Error(`Existing ${tag} is not a resumable published release for ${headSha}.`);
+  }
+
+  console.log(`Resuming post-release publishing for ${tag}; tag and GitHub Release are already verified.`);
+}
+
 function releaseDmgSha(version) {
   const assetName = releaseAssetName(version);
   const release = JSON.parse(capture('gh', ['release', 'view', `v${version}`, '--json', 'assets']));
@@ -564,11 +607,14 @@ async function publishRelease(version, options) {
 
   const tag = `v${releaseVersion}`;
   if (capture('git', ['tag', '--list', tag])) {
-    throw new Error(`Tag already exists locally: ${tag}`);
+    resumeExistingReleaseTag(tag, headSha);
+  } else if (remoteTagSha(tag)) {
+    throw new Error(`Remote tag already exists without a local tag: ${tag}`);
+  } else {
+    run('git', ['tag', tag]);
+    run('git', ['push', 'origin', tag]);
+    await runReleaseWorkflow({ branch: tag, event: 'push', headSha });
   }
-  run('git', ['tag', tag]);
-  run('git', ['push', 'origin', tag]);
-  await runReleaseWorkflow({ branch: tag, event: 'push', headSha });
 
   const sha256 = releaseDmgSha(releaseVersion);
   commitCask(releaseVersion, sha256);

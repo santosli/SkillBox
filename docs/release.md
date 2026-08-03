@@ -80,6 +80,12 @@ The command:
 - updates and pushes `packaging/homebrew/Casks/skillbox.rb`;
 - updates and pushes `santosli/homebrew-tap`.
 
+If the process is interrupted after the tag-triggered workflow has published
+the release, rerun `npm run release:publish -- <version> --yes`. The runner
+verifies that the local and remote tag agree, the published release exists, and
+the tag is an ancestor of the current main before resuming DMG digest, cask,
+and tap updates.
+
 Useful variants:
 
 ```sh

@@ -5,6 +5,7 @@ import test from 'node:test';
 import {
   assertReleaseAssets,
   buildLatestJson,
+  canResumeReleaseTag,
   extractChangelogEntry,
   insertChangelogEntry,
   normalizeVersion,
@@ -123,6 +124,36 @@ test('release asset validation requires DMG, updater bundle, signature, and late
   assert.throws(
     () => assertReleaseAssets({ assets: release.assets.slice(0, 3) }, '0.3.0'),
     /latest\.json/
+  );
+});
+
+test('release publish can safely resume after a tag workflow already published the release', () => {
+  assert.equal(
+    canResumeReleaseTag({
+      tagSha: 'abc',
+      remoteTagSha: 'abc',
+      releaseExists: true,
+      tagIsAncestor: true
+    }),
+    true
+  );
+  assert.equal(
+    canResumeReleaseTag({
+      tagSha: 'abc',
+      remoteTagSha: 'def',
+      releaseExists: true,
+      tagIsAncestor: true
+    }),
+    false
+  );
+  assert.equal(
+    canResumeReleaseTag({
+      tagSha: 'abc',
+      remoteTagSha: 'abc',
+      releaseExists: false,
+      tagIsAncestor: true
+    }),
+    false
   );
 });
 
