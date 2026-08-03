@@ -516,8 +516,16 @@ function releaseExists(tag) {
 }
 
 function remoteTagSha(tag) {
-  const result = capture('git', ['ls-remote', 'origin', `refs/tags/${tag}^{}`]);
-  return result.split(/\s+/)[0] || '';
+  const result = capture('git', [
+    'ls-remote',
+    'origin',
+    `refs/tags/${tag}`,
+    `refs/tags/${tag}^{}`
+  ]);
+  const lines = result.split('\n').filter(Boolean);
+  const peeled = lines.find((line) => line.endsWith(`refs/tags/${tag}^{}`));
+  const direct = lines.find((line) => line.endsWith(`refs/tags/${tag}`));
+  return (peeled || direct || '').split(/\s+/)[0] || '';
 }
 
 function resumeExistingReleaseTag(tag, headSha) {
