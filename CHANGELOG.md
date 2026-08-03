@@ -9,6 +9,13 @@ version tags such as `v0.3.0`.
 
 - No unreleased changes.
 
+## 0.7.1
+
+- Keep All, Calls, References, and Operations together in the History filter control on desktop and narrow windows.
+- Query the selected History event type directly so older References and Operations remain visible outside the bounded mixed-history window.
+- Prevent rapid History tab and refresh requests from overwriting newer results.
+- Add mandatory DMG-level notarization, stapling, and Gatekeeper verification before macOS release assets are published.
+
 ## 0.7.0
 
 - Add explicit inbound user-skills Git updates through Check remote, Review incoming changes, and preview-confirmed fast-forward Apply, with clear clean, dirty, ahead, behind, diverged, remote-only, and missing-branch states.
