@@ -937,7 +937,7 @@ Apply fast-forward:
 - 有可用更新时，Tauri 保存最近一次成功 metadata check 得到的进程内 pending update；侧边栏显示 Update，Settings 显示版本、notes 和安装按钮。
 - 点击安装时先执行一次 force check，确认版本仍然可用，再调用 `install_app_update` 下载、验证、安装并重启。进程内 pending 缺失时，Rust 也必须重新检查，不能从 SQLite cache 构造 URL 或安装对象。
 - 自动检查只检查 metadata；没有用户点击时不下载、不安装、不重启。
-- Release workflow 必须先对生成的 DMG 本体执行 `xcrun notarytool submit --wait`，确认状态为 `Accepted` 后执行 `xcrun stapler staple`；然后通过 `xcrun stapler validate <dmg>` 和 `spctl --assess --type open -vv <dmg>`，再进入发布与 checksum 阶段。仅 app 已签名/notarized 不足以通过 DMG 发布门禁。
+- Release workflow 必须先对生成的 DMG 本体执行 `xcrun notarytool submit --wait`，确认状态为 `Accepted` 后执行 `xcrun stapler staple`；然后通过 `xcrun stapler validate <dmg>` 和带 `context:primary-signature` 的 `spctl --assess --type open -vv --context context:primary-signature <dmg>`，再进入发布与 checksum 阶段。仅 app 已签名/notarized 不足以通过 DMG 发布门禁。
 - Release workflow 必须上传通过 DMG-level gates 的 DMG、updater `.app.tar.gz`、`.sig` 和 `latest.json`；`latest.json` 同时包含 `darwin-aarch64` 和 `darwin-x86_64`，指向同一个 universal updater archive。挂载后仍需验证 `SkillBox.app` 的 codesign、stapler、Gatekeeper、版本和 bundle id。
 
 失败与回滚：

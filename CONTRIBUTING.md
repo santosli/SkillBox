@@ -255,8 +255,8 @@ Public releases must be:
 - built as universal macOS DMGs;
 - signed and notarized before direct install instructions are published;
 - stapled and independently accepted by `xcrun stapler validate` and
-  `spctl --assess --type open` at the DMG level, with the mounted app checked
-  separately;
+  `spctl --assess --type open -vv --context context:primary-signature` at the
+  DMG level, with the mounted app checked separately;
 - accompanied by `SHA256SUMS` and a DMG-specific `.sha256` asset;
 - compatible with the Homebrew tap cask;
 - clear that `~/.skillbox` is user data and is not removed by normal uninstall.

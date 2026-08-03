@@ -5,8 +5,10 @@ DMG plus Tauri updater artifacts through GitHub Releases.
 
 The DMG itself is a release artifact and must be submitted to Apple notarization,
 reach `Accepted`, be stapled, and pass both `xcrun stapler validate` and
-`spctl --assess --type open` before it can be published. App-level signing and
-mounted-app checks do not replace these DMG-level checks.
+`spctl --assess --type open -vv --context context:primary-signature` before it
+can be published. The primary-signature context is required for a disk-image
+Gatekeeper assessment. App-level signing and mounted-app checks do not replace
+these DMG-level checks.
 
 ## Release Identity
 
@@ -102,7 +104,7 @@ GitHub release labels.
 
   ```sh
   xcrun stapler validate SkillBox_<version>_universal.dmg
-  spctl --assess --type open -vv SkillBox_<version>_universal.dmg
+  spctl --assess --type open -vv --context context:primary-signature SkillBox_<version>_universal.dmg
   ```
 
 - Verify Gatekeeper accepts the app:

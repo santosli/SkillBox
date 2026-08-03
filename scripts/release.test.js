@@ -145,7 +145,8 @@ test('release workflow notarizes and staples the DMG before verification and upl
   assert.match(workflow, /notary_status[\s\S]*Accepted/);
   assert.match(workflow, /xcrun stapler staple -v "\$dmg_path"/);
   assert.match(workflow, /xcrun stapler validate "\$dmg_path"/);
-  assert.match(workflow, /spctl --assess --type open -vv "\$dmg_path"/);
+  assert.match(workflow, /spctl --assess --type open -vv --context context:primary-signature "\$dmg_path"/);
+  assert.match(workflow, /DMG notarization status: Accepted/);
   assert.match(workflow, /codesign --verify --verbose=2 "\$dmg_path"/);
   assert.match(workflow, /xcrun stapler validate "\$app_path"/);
   assert.match(workflow, /DMG_PATH: \$\{\{ steps\.notarize_dmg\.outputs\.dmg_path \}\}/);

@@ -147,10 +147,11 @@ jobs:
             echo "DMG notarization did not reach Accepted status (status: ${notary_status:-unknown})." >&2
             exit 1
           fi
+          echo "DMG notarization status: Accepted"
 
           xcrun stapler staple -v "$dmg_path"
           xcrun stapler validate "$dmg_path"
-          spctl --assess --type open -vv "$dmg_path"
+          spctl --assess --type open -vv --context context:primary-signature "$dmg_path"
 
           echo "dmg_path=$dmg_path" >> "$GITHUB_OUTPUT"
 
@@ -178,7 +179,7 @@ jobs:
 
           codesign --verify --verbose=2 "$dmg_path"
           xcrun stapler validate "$dmg_path"
-          spctl --assess --type open -vv "$dmg_path"
+          spctl --assess --type open -vv --context context:primary-signature "$dmg_path"
           hdiutil attach "$dmg_path" -nobrowse -readonly -mountpoint "$mount_dir"
           app_path="$mount_dir/SkillBox.app"
           if [ ! -d "$app_path" ]; then
