@@ -93,7 +93,7 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
           security find-identity -v -p codesigning build.keychain
 
-      - name: Build, sign, and notarize DMG
+      - name: Build and sign app/DMG
         uses: tauri-apps/tauri-action@v1.0.0
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -108,10 +108,12 @@ jobs:
           uploadUpdaterJson: false
           args: --target universal-apple-darwin --bundles app,dmg
 
-      - name: Verify signed DMG
-        id: verify_dmg
+      - name: Notarize and staple DMG
+        id: notarize_dmg
         env:
-          RELEASE_VERSION: ${{ steps.release_version.outputs.version }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
 
@@ -124,6 +126,48 @@ jobs:
           fi
 
           dmg_path="$(printf '%s\n' "$dmg_list" | sed -n '1p')"
+          notary_result="$(mktemp)"
+          cleanup() {
+            rm -f "$notary_result"
+          }
+          trap cleanup EXIT
+
+          xcrun notarytool submit "$dmg_path" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait \
+            --output-format json > "$notary_result"
+          notary_status="$(node -e '
+            const fs = require("node:fs");
+            const result = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+            process.stdout.write(result.status || "");
+          ' "$notary_result")"
+          if [ "$notary_status" != "Accepted" ]; then
+            echo "DMG notarization did not reach Accepted status (status: ${notary_status:-unknown})." >&2
+            exit 1
+          fi
+
+          xcrun stapler staple -v "$dmg_path"
+          xcrun stapler validate "$dmg_path"
+          spctl --assess --type open -vv "$dmg_path"
+
+          echo "dmg_path=$dmg_path" >> "$GITHUB_OUTPUT"
+
+      - name: Verify signed DMG
+        id: verify_dmg
+        env:
+          RELEASE_VERSION: ${{ steps.release_version.outputs.version }}
+          DMG_PATH: ${{ steps.notarize_dmg.outputs.dmg_path }}
+        run: |
+          set -euo pipefail
+
+          if [ ! -f "$DMG_PATH" ]; then
+            echo "The notarized DMG path is missing: $DMG_PATH" >&2
+            exit 1
+          fi
+
+          dmg_path="$DMG_PATH"
           asset_name="SkillBox_${RELEASE_VERSION}_universal.dmg"
           mount_dir="$(mktemp -d)"
           cleanup() {
@@ -132,6 +176,9 @@ jobs:
           }
           trap cleanup EXIT
 
+          codesign --verify --verbose=2 "$dmg_path"
+          xcrun stapler validate "$dmg_path"
+          spctl --assess --type open -vv "$dmg_path"
           hdiutil attach "$dmg_path" -nobrowse -readonly -mountpoint "$mount_dir"
           app_path="$mount_dir/SkillBox.app"
           if [ ! -d "$app_path" ]; then
@@ -140,7 +187,8 @@ jobs:
           fi
 
           codesign --verify --deep --strict --verbose=2 "$app_path"
-          spctl -a -vv --type exec "$app_path"
+          xcrun stapler validate "$app_path"
+          spctl --assess --type exec -vv "$app_path"
 
           app_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_path/Contents/Info.plist")"
           if [ "$app_version" != "$RELEASE_VERSION" ]; then

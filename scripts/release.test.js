@@ -134,6 +134,24 @@ test('release workflow builds app and dmg bundles for updater artifacts', () => 
   assert.doesNotMatch(workflow, /\$UPDATER_PATH#\$UPDATER_ASSET_NAME/);
 });
 
+test('release workflow notarizes and staples the DMG before verification and upload', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8');
+  const notarizeIndex = workflow.indexOf('id: notarize_dmg');
+  const verifyIndex = workflow.indexOf('id: verify_dmg');
+
+  assert.ok(notarizeIndex >= 0, 'DMG notarization step should be present');
+  assert.ok(verifyIndex > notarizeIndex, 'DMG verification must follow notarization');
+  assert.match(workflow, /xcrun notarytool submit "\$dmg_path"[\s\S]*--wait/);
+  assert.match(workflow, /notary_status[\s\S]*Accepted/);
+  assert.match(workflow, /xcrun stapler staple -v "\$dmg_path"/);
+  assert.match(workflow, /xcrun stapler validate "\$dmg_path"/);
+  assert.match(workflow, /spctl --assess --type open -vv "\$dmg_path"/);
+  assert.match(workflow, /codesign --verify --verbose=2 "\$dmg_path"/);
+  assert.match(workflow, /xcrun stapler validate "\$app_path"/);
+  assert.match(workflow, /DMG_PATH: \$\{\{ steps\.notarize_dmg\.outputs\.dmg_path \}\}/);
+  assert.match(workflow, /DMG_PATH: \$\{\{ steps\.verify_dmg\.outputs\.dmg_path \}\}/);
+});
+
 test('inserts and extracts changelog release notes', () => {
   const changelog = [
     '# Changelog',
