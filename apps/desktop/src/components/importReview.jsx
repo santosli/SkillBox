@@ -4,6 +4,7 @@ import codexAppIcon from '../assets/codex-app-icon.png';
 import codexCliIcon from '../assets/codex-cli-icon.png';
 import {
   canClassifyImportCandidateGroup,
+  collectionChildTypeState,
   filterImportCandidateGroups,
   filterImportCandidateGroupsByQuery,
   filterImportCollectionsByQuery,
@@ -396,6 +397,7 @@ function CollectionReviewCard({
   onTypeChange
 }) {
   const [expanded, setExpanded] = useState(false);
+  const isInstalledSource = collection.sourceKind === 'installed_source';
   const disclosureId = `${collection.id}-children`;
   const selectedCount = collection.children.filter((child) => {
     const group = groups.find((candidateGroup) => candidateGroup.id === child.groupId);
@@ -409,14 +411,22 @@ function CollectionReviewCard({
         <div className="collectionReviewIdentity">
           <div className="candidateTitle">
             <strong>{collection.displayName}</strong>
-            <Badge tone="slate">Collection</Badge>
+            <Badge tone="slate">
+              {isInstalledSource ? 'Installed source collection' : 'Git collection'}
+            </Badge>
             <Badge tone="slate">{collection.children.length} skills</Badge>
           </div>
-          <small>
-            {collection.branch || (collection.detached ? 'Detached HEAD' : 'No branch')} · {shortSha}
-            {collection.originUrl ? ` · ${collection.originUrl}` : ''}
-          </small>
-          <code>{compactPath(collection.canonicalWorktreeRoot)}</code>
+          {isInstalledSource ? (
+            <small>Source: {collection.originUrl || 'Installed source metadata'}</small>
+          ) : (
+            <>
+              <small>
+                {collection.branch || (collection.detached ? 'Detached HEAD' : 'No branch')} · {shortSha}
+                {collection.originUrl ? ` · ${collection.originUrl}` : ''}
+              </small>
+              <code>{compactPath(collection.canonicalWorktreeRoot)}</code>
+            </>
+          )}
         </div>
         <span className="collectionReviewSelection">{selectedCount} selected</span>
       </div>
@@ -438,7 +448,14 @@ function CollectionReviewCard({
             if (!group) return null;
             const variant = group.variants.find((candidateVariant) => candidateVariant.id === child.variantId);
             const selected = group.isSelected && group.selectedVariantId === child.variantId;
-            const canSelect = isSelectableImportCandidateGroup(group);
+            const {
+              canClassify,
+              canSelect,
+              childType,
+              importableChild,
+              needsTypeChoice,
+              readOnlyLabel
+            } = collectionChildTypeState(group, child);
             return (
               <div className={`collectionChildRow ${selected ? 'selected' : ''}`} key={child.id}>
                 <label className="candidateCheck">
@@ -456,7 +473,7 @@ function CollectionReviewCard({
                     <strong>{child.name}</strong>
                     {child.importStatus !== 'importable' ? <Badge tone="slate">{child.importStatus}</Badge> : null}
                     {child.conflict ? <Badge tone="red">Conflict</Badge> : null}
-                    {child.requiresTypeReview ? <Badge tone="amber">Choose type</Badge> : null}
+                    {needsTypeChoice ? <Badge tone="amber">Choose type</Badge> : null}
                   </div>
                   <code>{child.relativePath}</code>
                   <span className="candidateUsage">Calls {group.usageCount || 0}</span>
@@ -490,30 +507,34 @@ function CollectionReviewCard({
                     </div>
                   ) : null}
                 </div>
-                <div className="collectionChildType">
-                  <span>{variant?.selectedType === 'remote' ? 'Remote' : 'User'}</span>
-                  <div className="candidateTypeSwitch" role="radiogroup" aria-label={`${child.name} skill type`}>
-                    <button
-                      aria-checked={variant?.selectedType === 'user'}
-                      className={variant?.selectedType === 'user' ? 'active' : ''}
-                      disabled={!canClassifyImportCandidateGroup(group)}
-                      role="radio"
-                      type="button"
-                      onClick={() => onTypeChange(group, 'user')}
-                    >
-                      User
-                    </button>
-                    <button
-                      aria-checked={variant?.selectedType === 'remote'}
-                      className={variant?.selectedType === 'remote' ? 'active' : ''}
-                      disabled={!canClassifyImportCandidateGroup(group)}
-                      role="radio"
-                      type="button"
-                      onClick={() => onTypeChange(group, 'remote')}
-                    >
-                      Remote
-                    </button>
-                  </div>
+                <div className={`collectionChildType ${needsTypeChoice ? 'required' : ''}`}>
+                  {importableChild && canClassify ? (
+                    <>
+                      <span>{needsTypeChoice ? 'Skill type · Required' : (childType === 'remote' ? 'Remote' : 'User')}</span>
+                      <div className="candidateTypeSwitch" role="radiogroup" aria-label={`${child.name} skill type`}>
+                        <button
+                          aria-checked={childType === 'user'}
+                          className={childType === 'user' ? 'active' : ''}
+                          role="radio"
+                          type="button"
+                          onClick={() => onTypeChange(group, 'user')}
+                        >
+                          User
+                        </button>
+                        <button
+                          aria-checked={childType === 'remote'}
+                          className={childType === 'remote' ? 'active' : ''}
+                          role="radio"
+                          type="button"
+                          onClick={() => onTypeChange(group, 'remote')}
+                        >
+                          Remote
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <span className="collectionChildTypeReadOnly">{readOnlyLabel}</span>
+                  )}
                 </div>
               </div>
             );

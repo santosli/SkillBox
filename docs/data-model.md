@@ -329,6 +329,13 @@ selected-child import 成功后写入，写入使用 SQLite transaction，重复
 现有 skill/deployment/usage/import rows，也不要求用户 rescan；collection source 不可用
 时保留 provenance，并在读取 collection detail 时派生 `available=false`。
 
+Import Review 返回的 `ImportCandidateCollection` 还有一个只读的
+`source_kind`：`git_worktree` 表示可绑定 canonical worktree/HEAD 的本地 Git
+来源；`installed_source` 表示由受支持的 v3 installer lockfile 归并的来源
+展示。后者不写新的 collection/member row，不保存假 branch/HEAD，也不改变
+schema v8 的 apply 事务；child 的真实 source path、snapshot、status、type 和
+import identity 仍来自 filesystem scan，并通过普通 per-skill import 写入。
+
 `skill_user_metadata` 保存用户显式设置的 favorite 和 tags。桌面首次读取该表时会把旧 `localStorage` 中仍存在的 metadata 通过 `INSERT OR IGNORE` 迁入，因此 SQLite 中已有值不会被旧浏览器状态覆盖；迁移成功后删除旧 key。
 
 当前 `preferences` key-value 表除用户设置和 remote skill update cache 外，还保存

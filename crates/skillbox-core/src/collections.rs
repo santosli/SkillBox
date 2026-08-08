@@ -137,6 +137,13 @@ where
             })
             .cloned()
             .collect::<Vec<_>>();
+        let actionable = candidate.import_status == ImportCandidateStatus::Importable
+            && candidate.conflict.is_none();
+        let selected_type = if actionable {
+            variant.selected_type
+        } else {
+            Some(candidate.suggested_type)
+        };
         builder.children.insert(
             child_key,
             ImportCandidateCollectionChild {
@@ -163,9 +170,9 @@ where
                 locations,
                 unlinked_locations,
                 suggested_types: variant.suggested_types.clone(),
-                requires_type_review: variant.requires_type_review,
-                selected_type: variant.selected_type,
-                is_selected: variant.candidate.is_selected,
+                requires_type_review: actionable && variant.requires_type_review,
+                selected_type,
+                is_selected: variant.candidate.is_selected && selected_type.is_some(),
             },
         );
         progress(index + 1, candidates.len(), unique_repository_count);
@@ -253,6 +260,7 @@ impl CollectionBuilder {
             id,
             preview_id,
             display_name,
+            source_kind: ImportCandidateCollectionSourceKind::GitWorktree,
             canonical_worktree_root: self.identity.worktree_root,
             canonical_repository_id: self.identity.common_dir,
             origin_url,
@@ -393,6 +401,11 @@ pub fn apply_import_collection(
         .ok_or_else(|| {
             "Collection preview is stale. Re-open Import Review and try again.".to_string()
         })?;
+    if collection.source_kind != ImportCandidateCollectionSourceKind::GitWorktree {
+        return Err(
+            "Installed source collections use the regular per-skill import flow.".to_string(),
+        );
+    }
     if collection.preview_id != request.preview_id || collection.canonical_worktree_root != root {
         return Err(
             "Collection preview is stale. Re-open Import Review and try again.".to_string(),

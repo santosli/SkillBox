@@ -134,6 +134,20 @@ Review/apply：
   traversal、escaping symlink、unsafe file type 或 invalid `SKILL.md` 会 fail closed；
   existing skills/deployments/usage/history 不会被 collection discovery 破坏。
 
+复制安装的来源分组：
+
+- 如果 candidate 不在 live Git worktree，Rust 会按固定 runtime root 旁边的 v3
+  `.skill-lock.json` 做一次 bounded provenance lookup。只有真实扫描到的 candidate
+  与 safe `skillPath`/name 匹配，并且 `sourceType=github`、source URL 可被
+  canonicalize 为无凭据 GitHub repository identity 时，才会显示为
+  `Installed source collection`。
+- 这类 collection 只用于展示来源和聚合 child，不提供 branch、HEAD、fetch、更新或
+  `collection-apply`。它不使用 lockfile hash 替代完整 snapshot 校验；用户选中的
+  child 仍逐项走现有 per-skill Import Review/apply，`.agents` 与 `.claude` 的等价
+  symlink location 仍只保留一份。
+- lockfile 版本不支持、文件过大、条目 malformed、路径 traversal、非 GitHub/custom
+  source 或 stale/mismatched entry 都不会隐藏 candidate，也不会创建网络或文件写入。
+
 当前边界：Phase C 的 GitHub repository one-fetch multi-skill preview/apply 与 Phase D
 的 collection-level update/rollback 尚未实现。Collection operations 不运行 hooks、
 filters、submodules、repository scripts、custom helpers 或 arbitrary shell。

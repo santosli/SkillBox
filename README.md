@@ -33,6 +33,7 @@ A 30-second overview of SkillBox: runtime-aware workspaces, review-before-write 
 - **Evidence-aware Calls, references, and operation history.** Count locally confirmed executions plus defensible structured invocations as Calls, keep lower-signal history references separate, and explain coverage without storing full chat transcripts.
 - **Safe storage and deployment defaults.** Use ordered SQLite migrations, recovery backups, integrity checks, and ownership-checked symlinks instead of silently overwriting runtime content.
 - **Git-backed local collections.** Import Review groups skills from the same local Git worktree into one repository card while keeping each child independently selectable, deployable, and usage-tracked. GitHub multi-skill fetch and collection-level update/rollback remain future work.
+- **Installed-source provenance.** Copied skills with valid v3 installer lockfile entries can appear under one normalized GitHub source collection even without a local Git worktree. This is display-only provenance: it does not invent a branch/HEAD or enable updates, and each child keeps the normal reviewed import path.
 - **Compatibility before deployment.** Rust-owned runtime profiles identify each workspace and report preserved frontmatter warnings or hard blockers before a confirmed symlink deployment.
 - **Signed macOS distribution.** Install a notarized DMG or Homebrew cask and apply signed app updates only after confirmation.
 

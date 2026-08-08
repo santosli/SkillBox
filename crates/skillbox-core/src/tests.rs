@@ -10295,6 +10295,201 @@ fn scan_import_candidates_reuses_repository_and_snapshot_work_for_duplicate_loca
 }
 
 #[test]
+fn scan_import_candidates_groups_validated_installed_source_lockfile_entries() {
+    let root = temp_dir("candidate-installed-source-lockfile");
+    let agents_root = root.join(".agents/skills");
+    let claude_root = root.join(".claude/skills");
+    let managed_root = root.join("SkillBox");
+    let source_url = "https://github.com/dontbesilent2025/dbskill.git";
+    let names = (0..24)
+        .map(|index| format!("dbs-skill-{index:02}"))
+        .collect::<Vec<_>>();
+
+    for name in &names {
+        make_skill(&agents_root.join(name), name, "Installed source skill");
+        fs::create_dir_all(&claude_root).unwrap();
+        symlink_dir(&agents_root.join(name), &claude_root.join(name)).unwrap();
+    }
+    let skills = names
+        .iter()
+        .map(|name| {
+            (
+                name.clone(),
+                serde_json::json!({
+                    "source": "dontbesilent2025/dbskill",
+                    "sourceType": "github",
+                    "sourceUrl": source_url,
+                    "skillPath": format!("skills/{name}/SKILL.md"),
+                    "skillFolderHash": "stale-lock-hash"
+                }),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>();
+    fs::create_dir_all(root.join(".agents")).unwrap();
+    fs::write(
+        root.join(".agents/.skill-lock.json"),
+        serde_json::to_vec(&serde_json::json!({ "version": 3, "skills": skills })).unwrap(),
+    )
+    .unwrap();
+
+    let scan = scan_import_candidates(&[agents_root, claude_root], &managed_root).unwrap();
+    assert_eq!(scan.collections.len(), 1);
+    let collection = &scan.collections[0];
+    assert_eq!(
+        collection.source_kind,
+        ImportCandidateCollectionSourceKind::InstalledSource
+    );
+    assert_eq!(collection.display_name, "dontbesilent2025/dbskill");
+    assert_eq!(
+        collection.origin_url.as_deref(),
+        Some("https://github.com/dontbesilent2025/dbskill")
+    );
+    assert!(collection.canonical_worktree_root.as_os_str().is_empty());
+    assert!(collection.reviewed_head_sha.is_none());
+    assert_eq!(collection.children.len(), names.len());
+    assert_eq!(scan.standalone_groups.len(), 0);
+    assert_eq!(scan.diagnostics.installed_source_lockfiles_scanned, 1);
+    assert_eq!(
+        scan.diagnostics.installed_source_lockfile_entries,
+        names.len()
+    );
+    assert_eq!(
+        scan.diagnostics.installed_source_lockfile_matches,
+        names.len()
+    );
+    assert_eq!(scan.diagnostics.installed_source_collections, 1);
+    assert!(collection
+        .children
+        .iter()
+        .all(|child| !child.snapshot_hash.is_empty()));
+    assert!(collection
+        .children
+        .iter()
+        .all(|child| child.locations.len() == 2));
+}
+
+#[test]
+fn scan_import_candidates_keeps_unsafe_lockfile_entries_standalone_and_live_git_wins() {
+    let root = temp_dir("candidate-installed-source-safety");
+    let agents_root = root.join(".agents/skills");
+    let managed_root = root.join("SkillBox");
+    make_skill(&agents_root.join("safe-skill"), "safe-skill", "Safe skill");
+    make_skill(
+        &agents_root.join("unsafe-skill"),
+        "unsafe-skill",
+        "Unsafe skill",
+    );
+    fs::create_dir_all(root.join(".agents")).unwrap();
+    fs::write(
+        root.join(".agents/.skill-lock.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "version": 3,
+            "skills": {
+                "safe-skill": {
+                    "sourceType": "github",
+                    "sourceUrl": "https://github.com/acme/safe.git?token=secret",
+                    "skillPath": "skills/safe-skill/SKILL.md",
+                    "skillFolderHash": "stale"
+                },
+                "unsafe-skill": {
+                    "sourceType": "github",
+                    "sourceUrl": "https://github.com/acme/safe.git",
+                    "skillPath": "skills/other/SKILL.md",
+                    "skillFolderHash": "stale"
+                }
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let scan = scan_import_candidates(std::slice::from_ref(&agents_root), &managed_root).unwrap();
+    assert!(scan.collections.is_empty());
+    assert_eq!(scan.standalone_groups.len(), 2);
+    assert_eq!(scan.diagnostics.installed_source_lockfile_matches, 0);
+    assert_eq!(scan.diagnostics.installed_source_invalid_entries, 2);
+
+    let repository = root.join("live-repository");
+    let live_root = repository.join(".agents/skills");
+    make_skill(
+        &live_root.join("live-skill"),
+        "live-skill",
+        "Live Git skill",
+    );
+    run_git(&repository, &["init", "-b", "main"]);
+    run_git(&repository, &["add", "."]);
+    run_git(
+        &repository,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Live collection",
+        ],
+    );
+    fs::create_dir_all(repository.join(".agents")).unwrap();
+    fs::write(
+        repository.join(".agents/.skill-lock.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "version": 3,
+            "skills": {
+                "live-skill": {
+                    "sourceType": "github",
+                    "sourceUrl": "https://github.com/acme/live.git",
+                    "skillPath": "skills/live-skill/SKILL.md"
+                }
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let scan = scan_import_candidates(std::slice::from_ref(&live_root), &managed_root).unwrap();
+    assert_eq!(scan.collections.len(), 1);
+    assert_eq!(
+        scan.collections[0].source_kind,
+        ImportCandidateCollectionSourceKind::GitWorktree
+    );
+    assert_eq!(scan.diagnostics.installed_source_collections, 0);
+}
+
+#[test]
+fn scan_import_candidates_ignores_malformed_or_oversized_lockfiles_without_hiding_candidates() {
+    let root = temp_dir("candidate-installed-source-lockfile-bounds");
+    let agents_root = root.join(".agents/skills");
+    let managed_root = root.join("SkillBox");
+    make_skill(
+        &agents_root.join("standalone"),
+        "standalone",
+        "Standalone skill",
+    );
+    fs::create_dir_all(root.join(".agents")).unwrap();
+
+    fs::write(root.join(".agents/.skill-lock.json"), b"{not-json").unwrap();
+    let malformed =
+        scan_import_candidates(std::slice::from_ref(&agents_root), &managed_root).unwrap();
+    assert!(malformed.collections.is_empty());
+    assert_eq!(malformed.standalone_groups.len(), 1);
+    assert_eq!(malformed.diagnostics.installed_source_lockfiles_scanned, 1);
+    assert_eq!(malformed.diagnostics.installed_source_lockfile_errors, 1);
+
+    fs::write(
+        root.join(".agents/.skill-lock.json"),
+        vec![b' '; 5 * 1024 * 1024 + 1],
+    )
+    .unwrap();
+    let oversized =
+        scan_import_candidates(std::slice::from_ref(&agents_root), &managed_root).unwrap();
+    assert!(oversized.collections.is_empty());
+    assert_eq!(oversized.standalone_groups.len(), 1);
+    assert_eq!(oversized.diagnostics.installed_source_lockfiles_scanned, 1);
+    assert_eq!(oversized.diagnostics.installed_source_lockfile_errors, 1);
+}
+
+#[test]
 fn git_collection_apply_persists_selected_children_and_rejects_stale_head_before_writes() {
     let root = temp_dir("git-collection-apply");
     let repository = root.join("skill-collection");
@@ -11256,6 +11451,18 @@ fn scan_import_candidates_keeps_distinct_imported_targets_separate() {
     assert_eq!(candidates.groups.len(), 1);
     assert_eq!(candidates.groups[0].variants.len(), 2);
     assert!(candidates.groups[0].selected_variant_id.is_none());
+    let user_candidate = candidates
+        .candidates
+        .iter()
+        .find(|candidate| is_under_path(&candidate.real_path, &user_managed))
+        .unwrap();
+    let remote_candidate = candidates
+        .candidates
+        .iter()
+        .find(|candidate| is_under_path(&candidate.real_path, &remote_version))
+        .unwrap();
+    assert_eq!(user_candidate.suggested_type, SkillKind::User);
+    assert_eq!(remote_candidate.suggested_type, SkillKind::Remote);
 }
 
 #[test]

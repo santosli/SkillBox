@@ -111,6 +111,7 @@ export function normalizeImportCollections(collections = []) {
   return collections.map((collection) => ({
     ...collection,
     id: collection.id,
+    sourceKind: collection.sourceKind || collection.source_kind || 'git_worktree',
     previewId: collection.previewId || collection.preview_id || '',
     displayName: collection.displayName || collection.display_name || 'Git repository',
     canonicalWorktreeRoot: collection.canonicalWorktreeRoot || collection.canonical_worktree_root || '',
@@ -132,7 +133,9 @@ export function normalizeImportCollections(collections = []) {
       contentHash: child.contentHash || child.content_hash || '',
       importStatus: child.importStatus || child.import_status || 'importable',
       suggestedTypes: child.suggestedTypes || child.suggested_types || [],
-      requiresTypeReview: Boolean(child.requiresTypeReview ?? child.requires_type_review),
+      requiresTypeReview: (child.importStatus || child.import_status || 'importable') === 'importable'
+        && !child.conflict
+        && Boolean(child.requiresTypeReview ?? child.requires_type_review),
       selectedType: child.selectedType ?? child.selected_type ?? null,
       isSelected: Boolean(child.isSelected ?? child.is_selected),
       locations: (child.locations || []).map(normalizeImportCandidateLocation),
@@ -143,9 +146,11 @@ export function normalizeImportCollections(collections = []) {
   }));
 }
 
-export function importCollectionGroupIds(collections = []) {
+export function importCollectionGroupIds(collections = [], { liveOnly = false } = {}) {
   return new Set(
-    collections.flatMap((collection) => collection.children.map((child) => child.groupId))
+    collections
+      .filter((collection) => !liveOnly || collection.sourceKind === 'git_worktree')
+      .flatMap((collection) => collection.children.map((child) => child.groupId))
   );
 }
 
@@ -176,7 +181,7 @@ export function filterImportCollectionsByQuery(collections = [], query = '') {
 }
 
 export function selectedImportCollectionRequests(groups = [], collections = []) {
-  return collections.map((collection) => {
+  return collections.filter((collection) => collection.sourceKind === 'git_worktree').map((collection) => {
     const selections = collection.children
       .map((child) => {
         const group = groups.find((candidateGroup) => candidateGroup.id === child.groupId);
@@ -220,6 +225,40 @@ export function canClassifyImportCandidateGroup(group) {
     && variant.candidate.importStatus === 'importable'
     && !variant.candidate.conflict
   );
+}
+
+export function collectionChildTypeState(group, child) {
+  const variant = group.variants.find((candidateVariant) => candidateVariant.id === child.variantId);
+  const selectedVariant = group.selectedVariantId === child.variantId;
+  const importableChild = child.importStatus === 'importable' && !child.conflict;
+  const canClassify = importableChild
+    && selectedVariant
+    && canClassifyImportCandidateGroup({
+      ...group,
+      selectedVariantId: child.variantId
+    });
+  const childType = child.selectedType || (selectedVariant ? variant?.selectedType : null);
+  const canSelect = canClassify && Boolean(childType);
+  const needsTypeChoice = canClassify && child.requiresTypeReview && !childType;
+  const readOnlyLabel = child.importStatus === 'imported' && childType
+    ? `Managed as ${childType === 'remote' ? 'Remote' : 'User'}`
+    : child.conflict
+      ? 'Resolve conflict before import'
+      : child.importStatus === 'system'
+        ? 'System skill'
+        : childType
+          ? `${childType === 'remote' ? 'Remote' : 'User'} suggestion`
+          : 'Choose a variant first';
+
+  return {
+    childType,
+    canClassify,
+    canSelect,
+    importableChild,
+    needsTypeChoice,
+    readOnlyLabel,
+    selectedVariant
+  };
 }
 
 export function isSelectableImportCandidateGroup(group) {
@@ -273,9 +312,14 @@ export function toggleImportCandidateGroupSelection(groups, targetGroups = group
     : group);
 }
 
-export function selectedImportCandidates(groups = []) {
+export function selectedImportCandidates(groups = [], collections = []) {
+  const liveCollectionGroupIds = importCollectionGroupIds(collections, { liveOnly: true });
   return groups
-    .filter((group) => group.isSelected && isSelectableImportCandidateGroup(group))
+    .filter((group) => (
+      group.isSelected
+      && isSelectableImportCandidateGroup(group)
+      && !liveCollectionGroupIds.has(group.id)
+    ))
     .map(selectedImportCandidate);
 }
 

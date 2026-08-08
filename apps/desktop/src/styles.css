@@ -6416,6 +6416,20 @@ dd {
   flex: 1 1 0;
 }
 
+.collectionChildType.required {
+  border: 1px solid var(--skillbox-amber-border);
+  border-radius: 8px;
+  background: var(--skillbox-surface-orange);
+  padding: 6px;
+}
+
+.collectionChildTypeReadOnly {
+  max-width: 156px;
+  color: var(--skillbox-text-muted);
+  line-height: 1.35;
+  text-align: right;
+}
+
 .workspaceSkillError {
   border: 1px solid var(--skillbox-amber-border);
   border-radius: 8px;
@@ -7058,6 +7072,11 @@ dd {
     grid-column: 2;
     justify-items: start;
     min-width: 0;
+  }
+
+  .collectionChildTypeReadOnly {
+    max-width: none;
+    text-align: left;
   }
 
   .collectionChildType .candidateTypeSwitch {

@@ -148,6 +148,13 @@ optional remote, branch/HEAD, skill count, and a searchable expandable child
 list with individual and select-all controls; it will never deploy children
 automatically.
 
+When a copied runtime installation has no live Git metadata, a supported v3
+installer lockfile may provide a display-only `installed_source` grouping by
+validated canonical GitHub source URL. Live Git identity remains authoritative;
+lockfile groups never fabricate branch/HEAD, fetch/update, or collection apply
+permissions, and child imports continue through the ordinary per-skill safety
+contract.
+
 A remote repository URL will use one bounded fetch/check to preview all valid
 children. Preview will report added, changed, removed, and invalid children,
 plus path/name conflicts. Apply will install only explicitly selected child

@@ -7,6 +7,8 @@ version tags such as `v0.3.0`.
 
 ## Unreleased
 
+- Group scanned copied skills with validated v3 GitHub installer-lockfile provenance into display-only Installed source collections, while keeping live Git collections authoritative and selected children on the existing per-skill import path.
+- Make collection child type controls truthful: only actionable importable children expose User/Remote actions; imported, system, and conflict children show read-only status/classification instead of disabled controls.
 - Add read-only local Git worktree discovery to Import Review, grouping repository
   children into one collection card while preserving independent child selection.
 - Persist reviewed collection source identity and imported child relationships in

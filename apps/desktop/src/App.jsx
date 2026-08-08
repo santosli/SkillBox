@@ -1399,7 +1399,10 @@ export default function App() {
   }
 
   async function importSelectedCandidates() {
-    const selected = selectedImportCandidates(importReview.candidates);
+    const selected = selectedImportCandidates(
+      importReview.candidates,
+      importReview.collections
+    );
     const collectionRequests = selectedImportCollectionRequests(
       importReview.candidates,
       importReview.collections

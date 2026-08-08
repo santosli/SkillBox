@@ -5,6 +5,7 @@ import {
   filterImportCandidateGroupsByQuery,
   filterImportCandidatesByQuery,
   filterWorkspaceSkillCandidates,
+  collectionChildTypeState,
   importCandidateGroupLocationCount,
   importCandidateGroupTabs,
   normalizeImportCollections,
@@ -422,6 +423,133 @@ test('normalizes Git-backed collection children and submits one selected child r
       skillType: 'user'
     }]
   }]);
+});
+
+test('installed-source collections stay on per-skill apply and suppress imported type review', () => {
+  const collections = normalizeImportCollections([{
+    id: 'installed-source-dbs',
+    source_kind: 'installed_source',
+    display_name: 'dontbesilent2025/dbskill',
+    origin_url: 'https://github.com/dontbesilent2025/dbskill',
+    children: [{
+      id: 'child-imported',
+      group_id: 'skill-imported',
+      variant_id: 'variant-imported',
+      name: 'git-merge-to-main',
+      relative_path: 'skills/git-merge-to-main',
+      source_path: '/Users/example/.agents/skills/git-merge-to-main',
+      import_status: 'imported',
+      requires_type_review: true,
+      selected_type: 'user',
+      locations: [{ source_path: '/Users/example/.agents/skills/git-merge-to-main' }]
+    }]
+  }]);
+
+  assert.equal(collections[0].sourceKind, 'installed_source');
+  assert.equal(collections[0].canonicalWorktreeRoot, '');
+  assert.equal(collections[0].children[0].requiresTypeReview, false);
+  assert.equal(collections[0].children[0].selectedType, 'user');
+  assert.deepEqual(selectedImportCollectionRequests([], collections), []);
+
+  const importedState = collectionChildTypeState(
+    normalizeImportCandidateGroup({
+      id: 'skill-imported',
+      selected_variant_id: 'variant-imported',
+      variants: [{
+        id: 'variant-imported',
+        candidate: {
+          name: 'git-merge-to-main',
+          import_status: 'imported',
+          is_selected: false
+        },
+        selected_type: 'user',
+        requires_type_review: true
+      }]
+    }),
+    collections[0].children[0]
+  );
+  assert.equal(importedState.canClassify, false);
+  assert.equal(importedState.canSelect, false);
+  assert.equal(importedState.needsTypeChoice, false);
+  assert.equal(importedState.readOnlyLabel, 'Managed as User');
+
+  const group = normalizeImportCandidateGroup({
+    id: 'skill-importable',
+    name: 'dbs-action',
+    selected_variant_id: 'variant-importable',
+    variants: [{
+      id: 'variant-importable',
+      candidate: {
+        name: 'dbs-action',
+        source_path: '/Users/example/.agents/skills/dbs-action',
+        import_status: 'importable',
+        is_selected: true
+      },
+      selected_type: 'user',
+      locations: [{ source_path: '/Users/example/.agents/skills/dbs-action' }]
+    }]
+  });
+  const installedGroup = normalizeImportCollections([{
+    id: 'installed-source-dbs',
+    source_kind: 'installed_source',
+    children: [{ group_id: 'skill-importable', variant_id: 'variant-importable' }]
+  }]);
+  assert.equal(selectedImportCandidates([group], installedGroup).length, 1);
+});
+
+test('collection child type state keeps mixed importable review actionable and blocks system/conflict rows', () => {
+  const mixedGroup = normalizeImportCandidateGroup({
+    id: 'skill-mixed',
+    selected_variant_id: 'variant-mixed',
+    variants: [{
+      id: 'variant-mixed',
+      candidate: {
+        name: 'mixed-skill',
+        import_status: 'importable',
+        is_selected: true
+      },
+      selected_type: null,
+      requires_type_review: true
+    }]
+  });
+  const mixedChild = {
+    groupId: 'skill-mixed',
+    variantId: 'variant-mixed',
+    importStatus: 'importable',
+    requiresTypeReview: true,
+    selectedType: null,
+    conflict: null
+  };
+  const mixedState = collectionChildTypeState(mixedGroup, mixedChild);
+  assert.equal(mixedState.canClassify, true);
+  assert.equal(mixedState.canSelect, false);
+  assert.equal(mixedState.needsTypeChoice, true);
+
+  const resolvedState = collectionChildTypeState(mixedGroup, {
+    ...mixedChild,
+    selectedType: 'remote'
+  });
+  assert.equal(resolvedState.canSelect, true);
+  assert.equal(resolvedState.needsTypeChoice, false);
+
+  for (const status of ['system', 'imported']) {
+    const state = collectionChildTypeState(mixedGroup, {
+      ...mixedChild,
+      importStatus: status,
+      selectedType: status === 'imported' ? 'remote' : null
+    });
+    assert.equal(state.canClassify, false);
+    assert.equal(state.canSelect, false);
+    assert.equal(state.needsTypeChoice, false);
+  }
+
+  const conflictState = collectionChildTypeState(mixedGroup, {
+    ...mixedChild,
+    conflict: 'duplicate managed skill'
+  });
+  assert.equal(conflictState.canClassify, false);
+  assert.equal(conflictState.needsTypeChoice, false);
+  assert.equal(conflictState.readOnlyLabel, 'Resolve conflict before import');
 });
 
 test('builds workspace skill tabs and separates unimported, imported, and system skills', () => {

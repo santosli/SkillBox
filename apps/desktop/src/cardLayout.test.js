@@ -556,6 +556,10 @@ test('collection review keeps child selection and type controls inside one expan
   assert.match(collectionSource, /onToggleSelected\(group\)/);
   assert.match(collectionSource, /onTypeChange\(group, 'user'\)/);
   assert.match(collectionSource, /onTypeChange\(group, 'remote'\)/);
+  assert.match(collectionSource, /collectionChildTypeState\(group, child\)/);
+  assert.match(collectionSource, /collectionChildTypeState\(group, child\)/);
+  assert.match(collectionSource, /collection\.sourceKind === 'installed_source'/);
+  assert.doesNotMatch(collectionSource, /disabled=\{!canClassifyImportCandidateGroup\(group\)\}/);
   assert.match(collectionSource, /relativePath/);
   assert.match(collectionRule, /min-width:\s*0;/);
   assert.match(childRule, /grid-template-columns:\s*28px minmax\(0,\s*1fr\) auto;/);

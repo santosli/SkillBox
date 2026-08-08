@@ -1120,6 +1120,7 @@ pub struct ImportCandidateCollection {
     pub id: String,
     pub preview_id: String,
     pub display_name: String,
+    pub source_kind: ImportCandidateCollectionSourceKind,
     pub canonical_worktree_root: PathBuf,
     pub canonical_repository_id: PathBuf,
     pub origin_url: Option<String>,
@@ -1128,6 +1129,13 @@ pub struct ImportCandidateCollection {
     pub reviewed_head_sha: Option<String>,
     pub children: Vec<ImportCandidateCollectionChild>,
     pub errors: Vec<ImportCandidateError>,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportCandidateCollectionSourceKind {
+    GitWorktree,
+    InstalledSource,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1158,6 +1166,12 @@ pub struct ImportScanDiagnostics {
     pub repository_cache_hits: usize,
     pub snapshot_hash_computations: usize,
     pub snapshot_cache_hits: usize,
+    pub installed_source_lockfiles_scanned: usize,
+    pub installed_source_lockfile_entries: usize,
+    pub installed_source_lockfile_matches: usize,
+    pub installed_source_invalid_entries: usize,
+    pub installed_source_lockfile_errors: usize,
+    pub installed_source_collections: usize,
     pub elapsed_ms: u64,
 }
 

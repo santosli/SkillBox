@@ -107,6 +107,7 @@ cargo run -p skillbox-cli --offline -- <command>
 - `compatibility.rs` read-only frontmatter/target compatibility preview 与 stale-preview apply
 - `import.rs` import candidates 扫描、类型推断、Rust-owned skill group / variant / location 分组、冲突与备份
 - `collections.rs` local Git worktree identity、Import Review collection grouping、schema-backed child provenance 和 stale-checked selected-child apply
+- `installed_sources.rs` bounded v3 installer lockfile provenance matching for display-only installed-source collections; it never creates candidates or grants Git/update authority
 - `state.rs` managed state 聚合与用户偏好
 - `workspaces.rs` workspace registry 发现、注册与扫描
 - `remote.rs` GitHub install preview/apply、remote source 绑定、update check、diff 预览、版本切换
@@ -211,6 +212,15 @@ Phase A+B 的 Collection model 只覆盖本地 Git discovery、Import Review
 grouping 和成功导入后的 provenance persistence。Rust `GitService` 返回
 canonical worktree root、Git common directory、branch/detached state、HEAD
 和 sanitized origin；core 以 worktree/common-dir pair 作为 collection identity。
+
+对于没有 live Git metadata 的复制安装，Import Review 可以读取配置 runtime
+root 旁边受支持的 v3 `.skill-lock.json`。Rust 只解析 bounded JSON，校验
+`sourceType=github`、无 credentials/query/fragment 的 canonical GitHub
+repository URL、safe `skillPath` 和已扫描 candidate name，再把相同 source URL
+映射为 `installed_source` display collection。它不读取 lockfile 指向的本地
+路径，不执行网络，不伪造 branch/HEAD，也不允许 `apply_import_collection`；
+选中的 child 仍走普通 per-skill import。live Git worktree identity 优先，
+lockfile hash 不会跳过完整目录 snapshot 校验。
 因此 nested repositories 是独立 collection，worktree/runtime symlink 解析到同一
 child 时只保留一个 child identity，而 Git metadata 外的相似 copy 不会因为内容相似
 被声明为成员，只会作为 unlinked location 展示。

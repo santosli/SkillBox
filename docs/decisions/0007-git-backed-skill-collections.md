@@ -34,6 +34,18 @@ select children individually or with Select all applicable, and each selected
 child still has one primary source, type, managed identity, deployment, Calls,
 and history record.
 
+Import Review also recognizes a bounded fallback provenance source: a supported
+v3 installer lockfile adjacent to a configured `.agents/skills`, `.claude/skills`,
+`.codex/skills`, or `.cursor/skills` root. Valid GitHub `sourceUrl` entries are
+grouped into an `installed_source` collection only after a real scanned
+candidate matches the lock entry's name and safe repository-relative
+`skillPath`. This is display/provenance grouping, not Git authority: it has no
+worktree, branch, HEAD, fetch, update, or collection-apply capability, and each
+child continues through the normal per-skill preview/import contract. Live Git
+identity always wins. Lockfile hashes never replace full snapshot validation,
+and malformed, stale, unsupported, credential-bearing, or path-unsafe entries
+leave candidates standalone.
+
 Phase B adds schema v8 tables `skill_collections` and
 `skill_collection_members`. Rows are written only after a selected-child import
 passes preview identity, canonical-root, HEAD, full snapshot, path, variant,

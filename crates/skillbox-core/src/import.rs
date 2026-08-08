@@ -151,6 +151,35 @@ where
             });
         },
     );
+    let live_collection_group_ids = collections
+        .iter()
+        .flat_map(|collection| {
+            collection
+                .children
+                .iter()
+                .map(|child| child.group_id.clone())
+        })
+        .collect::<HashSet<_>>();
+    progress(ImportScanProgress {
+        phase: "loading installed source provenance".to_string(),
+        processed: 0,
+        total: None,
+        unique_repositories: collection_stats.unique_repository_count,
+    });
+    let (installed_source_collections, installed_source_stats) =
+        discover_installed_source_collections(
+            &scan.roots,
+            &candidates,
+            &groups,
+            &live_collection_group_ids,
+        );
+    let mut collections = collections;
+    collections.extend(installed_source_collections);
+    collections.sort_by(|left, right| {
+        left.display_name
+            .cmp(&right.display_name)
+            .then_with(|| left.id.cmp(&right.id))
+    });
     let collection_group_ids = collections
         .iter()
         .flat_map(|collection| {
@@ -193,6 +222,12 @@ where
                 + collection_stats.snapshot_hash_computations,
             snapshot_cache_hits: grouping_stats.snapshot_cache_hits
                 + collection_stats.snapshot_cache_hits,
+            installed_source_lockfiles_scanned: installed_source_stats.lockfiles_scanned,
+            installed_source_lockfile_entries: installed_source_stats.lockfile_entries,
+            installed_source_lockfile_matches: installed_source_stats.lockfile_matches,
+            installed_source_invalid_entries: installed_source_stats.invalid_lockfile_entries,
+            installed_source_lockfile_errors: installed_source_stats.lockfile_errors,
+            installed_source_collections: installed_source_stats.installed_source_collections,
             elapsed_ms: started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
         },
     })
@@ -1059,6 +1094,26 @@ pub(crate) fn infer_import_candidate_type(
     skill: &Skill,
     paths: &ManagedPaths,
 ) -> (SkillKind, String, bool) {
+    // An imported runtime symlink can live under a different runtime profile
+    // than the managed target it points to. Preserve the actual managed
+    // classification instead of treating the runtime path as authoritative.
+    if skill.is_symlink {
+        if is_under_path(&skill.real_path, &paths.remote_skills_root) {
+            return (
+                SkillKind::Remote,
+                "already managed as Remote".to_string(),
+                false,
+            );
+        }
+        if is_under_path(&skill.real_path, &paths.user_skills_root) {
+            return (
+                SkillKind::User,
+                "already managed as User".to_string(),
+                false,
+            );
+        }
+    }
+
     let path = skill.path.to_string_lossy();
 
     if path.contains("/.codex/skills/.system/") || path.ends_with("/.codex/skills/.system") {

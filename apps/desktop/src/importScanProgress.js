@@ -4,6 +4,7 @@ const PHASE_LABELS = {
   'scanning local roots': 'Scanning local skill roots',
   'validating candidates': 'Validating skill candidates',
   'grouping Git repositories': 'Grouping Git repositories',
+  'loading installed source provenance': 'Loading installed source provenance',
   'loading workspace registry': 'Loading workspace registry',
   complete: 'Import scan complete'
 };
