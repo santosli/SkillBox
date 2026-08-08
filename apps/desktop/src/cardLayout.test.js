@@ -531,7 +531,9 @@ test('import review opens before scanning and exposes staged accessible progress
   assert.match(scanSource, /const scanId = scanController\.begin\(\)/);
   assert.match(scanSource, /if \(scanId == null\)/);
   assert.match(scanSource, /await waitForNextPaint\(\)/);
-  assert.match(scanSource, /invoke\('scan_import_candidates', \{ scan_id: scanId \}\)/);
+  assert.match(appSource, /importScanCommandArgs/);
+  assert.match(scanSource, /invoke\('scan_import_candidates', importScanCommandArgs\(scanId\)\)/);
+  assert.doesNotMatch(scanSource, /scan_id:\s*scanId/);
   assert.match(appSource, /importScanControllerRef\.current\?\.invalidate\(\)/);
   assert.match(scanSource, /scanController\.finish\(scanId\)/);
   assert.match(importReviewSource, /loading = false/);

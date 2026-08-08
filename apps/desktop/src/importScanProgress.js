@@ -46,6 +46,10 @@ export function isImportScanRequestCurrent(requestId, currentRequestId) {
   return requestId === currentRequestId;
 }
 
+export function importScanCommandArgs(scanId) {
+  return { scanId };
+}
+
 export function createImportScanRequestController() {
   let latestRequestId = 0;
   let activeRequestId = 0;

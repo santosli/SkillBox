@@ -65,6 +65,7 @@ import {
 import {
   browserImportScanOptions,
   createImportScanRequestController,
+  importScanCommandArgs,
   importScanProgressDetail,
   importScanProgressLabel,
   isImportScanRequestCurrent,
@@ -100,6 +101,13 @@ test('import scan request generation ignores stale progress and bounds browser Q
     delayMs: 0,
     error: false
   });
+});
+
+test('builds the camelCase Tauri scan argument required by the production command', () => {
+  const args = importScanCommandArgs(7);
+
+  assert.deepEqual(args, { scanId: 7 });
+  assert.equal(Object.hasOwn(args, 'scan_id'), false);
 });
 
 test('closing and reopening Import Review isolates late scan A from active scan B', () => {

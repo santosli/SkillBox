@@ -16,7 +16,8 @@ version tags such as `v0.3.0`.
 - Open Import Review before the local scan finishes, expose accessible staged progress
   and retry state, and reuse repository identity and snapshot work across duplicate
   locations. Closing the review dismisses the UI and ignores stale results; it does
-  not claim to abort the underlying read-only Rust scan.
+  not claim to abort the underlying read-only Rust scan. Native Tauri scan requests
+  now use the bridge's camelCase argument contract.
 
 ## 0.7.1
 

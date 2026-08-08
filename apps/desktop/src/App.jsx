@@ -61,6 +61,7 @@ import {
 import {
   browserImportScanOptions,
   createImportScanRequestController,
+  importScanCommandArgs,
   waitForImportScanDelay
 } from './importScanProgress.js';
 import {
@@ -1150,7 +1151,7 @@ export default function App() {
       if (importScanTimingRef.current) {
         importScanTimingRef.current.commandStartedAt = performance.now();
       }
-      const scan = await invoke('scan_import_candidates', { scan_id: scanId });
+      const scan = await invoke('scan_import_candidates', importScanCommandArgs(scanId));
       if (importScanTimingRef.current) {
         importScanTimingRef.current.commandFinishedAt = performance.now();
       }
