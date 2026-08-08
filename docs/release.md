@@ -16,12 +16,12 @@ these DMG-level checks.
 - Main repository: `santosli/SkillBox`
 - Homebrew tap: `santosli/homebrew-tap`
 - Bundle identifier: `io.github.santosli.skillbox`
-- Current tag: `v0.7.1`
-- Current DMG asset: `SkillBox_0.7.1_universal.dmg`
-- Current updater asset: `SkillBox_0.7.1_universal.app.tar.gz`
-- Current updater signature: `SkillBox_0.7.1_universal.app.tar.gz.sig`
+- Current tag: `v0.8.0`
+- Current DMG asset: `SkillBox_0.8.0_universal.dmg`
+- Current updater asset: `SkillBox_0.8.0_universal.app.tar.gz`
+- Current updater signature: `SkillBox_0.8.0_universal.app.tar.gz.sig`
 - Current updater manifest: `latest.json`
-- Current checksum asset: `SkillBox_0.7.1_universal.dmg.sha256`
+- Current checksum asset: `SkillBox_0.8.0_universal.dmg.sha256`
 
 ## GitHub Actions Secrets
 
