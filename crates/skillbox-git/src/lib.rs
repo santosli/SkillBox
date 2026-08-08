@@ -76,6 +76,15 @@ pub struct GitTreeEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitRepositoryIdentity {
+    pub worktree_root: std::path::PathBuf,
+    pub common_dir: std::path::PathBuf,
+    pub head: Option<String>,
+    pub branch: Option<String>,
+    pub origin_url: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitBackupRef {
     pub reference: String,
     pub target: String,
@@ -314,6 +323,77 @@ impl GitService {
         let output =
             self.run_hardened_status_output(repo, &args, LOCAL_GIT_TIMEOUT, "git ls-tree")?;
         parse_tree_entries(&self.success_stdout_bytes(output)?)
+    }
+
+    /// Resolve the nearest Git worktree using only bounded, hook-free read commands.
+    ///
+    /// This is intentionally a repository identity primitive for callers that need to
+    /// group local content. It does not inspect or execute repository scripts.
+    pub fn repository_identity(
+        &self,
+        path: impl AsRef<Path>,
+    ) -> Result<Option<GitRepositoryIdentity>, String> {
+        let path = path.as_ref();
+        let command_path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        let command_path = if command_path.is_dir() {
+            command_path
+        } else {
+            command_path
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| path.to_path_buf())
+        };
+        let output = self.run_hardened_status_output(
+            &command_path,
+            &[
+                "rev-parse",
+                "--show-toplevel",
+                "--git-common-dir",
+                "--abbrev-ref",
+                "HEAD",
+            ],
+            LOCAL_GIT_TIMEOUT,
+            "git repository identity",
+        )?;
+        if !output.status.success() {
+            if matches!(output.status.code(), Some(128 | 129)) {
+                return Ok(None);
+            }
+            return Err(sanitize_git_error(
+                String::from_utf8_lossy(&output.stderr).trim(),
+            ));
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let lines = stdout
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>();
+        if lines.len() != 3 {
+            return Err("Git returned an invalid repository identity.".to_string());
+        }
+        let worktree_root = fs::canonicalize(lines[0])
+            .map_err(|error| format!("Unable to resolve Git worktree root: {error}"))?;
+        let common_dir = {
+            let candidate = Path::new(lines[1]);
+            let candidate = if candidate.is_absolute() {
+                candidate.to_path_buf()
+            } else {
+                command_path.join(candidate)
+            };
+            fs::canonicalize(candidate)
+                .map_err(|error| format!("Unable to resolve Git common directory: {error}"))?
+        };
+        let head = self.hardened_head(&command_path)?;
+        let branch = (!lines[2].eq_ignore_ascii_case("HEAD")).then(|| lines[2].to_string());
+        let origin_url = self.origin_url(&command_path)?;
+        Ok(Some(GitRepositoryIdentity {
+            worktree_root,
+            common_dir,
+            head,
+            branch,
+            origin_url,
+        }))
     }
 
     pub fn init_main(&self, repo: impl AsRef<Path>) -> Result<(), String> {
@@ -2606,6 +2686,65 @@ mod tests {
         assert!(status.initialized);
         assert_eq!(status.branch, "main");
         assert!(!status.dirty);
+    }
+
+    #[test]
+    fn repository_identity_resolves_worktree_root_and_head_without_writes() {
+        let git = GitService::new();
+        let repo = temp_dir("skillbox-git-repository-identity");
+        git.init_main(&repo).unwrap();
+        write_file(&repo.join("tracked.txt"), "content\n");
+        git.add_all(&repo).unwrap();
+        let head = git.commit(&repo, "Identity").unwrap();
+
+        let identity = git
+            .repository_identity(repo.join("tracked.txt"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(identity.worktree_root, fs::canonicalize(&repo).unwrap());
+        assert_eq!(identity.head.as_deref(), Some(head.as_str()));
+        assert_eq!(identity.branch.as_deref(), Some("main"));
+        assert!(identity.origin_url.is_none());
+        assert!(!repo.join(".git/index.lock").exists());
+    }
+
+    #[test]
+    fn repository_identity_keeps_worktree_root_separate_from_git_common_dir() {
+        let git = GitService::new();
+        let repo = temp_dir("skillbox-git-worktree-identity");
+        git.init_main(&repo).unwrap();
+        write_file(&repo.join("tracked.txt"), "content\n");
+        git.add_all(&repo).unwrap();
+        let head = git.commit(&repo, "Identity").unwrap();
+
+        let worktree = temp_dir("skillbox-git-linked-worktree");
+        fs::remove_dir(&worktree).unwrap();
+        run_git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "linked-worktree-test",
+                worktree.to_str().unwrap(),
+                "main",
+            ],
+        )
+        .unwrap();
+
+        let identity = git
+            .repository_identity(worktree.join("tracked.txt"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(identity.worktree_root, fs::canonicalize(&worktree).unwrap());
+        assert_eq!(identity.head.as_deref(), Some(head.as_str()));
+        assert_ne!(identity.common_dir, identity.worktree_root);
+        assert!(!identity.common_dir.ends_with(".git/worktrees"));
+        run_git(
+            &repo,
+            &["worktree", "remove", "--force", worktree.to_str().unwrap()],
+        )
+        .unwrap();
     }
 
     #[test]

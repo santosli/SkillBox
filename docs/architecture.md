@@ -51,6 +51,8 @@ React UI
 - `migrate_legacy_skill_user_metadata` -> `skillbox_core::migrate_legacy_skill_user_metadata`
 - `scan_skills` -> `skillbox_core::scan_skill_roots`
 - `scan_import_candidates` -> `skillbox_core::scan_import_candidates`
+- `list_skill_collections` -> `skillbox_core::list_skill_collections`
+- `apply_import_collection` -> `skillbox_core::apply_import_collection`
 - `scan_workspace_import_candidates` -> `skillbox_core::scan_import_candidates` scoped to one workspace root
 - `import_candidates` -> `skillbox_core::import_candidates`
 - `parse_github_url` -> `skillbox_github::parse_github_skill_url`
@@ -104,6 +106,8 @@ cargo run -p skillbox-cli --offline -- <command>
 - `runtime_profiles.rs` versioned runtime profile registry、root precedence 和 capability policy
 - `compatibility.rs` read-only frontmatter/target compatibility preview 与 stale-preview apply
 - `import.rs` import candidates 扫描、类型推断、Rust-owned skill group / variant / location 分组、冲突与备份
+- `collections.rs` local Git worktree identity、Import Review collection grouping、schema-backed child provenance 和 stale-checked selected-child apply
+- `installed_sources.rs` bounded v3 installer lockfile provenance matching for display-only installed-source collections; it never creates candidates or grants Git/update authority
 - `state.rs` managed state 聚合与用户偏好
 - `workspaces.rs` workspace registry 发现、注册与扫描
 - `remote.rs` GitHub install preview/apply、remote source 绑定、update check、diff 预览、版本切换
@@ -133,6 +137,7 @@ cargo run -p skillbox-cli --offline -- <command>
 - runtime profile registry、structured frontmatter preservation 和部署 compatibility 判定。
 - user/remote skill 导入。
 - import candidates 扫描、类型推断、整目录快照去重和冲突检测。Rust 按规范化 skill name 生成稳定 group/variant ids；严格等价副本成为同一 variant 的 locations，同名但快照、状态或冲突不同的来源仍是同卡片内的独立 variants。User/Remote 建议是 location 级分类建议，不参与内容 identity；Rust 对混合建议返回显式 type-review 状态。React 只展示 Rust 结果并提交明确选中的 variant primary 与分类，core 同时拒绝一次请求为同名 skill 提交多个来源。
+- 本地 Git Skill Collections 的 discovery 与 apply。Rust 通过 hardened `GitService` 找到候选的最近安全 worktree，按 canonical worktree/common-dir identity 聚合 children；nested repository 是独立 collection，解析到同一 child 的 runtime symlinks 不重复创建成员，Git metadata 外的相似副本只作为 unlinked location。React 只展示 collection metadata/children 并提交 `collection_id + preview_id + selected child identities`。
 - preview-confirmed symlink 部署和部署索引。
 - import backup 与 source 替换为 symlink。
 - GitHub install preview/apply, GitHub-only remote source search, manual binding, update check, version listing, diff preview, update/rollback apply, and operation logging.
@@ -200,6 +205,37 @@ schema v6 让 workspace 显式记录 `profile_id`、`root_key` 和 `format`。�
 Code、Cursor；它只决定 discovery/recommendation 顺序，不授权自动部署。
 
 桌面 Add workspace 将普通项目目录交给 Rust core 做只读 preview，并只展示 core 返回的固定 root 候选。`Project` 是现有 `kind=user` 的 UI 语义标签；apply 会重放 preview 校验，再按 allowlist 创建至多一个项目局部 root。React 不拼接路径、不创建目录，Global scope 也不自动初始化目录。
+
+### Local Git Skill Collections
+
+Phase A+B 的 Collection model 只覆盖本地 Git discovery、Import Review
+grouping 和成功导入后的 provenance persistence。Rust `GitService` 返回
+canonical worktree root、Git common directory、branch/detached state、HEAD
+和 sanitized origin；core 以 worktree/common-dir pair 作为 collection identity。
+
+对于没有 live Git metadata 的复制安装，Import Review 可以读取配置 runtime
+root 旁边受支持的 v3 `.skill-lock.json`。Rust 只解析 bounded JSON，校验
+`sourceType=github`、无 credentials/query/fragment 的 canonical GitHub
+repository URL、safe `skillPath` 和已扫描 candidate name，再把相同 source URL
+映射为 `installed_source` display collection。它不读取 lockfile 指向的本地
+路径，不执行网络，不伪造 branch/HEAD，也不允许 `apply_import_collection`；
+选中的 child 仍走普通 per-skill import。live Git worktree identity 优先，
+lockfile hash 不会跳过完整目录 snapshot 校验。
+因此 nested repositories 是独立 collection，worktree/runtime symlink 解析到同一
+child 时只保留一个 child identity，而 Git metadata 外的相似 copy 不会因为内容相似
+被声明为成员，只会作为 unlinked location 展示。
+
+Collection preview 不写文件或 SQLite。用户可以在一个 collection 中逐 child 选择、
+选择适用的 type/variant，但每个 child 仍是独立 managed skill、deployment、Calls
+和 history entity。apply 重新 canonicalize worktree、扫描 HEAD 和完整 child
+snapshot，校验 `collection_id`、`preview_id`、relative path、variant/type 和 managed
+target，然后才导入并保存 `skill_collections` / `skill_collection_members`。成功导入
+前不创建 collection rows；失败时使用受保护的 compensatable rollback，并报告无法
+回滚的部分，而不是声称跨文件系统 transaction。
+
+Phase C 的 GitHub multi-skill one-fetch install，以及 Phase D 的 collection-level
+update/rollback 尚未实现。当前实现也不自动部署、不执行 hooks、filters、submodules、
+repository scripts、custom helpers 或 arbitrary shell。
 
 不要在没有 adapter 语义的情况下猜测某个 agent 的目录布局。新增 agent 支持时，先定义 adapter 的发现路径、原生格式、部署方式和冲突处理。
 

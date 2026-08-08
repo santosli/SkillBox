@@ -48,6 +48,15 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 步骤：
 
 - 扫描 import candidates。
+- 点击 Dashboard `Import` 后先同步打开 Import Review shell，再在其中显示
+  `scanning local roots`、`validating candidates`、`grouping Git repositories` 等阶段；扫描期间不显示误导性的空结果，用户可以取消并使迟到结果失效。
+- Desktop 通过 Tauri bridge 以 camelCase `scanId` 传递扫描请求身份；Rust 进度事件也以
+  camelCase 返回 `scanId` 和 `uniqueRepositories`，避免 native bridge 与 browser preview
+  的参数形状漂移。
+- 关闭或 dismiss Import Review 只会撤销当前 UI 请求并忽略迟到的扫描结果；它不会强制终止已经提交给 Rust `spawn_blocking` 的只读扫描。重新打开时，新请求拥有独立 generation；两个只读扫描短暂重叠不会写共享状态。
+- Rust 返回 aggregate-only scan diagnostics（候选数量、唯一 repository 数、Git identity
+  检查与 snapshot cache 命中、耗时），并在同一个扫描请求内按 canonical
+  worktree/common-dir 复用 Git identity 和已验证的 full-directory snapshot；不把 Git 或文件系统工作移到 React。
 - 根据路径和内容推断类型：当前 `.agents/skills` 倾向 user，`.codex/skills` 倾向 remote，`.system` 默认不选中，包含 GitHub 来源信息的未知目录倾向 remote。
 - 对名称、`SKILL.md` hash、状态、冲突结果以及完整导入快照都一致的实体副本进行分组；推断类型仅作为 location 级分类建议，不参与等价 identity。快照忽略顶层 `.git`，但覆盖其它文件、Unix mode、目录和 symlink。仅 `SKILL.md` 相同而脚本、权限或资源不同的候选保持分离。
 - 已 imported 的多个 runtime symlink 只有解析到同一个 managed `real_path` 时才作为 alias 合并。
@@ -80,6 +89,79 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 使用临时目录运行 Rust CLI：`cargo run -p skillbox-cli --offline -- import <source-dir> --type user --managed-root <temp-skillbox-root>`
 - UI 路径变更时，手动验证 import review 与本地 import 确认弹窗中的 User/Remote 类型选择、冲突、默认选中和备份提示。
 - 使用两个 runtime roots 验证导入内容一致的副本只显示一行、列出两个位置、只为 primary 创建 backup/symlink，并保持 additional source 不变；修改任一附加脚本或 executable bit 后应恢复为两条候选。
+
+## 2.1 Local Git Skill Collections
+
+Phase A+B 将本地 Git repository/worktree 作为 Import Review 的来源实体；它不是
+GitHub multi-skill install，也不改变 child skill 的独立 managed/deploy/Calls 语义。
+
+触发条件：
+
+- Dashboard 或 workspace scan 执行 `scan_import_candidates`。
+- CLI 执行 `collection-preview <repository-root> [--managed-root <path>]`。
+- Desktop 在 Import Review 中收到 Rust 返回的 `collections`。
+
+只读 discovery：
+
+- Rust 对每个 candidate 使用固定参数、非交互、有界的 `GitService` 读取
+  canonical worktree root、Git common-dir/repository identity、branch 或 detached
+  state、HEAD 和 sanitized origin；React 不解析 `.git`、路径 marker 或 remote。
+- 同一 canonical worktree/common-dir 归为一个 collection；nested repository 是独立
+  collection，runtime symlink 解析到同一 repository-relative child 时只出现一个 child。
+- child 仍按既有 group/variant/type-review contract 分组。worktree 之外的相似 copy
+  不会因 content similarity 变成 member，而会在 child 下以 unlinked location 保留。
+- preview 绑定 repository identity、HEAD、ordered child relative paths、full snapshot
+  and content hashes、status/conflict/type inputs。scan 不写文件、Git refs、SQLite 或
+  collection rows。
+
+Review/apply：
+
+- Collection card 显示 repository name、child count、branch/short HEAD、可选 remote 和
+  compact root；展开后可搜索 child、逐项选择或 Select all applicable，并继续使用既有
+  variant、User/Remote type control 和 Calls 展示。不会自动 deploy。
+- CLI `collection-apply <repository-root> --collection-id <id> --preview-id <id>
+  --select <path|group|variant|type,...> [--managed-root <path>]` 与 Tauri
+  `apply_import_collection` 只接收结构化 child identities。`collections` CLI/Tauri
+  返回已持久化 collection 及 member detail。
+- apply 在首次 managed write 前重新 canonicalize worktree、读取 current HEAD/tree
+  snapshot、校验 preview/child/group/variant/type/duplicate-name 和 managed target。
+  HEAD、root、child snapshot 或 target 变化会拒绝整个 selected collection apply。
+- 成功导入后，在 SQLite transaction 中写入 `skill_collections` 和
+  `skill_collection_members`。文件导入与 metadata transaction 通过 preflight 和
+  operation-scoped compensatable rollback 连接；这不是跨 filesystem/SQLite 的不可分割
+  transaction。失败会尽力只清理本次创建且仍匹配的内容，并报告保留的 rollback material。
+- 已有 managed target、managed index row、conflict child、duplicate selected name、
+  traversal、escaping symlink、unsafe file type 或 invalid `SKILL.md` 会 fail closed；
+  existing skills/deployments/usage/history 不会被 collection discovery 破坏。
+
+复制安装的来源分组：
+
+- 如果 candidate 不在 live Git worktree，Rust 会按固定 runtime root 旁边的 v3
+  `.skill-lock.json` 做一次 bounded provenance lookup。只有真实扫描到的 candidate
+  与 safe `skillPath`/name 匹配，并且 `sourceType=github`、source URL 可被
+  canonicalize 为无凭据 GitHub repository identity 时，才会显示为
+  `Installed source collection`。
+- 这类 collection 只用于展示来源和聚合 child，不提供 branch、HEAD、fetch、更新或
+  `collection-apply`。它不使用 lockfile hash 替代完整 snapshot 校验；用户选中的
+  child 仍逐项走现有 per-skill Import Review/apply，`.agents` 与 `.claude` 的等价
+  symlink location 仍只保留一份。
+- lockfile 版本不支持、文件过大、条目 malformed、路径 traversal、非 GitHub/custom
+  source 或 stale/mismatched entry 都不会隐藏 candidate，也不会创建网络或文件写入。
+- installed-source fallback 只有在同一 normalized source URL 匹配至少两个已验证 child
+  时才形成 collection card；单个匹配仍作为普通 standalone candidate 显示。live Git
+  worktree collection 保留其 repository/HEAD 语义，不受这个展示降噪门槛影响。
+
+当前边界：Phase C 的 GitHub repository one-fetch multi-skill preview/apply 与 Phase D
+的 collection-level update/rollback 尚未实现。Collection operations 不运行 hooks、
+filters、submodules、repository scripts、custom helpers 或 arbitrary shell。
+
+完成验证：
+
+- `cargo test -p skillbox-core --offline schema_v8_collection_migration_is_idempotent_for_existing_database`
+- `cargo test -p skillbox-core --offline scan_import_candidates_groups_git_repository_children_and_keeps_external_copies_unlinked`
+- `cargo test -p skillbox-core --offline git_collection_apply_persists_selected_children_and_rejects_stale_head_before_writes`
+- `cargo run -p skillbox-cli --offline -- collection-preview <repository-root> --managed-root <temp-skillbox-root>`
+- `npm test` 和桌面 Import Review 的 collection collapsed/expanded/narrow visual QA。
 
 ## 3. Revert Local Import
 
@@ -1031,7 +1113,8 @@ returns structured JSON while the desktop provides interactive review.
 | Undeploy and reviewed skill deletion | Full | Full | Both share overwrite, ownership, stale-preview, and confirmation protections. |
 | Remote source binding, update, rollback, and versions | Full | Full | Desktop provides all-file visual review; CLI returns structured diff/version data. |
 | User-skills Git status and outbound commit/push | Full | Full | Desktop adds selected-file diff review. Existing push defaults and `push_failed` semantics remain unchanged. |
-| Reviewed inbound user-skills fast-forward (Unreleased v0.7 Draft) | Full | Full | Both use Check -> Preview -> Apply with the same Rust validation and stale-preview contract. Desktop adds visual repository/skill/deployment review and conflict diagnostics. Neither interface auto-merges, rebases, resets, stashes, or resolves divergence. |
+| Reviewed inbound user-skills fast-forward (v0.7 shipped) | Full | Full | Both use Check -> Preview -> Apply with the same Rust validation and stale-preview contract. Desktop adds visual repository/skill/deployment review and conflict diagnostics. Neither interface auto-merges, rebases, resets, stashes, or resolves divergence. |
+| Local Git Skill Collections Phase A+B | Full | Full | `collection-preview`/`collection-apply` and `collections` expose Rust-owned local worktree discovery, selected-child apply, and persisted provenance. GitHub multi-skill fetch and collection-level update/rollback remain planned. |
 | Workspaces | Partial | Full | CLI lists/scans/adds/forgets exact roots. Desktop also previews a project directory, initializes one selected supported root, and offers the native folder picker. |
 | Usage rankings and local history sync | Full | Full | Both use the same confirmed/inferred/reference evidence model and provider backfills. |
 | Aggregate usage diagnostics | Full | Limited | CLI `usage-audit` is the automation-oriented aggregate report. Desktop exposes the relevant coverage summary and disclosure, not the complete diagnostic JSON. |

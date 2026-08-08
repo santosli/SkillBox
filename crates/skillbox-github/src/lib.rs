@@ -178,6 +178,30 @@ pub fn validate_github_repo_url(repo_url: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Return a stable, credential-free identity for a GitHub repository URL.
+///
+/// This intentionally accepts only the HTTPS GitHub repository form used by
+/// the local installer lockfile. It does not resolve the repository or imply
+/// that the repository can be fetched.
+pub fn normalize_github_repo_url(repo_url: &str) -> Result<String, String> {
+    validate_github_repo_url(repo_url)?;
+    let url = Url::parse(repo_url.trim()).map_err(|error| error.to_string())?;
+    let parts = path_parts(&url);
+    let owner = parts
+        .first()
+        .ok_or_else(|| "GitHub remote URL must include an owner.".to_string())?;
+    let repo = trim_git_suffix(
+        parts
+            .get(1)
+            .ok_or_else(|| "GitHub remote URL must include a repository.".to_string())?,
+    );
+    Ok(format!(
+        "https://github.com/{}/{}",
+        owner.to_ascii_lowercase(),
+        repo.to_ascii_lowercase()
+    ))
+}
+
 pub fn validate_git_reference(reference: &str) -> Result<(), String> {
     let value = reference.trim();
     if value.is_empty() {
@@ -383,6 +407,18 @@ mod tests {
                 "{url}"
             );
         }
+    }
+
+    #[test]
+    fn normalizes_github_repository_identity_without_credentials_or_git_suffix() {
+        assert_eq!(
+            normalize_github_repo_url("https://github.com/acme/repo.git").unwrap(),
+            "https://github.com/acme/repo"
+        );
+        assert!(
+            normalize_github_repo_url("https://github.com/acme/repo?access_token=secret").is_err()
+        );
+        assert!(normalize_github_repo_url("https://gitlab.com/acme/repo").is_err());
     }
 
     #[test]

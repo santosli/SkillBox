@@ -7,7 +7,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub type Result<T> = std::result::Result<T, String>;
 
@@ -69,6 +69,7 @@ const USAGE_METADATA_CONTENT_KEYS: &[&str] = &[
     "file_contents",
 ];
 
+mod collections;
 mod compatibility;
 mod db;
 mod doctor;
@@ -77,6 +78,7 @@ mod git_sync;
 mod hooks;
 mod import;
 mod inbound_git_sync;
+mod installed_sources;
 mod marketplace;
 mod metadata;
 mod mutation_lock;
@@ -94,6 +96,7 @@ mod usage_backfill_cursor;
 mod usage_backfill_cursor_transcripts;
 mod workspaces;
 
+pub use collections::*;
 pub use compatibility::*;
 pub(crate) use db::*;
 pub use doctor::*;
@@ -102,6 +105,7 @@ pub use git_sync::*;
 pub use hooks::*;
 pub use import::*;
 pub use inbound_git_sync::*;
+pub(crate) use installed_sources::*;
 pub(crate) use marketplace::*;
 pub use metadata::*;
 pub(crate) use mutation_lock::*;

@@ -2,7 +2,7 @@ use crate::*;
 use fs2::FileExt;
 use std::fs::{File, OpenOptions};
 
-pub(crate) const LATEST_DATABASE_SCHEMA_VERSION: i64 = 7;
+pub(crate) const LATEST_DATABASE_SCHEMA_VERSION: i64 = 8;
 
 pub(crate) fn open_database(database_path: &Path) -> Result<Connection> {
     let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
@@ -95,6 +95,7 @@ pub(crate) fn run_database_migrations(connection: &mut Connection) -> Result<()>
         (5_i64, "canonical_usage_agent_ids"),
         (6_i64, "runtime_profiles"),
         (7_i64, "usage_evidence_classification"),
+        (8_i64, "skill_collections"),
     ] {
         let applied: bool = connection
             .query_row(
@@ -118,6 +119,7 @@ pub(crate) fn run_database_migrations(connection: &mut Connection) -> Result<()>
             5 => apply_canonical_usage_agent_ids_migration(&transaction)?,
             6 => apply_runtime_profiles_migration(&transaction)?,
             7 => apply_usage_evidence_classification_migration(&transaction)?,
+            8 => apply_skill_collections_migration(&transaction)?,
             _ => return Err(format!("Unknown database migration version: {version}")),
         }
         transaction
@@ -388,6 +390,42 @@ fn apply_usage_evidence_classification_migration(connection: &Connection) -> Res
         )
         .map_err(|error| error.to_string())?;
     backfill_missing_usage_evidence(connection)
+}
+
+fn apply_skill_collections_migration(connection: &Connection) -> Result<()> {
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS skill_collections (
+              id TEXT PRIMARY KEY,
+              display_name TEXT NOT NULL,
+              canonical_worktree_root TEXT NOT NULL,
+              canonical_repository_id TEXT NOT NULL,
+              origin_url TEXT,
+              branch TEXT,
+              detached INTEGER NOT NULL DEFAULT 0,
+              reviewed_head_sha TEXT,
+              available INTEGER NOT NULL DEFAULT 1,
+              updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS skill_collection_members (
+              collection_id TEXT NOT NULL,
+              skill_name TEXT NOT NULL,
+              relative_path TEXT NOT NULL,
+              reviewed_head_sha TEXT,
+              snapshot_hash TEXT NOT NULL,
+              content_hash TEXT NOT NULL,
+              managed_skill_name TEXT NOT NULL,
+              PRIMARY KEY (collection_id, relative_path),
+              FOREIGN KEY (collection_id) REFERENCES skill_collections(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_skill_collection_members_skill
+              ON skill_collection_members(skill_name);
+            ",
+        )
+        .map_err(|error| error.to_string())
 }
 
 fn usage_evidence_repair_required(connection: &Connection) -> Result<bool> {

@@ -231,6 +231,29 @@ workspaces
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 
+skill_collections
+  id TEXT PRIMARY KEY
+  display_name TEXT NOT NULL
+  canonical_worktree_root TEXT NOT NULL
+  canonical_repository_id TEXT NOT NULL
+  origin_url TEXT
+  branch TEXT
+  detached INTEGER NOT NULL DEFAULT 0
+  reviewed_head_sha TEXT
+  available INTEGER NOT NULL DEFAULT 1
+  updated_at TEXT NOT NULL
+
+skill_collection_members
+  collection_id TEXT NOT NULL
+  skill_name TEXT NOT NULL
+  relative_path TEXT NOT NULL
+  reviewed_head_sha TEXT
+  snapshot_hash TEXT NOT NULL
+  content_hash TEXT NOT NULL
+  managed_skill_name TEXT NOT NULL
+  PRIMARY KEY (collection_id, relative_path)
+  FOREIGN KEY (collection_id) REFERENCES skill_collections(id)
+
 operations
   id TEXT PRIMARY KEY
   type TEXT NOT NULL
@@ -296,6 +319,22 @@ skill_user_metadata
 ```
 
 `schema_migrations` 是 Rust schema 的唯一版本历史。migration 按 version 顺序在独立 transaction 中执行；已有数据库在首次执行待处理 migration 前生成一致性 backup，全部 migration 完成后运行 SQLite integrity check。新建空数据库不生成 backup。backup decision 和 migration application 由同一个进程安全文件锁串行化，锁随文件句柄释放，即使进程异常退出也不会留下永久锁状态。schema v6 增加 workspace runtime profile identity，并按 `canonical_path` 的 component suffix backfill：`.agents/skills` -> `agents`、`.codex/skills` -> `codex`、`.claude/skills` -> `claude-code`、`.cursor/skills` -> `cursor`；其它已登记 root -> `custom-skill-md`。因此，显示路径看似 built-in root、但 symlink 实际解析到其它位置的 legacy workspace 会按 canonical identity 迁移为 `custom-skill-md/exact`。全部现有 row 使用 `format=skill_md`，不要求重新 scan。schema v7 为 usage event 增加 evidence class 与有界 provenance：已有事件按可信 source 保守回填为 `confirmed`、`inferred` 或 `reference`，随后在同一 migration transaction 中幂等重建 `skill_usage_stats`，不删除 raw event，也不要求重新扫描本地 history。legacy Claude session rows 因缺少逐条 native Skill attribution 而先保守迁为 `inferred`；用户之后显式执行 `Sync histories` 时，才会从仍可用的本地 session 文件恢复或升级 native Skill tool/command evidence 为 `confirmed`。
+
+schema v8 增加 `skill_collections` 和 `skill_collection_members`。collection row 保存
+canonical worktree/repository identity、branch/detached state、reviewed HEAD 和
+sanitized origin；member row 绑定 collection、repository-relative child path、reviewed
+HEAD、full snapshot/content identity 和 managed skill name。它们只在 preview-confirmed
+selected-child import 成功后写入，写入使用 SQLite transaction，重复相同 identity 会
+更新成员关系而不会创建重复 row。已有数据库只执行表/index migration，不扫描或改写
+现有 skill/deployment/usage/import rows，也不要求用户 rescan；collection source 不可用
+时保留 provenance，并在读取 collection detail 时派生 `available=false`。
+
+Import Review 返回的 `ImportCandidateCollection` 还有一个只读的
+`source_kind`：`git_worktree` 表示可绑定 canonical worktree/HEAD 的本地 Git
+来源；`installed_source` 表示由受支持的 v3 installer lockfile 归并的来源
+展示。后者不写新的 collection/member row，不保存假 branch/HEAD，也不改变
+schema v8 的 apply 事务；child 的真实 source path、snapshot、status、type 和
+import identity 仍来自 filesystem scan，并通过普通 per-skill import 写入。
 
 `skill_user_metadata` 保存用户显式设置的 favorite 和 tags。桌面首次读取该表时会把旧 `localStorage` 中仍存在的 metadata 通过 `INSERT OR IGNORE` 迁入，因此 SQLite 中已有值不会被旧浏览器状态覆盖；迁移成功后删除旧 key。
 

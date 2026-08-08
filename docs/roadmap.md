@@ -22,17 +22,18 @@ and notarized `v0.7.1` distribution. The current release identity and
 distribution invariants remain documented in `docs/release.md`.
 
 Copy-snapshot deployment and broader recovery hardening remain planned product
-work. Git-backed Skill Collections are the active next milestone, targeted for
-`v0.8.0`.
+work. Git-backed Skill Collections are the active `v0.8.0` milestone; Phase A+B
+are now implemented, while remote multi-skill fetch and collection-level
+update/rollback remain planned.
 
 ## Near-Term Priorities
 
 These are the next areas where focused contributions are most useful:
 
-- **Git-backed Skill Collections (planned for v0.8.0).** Treat one canonical Git
-  repository/worktree and reviewed SHA as a collection source while keeping
-  child `SKILL.md` directories independently selectable and deployable. Track
-  delivery in [GitHub issue #46](https://github.com/santosli/SkillBox/issues/46).
+- **Git-backed Skill Collections (v0.8.0 Phase A+B).** Rust now treats one
+  canonical Git repository/worktree and reviewed SHA as a local collection
+  source while keeping child `SKILL.md` directories independently selectable
+  and deployable. Track the remaining scope in [GitHub issue #46](https://github.com/santosli/SkillBox/issues/46).
 - **Deployment portability.** Add copy-snapshot deployment as an explicit
   alternative to the current compatibility-checked symlink path.
 - **Recovery workflows.** Strengthen restore previews, backup inspection, and
@@ -130,7 +131,7 @@ to a runtime before a fresh preview is explicitly confirmed.
 ### 0.8 Git-backed Skill Collections
 
 [Git-backed Skill Collections](https://github.com/santosli/SkillBox/issues/46)
-are planned for `v0.8.0`; they are not implemented. A collection is a
+are targeted for `v0.8.0`. Phase A+B are implemented: a collection is a
 repository/source entity identified by its canonical Git repository or
 worktree plus ref/HEAD. A GitHub remote is optional. Child `SKILL.md`
 directories remain independent skills for selection, deployment, Calls, and
@@ -147,6 +148,13 @@ optional remote, branch/HEAD, skill count, and a searchable expandable child
 list with individual and select-all controls; it will never deploy children
 automatically.
 
+When a copied runtime installation has no live Git metadata, a supported v3
+installer lockfile may provide a display-only `installed_source` grouping by
+validated canonical GitHub source URL. Live Git identity remains authoritative;
+lockfile groups never fabricate branch/HEAD, fetch/update, or collection apply
+permissions, and child imports continue through the ordinary per-skill safety
+contract.
+
 A remote repository URL will use one bounded fetch/check to preview all valid
 children. Preview will report added, changed, removed, and invalid children,
 plus path/name conflicts. Apply will install only explicitly selected child
@@ -156,10 +164,12 @@ an independent per-skill action.
 
 Delivery is phased within the `v0.8.0` target:
 
-1. Repository detection and local Import Review grouping.
-2. Collection/source persistence and child relationships.
+1. **Implemented:** Repository detection and local Import Review grouping.
+2. **Implemented:** Collection/source persistence and child relationships.
 3. GitHub multi-skill install preview/apply with one repository fetch.
 4. Collection-level update/rollback and UI detail.
+
+Phases 3 and 4 are not implemented and must not be described as shipped.
 
 All scans are read-only. Apply must recheck canonical Git root, HEAD/ref, and
 tree snapshot and reject stale previews. Collection operations must never run

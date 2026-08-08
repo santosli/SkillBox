@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import desktopPackage from '../package.json';
 import skillBoxAppIcon from '../src-tauri/icons/icon.png';
@@ -48,13 +49,21 @@ import {
 } from './doctor.js';
 import {
   normalizeImportCandidateGroups,
+  normalizeImportCollections,
   normalizeImportCandidate,
+  selectedImportCollectionRequests,
   selectedImportCandidates,
   selectImportCandidateVariant,
   toggleImportCandidateGroup,
   toggleImportCandidateGroupSelection,
   updateImportCandidateGroupType
 } from './importCandidates.js';
+import {
+  browserImportScanOptions,
+  createImportScanRequestController,
+  importScanCommandArgs,
+  waitForImportScanDelay
+} from './importScanProgress.js';
 import {
   appUpdateNotice,
   appUpdateStatusAfterCheckError,
@@ -87,6 +96,7 @@ import {
   previewHistory,
   previewImportCandidates,
   previewImportCandidateGroups,
+  previewImportCollections,
   previewPaths,
   previewSkills,
   previewUsageRankings,
@@ -305,8 +315,13 @@ export default function App() {
   const [isFirstUse, setIsFirstUse] = useState(false);
   const [importReview, setImportReview] = useState({
     open: false,
+    loading: false,
     candidates: [],
+    collections: [],
     errors: [],
+    scanError: '',
+    scanProgress: null,
+    diagnostics: null,
     title: 'Import Review',
     subtitle: 'Confirm each skill type before SkillBox copies it into the managed store.',
     noticePrefix: ''
@@ -319,6 +334,7 @@ export default function App() {
   const [localImportConfirmation, setLocalImportConfirmation] = useState({
     open: false,
     candidates: [],
+    collectionRequests: [],
     noticePrefix: ''
   });
   const [remoteImport, setRemoteImport] = useState({
@@ -456,6 +472,8 @@ export default function App() {
   const usageRankingRequestRef = useRef(0);
   const rankingImportRequestRef = useRef(0);
   const historyRequestRef = useRef(0);
+  const importScanControllerRef = useRef(null);
+  const importScanTimingRef = useRef(null);
   const authoritativeGenerationRef = useRef(0);
   const pageRef = useRef(page);
   const dismissNotice = () => setNotice('');
@@ -471,6 +489,32 @@ export default function App() {
   useEffect(() => {
     pageRef.current = page;
   }, [page]);
+
+  useEffect(() => {
+    if (!window.__TAURI_INTERNALS__) {
+      return undefined;
+    }
+
+    let active = true;
+    let unlisten;
+    listen('skillbox://import-scan-progress', (event) => {
+      const progress = event.payload || {};
+      const scanController = importScanControllerRef.current;
+      if (!active || !scanController || !scanController.isCurrent(progress.scanId)) {
+        return;
+      }
+      setImportReview((current) => current.open && current.loading
+        ? { ...current, scanProgress: progress }
+        : current);
+    }).then((removeListener) => {
+      unlisten = removeListener;
+    }).catch(() => {});
+
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, []);
 
   useEffect(() => {
     if (!window.__TAURI_INTERNALS__) {
@@ -1002,44 +1046,168 @@ export default function App() {
   }
 
   async function scanForImportCandidates() {
+    if (!importScanControllerRef.current) {
+      importScanControllerRef.current = createImportScanRequestController();
+    }
+    const scanController = importScanControllerRef.current;
+    const scanId = scanController.begin();
+    if (scanId == null) {
+      return;
+    }
+
+    importScanTimingRef.current = {
+      startedAt: performance.now(),
+      shellPaintedAt: null,
+      commandStartedAt: null,
+      commandFinishedAt: null
+    };
+    setImportReview((current) => ({
+      ...current,
+      open: true,
+      loading: true,
+      candidates: [],
+      collections: [],
+      errors: [],
+      scanError: '',
+      scanProgress: {
+        phase: 'preparing',
+        processed: 0,
+        total: null,
+        uniqueRepositories: 0
+      },
+      diagnostics: null
+    }));
     setStatus('scanning');
     setError('');
     setNotice('');
 
     try {
+      await waitForNextPaint();
+      if (!scanController.isCurrent(scanId)) {
+        return;
+      }
+      if (importScanTimingRef.current) {
+        importScanTimingRef.current.shellPaintedAt = performance.now();
+      }
+
       if (!window.__TAURI_INTERNALS__) {
+        const previewOptions = browserImportScanOptions(window.location.search);
+        setImportReview((current) => ({
+          ...current,
+          scanProgress: {
+            phase: 'validating candidates',
+            processed: 0,
+            total: previewImportCandidateGroups.length,
+            uniqueRepositories: previewImportCollections.length
+          }
+        }));
+        await waitForImportScanDelay(previewOptions.delayMs);
+        if (!scanController.isCurrent(scanId)) {
+          return;
+        }
+        if (previewOptions.error) {
+          throw new Error('Browser preview scan failed. Retry the local scan.');
+        }
         setWorkspaces(normalizeWorkspaces(previewWorkspaces));
         setImportReview({
           open: true,
+          loading: false,
           candidates: normalizeImportCandidateGroups(previewImportCandidateGroups),
+          collections: normalizeImportCollections(previewImportCollections),
           errors: [],
+          scanError: '',
+          scanProgress: null,
+          diagnostics: {
+            candidateCount: previewImportCandidateGroups.length,
+            uniqueRepositoryCount: previewImportCollections.length,
+            repositoryInspections: previewImportCollections.length,
+            repositoryCacheHits: 0,
+            snapshotHashComputations: 0,
+            snapshotCacheHits: 0,
+            elapsedMs: Math.round(performance.now() - importScanTimingRef.current.startedAt)
+          },
           title: 'Import Review',
           subtitle: 'Confirm each skill type before SkillBox copies it into the managed store.',
           noticePrefix: ''
         });
+        if (import.meta.env.DEV) {
+          const timing = importScanTimingRef.current;
+          console.info('[SkillBox] import scan diagnostics', {
+            shellPaintMs: timing?.shellPaintedAt == null ? null : Math.round(timing.shellPaintedAt - timing.startedAt),
+            commandMs: null,
+            totalMs: timing ? Math.round(performance.now() - timing.startedAt) : null,
+            diagnostics: {
+              candidateCount: previewImportCandidateGroups.length,
+              uniqueRepositoryCount: previewImportCollections.length
+            }
+          });
+        }
         setNotice('Browser preview is using mock scan candidates.');
         setStatus('prototype');
+        scanController.finish(scanId);
         return;
       }
 
-      const scan = await invoke('scan_import_candidates');
+      if (importScanTimingRef.current) {
+        importScanTimingRef.current.commandStartedAt = performance.now();
+      }
+      const scan = await invoke('scan_import_candidates', importScanCommandArgs(scanId));
+      if (importScanTimingRef.current) {
+        importScanTimingRef.current.commandFinishedAt = performance.now();
+      }
+      if (!scanController.isCurrent(scanId)) {
+        return;
+      }
       const workspaceRows = await invoke('list_workspaces').catch(() => []);
+      if (!scanController.isCurrent(scanId)) {
+        return;
+      }
       const candidates = normalizeImportCandidateGroups(scan.groups || [], scan.candidates || []);
+      const collections = normalizeImportCollections(scan.collections || []);
       setWorkspaces(normalizeWorkspaces(workspaceRows));
 
       setImportReview({
         open: candidates.length > 0,
+        loading: false,
         candidates,
+        collections,
         errors: scan.errors || [],
+        scanError: '',
+        scanProgress: null,
+        diagnostics: scan.diagnostics || null,
         title: 'Import Review',
         subtitle: 'Confirm each skill type before SkillBox copies it into the managed store.',
         noticePrefix: ''
       });
+      if (import.meta.env.DEV) {
+        const timing = importScanTimingRef.current;
+        console.info('[SkillBox] import scan diagnostics', {
+          shellPaintMs: timing?.shellPaintedAt == null ? null : Math.round(timing.shellPaintedAt - timing.startedAt),
+          commandMs: timing?.commandStartedAt == null || timing?.commandFinishedAt == null
+            ? null
+            : Math.round(timing.commandFinishedAt - timing.commandStartedAt),
+          totalMs: timing ? Math.round(performance.now() - timing.startedAt) : null,
+          diagnostics: scan.diagnostics || null
+        });
+      }
       setNotice(candidates.length === 0 ? 'No new local skills found.' : '');
       setStatus('ready');
+      scanController.finish(scanId);
     } catch (scanError) {
-      setError(scanError.message || 'Unable to scan local skill folders.');
+      if (!scanController.isCurrent(scanId)) {
+        return;
+      }
+      const message = scanError.message || String(scanError) || 'Unable to scan local skill folders.';
+      setImportReview((current) => ({
+        ...current,
+        open: true,
+        loading: false,
+        scanError: message,
+        scanProgress: null
+      }));
+      setError('');
       setStatus('ready');
+      scanController.finish(scanId);
     }
   }
 
@@ -1205,7 +1373,15 @@ export default function App() {
   }
 
   function closeImportReview() {
-    setImportReview((current) => ({ ...current, open: false }));
+    importScanControllerRef.current?.invalidate();
+    setImportReview((current) => ({
+      ...current,
+      open: false,
+      loading: false,
+      scanError: '',
+      scanProgress: null
+    }));
+    setStatus((current) => current === 'scanning' ? 'ready' : current);
   }
 
   function updateImportCandidateGroup(groupId, updater) {
@@ -1223,8 +1399,15 @@ export default function App() {
   }
 
   async function importSelectedCandidates() {
-    const selected = selectedImportCandidates(importReview.candidates);
-    if (selected.length === 0) {
+    const selected = selectedImportCandidates(
+      importReview.candidates,
+      importReview.collections
+    );
+    const collectionRequests = selectedImportCollectionRequests(
+      importReview.candidates,
+      importReview.collections
+    );
+    if (selected.length === 0 && collectionRequests.length === 0) {
       setNotice('Select at least one candidate without conflicts to import.');
       return;
     }
@@ -1233,15 +1416,16 @@ export default function App() {
       setLocalImportConfirmation({
         open: true,
         candidates: selected,
+        collectionRequests,
         noticePrefix: importReview.noticePrefix || ''
       });
       return;
     }
 
-    await runCandidateImport(selected, importReview.noticePrefix || '');
+    await runCandidateImport(selected, importReview.noticePrefix || '', collectionRequests);
   }
 
-  async function runCandidateImport(selected, noticePrefix = '') {
+  async function runCandidateImport(selected, noticePrefix = '', collectionRequests = []) {
     setStatus('importing');
     setError('');
     setNotice('');
@@ -1252,23 +1436,48 @@ export default function App() {
       setSkills((current) => mergeSkills(current, importedSkills));
       setSelectedName('');
       setIsFirstUse(false);
-      setImportReview({ open: false, candidates: [], errors: [], noticePrefix: '' });
+      setImportReview({ open: false, candidates: [], collections: [], errors: [], noticePrefix: '' });
       setStatus('prototype');
       setNotice(importNotice(noticePrefix, `Mock imported ${importedSkills.length} skills.`));
       return;
     }
 
     try {
-      const result = await invoke('import_candidates', {
-        items: importRequestItems(selected)
-      });
+      const result = selected.length > 0
+        ? await invoke('import_candidates', { items: importRequestItems(selected) })
+        : { imported: [], errors: [] };
+      const collectionResults = [];
+      for (const request of collectionRequests) {
+        collectionResults.push(await invoke('apply_import_collection', {
+          request: {
+            collection_id: request.collectionId,
+            worktree_root: request.worktreeRoot,
+            preview_id: request.previewId,
+            selections: request.selections.map((selection) => ({
+              relative_path: selection.relativePath,
+              group_id: selection.groupId,
+              variant_id: selection.variantId,
+              skill_type: selection.skillType
+            })),
+            actor: 'desktop'
+          }
+        }));
+      }
 
-      setImportReview({ open: false, candidates: [], errors: [], noticePrefix: '' });
+      setImportReview({ open: false, candidates: [], collections: [], errors: [], noticePrefix: '' });
       await refresh();
       if (page === 'rankings') {
         await loadUsageRankings(usageRankingFilters);
       }
-      setNotice(importNotice(noticePrefix, importBatchNotice(result)));
+      const collectionCount = collectionResults.reduce(
+        (count, collection) => count + (collection.imported || []).length,
+        0
+      );
+      const summary = [
+        selected.length > 0 ? importBatchNotice(result) : '',
+        collectionCount > 0 ? `Imported ${collectionCount} collection skill${collectionCount === 1 ? '' : 's'}.` : ''
+      ].filter(Boolean).join(' ');
+      setNotice(importNotice(noticePrefix, summary || 'Import completed.'));
     } catch (importError) {
       setError(importError.message || 'Unable to import selected skills.');
       setStatus('ready');
@@ -1279,15 +1488,16 @@ export default function App() {
     if (status === 'importing') {
       return;
     }
-    setLocalImportConfirmation({ open: false, candidates: [], noticePrefix: '' });
+    setLocalImportConfirmation({ open: false, candidates: [], collectionRequests: [], noticePrefix: '' });
   }
 
   async function confirmLocalImport() {
     const selected = localImportConfirmation.candidates;
+    const collectionRequests = localImportConfirmation.collectionRequests || [];
     const noticePrefix = localImportConfirmation.noticePrefix || '';
 
-    setLocalImportConfirmation({ open: false, candidates: [], noticePrefix: '' });
-    await runCandidateImport(selected, noticePrefix);
+    setLocalImportConfirmation({ open: false, candidates: [], collectionRequests: [], noticePrefix: '' });
+    await runCandidateImport(selected, noticePrefix, collectionRequests);
   }
 
   async function saveStatusRefreshIntervalMinutes(minutes) {
@@ -3686,6 +3896,7 @@ export default function App() {
       setImportReview({
         open: true,
         candidates,
+        collections: [],
         errors: [],
         ...reviewMeta
       });
@@ -3698,11 +3909,13 @@ export default function App() {
       const scan = await invoke('scan_workspace_import_candidates', { path: workspace.path });
       const workspaceRows = await invoke('list_workspaces').catch(() => []);
       const candidates = normalizeImportCandidateGroups(scan.groups || [], scan.candidates || []);
+      const collections = normalizeImportCollections(scan.collections || []);
 
       setWorkspaces(normalizeWorkspaces(workspaceRows));
       setImportReview({
         open: true,
         candidates,
+        collections,
         errors: scan.errors || [],
         ...reviewMeta
       });
@@ -4205,7 +4418,12 @@ export default function App() {
       {importReview.open ? (
         <ImportReview
           groups={importReview.candidates}
+          collections={importReview.collections}
           errors={importReview.errors}
+          loading={importReview.loading}
+          scanError={importReview.scanError}
+          scanProgress={importReview.scanProgress}
+          onRetry={scanForImportCandidates}
           onClose={closeImportReview}
           onImport={importSelectedCandidates}
           onToggleAll={toggleAllImportCandidates}

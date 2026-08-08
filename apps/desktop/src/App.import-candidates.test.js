@@ -5,12 +5,16 @@ import {
   filterImportCandidateGroupsByQuery,
   filterImportCandidatesByQuery,
   filterWorkspaceSkillCandidates,
+  collectionChildTypeState,
+  collectionSkillCountLabel,
   importCandidateGroupLocationCount,
   importCandidateGroupTabs,
+  normalizeImportCollections,
   normalizeImportCandidateGroup,
   normalizeImportCandidateGroups,
   normalizeImportCandidate,
   selectedImportCandidates,
+  selectedImportCollectionRequests,
   selectImportCandidateVariant,
   toggleImportCandidateGroupSelection,
   updateImportCandidateGroupType,
@@ -60,6 +64,76 @@ import {
   shouldConfirmLocalImport,
   toggleImportCandidateSelection
 } from './importFlow.js';
+import {
+  browserImportScanOptions,
+  createImportScanRequestController,
+  importScanCommandArgs,
+  importScanProgressDetail,
+  importScanProgressLabel,
+  isImportScanRequestCurrent,
+  normalizeImportScanProgress
+} from './importScanProgress.js';
+
+test('normalizes staged import scan progress and exposes truthful labels', () => {
+  const progress = normalizeImportScanProgress({
+    phase: 'grouping Git repositories',
+    processed: 12,
+    total: 48,
+    unique_repositories: 3
+  });
+
+  assert.deepEqual(progress, {
+    phase: 'grouping Git repositories',
+    processed: 12,
+    total: 48,
+    uniqueRepositories: 3
+  });
+  assert.equal(importScanProgressLabel(progress), 'Grouping Git repositories');
+  assert.equal(importScanProgressDetail(progress), '12 of 48 · 3 repositories');
+});
+
+test('import scan request generation ignores stale progress and bounds browser QA delay', () => {
+  assert.equal(isImportScanRequestCurrent(4, 4), true);
+  assert.equal(isImportScanRequestCurrent(4, 5), false);
+  assert.deepEqual(browserImportScanOptions('?import-scan-delay-ms=9999&import-scan-error=1'), {
+    delayMs: 2000,
+    error: true
+  });
+  assert.deepEqual(browserImportScanOptions('?import-scan-delay-ms=-10'), {
+    delayMs: 0,
+    error: false
+  });
+});
+
+test('builds the camelCase Tauri scan argument required by the production command', () => {
+  const args = importScanCommandArgs(7);
+
+  assert.deepEqual(args, { scanId: 7 });
+  assert.equal(Object.hasOwn(args, 'scan_id'), false);
+});
+
+test('closing and reopening Import Review isolates late scan A from active scan B', () => {
+  const controller = createImportScanRequestController();
+  const scanA = controller.begin();
+
+  assert.equal(scanA, 1);
+  assert.equal(controller.begin(), null, 'duplicate active clicks do not start another scan');
+
+  controller.invalidate();
+  const scanB = controller.begin();
+
+  assert.equal(scanB, 3);
+  assert.equal(controller.isCurrent(scanA), false);
+  assert.equal(controller.isCurrent(scanB), true);
+
+  const applied = [];
+  if (controller.isCurrent(scanA)) applied.push('A');
+  if (controller.isCurrent(scanB)) applied.push('B');
+  assert.deepEqual(applied, ['B']);
+
+  controller.finish(scanB);
+  assert.equal(controller.begin(), 4);
+});
 
 test('normalizes backend is_selected false without selecting importable candidate', () => {
   const candidate = normalizeImportCandidate({
@@ -303,6 +377,186 @@ test('group search tabs and select-all count one skill while matching every loca
   assert.deepEqual(filterImportCandidateGroups(groups, 'system').map((group) => group.name), ['system-skill']);
   assert.deepEqual(filterImportCandidateGroupsByQuery(groups, 'cursor skills').map((group) => group.name), ['demo']);
   assert.deepEqual(toggleImportCandidateGroupSelection(groups).map((group) => group.isSelected), [true, false]);
+});
+
+test('normalizes Git-backed collection children and submits one selected child request', () => {
+  const collections = normalizeImportCollections([{
+    id: 'collection-demo',
+    preview_id: 'preview-demo',
+    display_name: 'skills-repo',
+    canonical_worktree_root: '/Users/example/skills-repo',
+    reviewed_head_sha: 'abcdef123456',
+    children: [{
+      id: 'child-demo',
+      group_id: 'skill-demo',
+      variant_id: 'variant-demo',
+      name: 'demo',
+      relative_path: 'skills/demo',
+      source_path: '/Users/example/skills-repo/skills/demo',
+      import_status: 'importable',
+      suggested_types: ['user'],
+      selected_type: 'user',
+      is_selected: true,
+      locations: [{ source_path: '/Users/example/skills-repo/skills/demo' }]
+    }]
+  }]);
+  const groups = normalizeImportCandidateGroups([{
+    id: 'skill-demo',
+    name: 'demo',
+    selected_variant_id: 'variant-demo',
+    variants: [{
+      id: 'variant-demo',
+      candidate: { name: 'demo', source_path: '/Users/example/skills-repo/skills/demo', import_status: 'importable', is_selected: true },
+      selected_type: 'user',
+      locations: [{ source_path: '/Users/example/skills-repo/skills/demo' }]
+    }]
+  }]);
+
+  const requests = selectedImportCollectionRequests(groups, collections);
+  assert.deepEqual(requests, [{
+    collectionId: 'collection-demo',
+    worktreeRoot: '/Users/example/skills-repo',
+    previewId: 'preview-demo',
+    selections: [{
+      relativePath: 'skills/demo',
+      groupId: 'skill-demo',
+      variantId: 'variant-demo',
+      skillType: 'user'
+    }]
+  }]);
+});
+
+test('installed-source collections stay on per-skill apply and suppress imported type review', () => {
+  const collections = normalizeImportCollections([{
+    id: 'installed-source-dbs',
+    source_kind: 'installed_source',
+    display_name: 'dontbesilent2025/dbskill',
+    origin_url: 'https://github.com/dontbesilent2025/dbskill',
+    children: [{
+      id: 'child-imported',
+      group_id: 'skill-imported',
+      variant_id: 'variant-imported',
+      name: 'git-merge-to-main',
+      relative_path: 'skills/git-merge-to-main',
+      source_path: '/Users/example/.agents/skills/git-merge-to-main',
+      import_status: 'imported',
+      requires_type_review: true,
+      selected_type: 'user',
+      locations: [{ source_path: '/Users/example/.agents/skills/git-merge-to-main' }]
+    }]
+  }]);
+
+  assert.equal(collections[0].sourceKind, 'installed_source');
+  assert.equal(collections[0].canonicalWorktreeRoot, '');
+  assert.equal(collections[0].children[0].requiresTypeReview, false);
+  assert.equal(collections[0].children[0].selectedType, 'user');
+  assert.deepEqual(selectedImportCollectionRequests([], collections), []);
+
+  const importedState = collectionChildTypeState(
+    normalizeImportCandidateGroup({
+      id: 'skill-imported',
+      selected_variant_id: 'variant-imported',
+      variants: [{
+        id: 'variant-imported',
+        candidate: {
+          name: 'git-merge-to-main',
+          import_status: 'imported',
+          is_selected: false
+        },
+        selected_type: 'user',
+        requires_type_review: true
+      }]
+    }),
+    collections[0].children[0]
+  );
+  assert.equal(importedState.canClassify, false);
+  assert.equal(importedState.canSelect, false);
+  assert.equal(importedState.needsTypeChoice, false);
+  assert.equal(importedState.readOnlyLabel, 'Managed as User');
+
+  const group = normalizeImportCandidateGroup({
+    id: 'skill-importable',
+    name: 'dbs-action',
+    selected_variant_id: 'variant-importable',
+    variants: [{
+      id: 'variant-importable',
+      candidate: {
+        name: 'dbs-action',
+        source_path: '/Users/example/.agents/skills/dbs-action',
+        import_status: 'importable',
+        is_selected: true
+      },
+      selected_type: 'user',
+      locations: [{ source_path: '/Users/example/.agents/skills/dbs-action' }]
+    }]
+  });
+  const installedGroup = normalizeImportCollections([{
+    id: 'installed-source-dbs',
+    source_kind: 'installed_source',
+    children: [{ group_id: 'skill-importable', variant_id: 'variant-importable' }]
+  }]);
+  assert.equal(selectedImportCandidates([group], installedGroup).length, 1);
+});
+
+test('collection child type state keeps mixed importable review actionable and blocks system/conflict rows', () => {
+  const mixedGroup = normalizeImportCandidateGroup({
+    id: 'skill-mixed',
+    selected_variant_id: 'variant-mixed',
+    variants: [{
+      id: 'variant-mixed',
+      candidate: {
+        name: 'mixed-skill',
+        import_status: 'importable',
+        is_selected: true
+      },
+      selected_type: null,
+      requires_type_review: true
+    }]
+  });
+  const mixedChild = {
+    groupId: 'skill-mixed',
+    variantId: 'variant-mixed',
+    importStatus: 'importable',
+    requiresTypeReview: true,
+    selectedType: null,
+    conflict: null
+  };
+  const mixedState = collectionChildTypeState(mixedGroup, mixedChild);
+  assert.equal(mixedState.canClassify, true);
+  assert.equal(mixedState.canSelect, false);
+  assert.equal(mixedState.needsTypeChoice, true);
+
+  const resolvedState = collectionChildTypeState(mixedGroup, {
+    ...mixedChild,
+    selectedType: 'remote'
+  });
+  assert.equal(resolvedState.canSelect, true);
+  assert.equal(resolvedState.needsTypeChoice, false);
+
+  for (const status of ['system', 'imported']) {
+    const state = collectionChildTypeState(mixedGroup, {
+      ...mixedChild,
+      importStatus: status,
+      selectedType: status === 'imported' ? 'remote' : null
+    });
+    assert.equal(state.canClassify, false);
+    assert.equal(state.canSelect, false);
+    assert.equal(state.needsTypeChoice, false);
+  }
+
+  const conflictState = collectionChildTypeState(mixedGroup, {
+    ...mixedChild,
+    conflict: 'duplicate managed skill'
+  });
+  assert.equal(conflictState.canClassify, false);
+  assert.equal(conflictState.needsTypeChoice, false);
+  assert.equal(conflictState.readOnlyLabel, 'Resolve conflict before import');
+});
+
+test('collection skill counts use singular grammar for singleton cards', () => {
+  assert.equal(collectionSkillCountLabel(1), '1 skill');
+  assert.equal(collectionSkillCountLabel(2), '2 skills');
+  assert.equal(collectionSkillCountLabel(0), '0 skills');
 });
 
 test('builds workspace skill tabs and separates unimported, imported, and system skills', () => {

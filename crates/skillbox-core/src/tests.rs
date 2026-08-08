@@ -170,7 +170,8 @@ fn database_initialization_records_ordered_schema_migrations() {
             (4, "skill_usage_ranking_indexes".to_string()),
             (5, "canonical_usage_agent_ids".to_string()),
             (6, "runtime_profiles".to_string()),
-            (7, "usage_evidence_classification".to_string())
+            (7, "usage_evidence_classification".to_string()),
+            (8, "skill_collections".to_string())
         ]
     );
     assert_eq!(
@@ -180,6 +181,12 @@ fn database_initialization_records_ordered_schema_migrations() {
     assert!(table_column_names(&connection, "skill_user_metadata")
         .unwrap()
         .contains(&"tags_json".to_string()));
+    assert!(table_column_names(&connection, "skill_collections")
+        .unwrap()
+        .contains(&"canonical_worktree_root".to_string()));
+    assert!(table_column_names(&connection, "skill_collection_members")
+        .unwrap()
+        .contains(&"relative_path".to_string()));
     for column in ["profile_id", "root_key", "format"] {
         assert!(table_column_names(&connection, "workspaces")
             .unwrap()
@@ -200,6 +207,39 @@ fn database_initialization_records_ordered_schema_migrations() {
             .unwrap();
         assert!(exists, "missing ranking index {index}");
     }
+}
+
+#[test]
+fn schema_v8_collection_migration_is_idempotent_for_existing_database() {
+    let root = temp_dir("skill-collections-v8-migration");
+    let managed_root = root.join("SkillBox");
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    {
+        let connection = rusqlite::Connection::open(&paths.database_path).unwrap();
+        connection
+            .execute_batch(
+                "
+                DROP TABLE skill_collection_members;
+                DROP TABLE skill_collections;
+                DELETE FROM schema_migrations WHERE version = 8;
+                ",
+            )
+            .unwrap();
+    }
+
+    ensure_managed_layout(&managed_root).unwrap();
+    ensure_managed_layout(&managed_root).unwrap();
+    let connection = rusqlite::Connection::open(&paths.database_path).unwrap();
+    assert_eq!(
+        current_database_schema_version(&connection).unwrap(),
+        LATEST_DATABASE_SCHEMA_VERSION
+    );
+    assert!(table_column_names(&connection, "skill_collections")
+        .unwrap()
+        .contains(&"reviewed_head_sha".to_string()));
+    assert!(table_column_names(&connection, "skill_collection_members")
+        .unwrap()
+        .contains(&"managed_skill_name".to_string()));
 }
 
 #[test]
@@ -10102,6 +10142,470 @@ fn scan_import_candidates_groups_mixed_type_suggestions_without_splitting_conten
 }
 
 #[test]
+fn scan_import_candidates_groups_git_repository_children_and_keeps_external_copies_unlinked() {
+    let root = temp_dir("candidate-git-collection");
+    let repository = root.join("skill-collection");
+    let project = root.join("project");
+    let outside_root = root.join("outside/.agents/skills");
+    let managed_root = root.join("SkillBox");
+    fs::create_dir_all(&repository).unwrap();
+    run_git(&repository, &["init", "-b", "main"]);
+    make_skill(&repository.join("skills/alpha"), "alpha", "Alpha skill");
+    make_skill(&repository.join("skills/beta"), "beta", "Beta skill");
+    let nested_repository = repository.join("nested-repository");
+    fs::create_dir_all(&nested_repository).unwrap();
+    run_git(&nested_repository, &["init", "-b", "main"]);
+    make_skill(
+        &nested_repository.join("skills/nested"),
+        "nested",
+        "Nested skill",
+    );
+    run_git(&nested_repository, &["add", "."]);
+    run_git(
+        &nested_repository,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Add nested skill",
+        ],
+    );
+    fs::write(repository.join("README.md"), "Skill collection\n").unwrap();
+    run_git(&repository, &["add", "."]);
+    run_git(
+        &repository,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Add collection skills",
+        ],
+    );
+
+    make_skill(&outside_root.join("alpha"), "alpha", "Alpha skill");
+    let project_runtime_root = project.join(".agents/skills");
+    fs::create_dir_all(&project_runtime_root).unwrap();
+    symlink_dir(
+        &repository.join("skills/alpha"),
+        &project_runtime_root.join("alpha"),
+    )
+    .unwrap();
+
+    let scan = scan_import_candidates(
+        &[
+            repository.clone(),
+            project_runtime_root,
+            outside_root.clone(),
+        ],
+        &managed_root,
+    )
+    .unwrap();
+    assert_eq!(scan.collections.len(), 2);
+    let collection = scan
+        .collections
+        .iter()
+        .find(|collection| {
+            collection.canonical_worktree_root == fs::canonicalize(&repository).unwrap()
+        })
+        .unwrap();
+    assert_eq!(
+        collection.canonical_worktree_root,
+        fs::canonicalize(&repository).unwrap()
+    );
+    assert_eq!(collection.children.len(), 2);
+
+    let alpha = collection
+        .children
+        .iter()
+        .find(|child| child.name == "alpha")
+        .unwrap();
+    assert_eq!(alpha.relative_path, "skills/alpha");
+    assert_eq!(alpha.locations.len(), 2);
+    assert_eq!(alpha.unlinked_locations.len(), 1);
+    assert_eq!(
+        alpha.unlinked_locations[0].source_path,
+        outside_root.join("alpha")
+    );
+    assert!(collection
+        .children
+        .iter()
+        .all(|child| child.relative_path.starts_with("skills/")));
+    let nested = scan
+        .collections
+        .iter()
+        .find(|collection| collection.display_name == "nested-repository")
+        .unwrap();
+    assert_eq!(nested.children.len(), 1);
+    assert_eq!(nested.children[0].relative_path, "skills/nested");
+}
+
+#[test]
+fn scan_import_candidates_reuses_repository_and_snapshot_work_for_duplicate_locations() {
+    let root = temp_dir("candidate-git-collection-cache");
+    let repository = root.join("skill-collection");
+    let runtime_root = root.join("project/.agents/skills");
+    let managed_root = root.join("SkillBox");
+    let skill_count = 48;
+    fs::create_dir_all(&repository).unwrap();
+    run_git(&repository, &["init", "-b", "main"]);
+    for index in 0..skill_count {
+        let name = format!("skill-{index:02}");
+        make_skill(
+            &repository.join("skills").join(&name),
+            &name,
+            "Cached collection skill",
+        );
+    }
+    run_git(&repository, &["add", "."]);
+    run_git(
+        &repository,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Add cached collection skills",
+        ],
+    );
+    fs::create_dir_all(&runtime_root).unwrap();
+    for index in 0..skill_count {
+        let name = format!("skill-{index:02}");
+        symlink_dir(
+            &repository.join("skills").join(&name),
+            &runtime_root.join(&name),
+        )
+        .unwrap();
+    }
+
+    let scan = scan_import_candidates(&[repository, runtime_root], &managed_root).unwrap();
+    assert_eq!(scan.collections.len(), 1);
+    assert_eq!(scan.diagnostics.unique_repository_count, 1);
+    assert_eq!(scan.diagnostics.repository_inspections, 1);
+    assert!(scan.diagnostics.repository_cache_hits >= skill_count);
+    assert!(scan.diagnostics.snapshot_hash_computations <= skill_count);
+    assert!(scan.diagnostics.snapshot_cache_hits >= skill_count);
+}
+
+#[test]
+fn scan_import_candidates_groups_validated_installed_source_lockfile_entries() {
+    let root = temp_dir("candidate-installed-source-lockfile");
+    let agents_root = root.join(".agents/skills");
+    let claude_root = root.join(".claude/skills");
+    let managed_root = root.join("SkillBox");
+    let source_url = "https://github.com/dontbesilent2025/dbskill.git";
+    let names = (0..24)
+        .map(|index| format!("dbs-skill-{index:02}"))
+        .collect::<Vec<_>>();
+
+    for name in &names {
+        make_skill(&agents_root.join(name), name, "Installed source skill");
+        fs::create_dir_all(&claude_root).unwrap();
+        symlink_dir(&agents_root.join(name), &claude_root.join(name)).unwrap();
+    }
+    let skills = names
+        .iter()
+        .map(|name| {
+            (
+                name.clone(),
+                serde_json::json!({
+                    "source": "dontbesilent2025/dbskill",
+                    "sourceType": "github",
+                    "sourceUrl": source_url,
+                    "skillPath": format!("skills/{name}/SKILL.md"),
+                    "skillFolderHash": "stale-lock-hash"
+                }),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>();
+    fs::create_dir_all(root.join(".agents")).unwrap();
+    fs::write(
+        root.join(".agents/.skill-lock.json"),
+        serde_json::to_vec(&serde_json::json!({ "version": 3, "skills": skills })).unwrap(),
+    )
+    .unwrap();
+
+    let scan = scan_import_candidates(&[agents_root, claude_root], &managed_root).unwrap();
+    assert_eq!(scan.collections.len(), 1);
+    let collection = &scan.collections[0];
+    assert_eq!(
+        collection.source_kind,
+        ImportCandidateCollectionSourceKind::InstalledSource
+    );
+    assert_eq!(collection.display_name, "dontbesilent2025/dbskill");
+    assert_eq!(
+        collection.origin_url.as_deref(),
+        Some("https://github.com/dontbesilent2025/dbskill")
+    );
+    assert!(collection.canonical_worktree_root.as_os_str().is_empty());
+    assert!(collection.reviewed_head_sha.is_none());
+    assert_eq!(collection.children.len(), names.len());
+    assert_eq!(scan.standalone_groups.len(), 0);
+    assert_eq!(scan.diagnostics.installed_source_lockfiles_scanned, 1);
+    assert_eq!(
+        scan.diagnostics.installed_source_lockfile_entries,
+        names.len()
+    );
+    assert_eq!(
+        scan.diagnostics.installed_source_lockfile_matches,
+        names.len()
+    );
+    assert_eq!(scan.diagnostics.installed_source_collections, 1);
+    assert!(collection
+        .children
+        .iter()
+        .all(|child| !child.snapshot_hash.is_empty()));
+    assert!(collection
+        .children
+        .iter()
+        .all(|child| child.locations.len() == 2));
+}
+
+#[test]
+fn scan_import_candidates_keeps_single_installed_source_match_standalone() {
+    let root = temp_dir("candidate-installed-source-lockfile-singleton");
+    let agents_root = root.join(".agents/skills");
+    let managed_root = root.join("SkillBox");
+    make_skill(
+        &agents_root.join("standalone-source-skill"),
+        "standalone-source-skill",
+        "Single installed source skill",
+    );
+    fs::create_dir_all(root.join(".agents")).unwrap();
+    fs::write(
+        root.join(".agents/.skill-lock.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "version": 3,
+            "skills": {
+                "standalone-source-skill": {
+                    "sourceType": "github",
+                    "sourceUrl": "https://github.com/acme/skills.git",
+                    "skillPath": "skills/standalone-source-skill/SKILL.md",
+                    "skillFolderHash": "stale"
+                }
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let scan = scan_import_candidates(std::slice::from_ref(&agents_root), &managed_root).unwrap();
+
+    assert!(scan.collections.is_empty());
+    assert_eq!(scan.standalone_groups.len(), 1);
+    assert_eq!(scan.diagnostics.installed_source_lockfile_matches, 1);
+    assert_eq!(scan.diagnostics.installed_source_collections, 0);
+}
+
+#[test]
+fn scan_import_candidates_keeps_unsafe_lockfile_entries_standalone_and_live_git_wins() {
+    let root = temp_dir("candidate-installed-source-safety");
+    let agents_root = root.join(".agents/skills");
+    let managed_root = root.join("SkillBox");
+    make_skill(&agents_root.join("safe-skill"), "safe-skill", "Safe skill");
+    make_skill(
+        &agents_root.join("unsafe-skill"),
+        "unsafe-skill",
+        "Unsafe skill",
+    );
+    fs::create_dir_all(root.join(".agents")).unwrap();
+    fs::write(
+        root.join(".agents/.skill-lock.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "version": 3,
+            "skills": {
+                "safe-skill": {
+                    "sourceType": "github",
+                    "sourceUrl": "https://github.com/acme/safe.git?token=secret",
+                    "skillPath": "skills/safe-skill/SKILL.md",
+                    "skillFolderHash": "stale"
+                },
+                "unsafe-skill": {
+                    "sourceType": "github",
+                    "sourceUrl": "https://github.com/acme/safe.git",
+                    "skillPath": "skills/other/SKILL.md",
+                    "skillFolderHash": "stale"
+                }
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let scan = scan_import_candidates(std::slice::from_ref(&agents_root), &managed_root).unwrap();
+    assert!(scan.collections.is_empty());
+    assert_eq!(scan.standalone_groups.len(), 2);
+    assert_eq!(scan.diagnostics.installed_source_lockfile_matches, 0);
+    assert_eq!(scan.diagnostics.installed_source_invalid_entries, 2);
+
+    let repository = root.join("live-repository");
+    let live_root = repository.join(".agents/skills");
+    make_skill(
+        &live_root.join("live-skill"),
+        "live-skill",
+        "Live Git skill",
+    );
+    run_git(&repository, &["init", "-b", "main"]);
+    run_git(&repository, &["add", "."]);
+    run_git(
+        &repository,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Live collection",
+        ],
+    );
+    fs::create_dir_all(repository.join(".agents")).unwrap();
+    fs::write(
+        repository.join(".agents/.skill-lock.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "version": 3,
+            "skills": {
+                "live-skill": {
+                    "sourceType": "github",
+                    "sourceUrl": "https://github.com/acme/live.git",
+                    "skillPath": "skills/live-skill/SKILL.md"
+                }
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let scan = scan_import_candidates(std::slice::from_ref(&live_root), &managed_root).unwrap();
+    assert_eq!(scan.collections.len(), 1);
+    assert_eq!(
+        scan.collections[0].source_kind,
+        ImportCandidateCollectionSourceKind::GitWorktree
+    );
+    assert_eq!(scan.diagnostics.installed_source_collections, 0);
+}
+
+#[test]
+fn scan_import_candidates_ignores_malformed_or_oversized_lockfiles_without_hiding_candidates() {
+    let root = temp_dir("candidate-installed-source-lockfile-bounds");
+    let agents_root = root.join(".agents/skills");
+    let managed_root = root.join("SkillBox");
+    make_skill(
+        &agents_root.join("standalone"),
+        "standalone",
+        "Standalone skill",
+    );
+    fs::create_dir_all(root.join(".agents")).unwrap();
+
+    fs::write(root.join(".agents/.skill-lock.json"), b"{not-json").unwrap();
+    let malformed =
+        scan_import_candidates(std::slice::from_ref(&agents_root), &managed_root).unwrap();
+    assert!(malformed.collections.is_empty());
+    assert_eq!(malformed.standalone_groups.len(), 1);
+    assert_eq!(malformed.diagnostics.installed_source_lockfiles_scanned, 1);
+    assert_eq!(malformed.diagnostics.installed_source_lockfile_errors, 1);
+
+    fs::write(
+        root.join(".agents/.skill-lock.json"),
+        vec![b' '; 5 * 1024 * 1024 + 1],
+    )
+    .unwrap();
+    let oversized =
+        scan_import_candidates(std::slice::from_ref(&agents_root), &managed_root).unwrap();
+    assert!(oversized.collections.is_empty());
+    assert_eq!(oversized.standalone_groups.len(), 1);
+    assert_eq!(oversized.diagnostics.installed_source_lockfiles_scanned, 1);
+    assert_eq!(oversized.diagnostics.installed_source_lockfile_errors, 1);
+}
+
+#[test]
+fn git_collection_apply_persists_selected_children_and_rejects_stale_head_before_writes() {
+    let root = temp_dir("git-collection-apply");
+    let repository = root.join("skill-collection");
+    let managed_root = root.join("SkillBox");
+    fs::create_dir_all(&repository).unwrap();
+    run_git(&repository, &["init", "-b", "main"]);
+    make_skill(&repository.join("skills/alpha"), "alpha", "Alpha skill");
+    run_git(&repository, &["add", "."]);
+    run_git(
+        &repository,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Initial collection",
+        ],
+    );
+
+    let scan = scan_import_candidates(std::slice::from_ref(&repository), &managed_root).unwrap();
+    let preview = scan.collections.into_iter().next().unwrap();
+    let child = preview.children[0].clone();
+    let request = ImportCollectionApplyRequest {
+        collection_id: preview.id.clone(),
+        worktree_root: repository.clone(),
+        preview_id: preview.preview_id.clone(),
+        selections: vec![ImportCollectionChildSelection {
+            relative_path: child.relative_path.clone(),
+            group_id: child.group_id.clone(),
+            variant_id: child.variant_id.clone(),
+            skill_type: SkillKind::User,
+        }],
+        actor: "test".to_string(),
+    };
+
+    let applied = apply_import_collection(request.clone(), &managed_root).unwrap();
+    assert_eq!(applied.imported.len(), 1);
+    assert!(managed_root.join("user-skills/alpha/SKILL.md").is_file());
+    assert!(repository.join("skills/alpha").is_dir());
+    let stored = list_skill_collections(&managed_root).unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].members.len(), 1);
+    assert_eq!(stored[0].members[0].relative_path, "skills/alpha");
+
+    fs::write(
+        repository.join("skills/alpha/SKILL.md"),
+        "---\nname: alpha\ndescription: Changed\n---\n\n# Changed\n",
+    )
+    .unwrap();
+    run_git(&repository, &["add", "."]);
+    run_git(
+        &repository,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Change alpha",
+        ],
+    );
+
+    let error = apply_import_collection(request, &managed_root).unwrap_err();
+    assert!(error.contains("stale"));
+    assert_eq!(
+        fs::read_to_string(managed_root.join("user-skills/alpha/SKILL.md")).unwrap(),
+        "---\nname: alpha\ndescription: \"Alpha skill\"\n---\n\n# alpha\n\n"
+    );
+    assert_eq!(
+        list_skill_collections(&managed_root).unwrap()[0]
+            .members
+            .len(),
+        1
+    );
+}
+
+#[test]
 fn scan_import_candidates_keeps_different_executable_bits_separate() {
     let root = temp_dir("candidate-different-modes");
     let first_root = root.join("first").join(".agents").join("skills");
@@ -10983,6 +11487,18 @@ fn scan_import_candidates_keeps_distinct_imported_targets_separate() {
     assert_eq!(candidates.groups.len(), 1);
     assert_eq!(candidates.groups[0].variants.len(), 2);
     assert!(candidates.groups[0].selected_variant_id.is_none());
+    let user_candidate = candidates
+        .candidates
+        .iter()
+        .find(|candidate| is_under_path(&candidate.real_path, &user_managed))
+        .unwrap();
+    let remote_candidate = candidates
+        .candidates
+        .iter()
+        .find(|candidate| is_under_path(&candidate.real_path, &remote_version))
+        .unwrap();
+    assert_eq!(user_candidate.suggested_type, SkillKind::User);
+    assert_eq!(remote_candidate.suggested_type, SkillKind::Remote);
 }
 
 #[test]

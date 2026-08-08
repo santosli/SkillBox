@@ -107,6 +107,106 @@ export function normalizeImportCandidateGroups(groups = [], candidates = []) {
   });
 }
 
+export function normalizeImportCollections(collections = []) {
+  return collections.map((collection) => ({
+    ...collection,
+    id: collection.id,
+    sourceKind: collection.sourceKind || collection.source_kind || 'git_worktree',
+    previewId: collection.previewId || collection.preview_id || '',
+    displayName: collection.displayName || collection.display_name || 'Git repository',
+    canonicalWorktreeRoot: collection.canonicalWorktreeRoot || collection.canonical_worktree_root || '',
+    canonicalRepositoryId: collection.canonicalRepositoryId || collection.canonical_repository_id || '',
+    originUrl: collection.originUrl || collection.origin_url || '',
+    branch: collection.branch || '',
+    detached: Boolean(collection.detached),
+    reviewedHeadSha: collection.reviewedHeadSha || collection.reviewed_head_sha || '',
+    children: (collection.children || []).map((child) => ({
+      ...child,
+      id: child.id,
+      groupId: child.groupId || child.group_id || '',
+      variantId: child.variantId || child.variant_id || '',
+      name: child.name || '',
+      relativePath: child.relativePath || child.relative_path || '',
+      sourcePath: child.sourcePath || child.source_path || '',
+      realPath: child.realPath || child.real_path || '',
+      snapshotHash: child.snapshotHash || child.snapshot_hash || '',
+      contentHash: child.contentHash || child.content_hash || '',
+      importStatus: child.importStatus || child.import_status || 'importable',
+      suggestedTypes: child.suggestedTypes || child.suggested_types || [],
+      requiresTypeReview: (child.importStatus || child.import_status || 'importable') === 'importable'
+        && !child.conflict
+        && Boolean(child.requiresTypeReview ?? child.requires_type_review),
+      selectedType: child.selectedType ?? child.selected_type ?? null,
+      isSelected: Boolean(child.isSelected ?? child.is_selected),
+      locations: (child.locations || []).map(normalizeImportCandidateLocation),
+      unlinkedLocations: (child.unlinkedLocations || child.unlinked_locations || [])
+        .map(normalizeImportCandidateLocation)
+    })),
+    errors: collection.errors || []
+  }));
+}
+
+export function importCollectionGroupIds(collections = [], { liveOnly = false } = {}) {
+  return new Set(
+    collections
+      .filter((collection) => !liveOnly || collection.sourceKind === 'git_worktree')
+      .flatMap((collection) => collection.children.map((child) => child.groupId))
+  );
+}
+
+export function filterImportCollectionsByQuery(collections = [], query = '') {
+  const tokens = String(query).trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return collections;
+  return collections.filter((collection) => {
+    const searchable = [
+      collection.displayName,
+      collection.canonicalWorktreeRoot,
+      collection.canonicalRepositoryId,
+      collection.originUrl,
+      collection.branch,
+      collection.reviewedHeadSha,
+      ...collection.children.flatMap((child) => [
+        child.name,
+        child.relativePath,
+        child.sourcePath,
+        child.realPath,
+        child.importStatus,
+        child.conflict,
+        ...child.locations.flatMap((location) => [location.sourcePath, location.realPath]),
+        ...child.unlinkedLocations.flatMap((location) => [location.sourcePath, location.realPath])
+      ])
+    ].filter(Boolean).join(' ').toLowerCase();
+    return tokens.every((token) => searchable.includes(token));
+  });
+}
+
+export function selectedImportCollectionRequests(groups = [], collections = []) {
+  return collections.filter((collection) => collection.sourceKind === 'git_worktree').map((collection) => {
+    const selections = collection.children
+      .map((child) => {
+        const group = groups.find((candidateGroup) => candidateGroup.id === child.groupId);
+        if (!group || !group.isSelected || group.selectedVariantId !== child.variantId) return null;
+        const variant = group.variants.find((candidateVariant) => candidateVariant.id === child.variantId);
+        if (!variant || !variant.selectedType || variant.candidate.conflict) return null;
+        return {
+          relativePath: child.relativePath,
+          groupId: child.groupId,
+          variantId: child.variantId,
+          skillType: variant.selectedType
+        };
+      })
+      .filter(Boolean);
+    return selections.length === 0
+      ? null
+      : {
+          collectionId: collection.id,
+          worktreeRoot: collection.canonicalWorktreeRoot,
+          previewId: collection.previewId,
+          selections
+        };
+  }).filter(Boolean);
+}
+
 export function selectedImportCandidate(group) {
   const variant = selectedImportCandidateVariant(group);
   return variant
@@ -125,6 +225,45 @@ export function canClassifyImportCandidateGroup(group) {
     && variant.candidate.importStatus === 'importable'
     && !variant.candidate.conflict
   );
+}
+
+export function collectionChildTypeState(group, child) {
+  const variant = group.variants.find((candidateVariant) => candidateVariant.id === child.variantId);
+  const selectedVariant = group.selectedVariantId === child.variantId;
+  const importableChild = child.importStatus === 'importable' && !child.conflict;
+  const canClassify = importableChild
+    && selectedVariant
+    && canClassifyImportCandidateGroup({
+      ...group,
+      selectedVariantId: child.variantId
+    });
+  const childType = child.selectedType || (selectedVariant ? variant?.selectedType : null);
+  const canSelect = canClassify && Boolean(childType);
+  const needsTypeChoice = canClassify && child.requiresTypeReview && !childType;
+  const readOnlyLabel = child.importStatus === 'imported' && childType
+    ? `Managed as ${childType === 'remote' ? 'Remote' : 'User'}`
+    : child.conflict
+      ? 'Resolve conflict before import'
+      : child.importStatus === 'system'
+        ? 'System skill'
+        : childType
+          ? `${childType === 'remote' ? 'Remote' : 'User'} suggestion`
+          : 'Choose a variant first';
+
+  return {
+    childType,
+    canClassify,
+    canSelect,
+    importableChild,
+    needsTypeChoice,
+    readOnlyLabel,
+    selectedVariant
+  };
+}
+
+export function collectionSkillCountLabel(count) {
+  const normalized = Math.max(0, Math.trunc(Number(count) || 0));
+  return `${normalized} ${normalized === 1 ? 'skill' : 'skills'}`;
 }
 
 export function isSelectableImportCandidateGroup(group) {
@@ -178,9 +317,14 @@ export function toggleImportCandidateGroupSelection(groups, targetGroups = group
     : group);
 }
 
-export function selectedImportCandidates(groups = []) {
+export function selectedImportCandidates(groups = [], collections = []) {
+  const liveCollectionGroupIds = importCollectionGroupIds(collections, { liveOnly: true });
   return groups
-    .filter((group) => group.isSelected && isSelectableImportCandidateGroup(group))
+    .filter((group) => (
+      group.isSelected
+      && isSelectableImportCandidateGroup(group)
+      && !liveCollectionGroupIds.has(group.id)
+    ))
     .map(selectedImportCandidate);
 }
 

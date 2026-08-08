@@ -29,9 +29,11 @@ A 30-second overview of SkillBox: runtime-aware workspaces, review-before-write 
 - **One managed store for supported runtimes.** Keep durable skill state in `~/.skillbox`, then deploy it into supported global or project-local `SKILL.md` roots.
 - **Review the whole lifecycle.** Inspect imports, deployments, type changes, source bindings, updates, rollbacks, and deletion before SkillBox changes managed or runtime files.
 - **Versioned remote skills.** Check GitHub sources while SkillBox is open, preview all-file diffs, apply updates, and roll back to immutable versions.
-- **Reviewed Git changes in both directions.** Inspect local user-skill diffs before commit/push. The Unreleased v0.7 work adds an explicit Check remote -> Review incoming changes -> Apply fast-forward flow for safe inbound updates; diverged history remains a normal Git conflict to resolve outside SkillBox.
+- **Reviewed Git changes in both directions.** Inspect local user-skill diffs before commit/push. The shipped v0.7 line adds an explicit Check remote -> Review incoming changes -> Apply fast-forward flow for safe inbound updates; diverged history remains a normal Git conflict to resolve outside SkillBox.
 - **Evidence-aware Calls, references, and operation history.** Count locally confirmed executions plus defensible structured invocations as Calls, keep lower-signal history references separate, and explain coverage without storing full chat transcripts.
 - **Safe storage and deployment defaults.** Use ordered SQLite migrations, recovery backups, integrity checks, and ownership-checked symlinks instead of silently overwriting runtime content.
+- **Git-backed local collections.** Import Review groups skills from the same local Git worktree into one repository card while keeping each child independently selectable, deployable, and usage-tracked. GitHub multi-skill fetch and collection-level update/rollback remain future work.
+- **Installed-source provenance.** Copied skills with valid v3 installer lockfile entries can appear under one normalized GitHub source collection even without a local Git worktree. This is display-only provenance: it does not invent a branch/HEAD or enable updates, and each child keeps the normal reviewed import path.
 - **Compatibility before deployment.** Rust-owned runtime profiles identify each workspace and report preserved frontmatter warnings or hard blockers before a confirmed symlink deployment.
 - **Signed macOS distribution.** Install a notarized DMG or Homebrew cask and apply signed app updates only after confirmation.
 
@@ -97,12 +99,13 @@ Longer-term support for native Claude, OpenClaw, Cursor, Claude Code, Copilot, a
 ## Features
 
 - Scan and register supported global or project-local `SKILL.md` workspaces. In the packaged macOS app, use the native single-directory picker or enter a path manually to choose a project or existing skills folder; SkillBox immediately runs a read-only preview, and can explicitly create exactly one selected `.agents/skills`, `.codex/skills`, `.claude/skills`, or `.cursor/skills` root before registration. Cancelling the picker changes nothing, and SkillBox never creates all runtime roots automatically.
-- Review user, remote, and system import candidates before copying anything; see one card per skill, inspect every location and differing variant, and import exactly one reviewed source without changing equivalent copies.
+- Review user, remote, and system import candidates before copying anything; the review shell opens immediately with staged scan progress, then shows one card per skill, every location and differing variant, and exactly one reviewed source without changing equivalent copies.
 - Install GitHub-backed skills through a preview/apply flow and bind discovered remote source candidates without replacing the active version.
 - Check remote sources, preview all-file diffs, apply updates, and roll back to immutable versions.
 - Preview runtime-profile and frontmatter compatibility before deploying to an individual workspace. Blocked targets cannot be selected, warnings require confirmation, and apply revalidates stale skill/target/profile state before creating an ownership-checked symlink.
 - Delete a skill from the managed store and all associated workspaces after a name-confirmed preview, while retaining a recovery backup and workspace registrations.
-- Review user-skill Git diffs, create selected-file Conventional Commits, and optionally push. The Unreleased v0.7 flow handles incoming `origin/main` changes through separate preview-confirmed fast-forward steps; SkillBox never auto-merges, rebases, resets, stashes, or resolves conflicts.
+- Review user-skill Git diffs, create selected-file Conventional Commits, and optionally push. The v0.7 flow handles incoming `origin/main` changes through separate preview-confirmed fast-forward steps; SkillBox never auto-merges, rebases, resets, stashes, or resolves conflicts.
+- During local Import Review, Rust detects the nearest safe Git worktree and presents its `SKILL.md` children as one collection. Collection scans are read-only; applying selected children rechecks the reviewed worktree/HEAD and stores collection provenance after the import succeeds.
 - Search and filter the dashboard by type, update status, tag, or favorite; switch between grid and list views, with favorites and tags persisted in SQLite.
 - Record supported hooks and structured local-history evidence; browse Calls separately from History references, rank by confirmed plus defensible inferred Calls, and inspect aggregate-only coverage without storing full transcripts.
 - Apply ordered SQLite migrations with pre-migration backups and integrity checks; run Doctor diagnostics and explicitly clean up stale deployment records.
@@ -188,7 +191,7 @@ SkillBox is local-first and does not require a hosted account. The app may:
 - write managed copies and metadata under `~/.skillbox`;
 - create symlinks from runtime directories back to managed skills;
 - initialize and update Git metadata for `~/.skillbox/user-skills`;
-- in the Unreleased v0.7 flow, explicitly fetch and preview incoming `origin/main` changes, then fast-forward the shared user-skills repository only after confirmation;
+- in the v0.7 flow, explicitly fetch and preview incoming `origin/main` changes, then fast-forward the shared user-skills repository only after confirmation;
 - modify supported runtime hook config files when you explicitly inject hooks.
 
 SkillBox treats runtime folders, GitHub URLs, downloaded archives, and existing skills as untrusted input. It should not silently overwrite a non-symlink runtime target.
@@ -236,6 +239,7 @@ New core business logic should go into Rust crates. React should call structured
 - [Agent adapter ADR](docs/decisions/0004-support-multiple-agent-runtimes-through-adapters.md)
 - [Usage evidence ADR](docs/decisions/0005-usage-evidence-classification.md)
 - [Reviewed inbound Git ADR](docs/decisions/0006-review-inbound-user-skills-git-before-fast-forward.md)
+- [Git-backed Skill Collections ADR](docs/decisions/0007-git-backed-skill-collections.md)
 
 ## Development
 
