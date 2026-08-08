@@ -4,9 +4,9 @@ SkillBox is early-stage software. This roadmap describes the public direction,
 not a date-based commitment. Implementation details can change as the app gets
 more real-world use.
 
-## Current Focus: 0.7.x
+## Current Focus: 0.8.x
 
-SkillBox `v0.6.1` is shipped. The 0.6 line made `SKILL.md` deployment targets
+SkillBox `v0.7.1` is shipped. The 0.6 line made `SKILL.md` deployment targets
 explicit and portable without moving runtime knowledge into React:
 
 - a versioned Rust runtime-profile registry for Agents, Codex, Claude Code,
@@ -16,23 +16,19 @@ explicit and portable without moving runtime knowledge into React:
 - stale-preview protection and explicit confirmation before runtime writes.
 
 The runtime-profile and evidence-aware usage work passed release qualification
-through the signed and notarized `v0.6.1` distribution. The current release
-identity and distribution invariants remain documented in `docs/release.md`.
+through the signed and notarized `v0.6.1` distribution, and the v0.7 line added
+reviewed inbound Git sync plus the History query/layout patch in the signed
+and notarized `v0.7.1` distribution. The current release identity and
+distribution invariants remain documented in `docs/release.md`.
 
-Reviewed inbound synchronization for the shared user-skills Git repository is
-implemented on `main`, but it is not part of the shipped `v0.6.1` release.
-Copy-snapshot deployment and broader recovery work remain planned for the 0.7
-line. Git-backed Skill Collections are the next milestone, targeted for
+Copy-snapshot deployment and broader recovery hardening remain planned product
+work. Git-backed Skill Collections are the active next milestone, targeted for
 `v0.8.0`.
 
 ## Near-Term Priorities
 
 These are the next areas where focused contributions are most useful:
 
-- **Reviewed inbound sync (implemented, unreleased).** Report worktree state
-  separately from synced/ahead/behind/diverged/remote-only relation, then allow
-  repository-wide, preview-confirmed `origin/main` fast-forwards without
-  automatically merging conflicts.
 - **Git-backed Skill Collections (planned for v0.8.0).** Treat one canonical Git
   repository/worktree and reviewed SHA as a collection source while keeping
   child `SKILL.md` directories independently selectable and deployable. Track
@@ -65,7 +61,7 @@ verified; completing a feature list alone does not qualify a release.
 | **0.4 — Reliability foundation** | Versioned database migrations, persisted user metadata, Doctor diagnostics, and durable mutation auditing. | Upgrade and backup tests pass; Doctor is available through core, CLI, Tauri, and desktop; audited workflows record both success and failure; release automation passes. |
 | **0.5 — Local usage discovery and release awareness** | Evidence-aware local skill rankings with time-range, skill-type, agent, and workspace filters; separate Calls and history references; auditable multi-provider history sync; daily signed app-update awareness without automatic downloads. | CLI and desktop reconcile confirmed/inferred/reference evidence consistently; Calls never include low-signal references or claim provider-native totals; history providers resolve real local skills, deduplicate and upgrade stable identities, and preserve successful imports when another provider fails; schema upgrades and representative ranking queries are tested; update checks are rate-limited and every install is revalidated after an explicit click. |
 | **0.6 — Runtime profiles and portability** | Rust-owned runtime profiles model roots, precedence, frontmatter capabilities, and compatibility without hard-coding agent behavior in React. | Each supported profile has fixtures and compatibility tests; unsupported fields are reported before deployment; runtime-specific behavior remains behind an adapter boundary. |
-| **0.7 — Safe sync, deployment, and recovery** | Reviewed inbound user-skills Git updates, copy-snapshot deployment, and stronger restore/audit workflows complement the existing symlink path. Inbound fast-forward is implemented but unreleased; the rest remains planned. | Worktree and branch-relation states are explicit; conflicts are never auto-merged; incoming trees, stale previews, deployed deletion/rename blockers, backup refs, index reconciliation, overwrite protection, and recovery paths have automated coverage. |
+| **0.7 — Safe sync, deployment, and recovery** | Reviewed inbound user-skills Git updates are shipped; copy-snapshot deployment and broader restore/audit hardening remain planned follow-ups to the existing symlink path. | Worktree and branch-relation states are explicit; conflicts are never auto-merged; incoming trees, stale previews, deployed deletion/rename blockers, backup refs, index reconciliation, overwrite protection, and recovery paths have automated coverage. |
 | **0.8 — Skill Collections and product hardening** | Git-backed Skill Collections add repository-level discovery, reviewed multi-skill sources, and commit-consistent update/rollback while large-library performance, diagnostics, accessibility, onboarding, and recovery mature for sustained daily use. | Collections use one canonical repository/worktree identity and reviewed SHA, perform one bounded fetch/check per remote repository, require explicit child selection, preserve per-skill deploy/Calls independence, and pass rollback/recovery and untrusted-tree tests with CLI/Tauri parity. Performance budgets and critical UI workflows are verified; supported upgrade and recovery procedures are documented and exercised. |
 | **0.9 — Release candidate** | Feature scope is frozen while security, migration compatibility, packaging, updater, Homebrew, and real-world beta feedback are closed out. | Threat-model review is complete; upgrades from every supported prior release are tested; blocker defects are closed; signed and notarized distribution rehearsals pass. |
 | **1.0 — Stable local skill management** | SkillBox offers a documented, supportable contract for discovering, importing, managing, deploying, updating, synchronizing, diagnosing, and recovering supported skills. | Core workflows meet their definitions of done; supported runtimes and limitations are explicit; migrations and recovery are proven; release artifacts and docs match; no open blocker or known data-loss issue remains. |

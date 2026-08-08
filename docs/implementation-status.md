@@ -26,8 +26,11 @@
   Check remote -> Review incoming changes -> Apply fast-forward, with separate
   worktree/relation state, stale-preview rejection, untrusted-tree validation,
   deployed deletion/rename blockers, backup refs, and independent Git/SQLite
-  recovery auditing. This implementation is newer than the shipped `v0.6.1`
-  release and remains unreleased.
+  recovery auditing. This shipped in `v0.7.0` and is included in the current
+  `v0.7.1` release.
+- Shipped the v0.7.1 History filter/layout patch: All, Calls, References, and
+  Operations stay contained in the segmented control, and selected kinds query
+  Rust directly so bounded mixed-history results do not hide older references.
 - Implemented Rust/Tauri/CLI remote skill update status checks, Dashboard status refresh, last-checked timestamps, and configurable 5-minute auto refresh.
 - Implemented GitHub-only remote source search/binding, immutable remote version listing, all-file diff preview, update/rollback apply, and permanent operation logging in Rust core, Rust CLI, Tauri commands, and desktop review dialogs.
 - Implemented network-backed GitHub install preview/apply in Rust core, Rust CLI, and desktop UI, including first-install diff review, preview identity checks, version snapshots, `current` symlink updates, source metadata, optional CLI deploy, and legacy CLI aliases.
@@ -50,13 +53,14 @@
 ## Next Implementation Targets
 
 The `0.6` implementation and release qualification are complete. SkillBox
-`v0.6.1` is the shipped runtime-profile and evidence-aware usage release. The
-next milestones follow [the versioned evolution path](roadmap.md#versioned-evolution-path):
+`v0.7.1` is the current shipped release, including reviewed inbound sync and
+the History query/layout patch. The next milestones follow [the versioned
+evolution path](roadmap.md#versioned-evolution-path):
 
 ### 0.7 — Safe Sync, Deployment, And Recovery
 
-- Reviewed inbound user-skills Git is implemented on `main` but remains
-  unreleased after `v0.6.1`. It separates clean/dirty worktree state from
+- Reviewed inbound user-skills Git shipped in `v0.7.0`. It separates
+  clean/dirty worktree state from
   unknown/synced/ahead/behind/diverged/remote-only/no-remote-branch relation,
   then uses Check remote -> Review incoming changes -> Apply fast-forward.
 - The inbound implementation validates the complete remote skill tree, binds a
@@ -66,9 +70,12 @@ next milestones follow [the versioned evolution path](roadmap.md#versioned-evolu
 - Inbound remains explicit and `origin/main`-only. It does not run on startup,
   select individual skills, or automatically merge, rebase, reset, stash,
   force-push, or resolve conflicts.
+- The v0.7.1 History patch keeps All, Calls, References, and Operations aligned
+  with bounded server-side queries and request-generation protection.
 - Add copy-snapshot deployment as an explicit, compatibility-checked
   alternative without weakening the current symlink protections.
-- Strengthen backup inspection, restore previews, and recovery auditing.
+- Strengthen backup inspection, restore previews, and recovery auditing; these
+  broader hardening items are not claimed as shipped.
 - Keep runtime profiles, schema-v6 workspace migration, schema-v7 evidence
   classification, and Calls/reference semantics backward compatible.
 - Keep native non-`SKILL.md` formats behind the future adapter boundary.
