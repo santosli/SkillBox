@@ -46,6 +46,34 @@ export function isImportScanRequestCurrent(requestId, currentRequestId) {
   return requestId === currentRequestId;
 }
 
+export function createImportScanRequestController() {
+  let latestRequestId = 0;
+  let activeRequestId = 0;
+
+  return {
+    begin() {
+      if (activeRequestId !== 0) {
+        return null;
+      }
+      latestRequestId += 1;
+      activeRequestId = latestRequestId;
+      return activeRequestId;
+    },
+    finish(requestId) {
+      if (activeRequestId === requestId) {
+        activeRequestId = 0;
+      }
+    },
+    invalidate() {
+      latestRequestId += 1;
+      activeRequestId = 0;
+    },
+    isCurrent(requestId) {
+      return requestId === latestRequestId;
+    }
+  };
+}
+
 export function browserImportScanOptions(search = '') {
   const params = new URLSearchParams(search);
   const requestedDelay = Number(params.get('import-scan-delay-ms') || 0);

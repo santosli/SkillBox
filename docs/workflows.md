@@ -50,6 +50,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 扫描 import candidates。
 - 点击 Dashboard `Import` 后先同步打开 Import Review shell，再在其中显示
   `scanning local roots`、`validating candidates`、`grouping Git repositories` 等阶段；扫描期间不显示误导性的空结果，用户可以取消并使迟到结果失效。
+- 关闭或 dismiss Import Review 只会撤销当前 UI 请求并忽略迟到的扫描结果；它不会强制终止已经提交给 Rust `spawn_blocking` 的只读扫描。重新打开时，新请求拥有独立 generation；两个只读扫描短暂重叠不会写共享状态。
 - Rust 返回 aggregate-only scan diagnostics（候选数量、唯一 repository 数、Git identity
   检查与 snapshot cache 命中、耗时），并在同一个扫描请求内按 canonical
   worktree/common-dir 复用 Git identity 和已验证的 full-directory snapshot；不把 Git 或文件系统工作移到 React。

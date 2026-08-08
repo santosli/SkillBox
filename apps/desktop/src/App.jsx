@@ -60,7 +60,7 @@ import {
 } from './importCandidates.js';
 import {
   browserImportScanOptions,
-  isImportScanRequestCurrent,
+  createImportScanRequestController,
   waitForImportScanDelay
 } from './importScanProgress.js';
 import {
@@ -471,8 +471,7 @@ export default function App() {
   const usageRankingRequestRef = useRef(0);
   const rankingImportRequestRef = useRef(0);
   const historyRequestRef = useRef(0);
-  const importScanRequestRef = useRef(0);
-  const importScanActiveRef = useRef(0);
+  const importScanControllerRef = useRef(null);
   const importScanTimingRef = useRef(null);
   const authoritativeGenerationRef = useRef(0);
   const pageRef = useRef(page);
@@ -499,7 +498,8 @@ export default function App() {
     let unlisten;
     listen('skillbox://import-scan-progress', (event) => {
       const progress = event.payload || {};
-      if (!active || !isImportScanRequestCurrent(progress.scanId, importScanRequestRef.current)) {
+      const scanController = importScanControllerRef.current;
+      if (!active || !scanController || !scanController.isCurrent(progress.scanId)) {
         return;
       }
       setImportReview((current) => current.open && current.loading
@@ -1045,13 +1045,15 @@ export default function App() {
   }
 
   async function scanForImportCandidates() {
-    if (importScanActiveRef.current) {
+    if (!importScanControllerRef.current) {
+      importScanControllerRef.current = createImportScanRequestController();
+    }
+    const scanController = importScanControllerRef.current;
+    const scanId = scanController.begin();
+    if (scanId == null) {
       return;
     }
 
-    const scanId = importScanRequestRef.current + 1;
-    importScanRequestRef.current = scanId;
-    importScanActiveRef.current = scanId;
     importScanTimingRef.current = {
       startedAt: performance.now(),
       shellPaintedAt: null,
@@ -1080,7 +1082,7 @@ export default function App() {
 
     try {
       await waitForNextPaint();
-      if (!isImportScanRequestCurrent(scanId, importScanRequestRef.current)) {
+      if (!scanController.isCurrent(scanId)) {
         return;
       }
       if (importScanTimingRef.current) {
@@ -1099,7 +1101,7 @@ export default function App() {
           }
         }));
         await waitForImportScanDelay(previewOptions.delayMs);
-        if (!isImportScanRequestCurrent(scanId, importScanRequestRef.current)) {
+        if (!scanController.isCurrent(scanId)) {
           return;
         }
         if (previewOptions.error) {
@@ -1141,7 +1143,7 @@ export default function App() {
         }
         setNotice('Browser preview is using mock scan candidates.');
         setStatus('prototype');
-        importScanActiveRef.current = 0;
+        scanController.finish(scanId);
         return;
       }
 
@@ -1152,11 +1154,11 @@ export default function App() {
       if (importScanTimingRef.current) {
         importScanTimingRef.current.commandFinishedAt = performance.now();
       }
-      if (!isImportScanRequestCurrent(scanId, importScanRequestRef.current)) {
+      if (!scanController.isCurrent(scanId)) {
         return;
       }
       const workspaceRows = await invoke('list_workspaces').catch(() => []);
-      if (!isImportScanRequestCurrent(scanId, importScanRequestRef.current)) {
+      if (!scanController.isCurrent(scanId)) {
         return;
       }
       const candidates = normalizeImportCandidateGroups(scan.groups || [], scan.candidates || []);
@@ -1189,9 +1191,9 @@ export default function App() {
       }
       setNotice(candidates.length === 0 ? 'No new local skills found.' : '');
       setStatus('ready');
-      importScanActiveRef.current = 0;
+      scanController.finish(scanId);
     } catch (scanError) {
-      if (!isImportScanRequestCurrent(scanId, importScanRequestRef.current)) {
+      if (!scanController.isCurrent(scanId)) {
         return;
       }
       const message = scanError.message || String(scanError) || 'Unable to scan local skill folders.';
@@ -1204,7 +1206,7 @@ export default function App() {
       }));
       setError('');
       setStatus('ready');
-      importScanActiveRef.current = 0;
+      scanController.finish(scanId);
     }
   }
 
@@ -1370,8 +1372,7 @@ export default function App() {
   }
 
   function closeImportReview() {
-    importScanRequestRef.current += 1;
-    importScanActiveRef.current = 0;
+    importScanControllerRef.current?.invalidate();
     setImportReview((current) => ({
       ...current,
       open: false,

@@ -15,7 +15,8 @@ version tags such as `v0.3.0`.
   later phase; this change does not claim those workflows.
 - Open Import Review before the local scan finishes, expose accessible staged progress
   and retry state, and reuse repository identity and snapshot work across duplicate
-  locations.
+  locations. Closing the review dismisses the UI and ignores stale results; it does
+  not claim to abort the underlying read-only Rust scan.
 
 ## 0.7.1
 

@@ -527,11 +527,13 @@ test('import review opens before scanning and exposes staged accessible progress
   assert.match(tauriSource, /app\.emit\(\s*"skillbox:\/\/import-scan-progress"/);
   assert.match(scanSource, /open: true/);
   assert.match(scanSource, /loading: true/);
-  assert.match(scanSource, /if \(importScanActiveRef\.current\)/);
-  assert.match(scanSource, /importScanActiveRef\.current = scanId/);
+  assert.match(scanSource, /createImportScanRequestController/);
+  assert.match(scanSource, /const scanId = scanController\.begin\(\)/);
+  assert.match(scanSource, /if \(scanId == null\)/);
   assert.match(scanSource, /await waitForNextPaint\(\)/);
   assert.match(scanSource, /invoke\('scan_import_candidates', \{ scan_id: scanId \}\)/);
-  assert.match(appSource, /importScanRequestRef\.current \+= 1/);
+  assert.match(appSource, /importScanControllerRef\.current\?\.invalidate\(\)/);
+  assert.match(scanSource, /scanController\.finish\(scanId\)/);
   assert.match(importReviewSource, /loading = false/);
   assert.match(importReviewSource, /scanError = ''/);
   assert.match(importReviewSource, /onRetry/);

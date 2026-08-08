@@ -64,6 +64,7 @@ import {
 } from './importFlow.js';
 import {
   browserImportScanOptions,
+  createImportScanRequestController,
   importScanProgressDetail,
   importScanProgressLabel,
   isImportScanRequestCurrent,
@@ -99,6 +100,29 @@ test('import scan request generation ignores stale progress and bounds browser Q
     delayMs: 0,
     error: false
   });
+});
+
+test('closing and reopening Import Review isolates late scan A from active scan B', () => {
+  const controller = createImportScanRequestController();
+  const scanA = controller.begin();
+
+  assert.equal(scanA, 1);
+  assert.equal(controller.begin(), null, 'duplicate active clicks do not start another scan');
+
+  controller.invalidate();
+  const scanB = controller.begin();
+
+  assert.equal(scanB, 3);
+  assert.equal(controller.isCurrent(scanA), false);
+  assert.equal(controller.isCurrent(scanB), true);
+
+  const applied = [];
+  if (controller.isCurrent(scanA)) applied.push('A');
+  if (controller.isCurrent(scanB)) applied.push('B');
+  assert.deepEqual(applied, ['B']);
+
+  controller.finish(scanB);
+  assert.equal(controller.begin(), 4);
 });
 
 test('normalizes backend is_selected false without selecting importable candidate', () => {
