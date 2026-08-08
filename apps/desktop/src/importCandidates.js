@@ -261,6 +261,11 @@ export function collectionChildTypeState(group, child) {
   };
 }
 
+export function collectionSkillCountLabel(count) {
+  const normalized = Math.max(0, Math.trunc(Number(count) || 0));
+  return `${normalized} ${normalized === 1 ? 'skill' : 'skills'}`;
+}
+
 export function isSelectableImportCandidateGroup(group) {
   const variant = selectedImportCandidateVariant(group);
   return Boolean(canClassifyImportCandidateGroup(group) && variant.selectedType);

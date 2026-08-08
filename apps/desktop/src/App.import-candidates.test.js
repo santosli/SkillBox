@@ -6,6 +6,7 @@ import {
   filterImportCandidatesByQuery,
   filterWorkspaceSkillCandidates,
   collectionChildTypeState,
+  collectionSkillCountLabel,
   importCandidateGroupLocationCount,
   importCandidateGroupTabs,
   normalizeImportCollections,
@@ -550,6 +551,12 @@ test('collection child type state keeps mixed importable review actionable and b
   assert.equal(conflictState.canClassify, false);
   assert.equal(conflictState.needsTypeChoice, false);
   assert.equal(conflictState.readOnlyLabel, 'Resolve conflict before import');
+});
+
+test('collection skill counts use singular grammar for singleton cards', () => {
+  assert.equal(collectionSkillCountLabel(1), '1 skill');
+  assert.equal(collectionSkillCountLabel(2), '2 skills');
+  assert.equal(collectionSkillCountLabel(0), '0 skills');
 });
 
 test('builds workspace skill tabs and separates unimported, imported, and system skills', () => {

@@ -5,6 +5,7 @@ import codexCliIcon from '../assets/codex-cli-icon.png';
 import {
   canClassifyImportCandidateGroup,
   collectionChildTypeState,
+  collectionSkillCountLabel,
   filterImportCandidateGroups,
   filterImportCandidateGroupsByQuery,
   filterImportCollectionsByQuery,
@@ -414,7 +415,7 @@ function CollectionReviewCard({
             <Badge tone="slate">
               {isInstalledSource ? 'Installed source collection' : 'Git collection'}
             </Badge>
-            <Badge tone="slate">{collection.children.length} skills</Badge>
+            <Badge tone="slate">{collectionSkillCountLabel(collection.children.length)}</Badge>
           </div>
           {isInstalledSource ? (
             <small>Source: {collection.originUrl || 'Installed source metadata'}</small>

@@ -10369,6 +10369,42 @@ fn scan_import_candidates_groups_validated_installed_source_lockfile_entries() {
 }
 
 #[test]
+fn scan_import_candidates_keeps_single_installed_source_match_standalone() {
+    let root = temp_dir("candidate-installed-source-lockfile-singleton");
+    let agents_root = root.join(".agents/skills");
+    let managed_root = root.join("SkillBox");
+    make_skill(
+        &agents_root.join("standalone-source-skill"),
+        "standalone-source-skill",
+        "Single installed source skill",
+    );
+    fs::create_dir_all(root.join(".agents")).unwrap();
+    fs::write(
+        root.join(".agents/.skill-lock.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "version": 3,
+            "skills": {
+                "standalone-source-skill": {
+                    "sourceType": "github",
+                    "sourceUrl": "https://github.com/acme/skills.git",
+                    "skillPath": "skills/standalone-source-skill/SKILL.md",
+                    "skillFolderHash": "stale"
+                }
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let scan = scan_import_candidates(std::slice::from_ref(&agents_root), &managed_root).unwrap();
+
+    assert!(scan.collections.is_empty());
+    assert_eq!(scan.standalone_groups.len(), 1);
+    assert_eq!(scan.diagnostics.installed_source_lockfile_matches, 1);
+    assert_eq!(scan.diagnostics.installed_source_collections, 0);
+}
+
+#[test]
 fn scan_import_candidates_keeps_unsafe_lockfile_entries_standalone_and_live_git_wins() {
     let root = temp_dir("candidate-installed-source-safety");
     let agents_root = root.join(".agents/skills");

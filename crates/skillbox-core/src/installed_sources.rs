@@ -119,7 +119,10 @@ pub(crate) fn discover_installed_source_collections(
         .into_iter()
         .filter_map(|(source_url, children)| {
             let children = children.into_values().collect::<Vec<_>>();
-            if children.is_empty() {
+            // A single installer-provenance match is not enough to establish
+            // a useful collection. Keep it in the normal standalone group so
+            // the fallback never adds a noisy one-child card.
+            if children.len() < 2 {
                 return None;
             }
             let child_seed = children

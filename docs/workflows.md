@@ -147,6 +147,9 @@ Review/apply：
   symlink location 仍只保留一份。
 - lockfile 版本不支持、文件过大、条目 malformed、路径 traversal、非 GitHub/custom
   source 或 stale/mismatched entry 都不会隐藏 candidate，也不会创建网络或文件写入。
+- installed-source fallback 只有在同一 normalized source URL 匹配至少两个已验证 child
+  时才形成 collection card；单个匹配仍作为普通 standalone candidate 显示。live Git
+  worktree collection 保留其 repository/HEAD 语义，不受这个展示降噪门槛影响。
 
 当前边界：Phase C 的 GitHub repository one-fetch multi-skill preview/apply 与 Phase D
 的 collection-level update/rollback 尚未实现。Collection operations 不运行 hooks、
