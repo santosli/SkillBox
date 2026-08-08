@@ -371,6 +371,25 @@ fn scan_workspace_import_candidates(path: String) -> Result<Value, String> {
 }
 
 #[tauri::command]
+fn list_skill_collections() -> Result<Value, String> {
+    let collections = skillbox_core::list_skill_collections(skillbox_core::default_managed_root())?;
+    serde_json::to_value(collections).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn apply_import_collection(
+    request: skillbox_core::ImportCollectionApplyRequest,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result =
+            skillbox_core::apply_import_collection(request, skillbox_core::default_managed_root())?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Collection import task failed: {error}"))?
+}
+
+#[tauri::command]
 async fn import_candidates(items: Vec<skillbox_core::ImportRequestItem>) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let result =
@@ -1109,6 +1128,8 @@ pub fn run() {
             scan_skills,
             scan_import_candidates,
             scan_workspace_import_candidates,
+            list_skill_collections,
+            apply_import_collection,
             import_candidates,
             list_import_records,
             revert_import,

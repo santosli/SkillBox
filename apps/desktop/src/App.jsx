@@ -48,7 +48,9 @@ import {
 } from './doctor.js';
 import {
   normalizeImportCandidateGroups,
+  normalizeImportCollections,
   normalizeImportCandidate,
+  selectedImportCollectionRequests,
   selectedImportCandidates,
   selectImportCandidateVariant,
   toggleImportCandidateGroup,
@@ -87,6 +89,7 @@ import {
   previewHistory,
   previewImportCandidates,
   previewImportCandidateGroups,
+  previewImportCollections,
   previewPaths,
   previewSkills,
   previewUsageRankings,
@@ -306,6 +309,7 @@ export default function App() {
   const [importReview, setImportReview] = useState({
     open: false,
     candidates: [],
+    collections: [],
     errors: [],
     title: 'Import Review',
     subtitle: 'Confirm each skill type before SkillBox copies it into the managed store.',
@@ -319,6 +323,7 @@ export default function App() {
   const [localImportConfirmation, setLocalImportConfirmation] = useState({
     open: false,
     candidates: [],
+    collectionRequests: [],
     noticePrefix: ''
   });
   const [remoteImport, setRemoteImport] = useState({
@@ -1012,6 +1017,7 @@ export default function App() {
         setImportReview({
           open: true,
           candidates: normalizeImportCandidateGroups(previewImportCandidateGroups),
+          collections: normalizeImportCollections(previewImportCollections),
           errors: [],
           title: 'Import Review',
           subtitle: 'Confirm each skill type before SkillBox copies it into the managed store.',
@@ -1025,11 +1031,13 @@ export default function App() {
       const scan = await invoke('scan_import_candidates');
       const workspaceRows = await invoke('list_workspaces').catch(() => []);
       const candidates = normalizeImportCandidateGroups(scan.groups || [], scan.candidates || []);
+      const collections = normalizeImportCollections(scan.collections || []);
       setWorkspaces(normalizeWorkspaces(workspaceRows));
 
       setImportReview({
         open: candidates.length > 0,
         candidates,
+        collections,
         errors: scan.errors || [],
         title: 'Import Review',
         subtitle: 'Confirm each skill type before SkillBox copies it into the managed store.',
@@ -1224,7 +1232,11 @@ export default function App() {
 
   async function importSelectedCandidates() {
     const selected = selectedImportCandidates(importReview.candidates);
-    if (selected.length === 0) {
+    const collectionRequests = selectedImportCollectionRequests(
+      importReview.candidates,
+      importReview.collections
+    );
+    if (selected.length === 0 && collectionRequests.length === 0) {
       setNotice('Select at least one candidate without conflicts to import.');
       return;
     }
@@ -1233,15 +1245,16 @@ export default function App() {
       setLocalImportConfirmation({
         open: true,
         candidates: selected,
+        collectionRequests,
         noticePrefix: importReview.noticePrefix || ''
       });
       return;
     }
 
-    await runCandidateImport(selected, importReview.noticePrefix || '');
+    await runCandidateImport(selected, importReview.noticePrefix || '', collectionRequests);
   }
 
-  async function runCandidateImport(selected, noticePrefix = '') {
+  async function runCandidateImport(selected, noticePrefix = '', collectionRequests = []) {
     setStatus('importing');
     setError('');
     setNotice('');
@@ -1252,23 +1265,48 @@ export default function App() {
       setSkills((current) => mergeSkills(current, importedSkills));
       setSelectedName('');
       setIsFirstUse(false);
-      setImportReview({ open: false, candidates: [], errors: [], noticePrefix: '' });
+      setImportReview({ open: false, candidates: [], collections: [], errors: [], noticePrefix: '' });
       setStatus('prototype');
       setNotice(importNotice(noticePrefix, `Mock imported ${importedSkills.length} skills.`));
       return;
     }
 
     try {
-      const result = await invoke('import_candidates', {
-        items: importRequestItems(selected)
-      });
+      const result = selected.length > 0
+        ? await invoke('import_candidates', { items: importRequestItems(selected) })
+        : { imported: [], errors: [] };
+      const collectionResults = [];
+      for (const request of collectionRequests) {
+        collectionResults.push(await invoke('apply_import_collection', {
+          request: {
+            collection_id: request.collectionId,
+            worktree_root: request.worktreeRoot,
+            preview_id: request.previewId,
+            selections: request.selections.map((selection) => ({
+              relative_path: selection.relativePath,
+              group_id: selection.groupId,
+              variant_id: selection.variantId,
+              skill_type: selection.skillType
+            })),
+            actor: 'desktop'
+          }
+        }));
+      }
 
-      setImportReview({ open: false, candidates: [], errors: [], noticePrefix: '' });
+      setImportReview({ open: false, candidates: [], collections: [], errors: [], noticePrefix: '' });
       await refresh();
       if (page === 'rankings') {
         await loadUsageRankings(usageRankingFilters);
       }
-      setNotice(importNotice(noticePrefix, importBatchNotice(result)));
+      const collectionCount = collectionResults.reduce(
+        (count, collection) => count + (collection.imported || []).length,
+        0
+      );
+      const summary = [
+        selected.length > 0 ? importBatchNotice(result) : '',
+        collectionCount > 0 ? `Imported ${collectionCount} collection skill${collectionCount === 1 ? '' : 's'}.` : ''
+      ].filter(Boolean).join(' ');
+      setNotice(importNotice(noticePrefix, summary || 'Import completed.'));
     } catch (importError) {
       setError(importError.message || 'Unable to import selected skills.');
       setStatus('ready');
@@ -1279,15 +1317,16 @@ export default function App() {
     if (status === 'importing') {
       return;
     }
-    setLocalImportConfirmation({ open: false, candidates: [], noticePrefix: '' });
+    setLocalImportConfirmation({ open: false, candidates: [], collectionRequests: [], noticePrefix: '' });
   }
 
   async function confirmLocalImport() {
     const selected = localImportConfirmation.candidates;
+    const collectionRequests = localImportConfirmation.collectionRequests || [];
     const noticePrefix = localImportConfirmation.noticePrefix || '';
 
-    setLocalImportConfirmation({ open: false, candidates: [], noticePrefix: '' });
-    await runCandidateImport(selected, noticePrefix);
+    setLocalImportConfirmation({ open: false, candidates: [], collectionRequests: [], noticePrefix: '' });
+    await runCandidateImport(selected, noticePrefix, collectionRequests);
   }
 
   async function saveStatusRefreshIntervalMinutes(minutes) {
@@ -3686,6 +3725,7 @@ export default function App() {
       setImportReview({
         open: true,
         candidates,
+        collections: [],
         errors: [],
         ...reviewMeta
       });
@@ -3698,11 +3738,13 @@ export default function App() {
       const scan = await invoke('scan_workspace_import_candidates', { path: workspace.path });
       const workspaceRows = await invoke('list_workspaces').catch(() => []);
       const candidates = normalizeImportCandidateGroups(scan.groups || [], scan.candidates || []);
+      const collections = normalizeImportCollections(scan.collections || []);
 
       setWorkspaces(normalizeWorkspaces(workspaceRows));
       setImportReview({
         open: true,
         candidates,
+        collections,
         errors: scan.errors || [],
         ...reviewMeta
       });
@@ -4205,6 +4247,7 @@ export default function App() {
       {importReview.open ? (
         <ImportReview
           groups={importReview.candidates}
+          collections={importReview.collections}
           errors={importReview.errors}
           onClose={closeImportReview}
           onImport={importSelectedCandidates}

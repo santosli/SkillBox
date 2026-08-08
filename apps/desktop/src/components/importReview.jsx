@@ -6,6 +6,8 @@ import {
   canClassifyImportCandidateGroup,
   filterImportCandidateGroups,
   filterImportCandidateGroupsByQuery,
+  filterImportCollectionsByQuery,
+  importCollectionGroupIds,
   importCandidateGroupLocationCount,
   importCandidateGroupStatus,
   importCandidateGroupTabs,
@@ -192,6 +194,7 @@ export function LocalImportConfirmationDialog({
 
 export function ImportReview({
   groups,
+  collections = [],
   errors = [],
   onClose,
   onImport,
@@ -240,6 +243,7 @@ export function ImportReview({
           ) : null}
           {groups.length > 0 ? (
             <CandidateReviewList
+              collections={collections}
               groups={groups}
               onSelectVariant={onSelectVariant}
               onToggleSelected={onToggleSelected}
@@ -279,12 +283,24 @@ export function ImportReview({
   );
 }
 
-function CandidateReviewList({ groups, onSelectVariant, onToggleSelected, onTypeChange }) {
+function CandidateReviewList({ collections, groups, onSelectVariant, onToggleSelected, onTypeChange }) {
   const [activeTab, setActiveTab] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const searchedGroups = filterImportCandidateGroupsByQuery(groups, searchQuery);
+  const searchedCollections = filterImportCollectionsByQuery(collections, searchQuery);
   const tabs = importCandidateGroupTabs(searchedGroups);
   const filteredGroups = filterImportCandidateGroups(searchedGroups, activeTab);
+  const collectionGroupIds = importCollectionGroupIds(collections);
+  const visibleCollections = searchedCollections
+    .map((collection) => ({
+      ...collection,
+      children: collection.children.filter((child) => {
+        const group = groups.find((candidateGroup) => candidateGroup.id === child.groupId);
+        return group && filterImportCandidateGroups([group], activeTab).length > 0;
+      })
+    }))
+    .filter((collection) => collection.children.length > 0);
+  const standaloneGroups = filteredGroups.filter((group) => !collectionGroupIds.has(group.id));
 
   return (
     <>
@@ -311,8 +327,18 @@ function CandidateReviewList({ groups, onSelectVariant, onToggleSelected, onType
           onTabChange={setActiveTab}
         />
       </div>
-      {filteredGroups.length > 0 ? (
-        filteredGroups.map((group) => (
+      {visibleCollections.map((collection) => (
+        <CollectionReviewCard
+          collection={collection}
+          groups={groups}
+          key={collection.id}
+          onSelectVariant={onSelectVariant}
+          onToggleSelected={onToggleSelected}
+          onTypeChange={onTypeChange}
+        />
+      ))}
+      {standaloneGroups.length > 0 ? (
+        standaloneGroups.map((group) => (
           <CandidateGroupCard
             group={group}
             key={group.id}
@@ -321,13 +347,149 @@ function CandidateReviewList({ groups, onSelectVariant, onToggleSelected, onType
             onTypeChange={onTypeChange}
           />
         ))
-      ) : (
+      ) : visibleCollections.length === 0 ? (
         <div className="emptyState dashboardEmptyState workspaceSkillEmptyState">
           <strong>No skills in this view</strong>
           <span>{searchQuery ? 'Try another search or switch tabs.' : 'Switch tabs to review the rest.'}</span>
         </div>
-      )}
+      ) : null}
     </>
+  );
+}
+
+function CollectionReviewCard({
+  collection,
+  groups,
+  onSelectVariant,
+  onToggleSelected,
+  onTypeChange
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const disclosureId = `${collection.id}-children`;
+  const selectedCount = collection.children.filter((child) => {
+    const group = groups.find((candidateGroup) => candidateGroup.id === child.groupId);
+    return group?.isSelected && group.selectedVariantId === child.variantId;
+  }).length;
+  const shortSha = collection.reviewedHeadSha ? collection.reviewedHeadSha.slice(0, 8) : 'uncommitted';
+
+  return (
+    <section className="collectionReviewCard" aria-label={`${collection.displayName} skill collection`}>
+      <div className="collectionReviewHeader">
+        <div className="collectionReviewIdentity">
+          <div className="candidateTitle">
+            <strong>{collection.displayName}</strong>
+            <Badge tone="slate">Collection</Badge>
+            <Badge tone="slate">{collection.children.length} skills</Badge>
+          </div>
+          <small>
+            {collection.branch || (collection.detached ? 'Detached HEAD' : 'No branch')} · {shortSha}
+            {collection.originUrl ? ` · ${collection.originUrl}` : ''}
+          </small>
+          <code>{compactPath(collection.canonicalWorktreeRoot)}</code>
+        </div>
+        <span className="collectionReviewSelection">{selectedCount} selected</span>
+      </div>
+      <button
+        aria-controls={disclosureId}
+        aria-expanded={expanded}
+        className="candidateLocationsDisclosure"
+        type="button"
+        onClick={() => setExpanded((current) => !current)}
+      >
+        <MapPin aria-hidden="true" />
+        <span>{expanded ? 'Hide collection skills' : 'Review collection skills'}</span>
+        <ChevronDown aria-hidden="true" className={expanded ? 'expanded' : ''} />
+      </button>
+      {expanded ? (
+        <div className="collectionReviewChildren" id={disclosureId}>
+          {collection.children.map((child) => {
+            const group = groups.find((candidateGroup) => candidateGroup.id === child.groupId);
+            if (!group) return null;
+            const variant = group.variants.find((candidateVariant) => candidateVariant.id === child.variantId);
+            const selected = group.isSelected && group.selectedVariantId === child.variantId;
+            const canSelect = isSelectableImportCandidateGroup(group);
+            return (
+              <div className={`collectionChildRow ${selected ? 'selected' : ''}`} key={child.id}>
+                <label className="candidateCheck">
+                  <input
+                    checked={selected}
+                    disabled={!canSelect}
+                    type="checkbox"
+                    aria-label={`Select ${child.name} from ${collection.displayName}`}
+                    onChange={() => onToggleSelected(group)}
+                  />
+                  <span />
+                </label>
+                <div className="collectionChildMain">
+                  <div className="candidateTitle">
+                    <strong>{child.name}</strong>
+                    {child.importStatus !== 'importable' ? <Badge tone="slate">{child.importStatus}</Badge> : null}
+                    {child.conflict ? <Badge tone="red">Conflict</Badge> : null}
+                    {child.requiresTypeReview ? <Badge tone="amber">Choose type</Badge> : null}
+                  </div>
+                  <code>{child.relativePath}</code>
+                  <span className="candidateUsage">Calls {group.usageCount || 0}</span>
+                  {child.locations.length > 1 ? (
+                    <small>{child.locations.length} runtime/source locations resolve to this child.</small>
+                  ) : null}
+                  {child.unlinkedLocations?.length > 0 ? (
+                    <div className="collectionChildUnlinkedLocations">
+                      <small>
+                        {child.unlinkedLocations.length} standalone {child.unlinkedLocations.length === 1 ? 'copy remains' : 'copies remain'} outside this repository.
+                      </small>
+                      {child.unlinkedLocations.map((location) => (
+                        <code key={location.sourcePath}>{compactPath(location.sourcePath)}</code>
+                      ))}
+                    </div>
+                  ) : null}
+                  {group.variants.length > 1 ? (
+                    <div className="collectionChildVariants" role="radiogroup" aria-label={`${child.name} source variant`}>
+                      {group.variants.map((candidateVariant, index) => (
+                        <label key={candidateVariant.id}>
+                          <input
+                            checked={group.selectedVariantId === candidateVariant.id}
+                            disabled={!isImportableCandidate(candidateVariant.candidate)}
+                            name={`${group.id}-collection-variant`}
+                            type="radio"
+                            onChange={() => onSelectVariant(group, candidateVariant)}
+                          />
+                          <span>Variant {index + 1}</span>
+                        </label>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="collectionChildType">
+                  <span>{variant?.selectedType === 'remote' ? 'Remote' : 'User'}</span>
+                  <div className="candidateTypeSwitch" role="radiogroup" aria-label={`${child.name} skill type`}>
+                    <button
+                      aria-checked={variant?.selectedType === 'user'}
+                      className={variant?.selectedType === 'user' ? 'active' : ''}
+                      disabled={!canClassifyImportCandidateGroup(group)}
+                      role="radio"
+                      type="button"
+                      onClick={() => onTypeChange(group, 'user')}
+                    >
+                      User
+                    </button>
+                    <button
+                      aria-checked={variant?.selectedType === 'remote'}
+                      className={variant?.selectedType === 'remote' ? 'active' : ''}
+                      disabled={!canClassifyImportCandidateGroup(group)}
+                      role="radio"
+                      type="button"
+                      onClick={() => onTypeChange(group, 'remote')}
+                    >
+                      Remote
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+    </section>
   );
 }
 

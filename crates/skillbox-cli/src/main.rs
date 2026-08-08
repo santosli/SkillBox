@@ -45,6 +45,38 @@ fn run(args: Vec<String>) -> Result<(), String> {
             print_json(&parse_github_skill_url(&url)?)
         }
         "runtime-profiles" => print_json(&skillbox_core::list_runtime_profiles()),
+        "collections" => print_json(&skillbox_core::list_skill_collections(managed_root(
+            command_args,
+        ))?),
+        "collection-preview" => {
+            let root = positional(command_args).into_iter().next().ok_or_else(|| {
+                "Usage: skillbox collection-preview <repository-root> [--managed-root <path>]"
+                    .to_string()
+            })?;
+            print_json(&skillbox_core::scan_import_candidates(
+                &[PathBuf::from(root)],
+                managed_root(command_args),
+            )?)
+        }
+        "collection-apply" => {
+            let root = positional(command_args).into_iter().next().ok_or_else(|| {
+                "Usage: skillbox collection-apply <repository-root> --collection-id <id> --preview-id <id> --select <path|group|variant|type,...>"
+                    .to_string()
+            })?;
+            let collection_id = required_option_value(command_args, "--collection-id")?;
+            let preview_id = required_option_value(command_args, "--preview-id")?;
+            let selections = collection_selections(command_args)?;
+            print_json(&skillbox_core::apply_import_collection(
+                skillbox_core::ImportCollectionApplyRequest {
+                    collection_id,
+                    worktree_root: PathBuf::from(root),
+                    preview_id,
+                    selections,
+                    actor: "cli".to_string(),
+                },
+                managed_root(command_args),
+            )?)
+        }
         "install" => {
             let source_url = positional(command_args).into_iter().next().ok_or_else(|| {
                 "Usage: skillbox install <github-url> --preview-id <id> [--target <path>]"
@@ -595,6 +627,34 @@ fn required_option_value(args: &[String], name: &str) -> Result<String, String> 
     Ok(value.clone())
 }
 
+fn collection_selections(
+    args: &[String],
+) -> Result<Vec<skillbox_core::ImportCollectionChildSelection>, String> {
+    let value = required_option_value(args, "--select")?;
+    value
+        .split(',')
+        .map(|entry| {
+            let parts = entry.split('|').collect::<Vec<_>>();
+            if parts.len() != 4 {
+                return Err(
+                    "Each --select entry must be path|group-id|variant-id|user|remote.".to_string(),
+                );
+            }
+            let skill_type = match parts[3].to_ascii_lowercase().as_str() {
+                "user" => skillbox_core::SkillKind::User,
+                "remote" => skillbox_core::SkillKind::Remote,
+                _ => return Err("Collection skill type must be user or remote.".to_string()),
+            };
+            Ok(skillbox_core::ImportCollectionChildSelection {
+                relative_path: parts[0].to_string(),
+                group_id: parts[1].to_string(),
+                variant_id: parts[2].to_string(),
+                skill_type,
+            })
+        })
+        .collect()
+}
+
 fn help_text() -> &'static str {
     "SkillBox Rust CLI
 
@@ -605,6 +665,9 @@ Commands:
   skillbox scan [root ...] [--managed-root <path>]
   skillbox parse-github-url <github-url>
   skillbox runtime-profiles
+  skillbox collections [--managed-root <path>]
+  skillbox collection-preview <repository-root> [--managed-root <path>]
+  skillbox collection-apply <repository-root> --collection-id <id> --preview-id <id> --select <path|group|variant|type,...> [--managed-root <path>]
   skillbox install-preview <github-url> [--target <path>] [--managed-root <path>]
   skillbox install <github-url> --preview-id <id> [--target <path>] [--confirm-warnings] [--managed-root <path>]
   skillbox import <source-dir> --type user|remote [--managed-root <path>]
@@ -851,6 +914,25 @@ mod tests {
         assert!(help.contains("skillbox user-skills-inbound-check"));
         assert!(help.contains("skillbox user-skills-inbound-preview"));
         assert!(help.contains("skillbox user-skills-inbound-apply --preview-id <id>"));
+    }
+
+    #[test]
+    fn collection_help_and_selection_parser_keep_structured_child_contract() {
+        let help = help_text();
+        assert!(help.contains("skillbox collections [--managed-root <path>]"));
+        assert!(help.contains("skillbox collection-preview <repository-root>"));
+        assert!(help.contains("skillbox collection-apply <repository-root>"));
+
+        let selections = collection_selections(&[
+            "--select".to_string(),
+            "skills/alpha|group-alpha|variant-alpha|user,skills/beta|group-beta|variant-beta|remote".to_string(),
+        ])
+        .unwrap();
+        assert_eq!(selections.len(), 2);
+        assert_eq!(selections[0].relative_path, "skills/alpha");
+        assert_eq!(selections[0].skill_type, skillbox_core::SkillKind::User);
+        assert_eq!(selections[1].relative_path, "skills/beta");
+        assert_eq!(selections[1].skill_type, skillbox_core::SkillKind::Remote);
     }
 
     #[test]

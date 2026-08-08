@@ -133,6 +133,45 @@ export const previewImportCandidateGroups = [
   }))
 ];
 
+export const previewImportCollections = [
+  {
+    id: 'collection-skillbox-workflows',
+    previewId: 'preview-skillbox-workflows-v1',
+    displayName: 'skillbox-workflows',
+    canonicalWorktreeRoot: '~/Projects/skillbox-workflows',
+    canonicalRepositoryId: '~/Projects/skillbox-workflows/.git',
+    originUrl: 'https://github.com/example/skillbox-workflows.git',
+    branch: 'main',
+    detached: false,
+    reviewedHeadSha: 'a1b2c3d4e5f6a7b8c9d0',
+    children: [
+      {
+        id: 'collection-child-general-video',
+        groupId: 'skill-general-video',
+        variantId: 'variant-general-video',
+        name: 'general-video',
+        relativePath: 'skills/general-video',
+        sourcePath: '~/Projects/skillbox-workflows/skills/general-video',
+        realPath: '~/Projects/skillbox-workflows/skills/general-video',
+        contentHash: '87b21f5571a7d332',
+        snapshotHash: 'snapshot-skillbox-general-video',
+        importStatus: 'importable',
+        conflict: null,
+        usageCount: 6,
+        suggestedTypes: ['user', 'remote'],
+        requiresTypeReview: true,
+        selectedType: null,
+        isSelected: false,
+        locations: [
+          ...previewImportCandidateGroups[0].variants[0].locations
+        ],
+        unlinkedLocations: []
+      }
+    ],
+    errors: []
+  }
+];
+
 export const previewWorkspaces = [
   {
     canonical_path: '/Users/example/.codex/skills',

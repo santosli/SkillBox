@@ -170,7 +170,8 @@ fn database_initialization_records_ordered_schema_migrations() {
             (4, "skill_usage_ranking_indexes".to_string()),
             (5, "canonical_usage_agent_ids".to_string()),
             (6, "runtime_profiles".to_string()),
-            (7, "usage_evidence_classification".to_string())
+            (7, "usage_evidence_classification".to_string()),
+            (8, "skill_collections".to_string())
         ]
     );
     assert_eq!(
@@ -180,6 +181,12 @@ fn database_initialization_records_ordered_schema_migrations() {
     assert!(table_column_names(&connection, "skill_user_metadata")
         .unwrap()
         .contains(&"tags_json".to_string()));
+    assert!(table_column_names(&connection, "skill_collections")
+        .unwrap()
+        .contains(&"canonical_worktree_root".to_string()));
+    assert!(table_column_names(&connection, "skill_collection_members")
+        .unwrap()
+        .contains(&"relative_path".to_string()));
     for column in ["profile_id", "root_key", "format"] {
         assert!(table_column_names(&connection, "workspaces")
             .unwrap()
@@ -200,6 +207,39 @@ fn database_initialization_records_ordered_schema_migrations() {
             .unwrap();
         assert!(exists, "missing ranking index {index}");
     }
+}
+
+#[test]
+fn schema_v8_collection_migration_is_idempotent_for_existing_database() {
+    let root = temp_dir("skill-collections-v8-migration");
+    let managed_root = root.join("SkillBox");
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    {
+        let connection = rusqlite::Connection::open(&paths.database_path).unwrap();
+        connection
+            .execute_batch(
+                "
+                DROP TABLE skill_collection_members;
+                DROP TABLE skill_collections;
+                DELETE FROM schema_migrations WHERE version = 8;
+                ",
+            )
+            .unwrap();
+    }
+
+    ensure_managed_layout(&managed_root).unwrap();
+    ensure_managed_layout(&managed_root).unwrap();
+    let connection = rusqlite::Connection::open(&paths.database_path).unwrap();
+    assert_eq!(
+        current_database_schema_version(&connection).unwrap(),
+        LATEST_DATABASE_SCHEMA_VERSION
+    );
+    assert!(table_column_names(&connection, "skill_collections")
+        .unwrap()
+        .contains(&"reviewed_head_sha".to_string()));
+    assert!(table_column_names(&connection, "skill_collection_members")
+        .unwrap()
+        .contains(&"managed_skill_name".to_string()));
 }
 
 #[test]
@@ -10098,6 +10138,190 @@ fn scan_import_candidates_groups_mixed_type_suggestions_without_splitting_conten
             root.join("home/.cursor/skills/general-video"),
             root.join("home/.codex/skills/general-video"),
         ]
+    );
+}
+
+#[test]
+fn scan_import_candidates_groups_git_repository_children_and_keeps_external_copies_unlinked() {
+    let root = temp_dir("candidate-git-collection");
+    let repository = root.join("skill-collection");
+    let project = root.join("project");
+    let outside_root = root.join("outside/.agents/skills");
+    let managed_root = root.join("SkillBox");
+    fs::create_dir_all(&repository).unwrap();
+    run_git(&repository, &["init", "-b", "main"]);
+    make_skill(&repository.join("skills/alpha"), "alpha", "Alpha skill");
+    make_skill(&repository.join("skills/beta"), "beta", "Beta skill");
+    let nested_repository = repository.join("nested-repository");
+    fs::create_dir_all(&nested_repository).unwrap();
+    run_git(&nested_repository, &["init", "-b", "main"]);
+    make_skill(
+        &nested_repository.join("skills/nested"),
+        "nested",
+        "Nested skill",
+    );
+    run_git(&nested_repository, &["add", "."]);
+    run_git(
+        &nested_repository,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Add nested skill",
+        ],
+    );
+    fs::write(repository.join("README.md"), "Skill collection\n").unwrap();
+    run_git(&repository, &["add", "."]);
+    run_git(
+        &repository,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Add collection skills",
+        ],
+    );
+
+    make_skill(&outside_root.join("alpha"), "alpha", "Alpha skill");
+    let project_runtime_root = project.join(".agents/skills");
+    fs::create_dir_all(&project_runtime_root).unwrap();
+    symlink_dir(
+        &repository.join("skills/alpha"),
+        &project_runtime_root.join("alpha"),
+    )
+    .unwrap();
+
+    let scan = scan_import_candidates(
+        &[
+            repository.clone(),
+            project_runtime_root,
+            outside_root.clone(),
+        ],
+        &managed_root,
+    )
+    .unwrap();
+    assert_eq!(scan.collections.len(), 2);
+    let collection = scan
+        .collections
+        .iter()
+        .find(|collection| {
+            collection.canonical_worktree_root == fs::canonicalize(&repository).unwrap()
+        })
+        .unwrap();
+    assert_eq!(
+        collection.canonical_worktree_root,
+        fs::canonicalize(&repository).unwrap()
+    );
+    assert_eq!(collection.children.len(), 2);
+
+    let alpha = collection
+        .children
+        .iter()
+        .find(|child| child.name == "alpha")
+        .unwrap();
+    assert_eq!(alpha.relative_path, "skills/alpha");
+    assert_eq!(alpha.locations.len(), 2);
+    assert_eq!(alpha.unlinked_locations.len(), 1);
+    assert_eq!(
+        alpha.unlinked_locations[0].source_path,
+        outside_root.join("alpha")
+    );
+    assert!(collection
+        .children
+        .iter()
+        .all(|child| child.relative_path.starts_with("skills/")));
+    let nested = scan
+        .collections
+        .iter()
+        .find(|collection| collection.display_name == "nested-repository")
+        .unwrap();
+    assert_eq!(nested.children.len(), 1);
+    assert_eq!(nested.children[0].relative_path, "skills/nested");
+}
+
+#[test]
+fn git_collection_apply_persists_selected_children_and_rejects_stale_head_before_writes() {
+    let root = temp_dir("git-collection-apply");
+    let repository = root.join("skill-collection");
+    let managed_root = root.join("SkillBox");
+    fs::create_dir_all(&repository).unwrap();
+    run_git(&repository, &["init", "-b", "main"]);
+    make_skill(&repository.join("skills/alpha"), "alpha", "Alpha skill");
+    run_git(&repository, &["add", "."]);
+    run_git(
+        &repository,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Initial collection",
+        ],
+    );
+
+    let scan = scan_import_candidates(std::slice::from_ref(&repository), &managed_root).unwrap();
+    let preview = scan.collections.into_iter().next().unwrap();
+    let child = preview.children[0].clone();
+    let request = ImportCollectionApplyRequest {
+        collection_id: preview.id.clone(),
+        worktree_root: repository.clone(),
+        preview_id: preview.preview_id.clone(),
+        selections: vec![ImportCollectionChildSelection {
+            relative_path: child.relative_path.clone(),
+            group_id: child.group_id.clone(),
+            variant_id: child.variant_id.clone(),
+            skill_type: SkillKind::User,
+        }],
+        actor: "test".to_string(),
+    };
+
+    let applied = apply_import_collection(request.clone(), &managed_root).unwrap();
+    assert_eq!(applied.imported.len(), 1);
+    assert!(managed_root.join("user-skills/alpha/SKILL.md").is_file());
+    assert!(repository.join("skills/alpha").is_dir());
+    let stored = list_skill_collections(&managed_root).unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].members.len(), 1);
+    assert_eq!(stored[0].members[0].relative_path, "skills/alpha");
+
+    fs::write(
+        repository.join("skills/alpha/SKILL.md"),
+        "---\nname: alpha\ndescription: Changed\n---\n\n# Changed\n",
+    )
+    .unwrap();
+    run_git(&repository, &["add", "."]);
+    run_git(
+        &repository,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Change alpha",
+        ],
+    );
+
+    let error = apply_import_collection(request, &managed_root).unwrap_err();
+    assert!(error.contains("stale"));
+    assert_eq!(
+        fs::read_to_string(managed_root.join("user-skills/alpha/SKILL.md")).unwrap(),
+        "---\nname: alpha\ndescription: \"Alpha skill\"\n---\n\n# alpha\n\n"
+    );
+    assert_eq!(
+        list_skill_collections(&managed_root).unwrap()[0]
+            .members
+            .len(),
+        1
     );
 }
 

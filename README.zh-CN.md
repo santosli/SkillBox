@@ -29,9 +29,10 @@ SkillBox 是一个 local-first 的 macOS 桌面应用，带 Rust core/CLI，用�
 - **一个 managed store，面向受支持的 runtime。** 把持久 skill 状态放在 `~/.skillbox`，再部署到受支持的全局或项目局部 `SKILL.md` roots。
 - **完整生命周期都先 review。** 导入、部署、类型迁移、source 绑定、更新、回滚和删除都会先展示影响，再改 managed store 或 runtime 文件。
 - **远程 skill 版本管理。** SkillBox 打开期间检查 GitHub source，预览全文件 diff，应用更新，并回滚到不可变版本。
-- **双向 Git 变更都先审查。** 本地 user-skill diff 会在 commit/push 前 review。Unreleased v0.7 新增显式的 Check remote -> Review incoming changes -> Apply fast-forward 入站流程；远端历史分叉仍在 SkillBox 外按正常 Git 冲突处理。
+- **双向 Git 变更都先审查。** 本地 user-skill diff 会在 commit/push 前 review。已发布的 v0.7 增加显式的 Check remote -> Review incoming changes -> Apply fast-forward 入站流程；远端历史分叉仍在 SkillBox 外按正常 Git 冲突处理。
 - **按证据分类的 Calls、引用与操作历史。** Calls 只统计本机 confirmed execution 与可辩护的 structured invocation，低信号 history references 单独展示，并且不保存完整聊天 transcript。
 - **安全的存储与部署默认值。** 使用顺序 SQLite migrations、恢复备份、完整性检查和 ownership-checked symlink，不静默覆盖 runtime 内容。
+- **Git-backed 本地 Skill Collections。** Import Review 会把同一 Git worktree 中的 skills 聚合为一个仓库卡片，同时保留每个子 skill 的独立选择、部署和 usage。GitHub 多 skill fetch 与 collection 级更新/回滚仍是后续工作。
 - **部署前检查 compatibility。** Rust-owned runtime profiles 标识 workspace，并在确认 symlink 部署前报告会原样保留的 frontmatter warnings 或 hard blockers。
 - **签名的 macOS 分发。** 可安装已公证 DMG 或 Homebrew cask，app 更新也只在用户确认后应用。
 
@@ -102,7 +103,8 @@ Runtime 目录只是部署目标：
 - 检查 remote source、预览全文件 diff、应用更新，并回滚到不可变版本。
 - 部署前 preview runtime profile 与 frontmatter compatibility；blocked target 不可选择，warning 需要确认，apply 会重新校验 skill/target/profile 是否 stale，再创建 ownership-checked symlink。
 - 名称确认后，从 managed store 和全部关联 workspace 删除 skill，同时保留 recovery backup 和 workspace registrations。
-- Review user-skill Git diff、为选中文件创建 Conventional Commit，并可选推送。Unreleased v0.7 对 `origin/main` 入站更新使用独立的 preview-confirmed fast-forward 流程；SkillBox 不会自动 merge、rebase、reset、stash 或解决冲突。
+- Review user-skill Git diff、为选中文件创建 Conventional Commit，并可选推送。v0.7 对 `origin/main` 入站更新使用独立的 preview-confirmed fast-forward 流程；SkillBox 不会自动 merge、rebase、reset、stash 或解决冲突。
+- 本地 Import Review 由 Rust 找到最近的安全 Git worktree，并把其中的 `SKILL.md` children 展示为一个 collection。collection scan 只读；应用选中的 children 前会重新校验 worktree/HEAD，成功导入后才保存 collection provenance。
 - 按类型、更新状态、tag 或 favorite 搜索过滤 Dashboard，在 grid/list 间切换，并把 favorites 与 tags 持久化到 SQLite。
 - 记录受支持的 hooks 与 structured local-history evidence；分开展示 Calls 和 History references，按 confirmed 加可辩护 inferred Calls 排名，并提供不含正文的 aggregate-only coverage。
 - 执行顺序 SQLite migrations、迁移前备份和完整性检查；运行 Doctor 诊断并显式清理 stale deployment records。
@@ -187,7 +189,7 @@ SkillBox 是 local-first，不需要托管账号。应用可能会：
 - 在 `~/.skillbox` 下写入 managed copies 和 metadata；
 - 创建从 runtime 目录回指到 managed skills 的 symlink；
 - 为 `~/.skillbox/user-skills` 初始化和更新 Git metadata；
-- 在 Unreleased v0.7 流程中显式 fetch 并预览 `origin/main` 的入站变更，只在用户确认后 fast-forward 共享 user-skills repository；
+- 在 v0.7 流程中显式 fetch 并预览 `origin/main` 的入站变更，只在用户确认后 fast-forward 共享 user-skills repository；
 - 在你明确注入 hooks 时，修改受支持 runtime 的 hook config files。
 
 SkillBox 会把 runtime folders、GitHub URLs、下载归档和既有 skills 都视为不可信输入，不应静默覆盖非 symlink runtime target。
@@ -235,6 +237,7 @@ docs/                      architecture, data model, workflows, ADRs
 - [Agent adapter ADR](docs/decisions/0004-support-multiple-agent-runtimes-through-adapters.md)
 - [Usage evidence ADR](docs/decisions/0005-usage-evidence-classification.md)
 - [Reviewed inbound Git ADR](docs/decisions/0006-review-inbound-user-skills-git-before-fast-forward.md)
+- [Git-backed Skill Collections ADR](docs/decisions/0007-git-backed-skill-collections.md)
 
 ## 开发
 

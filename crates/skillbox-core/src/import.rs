@@ -96,6 +96,21 @@ pub fn scan_import_candidates(
         })
     });
     let groups = group_import_candidates(&candidates, &usage_by_skill);
+    let collections = discover_import_collections(&candidates, &groups);
+    let collection_group_ids = collections
+        .iter()
+        .flat_map(|collection| {
+            collection
+                .children
+                .iter()
+                .map(|child| child.group_id.clone())
+        })
+        .collect::<HashSet<_>>();
+    let standalone_groups = groups
+        .iter()
+        .filter(|group| !collection_group_ids.contains(&group.id))
+        .cloned()
+        .collect();
     dedupe_import_candidates(&mut candidates);
     candidates.sort_by(|left, right| {
         left.name
@@ -106,6 +121,8 @@ pub fn scan_import_candidates(
         roots: scan.roots,
         candidates,
         groups,
+        collections,
+        standalone_groups,
         errors: scan.errors,
     })
 }
@@ -397,7 +414,7 @@ pub fn import_candidates(
     Ok(ImportBatchResult { imported, errors })
 }
 
-fn validate_unique_import_request_names(items: &[ImportRequestItem]) -> Result<()> {
+pub(crate) fn validate_unique_import_request_names(items: &[ImportRequestItem]) -> Result<()> {
     let mut names = HashSet::new();
     for item in items {
         let source_path = expand_home(item.source_path.clone());

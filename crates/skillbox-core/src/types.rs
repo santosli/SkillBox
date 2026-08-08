@@ -1092,6 +1092,43 @@ pub struct ImportCandidateGroup {
     pub variants: Vec<ImportCandidateVariant>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ImportCandidateCollectionChild {
+    pub id: String,
+    pub group_id: String,
+    pub variant_id: String,
+    pub name: String,
+    pub relative_path: String,
+    pub source_path: PathBuf,
+    pub real_path: PathBuf,
+    pub content_hash: String,
+    pub snapshot_hash: String,
+    pub import_status: ImportCandidateStatus,
+    pub conflict: Option<String>,
+    pub usage_count: usize,
+    pub locations: Vec<ImportCandidateLocation>,
+    pub unlinked_locations: Vec<ImportCandidateLocation>,
+    pub suggested_types: Vec<SkillKind>,
+    pub requires_type_review: bool,
+    pub selected_type: Option<SkillKind>,
+    pub is_selected: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ImportCandidateCollection {
+    pub id: String,
+    pub preview_id: String,
+    pub display_name: String,
+    pub canonical_worktree_root: PathBuf,
+    pub canonical_repository_id: PathBuf,
+    pub origin_url: Option<String>,
+    pub branch: Option<String>,
+    pub detached: bool,
+    pub reviewed_head_sha: Option<String>,
+    pub children: Vec<ImportCandidateCollectionChild>,
+    pub errors: Vec<ImportCandidateError>,
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ImportCandidateStatus {
@@ -1105,6 +1142,8 @@ pub struct ImportCandidateScan {
     pub roots: Vec<PathBuf>,
     pub candidates: Vec<ImportCandidate>,
     pub groups: Vec<ImportCandidateGroup>,
+    pub collections: Vec<ImportCandidateCollection>,
+    pub standalone_groups: Vec<ImportCandidateGroup>,
     pub errors: Vec<ScanError>,
 }
 
@@ -1134,6 +1173,55 @@ pub struct ImportCandidateError {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ImportBatchResult {
+    pub imported: Vec<ImportedCandidate>,
+    pub errors: Vec<ImportCandidateError>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportCollectionChildSelection {
+    pub relative_path: String,
+    pub group_id: String,
+    pub variant_id: String,
+    pub skill_type: SkillKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportCollectionApplyRequest {
+    pub collection_id: String,
+    pub worktree_root: PathBuf,
+    pub preview_id: String,
+    pub selections: Vec<ImportCollectionChildSelection>,
+    pub actor: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SkillCollectionMember {
+    pub collection_id: String,
+    pub skill_name: String,
+    pub relative_path: String,
+    pub reviewed_head_sha: Option<String>,
+    pub snapshot_hash: String,
+    pub content_hash: String,
+    pub managed_skill_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SkillCollection {
+    pub id: String,
+    pub display_name: String,
+    pub canonical_worktree_root: PathBuf,
+    pub canonical_repository_id: PathBuf,
+    pub origin_url: Option<String>,
+    pub branch: Option<String>,
+    pub detached: bool,
+    pub reviewed_head_sha: Option<String>,
+    pub available: bool,
+    pub members: Vec<SkillCollectionMember>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ImportCollectionApplyResult {
+    pub collection: SkillCollection,
     pub imported: Vec<ImportedCandidate>,
     pub errors: Vec<ImportCandidateError>,
 }

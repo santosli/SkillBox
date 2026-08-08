@@ -6229,6 +6229,141 @@ dd {
   padding: 14px;
 }
 
+.collectionReviewCard {
+  min-width: 0;
+  border: 1px solid var(--skillbox-border);
+  border-radius: 10px;
+  background: var(--skillbox-surface);
+  padding: 14px;
+}
+
+.collectionReviewHeader {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.collectionReviewIdentity {
+  min-width: 0;
+}
+
+.collectionReviewIdentity code {
+  display: block;
+  max-width: 100%;
+  margin-top: 7px;
+  overflow: hidden;
+  color: var(--skillbox-text-nav);
+  font-family: "SF Mono", ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.collectionReviewSelection {
+  flex: 0 0 auto;
+  color: var(--skillbox-text-muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.collectionReviewChildren {
+  display: grid;
+  margin-top: 10px;
+  border-top: 1px solid var(--skillbox-border-soft);
+}
+
+.collectionChildRow {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  border-bottom: 1px solid var(--skillbox-border-soft);
+  padding: 11px 0;
+}
+
+.collectionChildRow:last-child {
+  border-bottom: 0;
+}
+
+.collectionChildRow.selected {
+  background: var(--skillbox-surface-muted);
+}
+
+.collectionChildMain {
+  min-width: 0;
+}
+
+.collectionChildMain code {
+  display: block;
+  max-width: 100%;
+  margin-top: 5px;
+  overflow: hidden;
+  color: var(--skillbox-text-nav);
+  font-family: "SF Mono", ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.collectionChildMain small {
+  display: block;
+  margin-top: 4px;
+  color: var(--skillbox-text-muted);
+  font-size: 11px;
+}
+
+.collectionChildUnlinkedLocations {
+  display: grid;
+  gap: 3px;
+  margin-top: 7px;
+  min-width: 0;
+}
+
+.collectionChildUnlinkedLocations code {
+  max-width: 100%;
+  margin-top: 0;
+  color: var(--skillbox-text-muted);
+  font-size: 10px;
+}
+
+.collectionChildVariants {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 7px;
+}
+
+.collectionChildVariants label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--skillbox-text-secondary);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.collectionChildType {
+  display: grid;
+  min-width: 156px;
+  justify-items: end;
+  gap: 5px;
+  color: var(--skillbox-text-muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.collectionChildType .candidateTypeSwitch {
+  width: 156px;
+}
+
+.collectionChildType .candidateTypeSwitch button {
+  min-width: 0;
+  flex: 1 1 0;
+}
+
 .workspaceSkillError {
   border: 1px solid var(--skillbox-amber-border);
   border-radius: 8px;
@@ -6855,6 +6990,26 @@ dd {
   .dashboardPageActions {
     width: 100%;
     flex-wrap: wrap;
+  }
+
+  .collectionReviewHeader {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .collectionChildRow {
+    grid-template-columns: 28px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .collectionChildType {
+    grid-column: 2;
+    justify-items: start;
+    min-width: 0;
+  }
+
+  .collectionChildType .candidateTypeSwitch {
+    width: min(100%, 240px);
   }
 
   .dashboardFilterPrimary {

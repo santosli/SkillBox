@@ -7,10 +7,12 @@ import {
   filterWorkspaceSkillCandidates,
   importCandidateGroupLocationCount,
   importCandidateGroupTabs,
+  normalizeImportCollections,
   normalizeImportCandidateGroup,
   normalizeImportCandidateGroups,
   normalizeImportCandidate,
   selectedImportCandidates,
+  selectedImportCollectionRequests,
   selectImportCandidateVariant,
   toggleImportCandidateGroupSelection,
   updateImportCandidateGroupType,
@@ -303,6 +305,53 @@ test('group search tabs and select-all count one skill while matching every loca
   assert.deepEqual(filterImportCandidateGroups(groups, 'system').map((group) => group.name), ['system-skill']);
   assert.deepEqual(filterImportCandidateGroupsByQuery(groups, 'cursor skills').map((group) => group.name), ['demo']);
   assert.deepEqual(toggleImportCandidateGroupSelection(groups).map((group) => group.isSelected), [true, false]);
+});
+
+test('normalizes Git-backed collection children and submits one selected child request', () => {
+  const collections = normalizeImportCollections([{
+    id: 'collection-demo',
+    preview_id: 'preview-demo',
+    display_name: 'skills-repo',
+    canonical_worktree_root: '/Users/example/skills-repo',
+    reviewed_head_sha: 'abcdef123456',
+    children: [{
+      id: 'child-demo',
+      group_id: 'skill-demo',
+      variant_id: 'variant-demo',
+      name: 'demo',
+      relative_path: 'skills/demo',
+      source_path: '/Users/example/skills-repo/skills/demo',
+      import_status: 'importable',
+      suggested_types: ['user'],
+      selected_type: 'user',
+      is_selected: true,
+      locations: [{ source_path: '/Users/example/skills-repo/skills/demo' }]
+    }]
+  }]);
+  const groups = normalizeImportCandidateGroups([{
+    id: 'skill-demo',
+    name: 'demo',
+    selected_variant_id: 'variant-demo',
+    variants: [{
+      id: 'variant-demo',
+      candidate: { name: 'demo', source_path: '/Users/example/skills-repo/skills/demo', import_status: 'importable', is_selected: true },
+      selected_type: 'user',
+      locations: [{ source_path: '/Users/example/skills-repo/skills/demo' }]
+    }]
+  }]);
+
+  const requests = selectedImportCollectionRequests(groups, collections);
+  assert.deepEqual(requests, [{
+    collectionId: 'collection-demo',
+    worktreeRoot: '/Users/example/skills-repo',
+    previewId: 'preview-demo',
+    selections: [{
+      relativePath: 'skills/demo',
+      groupId: 'skill-demo',
+      variantId: 'variant-demo',
+      skillType: 'user'
+    }]
+  }]);
 });
 
 test('builds workspace skill tabs and separates unimported, imported, and system skills', () => {

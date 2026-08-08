@@ -39,6 +39,7 @@
 - Implemented SQLite-backed workspace registry for global and project-local skills roots, including `.codex/skills`, `.agents/skills`, `.claude/skills`, scan-time auto registration, imported skill counts, preview-confirmed single-root project initialization, manual add/forget, Rust CLI compatibility commands, Tauri commands, and a searchable desktop Workspaces page with type filters and per-workspace skill review/import.
 - Implemented import records and import revert in Rust core, Rust CLI, Tauri commands, and Skill Detail UI, including backup restoration, conservative legacy reconciliation, multi-workspace blocking, and warning/danger confirmation states.
 - Implemented Rust-owned Import Review groups with stable content/status variant identities, full-snapshot-equivalent locations, location-level User/Remote advice with explicit mixed-suggestion confirmation, explicit selection for materially different same-name variants, group-level Calls/search/tab counts, and one-primary-only import enforcement that preserves existing revert guarantees.
+- Implemented v0.8.0 Skill Collections Phase A+B: Rust discovers the nearest safe Git worktree for local Import Review, groups repository children with canonical worktree/HEAD identity, keeps external copies unlinked, and persists reviewed collection/member provenance after a stale-checked child import. GitHub multi-skill fetch and collection-level update/rollback remain planned.
 - Added signed macOS app update checks and user-confirmed install/restart through the Tauri updater plugin, plus release workflow assets for updater archives, signatures, and `latest.json`.
 - Added daily macOS updater metadata checks with a SQLite-backed successful-result cache, a sidebar Update reminder, one-click metadata recheck plus signed install/restart, and retry-safe pending updates without automatic downloads.
 - Added ordered, transactional Rust SQLite migrations, consistent pre-migration backups for existing databases, schema version tracking, and integrity validation.
@@ -80,20 +81,24 @@ evolution path](roadmap.md#versioned-evolution-path):
   classification, and Calls/reference semantics backward compatible.
 - Keep native non-`SKILL.md` formats behind the future adapter boundary.
 
-### Later Milestones
+### 0.8 — Git-backed Skill Collections
 
-- Plan [Git-backed Skill Collections](https://github.com/santosli/SkillBox/issues/46)
-  for `v0.8.0`, after the v0.7.0 inbound-sync release. A collection is a
-  canonical Git repository/worktree source plus reviewed ref/HEAD; child
-  `SKILL.md` directories remain independently selectable and deployable. The
-  planned phases are local repository grouping, persistence and child
-  relationships, one-fetch GitHub multi-skill preview/apply, and
-  commit-consistent collection update/rollback.
+- [Git-backed Skill Collections](https://github.com/santosli/SkillBox/issues/46)
+  are the active v0.8.0 milestone. Phase A+B are implemented: local repository
+  grouping and schema-backed collection/member relationships are available in
+  Import Review. A collection records canonical worktree/repository identity,
+  reviewed HEAD, and child-relative provenance; child skills remain independent
+  for selection, import, deployment, Calls, and history.
+- Phase C, one-fetch GitHub multi-skill preview/apply, and Phase D,
+  commit-consistent collection update/rollback, remain planned and are not
+  shipped.
 - Collection scans must remain read-only. Apply must revalidate repository
   identity, HEAD/ref, and tree snapshot; execute no hooks, submodules, filters,
   scripts, or arbitrary shell; and preserve existing path, overwrite,
-  duplicate-name, backup, and recovery protections. No collection phase is
-  currently implemented.
+  duplicate-name, backup, and recovery protections. The current local apply is
+  preflighted and compensatable rather than a claim of a cross-filesystem
+  transaction; failures report rollback limitations instead of hiding partial
+  work.
 - Add FTS-backed search across skills, operations, and usage history.
 - Add remote source provenance and trust classification without treating
   popularity as verification.

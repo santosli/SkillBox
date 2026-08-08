@@ -502,7 +502,29 @@ test('import review uses the shared searchable candidate list template', () => {
   assert.match(candidateReviewListSource, /type="text"/);
   assert.doesNotMatch(candidateReviewListSource, /type="search"/);
   assert.match(candidateReviewListSource, /importCandidateGroupTabs\(searchedGroups\)/);
+  assert.match(candidateReviewListSource, /filterImportCollectionsByQuery\(collections, searchQuery\)/);
+  assert.match(candidateReviewListSource, /<CollectionReviewCard/);
+  assert.match(candidateReviewListSource, /collectionGroupIds/);
+  assert.match(appSource, /apply_import_collection/);
+  assert.match(appSource, /preview_id: request.previewId/);
   assert.match(searchRule, /width:\s*100%;/);
+});
+
+test('collection review keeps child selection and type controls inside one expandable card', () => {
+  const collectionSource = appSource.match(
+    /function CollectionReviewCard\(\{(?<body>[\s\S]*?)\n\}\n\nfunction WorkspaceSkillTabs/
+  )?.groups.body || '';
+  const collectionRule = css.match(/\.collectionReviewCard\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const childRule = css.match(/\.collectionChildRow\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(collectionSource, /aria-controls={disclosureId}/);
+  assert.match(collectionSource, /collection\.children\.map/);
+  assert.match(collectionSource, /onToggleSelected\(group\)/);
+  assert.match(collectionSource, /onTypeChange\(group, 'user'\)/);
+  assert.match(collectionSource, /onTypeChange\(group, 'remote'\)/);
+  assert.match(collectionSource, /relativePath/);
+  assert.match(collectionRule, /min-width:\s*0;/);
+  assert.match(childRule, /grid-template-columns:\s*28px minmax\(0,\s*1fr\) auto;/);
 });
 
 test('local import confirmation lets users choose User or Remote', () => {

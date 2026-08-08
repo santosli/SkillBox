@@ -7,7 +7,12 @@ version tags such as `v0.3.0`.
 
 ## Unreleased
 
-- No unreleased changes.
+- Add read-only local Git worktree discovery to Import Review, grouping repository
+  children into one collection card while preserving independent child selection.
+- Persist reviewed collection source identity and imported child relationships in
+  schema v8 after a successful, stale-checked apply.
+- Keep GitHub multi-skill fetch and collection-level update/rollback planned for a
+  later phase; this change does not claim those workflows.
 
 ## 0.7.1
 

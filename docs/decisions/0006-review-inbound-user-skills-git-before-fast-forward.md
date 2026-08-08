@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for the v0.7 implementation; release qualification is pending.
+Accepted and shipped in the v0.7.0 implementation.
 
 ## Context
 
