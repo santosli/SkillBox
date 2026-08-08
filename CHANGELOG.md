@@ -7,19 +7,7 @@ version tags such as `v0.3.0`.
 
 ## Unreleased
 
-- Group scanned copied skills with validated v3 GitHub installer-lockfile provenance into display-only Installed source collections, while keeping live Git collections authoritative and selected children on the existing per-skill import path.
-- Make collection child type controls truthful: only actionable importable children expose User/Remote actions; imported, system, and conflict children show read-only status/classification instead of disabled controls.
-- Add read-only local Git worktree discovery to Import Review, grouping repository
-  children into one collection card while preserving independent child selection.
-- Persist reviewed collection source identity and imported child relationships in
-  schema v8 after a successful, stale-checked apply.
-- Keep GitHub multi-skill fetch and collection-level update/rollback planned for a
-  later phase; this change does not claim those workflows.
-- Open Import Review before the local scan finishes, expose accessible staged progress
-  and retry state, and reuse repository identity and snapshot work across duplicate
-  locations. Closing the review dismisses the UI and ignores stale results; it does
-  not claim to abort the underlying read-only Rust scan. Native Tauri scan requests
-  now use the bridge's camelCase argument contract.
+- No unreleased changes.
 
 ## 0.7.1
 
