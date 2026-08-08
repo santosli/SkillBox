@@ -98,7 +98,7 @@ Runtime 目录只是部署目标：
 ## 功能
 
 - 扫描并登记受支持的全局或项目局部 `SKILL.md` workspaces。在打包后的 macOS app 中，可以通过原生单目录选择器或手动输入路径选择 project / 现有 skills folder；SkillBox 会立即执行只读 preview，并可在登记前显式创建一个选中的 `.agents/skills`、`.codex/skills`、`.claude/skills` 或 `.cursor/skills` root。取消选择不会改变当前状态，也不会一次创建所有 runtime roots。
-- 在复制前 review user、remote 和 system import candidates；同名 skill 只显示一张卡片，保留所有位置和差异 variant，并且每个 skill 只导入一个明确选择的来源，不改动等价副本。
+- 在复制前 review user、remote 和 system import candidates；review shell 会先立即打开并展示分阶段扫描进度，再按每个 skill 一张卡片展示所有位置和差异 variant；每个 skill 只导入一个明确选择的来源，不改动等价副本。
 - 通过 preview/apply 安装 GitHub-backed skill，并在不替换当前版本的情况下绑定识别到的 remote source candidate。
 - 检查 remote source、预览全文件 diff、应用更新，并回滚到不可变版本。
 - 部署前 preview runtime profile 与 frontmatter compatibility；blocked target 不可选择，warning 需要确认，apply 会重新校验 skill/target/profile 是否 stale，再创建 ownership-checked symlink。

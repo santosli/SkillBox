@@ -62,6 +62,44 @@ import {
   shouldConfirmLocalImport,
   toggleImportCandidateSelection
 } from './importFlow.js';
+import {
+  browserImportScanOptions,
+  importScanProgressDetail,
+  importScanProgressLabel,
+  isImportScanRequestCurrent,
+  normalizeImportScanProgress
+} from './importScanProgress.js';
+
+test('normalizes staged import scan progress and exposes truthful labels', () => {
+  const progress = normalizeImportScanProgress({
+    phase: 'grouping Git repositories',
+    processed: 12,
+    total: 48,
+    unique_repositories: 3
+  });
+
+  assert.deepEqual(progress, {
+    phase: 'grouping Git repositories',
+    processed: 12,
+    total: 48,
+    uniqueRepositories: 3
+  });
+  assert.equal(importScanProgressLabel(progress), 'Grouping Git repositories');
+  assert.equal(importScanProgressDetail(progress), '12 of 48 · 3 repositories');
+});
+
+test('import scan request generation ignores stale progress and bounds browser QA delay', () => {
+  assert.equal(isImportScanRequestCurrent(4, 4), true);
+  assert.equal(isImportScanRequestCurrent(4, 5), false);
+  assert.deepEqual(browserImportScanOptions('?import-scan-delay-ms=9999&import-scan-error=1'), {
+    delayMs: 2000,
+    error: true
+  });
+  assert.deepEqual(browserImportScanOptions('?import-scan-delay-ms=-10'), {
+    delayMs: 0,
+    error: false
+  });
+});
 
 test('normalizes backend is_selected false without selecting importable candidate', () => {
   const candidate = normalizeImportCandidate({

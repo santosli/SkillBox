@@ -3,7 +3,7 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 const APP_UPDATE_CHECK_INTERVAL_SECONDS: u64 = 24 * 60 * 60;
@@ -352,13 +352,40 @@ fn scan_skills() -> Result<Value, String> {
     serde_json::to_value(scan).map_err(|error| error.to_string())
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportScanProgressEvent {
+    scan_id: u64,
+    phase: String,
+    processed: usize,
+    total: Option<usize>,
+    unique_repositories: usize,
+}
+
 #[tauri::command]
-fn scan_import_candidates() -> Result<Value, String> {
-    let scan = skillbox_core::scan_import_candidates(
-        &skillbox_core::global_runtime_roots(),
-        skillbox_core::default_managed_root(),
-    )?;
-    serde_json::to_value(scan).map_err(|error| error.to_string())
+async fn scan_import_candidates(app: tauri::AppHandle, scan_id: u64) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let roots = skillbox_core::global_runtime_roots();
+        let result = skillbox_core::scan_import_candidates_with_progress(
+            &roots,
+            skillbox_core::default_managed_root(),
+            |progress| {
+                let _ = app.emit(
+                    "skillbox://import-scan-progress",
+                    ImportScanProgressEvent {
+                        scan_id,
+                        phase: progress.phase,
+                        processed: progress.processed,
+                        total: progress.total,
+                        unique_repositories: progress.unique_repositories,
+                    },
+                );
+            },
+        )?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Import scan task failed: {error}"))?
 }
 
 #[tauri::command]

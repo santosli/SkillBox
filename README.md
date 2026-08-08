@@ -98,7 +98,7 @@ Longer-term support for native Claude, OpenClaw, Cursor, Claude Code, Copilot, a
 ## Features
 
 - Scan and register supported global or project-local `SKILL.md` workspaces. In the packaged macOS app, use the native single-directory picker or enter a path manually to choose a project or existing skills folder; SkillBox immediately runs a read-only preview, and can explicitly create exactly one selected `.agents/skills`, `.codex/skills`, `.claude/skills`, or `.cursor/skills` root before registration. Cancelling the picker changes nothing, and SkillBox never creates all runtime roots automatically.
-- Review user, remote, and system import candidates before copying anything; see one card per skill, inspect every location and differing variant, and import exactly one reviewed source without changing equivalent copies.
+- Review user, remote, and system import candidates before copying anything; the review shell opens immediately with staged scan progress, then shows one card per skill, every location and differing variant, and exactly one reviewed source without changing equivalent copies.
 - Install GitHub-backed skills through a preview/apply flow and bind discovered remote source candidates without replacing the active version.
 - Check remote sources, preview all-file diffs, apply updates, and roll back to immutable versions.
 - Preview runtime-profile and frontmatter compatibility before deploying to an individual workspace. Blocked targets cannot be selected, warnings require confirmation, and apply revalidates stale skill/target/profile state before creating an ownership-checked symlink.

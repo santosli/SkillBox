@@ -6081,6 +6081,58 @@ dd {
   background: var(--skillbox-surface-muted);
 }
 
+.importScanProgress {
+  display: flex;
+  min-height: 220px;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--skillbox-text-secondary);
+  text-align: left;
+}
+
+.importScanProgressIcon {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  color: var(--skillbox-blue);
+  animation: syncSpin 0.8s linear infinite;
+}
+
+.importScanProgress div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.importScanProgress strong {
+  color: var(--skillbox-text);
+  font-size: 15px;
+  font-weight: 680;
+}
+
+.importScanProgress span {
+  color: var(--skillbox-text-muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.importScanError {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.importScanError span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.importScanError .button {
+  flex: 0 0 auto;
+}
+
 .collapsedCandidateGroup,
 .collapsedCandidateRows {
   display: grid;
@@ -7010,6 +7062,15 @@ dd {
 
   .collectionChildType .candidateTypeSwitch {
     width: min(100%, 240px);
+  }
+
+  .importScanError {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .importScanError .button {
+    width: 100%;
   }
 
   .dashboardFilterPrimary {

@@ -1,36 +1,75 @@
 use crate::*;
 use skillbox_git::{GitRepositoryIdentity, GitService};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 const MAX_COLLECTION_CHILDREN: usize = 500;
 const MAX_COLLECTION_ERRORS: usize = 32;
 
-pub(crate) fn discover_import_collections(
+#[derive(Debug, Default)]
+pub(crate) struct CollectionDiscoveryStats {
+    pub unique_repository_count: usize,
+    pub repository_inspections: usize,
+    pub repository_cache_hits: usize,
+    pub snapshot_hash_computations: usize,
+    pub snapshot_cache_hits: usize,
+}
+
+pub(crate) fn discover_import_collections_with_progress<F>(
     candidates: &[ImportCandidate],
     groups: &[ImportCandidateGroup],
-) -> Vec<ImportCandidateCollection> {
+    mut progress: F,
+) -> (Vec<ImportCandidateCollection>, CollectionDiscoveryStats)
+where
+    F: FnMut(usize, usize, usize),
+{
     let git = GitService::new();
     let mut builders = BTreeMap::<(PathBuf, PathBuf), CollectionBuilder>::new();
+    let mut identity_cache = HashMap::<PathBuf, Option<GitRepositoryIdentity>>::new();
+    let mut snapshot_cache = HashMap::<PathBuf, String>::new();
+    let mut unique_repository_keys = HashSet::<(PathBuf, PathBuf)>::new();
+    let mut stats = CollectionDiscoveryStats::default();
 
-    for candidate in candidates {
-        let identity = match git.repository_identity(&candidate.real_path) {
-            Ok(Some(identity)) => identity,
-            Ok(None) | Err(_) => continue,
+    for (index, candidate) in candidates.iter().enumerate() {
+        let identity_cache_key = repository_identity_cache_key(&candidate.real_path);
+        let identity = match identity_cache.entry(identity_cache_key) {
+            std::collections::hash_map::Entry::Occupied(entry) => {
+                stats.repository_cache_hits += 1;
+                entry.get().clone()
+            }
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                stats.repository_inspections += 1;
+                let identity = git.repository_identity(&candidate.real_path).ok().flatten();
+                entry.insert(identity.clone());
+                identity
+            }
         };
+        let identity = match identity {
+            Some(identity) => identity,
+            _ => {
+                progress(index + 1, candidates.len(), builders.len());
+                continue;
+            }
+        };
+        unique_repository_keys
+            .insert((identity.worktree_root.clone(), identity.common_dir.clone()));
+        let unique_repository_count = unique_repository_keys.len();
         let Some(relative_path) =
             safe_collection_relative_path(&identity.worktree_root, &candidate.real_path)
         else {
+            progress(index + 1, candidates.len(), unique_repository_count);
             continue;
         };
         if relative_path.as_os_str().is_empty() {
+            progress(index + 1, candidates.len(), unique_repository_count);
             continue;
         }
         let Some(group) = groups
             .iter()
             .find(|group| group.name.eq_ignore_ascii_case(&candidate.name))
         else {
+            progress(index + 1, candidates.len(), unique_repository_count);
             continue;
         };
         let Some(variant) = group.variants.iter().find(|variant| {
@@ -39,11 +78,30 @@ pub(crate) fn discover_import_collections(
                 .iter()
                 .any(|location| location.source_path == candidate.source_path)
         }) else {
+            progress(index + 1, candidates.len(), unique_repository_count);
             continue;
         };
-        let snapshot_hash = match skill_directory_snapshot_hash(&candidate.real_path) {
-            Ok(hash) => hash,
-            Err(_) => continue,
+        let snapshot_hash = if !variant.snapshot_hash.is_empty() {
+            variant.snapshot_hash.clone()
+        } else {
+            match snapshot_cache.entry(candidate.real_path.clone()) {
+                std::collections::hash_map::Entry::Occupied(entry) => {
+                    stats.snapshot_cache_hits += 1;
+                    entry.get().clone()
+                }
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    stats.snapshot_hash_computations += 1;
+                    let hash = match skill_directory_snapshot_hash(&candidate.real_path) {
+                        Ok(hash) => hash,
+                        Err(_) => {
+                            progress(index + 1, candidates.len(), unique_repository_count);
+                            continue;
+                        }
+                    };
+                    entry.insert(hash.clone());
+                    hash
+                }
+            }
         };
         let key = (identity.worktree_root.clone(), identity.common_dir.clone());
         let builder = builders.entry(key).or_insert_with(|| CollectionBuilder {
@@ -53,6 +111,7 @@ pub(crate) fn discover_import_collections(
         });
         let child_key = format!("{relative_path:?}\n{}", variant.id);
         if builder.children.contains_key(&child_key) {
+            progress(index + 1, candidates.len(), unique_repository_count);
             continue;
         }
         let locations = variant
@@ -109,12 +168,28 @@ pub(crate) fn discover_import_collections(
                 is_selected: variant.candidate.is_selected,
             },
         );
+        progress(index + 1, candidates.len(), unique_repository_count);
     }
 
-    builders
+    stats.unique_repository_count = unique_repository_keys.len();
+    let collections = builders
         .into_values()
         .filter_map(|builder| builder.finish())
-        .collect()
+        .collect();
+    (collections, stats)
+}
+
+fn repository_identity_cache_key(path: &Path) -> PathBuf {
+    let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let mut current = canonical.clone();
+    loop {
+        if fs::symlink_metadata(current.join(".git")).is_ok() {
+            return current.join(".git");
+        }
+        if !current.pop() {
+            return canonical;
+        }
+    }
 }
 
 struct CollectionBuilder {

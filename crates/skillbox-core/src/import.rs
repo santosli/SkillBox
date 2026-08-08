@@ -4,15 +4,46 @@ pub fn scan_import_candidates(
     roots: &[PathBuf],
     managed_root: impl AsRef<Path>,
 ) -> Result<ImportCandidateScan> {
+    scan_import_candidates_with_progress(roots, managed_root, |_| {})
+}
+
+pub fn scan_import_candidates_with_progress<F>(
+    roots: &[PathBuf],
+    managed_root: impl AsRef<Path>,
+    mut progress: F,
+) -> Result<ImportCandidateScan>
+where
+    F: FnMut(ImportScanProgress),
+{
+    let started = Instant::now();
+    progress(ImportScanProgress {
+        phase: "loading usage and index data".to_string(),
+        processed: 0,
+        total: None,
+        unique_repositories: 0,
+    });
     let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
     let imported_hashes = imported_skill_hashes(&paths)?;
     let usage_by_skill = load_usage_by_skill(&paths.database_path)?;
     let usage_by_skill_runtime = load_usage_by_skill_runtime(&paths.database_path)?;
+    progress(ImportScanProgress {
+        phase: "scanning local roots".to_string(),
+        processed: 0,
+        total: Some(roots.len()),
+        unique_repositories: 0,
+    });
     let scan = scan_skill_roots_for_import(roots, &paths)?;
     record_scanned_workspaces(&paths, &scan.roots)?;
+    let total_candidates = scan.skills.len();
+    progress(ImportScanProgress {
+        phase: "validating candidates".to_string(),
+        processed: 0,
+        total: Some(total_candidates),
+        unique_repositories: 0,
+    });
     let mut candidates = Vec::new();
 
-    for skill in scan.skills {
+    for (index, skill) in scan.skills.into_iter().enumerate() {
         let is_system = is_system_skill(&skill);
         let is_imported = skill_is_imported(&skill, &imported_hashes, &paths);
         let (suggested_type, suggestion_reason, default_selected) =
@@ -68,6 +99,12 @@ pub fn scan_import_candidates(
             conflict,
             usage_count,
         });
+        progress(ImportScanProgress {
+            phase: "validating candidates".to_string(),
+            processed: index + 1,
+            total: Some(total_candidates),
+            unique_repositories: 0,
+        });
     }
 
     let root_rank = scan
@@ -95,8 +132,25 @@ pub fn scan_import_candidates(
                 .then_with(|| left.source_path.cmp(&right.source_path))
         })
     });
-    let groups = group_import_candidates(&candidates, &usage_by_skill);
-    let collections = discover_import_collections(&candidates, &groups);
+    let (groups, grouping_stats) = group_import_candidates(&candidates, &usage_by_skill);
+    progress(ImportScanProgress {
+        phase: "grouping Git repositories".to_string(),
+        processed: 0,
+        total: Some(candidates.len()),
+        unique_repositories: 0,
+    });
+    let (collections, collection_stats) = discover_import_collections_with_progress(
+        &candidates,
+        &groups,
+        |processed, total, unique_repositories| {
+            progress(ImportScanProgress {
+                phase: "grouping Git repositories".to_string(),
+                processed,
+                total: Some(total),
+                unique_repositories,
+            });
+        },
+    );
     let collection_group_ids = collections
         .iter()
         .flat_map(|collection| {
@@ -117,6 +171,12 @@ pub fn scan_import_candidates(
             .cmp(&right.name)
             .then_with(|| left.source_path.cmp(&right.source_path))
     });
+    progress(ImportScanProgress {
+        phase: "complete".to_string(),
+        processed: candidates.len(),
+        total: Some(candidates.len()),
+        unique_repositories: collection_stats.unique_repository_count,
+    });
     Ok(ImportCandidateScan {
         roots: scan.roots,
         candidates,
@@ -124,14 +184,27 @@ pub fn scan_import_candidates(
         collections,
         standalone_groups,
         errors: scan.errors,
+        diagnostics: ImportScanDiagnostics {
+            candidate_count: total_candidates,
+            unique_repository_count: collection_stats.unique_repository_count,
+            repository_inspections: collection_stats.repository_inspections,
+            repository_cache_hits: collection_stats.repository_cache_hits,
+            snapshot_hash_computations: grouping_stats.snapshot_hash_computations
+                + collection_stats.snapshot_hash_computations,
+            snapshot_cache_hits: grouping_stats.snapshot_cache_hits
+                + collection_stats.snapshot_cache_hits,
+            elapsed_ms: started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+        },
     })
 }
 
 pub(crate) fn group_import_candidates(
     candidates: &[ImportCandidate],
     usage_by_skill: &HashMap<String, UsageSummary>,
-) -> Vec<ImportCandidateGroup> {
+) -> (Vec<ImportCandidateGroup>, SnapshotHashStats) {
     let mut grouped = BTreeMap::<String, Vec<ImportCandidate>>::new();
+    let mut snapshot_cache = HashMap::<PathBuf, String>::new();
+    let mut stats = SnapshotHashStats::default();
     for candidate in candidates {
         grouped
             .entry(candidate.name.to_ascii_lowercase())
@@ -139,23 +212,43 @@ pub(crate) fn group_import_candidates(
             .push(candidate.clone());
     }
 
-    grouped
+    let groups = grouped
         .into_iter()
         .map(|(normalized_name, candidates)| {
-            build_import_candidate_group(&normalized_name, candidates, usage_by_skill)
+            build_import_candidate_group(
+                &normalized_name,
+                candidates,
+                usage_by_skill,
+                &mut snapshot_cache,
+                &mut stats,
+            )
         })
-        .collect()
+        .collect();
+    (groups, stats)
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct SnapshotHashStats {
+    pub snapshot_hash_computations: usize,
+    pub snapshot_cache_hits: usize,
 }
 
 fn build_import_candidate_group(
     normalized_name: &str,
     candidates: Vec<ImportCandidate>,
     usage_by_skill: &HashMap<String, UsageSummary>,
+    snapshot_cache: &mut HashMap<PathBuf, String>,
+    snapshot_stats: &mut SnapshotHashStats,
 ) -> ImportCandidateGroup {
     let mut variants: Vec<(String, ImportCandidateVariant)> = Vec::new();
 
     for candidate in candidates {
-        let signature = import_candidate_variant_signature(&candidate);
+        let snapshot_hash = if candidate.import_status == ImportCandidateStatus::Imported {
+            String::new()
+        } else {
+            snapshot_hash_for_candidate(&candidate, snapshot_cache, snapshot_stats)
+        };
+        let signature = import_candidate_variant_signature(&candidate, &snapshot_hash);
         let location = import_candidate_location(&candidate);
         if let Some((_, variant)) = variants
             .iter_mut()
@@ -175,6 +268,7 @@ fn build_import_candidate_group(
             ImportCandidateVariant {
                 id: variant_id,
                 candidate: variant_candidate,
+                snapshot_hash,
                 locations: vec![location],
                 suggested_types: Vec::new(),
                 requires_type_review: false,
@@ -266,14 +360,11 @@ fn build_import_candidate_group(
     }
 }
 
-fn import_candidate_variant_signature(candidate: &ImportCandidate) -> String {
+fn import_candidate_variant_signature(candidate: &ImportCandidate, snapshot_hash: &str) -> String {
     let source_identity = if candidate.import_status == ImportCandidateStatus::Imported {
         format!("managed:{}", candidate.real_path.display())
     } else {
-        match skill_directory_snapshot_hash(&candidate.real_path) {
-            Ok(snapshot) => format!("snapshot:{snapshot}"),
-            Err(_) => format!("unavailable:{}", candidate.real_path.display()),
-        }
+        format!("snapshot:{snapshot_hash}")
     };
     format!(
         "{}\n{}\n{:?}\n{}\n{}",
@@ -283,6 +374,24 @@ fn import_candidate_variant_signature(candidate: &ImportCandidate) -> String {
         candidate.conflict.as_deref().unwrap_or_default(),
         source_identity,
     )
+}
+
+fn snapshot_hash_for_candidate(
+    candidate: &ImportCandidate,
+    snapshot_cache: &mut HashMap<PathBuf, String>,
+    snapshot_stats: &mut SnapshotHashStats,
+) -> String {
+    let cache_key =
+        fs::canonicalize(&candidate.real_path).unwrap_or_else(|_| candidate.real_path.clone());
+    if let Some(snapshot) = snapshot_cache.get(&cache_key) {
+        snapshot_stats.snapshot_cache_hits += 1;
+        return snapshot.clone();
+    }
+    snapshot_stats.snapshot_hash_computations += 1;
+    let snapshot = skill_directory_snapshot_hash(&candidate.real_path)
+        .unwrap_or_else(|_| format!("unavailable:{}", candidate.real_path.display()));
+    snapshot_cache.insert(cache_key, snapshot.clone());
+    snapshot
 }
 
 fn import_candidate_location(candidate: &ImportCandidate) -> ImportCandidateLocation {

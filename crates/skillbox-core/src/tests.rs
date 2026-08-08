@@ -10246,6 +10246,55 @@ fn scan_import_candidates_groups_git_repository_children_and_keeps_external_copi
 }
 
 #[test]
+fn scan_import_candidates_reuses_repository_and_snapshot_work_for_duplicate_locations() {
+    let root = temp_dir("candidate-git-collection-cache");
+    let repository = root.join("skill-collection");
+    let runtime_root = root.join("project/.agents/skills");
+    let managed_root = root.join("SkillBox");
+    let skill_count = 48;
+    fs::create_dir_all(&repository).unwrap();
+    run_git(&repository, &["init", "-b", "main"]);
+    for index in 0..skill_count {
+        let name = format!("skill-{index:02}");
+        make_skill(
+            &repository.join("skills").join(&name),
+            &name,
+            "Cached collection skill",
+        );
+    }
+    run_git(&repository, &["add", "."]);
+    run_git(
+        &repository,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Add cached collection skills",
+        ],
+    );
+    fs::create_dir_all(&runtime_root).unwrap();
+    for index in 0..skill_count {
+        let name = format!("skill-{index:02}");
+        symlink_dir(
+            &repository.join("skills").join(&name),
+            &runtime_root.join(&name),
+        )
+        .unwrap();
+    }
+
+    let scan = scan_import_candidates(&[repository, runtime_root], &managed_root).unwrap();
+    assert_eq!(scan.collections.len(), 1);
+    assert_eq!(scan.diagnostics.unique_repository_count, 1);
+    assert_eq!(scan.diagnostics.repository_inspections, 1);
+    assert!(scan.diagnostics.repository_cache_hits >= skill_count);
+    assert!(scan.diagnostics.snapshot_hash_computations <= skill_count);
+    assert!(scan.diagnostics.snapshot_cache_hits >= skill_count);
+}
+
+#[test]
 fn git_collection_apply_persists_selected_children_and_rejects_stale_head_before_writes() {
     let root = temp_dir("git-collection-apply");
     let repository = root.join("skill-collection");

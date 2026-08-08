@@ -510,6 +510,36 @@ test('import review uses the shared searchable candidate list template', () => {
   assert.match(searchRule, /width:\s*100%;/);
 });
 
+test('import review opens before scanning and exposes staged accessible progress', () => {
+  const scanSource = appSource.match(
+    /async function scanForImportCandidates\(\)\s*\{(?<body>[\s\S]*?)\n  \}\n\n  function openRemoteImport/
+  )?.groups.body || '';
+  const importReviewSource = appSource.match(
+    /export function ImportReview\(\{(?<body>[\s\S]*?)function ImportScanProgress/
+  )?.groups.body || '';
+  const progressSource = appSource.match(
+    /function ImportScanProgress\(\{(?<body>[\s\S]*?)function CandidateReviewList/
+  )?.groups.body || '';
+
+  assert.match(appSource, /listen\('skillbox:\/\/import-scan-progress'/);
+  assert.match(tauriSource, /async fn scan_import_candidates\(app: tauri::AppHandle, scan_id: u64\)/);
+  assert.match(tauriSource, /scan_import_candidates_with_progress/);
+  assert.match(tauriSource, /app\.emit\(\s*"skillbox:\/\/import-scan-progress"/);
+  assert.match(scanSource, /open: true/);
+  assert.match(scanSource, /loading: true/);
+  assert.match(scanSource, /if \(importScanActiveRef\.current\)/);
+  assert.match(scanSource, /importScanActiveRef\.current = scanId/);
+  assert.match(scanSource, /await waitForNextPaint\(\)/);
+  assert.match(scanSource, /invoke\('scan_import_candidates', \{ scan_id: scanId \}\)/);
+  assert.match(appSource, /importScanRequestRef\.current \+= 1/);
+  assert.match(importReviewSource, /loading = false/);
+  assert.match(importReviewSource, /scanError = ''/);
+  assert.match(importReviewSource, /onRetry/);
+  assert.match(progressSource, /role="status" aria-live="polite" aria-atomic="true"/);
+  assert.match(progressSource, /importScanProgressLabel/);
+  assert.match(progressSource, /importScanProgressDetail/);
+});
+
 test('collection review keeps child selection and type controls inside one expandable card', () => {
   const collectionSource = appSource.match(
     /function CollectionReviewCard\(\{(?<body>[\s\S]*?)\n\}\n\nfunction WorkspaceSkillTabs/

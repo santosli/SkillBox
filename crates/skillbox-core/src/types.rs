@@ -1075,6 +1075,7 @@ pub struct ImportCandidateLocation {
 pub struct ImportCandidateVariant {
     pub id: String,
     pub candidate: ImportCandidate,
+    pub snapshot_hash: String,
     pub locations: Vec<ImportCandidateLocation>,
     pub suggested_types: Vec<SkillKind>,
     pub requires_type_review: bool,
@@ -1145,6 +1146,28 @@ pub struct ImportCandidateScan {
     pub collections: Vec<ImportCandidateCollection>,
     pub standalone_groups: Vec<ImportCandidateGroup>,
     pub errors: Vec<ScanError>,
+    pub diagnostics: ImportScanDiagnostics,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportScanDiagnostics {
+    pub candidate_count: usize,
+    pub unique_repository_count: usize,
+    pub repository_inspections: usize,
+    pub repository_cache_hits: usize,
+    pub snapshot_hash_computations: usize,
+    pub snapshot_cache_hits: usize,
+    pub elapsed_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportScanProgress {
+    pub phase: String,
+    pub processed: usize,
+    pub total: Option<usize>,
+    pub unique_repositories: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

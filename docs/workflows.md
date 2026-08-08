@@ -48,6 +48,11 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 步骤：
 
 - 扫描 import candidates。
+- 点击 Dashboard `Import` 后先同步打开 Import Review shell，再在其中显示
+  `scanning local roots`、`validating candidates`、`grouping Git repositories` 等阶段；扫描期间不显示误导性的空结果，用户可以取消并使迟到结果失效。
+- Rust 返回 aggregate-only scan diagnostics（候选数量、唯一 repository 数、Git identity
+  检查与 snapshot cache 命中、耗时），并在同一个扫描请求内按 canonical
+  worktree/common-dir 复用 Git identity 和已验证的 full-directory snapshot；不把 Git 或文件系统工作移到 React。
 - 根据路径和内容推断类型：当前 `.agents/skills` 倾向 user，`.codex/skills` 倾向 remote，`.system` 默认不选中，包含 GitHub 来源信息的未知目录倾向 remote。
 - 对名称、`SKILL.md` hash、状态、冲突结果以及完整导入快照都一致的实体副本进行分组；推断类型仅作为 location 级分类建议，不参与等价 identity。快照忽略顶层 `.git`，但覆盖其它文件、Unix mode、目录和 symlink。仅 `SKILL.md` 相同而脚本、权限或资源不同的候选保持分离。
 - 已 imported 的多个 runtime symlink 只有解析到同一个 managed `real_path` 时才作为 alias 合并。

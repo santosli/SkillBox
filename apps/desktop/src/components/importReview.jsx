@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronDown, MapPin, Search } from 'lucide-react';
+import { ChevronDown, LoaderCircle, MapPin, Search } from 'lucide-react';
 import codexAppIcon from '../assets/codex-app-icon.png';
 import codexCliIcon from '../assets/codex-cli-icon.png';
 import {
@@ -25,6 +25,11 @@ import {
 import { closeOnBackdropClick } from '../modalEvents.js';
 import { compactPath } from '../skills.js';
 import { Badge } from './common.jsx';
+import {
+  importScanProgressDetail,
+  importScanProgressLabel,
+  normalizeImportScanProgress
+} from '../importScanProgress.js';
 
 export function RemoteImportDialog({ error, mode, status, value, onClose, onModeChange, onSubmit, onValueChange }) {
   const isMarkdown = mode === 'markdown';
@@ -196,8 +201,12 @@ export function ImportReview({
   groups,
   collections = [],
   errors = [],
+  loading = false,
+  scanError = '',
+  scanProgress = null,
   onClose,
   onImport,
+  onRetry,
   onToggleAll,
   onToggleSelected,
   onSelectVariant,
@@ -230,18 +239,27 @@ export function ImportReview({
         </div>
 
         <div className="candidateList">
-          {errors.length > 0 ? (
-            <div className="workspaceSkillError">
+          {loading ? <ImportScanProgress progress={scanProgress} /> : null}
+          {!loading && scanError ? (
+            <div className="workspaceSkillError importScanError" role="alert" aria-live="assertive">
+              <span>{scanError}</span>
+              <button className="button secondary" type="button" onClick={onRetry}>
+                Retry scan
+              </button>
+            </div>
+          ) : null}
+          {!loading && !scanError && errors.length > 0 ? (
+            <div className="workspaceSkillError" role="status" aria-live="polite">
               {errors.length} scan {errors.length === 1 ? 'issue' : 'issues'} found.
             </div>
           ) : null}
-          {groups.length === 0 && errors.length === 0 ? (
+          {!loading && !scanError && groups.length === 0 && errors.length === 0 ? (
             <div className="emptyState dashboardEmptyState workspaceSkillEmptyState">
               <strong>No skills found</strong>
               <span>This workspace has no importable SKILL.md directories yet.</span>
             </div>
           ) : null}
-          {groups.length > 0 ? (
+          {!loading && !scanError && groups.length > 0 ? (
             <CandidateReviewList
               collections={collections}
               groups={groups}
@@ -256,7 +274,7 @@ export function ImportReview({
           <div className="importSelectionSummary">
             <button
               className="selectAllButton"
-              disabled={selectableCount === 0 || status === 'importing'}
+              disabled={loading || selectableCount === 0 || status === 'importing'}
               type="button"
               onClick={onToggleAll}
             >
@@ -270,7 +288,7 @@ export function ImportReview({
             </button>
             <button
               className="button primary"
-              disabled={status === 'importing' || selectedCount === 0}
+              disabled={loading || status === 'importing' || selectedCount === 0}
               type="button"
               onClick={onImport}
             >
@@ -279,6 +297,19 @@ export function ImportReview({
           </div>
         </div>
       </section>
+    </div>
+  );
+}
+
+function ImportScanProgress({ progress }) {
+  const normalized = normalizeImportScanProgress(progress);
+  return (
+    <div className="importScanProgress" role="status" aria-live="polite" aria-atomic="true">
+      <LoaderCircle className="importScanProgressIcon" aria-hidden="true" />
+      <div>
+        <strong>{importScanProgressLabel(normalized)}</strong>
+        <span>{importScanProgressDetail(normalized)}</span>
+      </div>
     </div>
   );
 }

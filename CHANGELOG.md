@@ -13,6 +13,9 @@ version tags such as `v0.3.0`.
   schema v8 after a successful, stale-checked apply.
 - Keep GitHub multi-skill fetch and collection-level update/rollback planned for a
   later phase; this change does not claim those workflows.
+- Open Import Review before the local scan finishes, expose accessible staged progress
+  and retry state, and reuse repository identity and snapshot work across duplicate
+  locations.
 
 ## 0.7.1
 
