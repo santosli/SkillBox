@@ -9,6 +9,22 @@ version tags such as `v0.3.0`.
 
 - No unreleased changes.
 
+## 0.9.0
+
+- Add one-fetch GitHub repository collection preview/apply with explicit child
+  selection, stale ref/tree validation, and per-skill managed provenance. This
+  Phase C change targets v0.9.0 and remains unreleased pending v0.9.0 release
+  qualification; collection-level update/rollback remains planned.
+- Distinguish the shipped v0.8.0 local A+B work from the v0.9.0-targeted Phase C
+  implementation in the public roadmap and implementation status.
+- Add one-fetch GitHub multi-skill collection preview/apply for repository and tree URLs.
+- Let users explicitly select eligible children or Select all eligible children; never auto-deploy.
+- Bind selected children to one reviewed resolved SHA and persist collection/member provenance while each child remains independently deployable and usage-tracked.
+- Validate untrusted remote trees with bounded path, file, entry, and type checks; reject stale source, ref, tree, selection, and managed-state changes before writes.
+- Apply selected children through a compensatable batch operation with truthful partial-recovery evidence and no mixed reviewed SHA residue.
+- Keep root-only repository skills on the existing single-skill install flow, with structured CLI, Tauri, and Desktop parity.
+- Collection-level update and rollback are not included and remain Phase D work for a later v0.9.x release; root collection URLs cannot infer slash-containing refs without child-root disambiguation.
+
 ## 0.8.0
 
 - Group scanned copied skills with validated v3 GitHub installer-lockfile provenance into display-only Installed source collections, while keeping live Git collections authoritative and selected children on the existing per-skill import path.
