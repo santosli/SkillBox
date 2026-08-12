@@ -24,7 +24,7 @@ distribution invariants remain documented in `docs/release.md`.
 Copy-snapshot deployment and broader recovery hardening remain planned product
 work. Git-backed Skill Collections are the active `v0.9.0` milestone; Phase A+B
 shipped in `v0.8.0`, and the Phase C implementation is complete for `v0.9.0`
-and awaits merge and release qualification. Collection-level update/rollback
+and remains unreleased pending `v0.9.0` release qualification. Collection-level update/rollback
 remains planned Phase D work for a later `v0.9.x` release.
 
 ## Near-Term Priorities
@@ -35,7 +35,7 @@ These are the next areas where focused contributions are most useful:
   canonical Git repository/worktree and reviewed SHA as a local collection
   source while keeping child `SKILL.md` directories independently selectable
   and deployable. Phase C's one-fetch GitHub preview/apply is implemented for
-  `v0.9.0`, awaiting merge and release qualification; collection
+  `v0.9.0` and remains unreleased pending `v0.9.0` release qualification; collection
   update/rollback remains open. Track
   the remaining scope in [GitHub issue #46](https://github.com/santosli/SkillBox/issues/46).
 - **Deployment portability.** Add copy-snapshot deployment as an explicit

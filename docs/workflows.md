@@ -188,8 +188,8 @@ GitHub repository/root URL 的多 skill workflow 由 Rust core 承载：
   不会猜测带 slash 的 ref，也不会通过猜测路径扩大权限；请改用明确 SHA、无 slash
   ref，或包含已知 child skill-root 的 unambiguous URL。
 
-Phase C 是面向 v0.9.0、尚未 release-qualified 的实现；只有 review、merge 和 release
-qualification 完成后才可描述为 shipped。Phase D 的 collection-level update/rollback
+Phase C 已按 v0.9.0 实现，但仍未发布，待 v0.9.0 release qualification 完成后才可
+描述为 shipped。Phase D 的 collection-level update/rollback
 仍未实现。Collection operations 不运行 hooks、filters、submodules、repository
 scripts、custom helpers 或 arbitrary shell。
 
