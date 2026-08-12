@@ -446,7 +446,6 @@ pub fn apply_import_collection(
     let mut selected_names = HashSet::new();
     let mut items = Vec::new();
     let mut selected_children = Vec::new();
-    let mut targets = Vec::new();
     for selection in &request.selections {
         let child = collection
             .children
@@ -502,7 +501,6 @@ pub fn apply_import_collection(
                 skill.name
             ));
         }
-        targets.push(target);
         items.push(ImportRequestItem {
             source_path,
             skill_type: selection.skill_type,
@@ -515,7 +513,6 @@ pub fn apply_import_collection(
         &collection,
         &selected_children,
         items,
-        &targets,
         &request.actor,
     )
 }
@@ -552,6 +549,32 @@ pub(crate) fn collection_import_target(
                 .unwrap_or_default(),
         },
     }
+}
+
+fn collection_import_targets_from_imported(
+    imported: &[ImportedCandidate],
+) -> Vec<CollectionImportTarget> {
+    imported
+        .iter()
+        .map(|result| {
+            let remote_root = match result.kind {
+                SkillKind::User => None,
+                SkillKind::Remote => result
+                    .managed_path
+                    .parent()
+                    .and_then(Path::parent)
+                    .map(Path::to_path_buf),
+            };
+            let expected_snapshot_hash =
+                skill_directory_snapshot_hash(&result.managed_path).unwrap_or_default();
+            CollectionImportTarget {
+                name: result.name.clone(),
+                path: result.managed_path.clone(),
+                remote_root,
+                expected_snapshot_hash,
+            }
+        })
+        .collect()
 }
 
 pub(crate) fn managed_index_contains(database_path: &Path, skill_name: &str) -> Result<bool> {
@@ -695,7 +718,6 @@ pub(crate) fn apply_collection_import_with_audit(
     collection: &ImportCandidateCollection,
     selected_children: &[ImportCandidateCollectionChild],
     items: Vec<ImportRequestItem>,
-    targets: &[CollectionImportTarget],
     actor: &str,
 ) -> Result<ImportCollectionApplyResult> {
     let selected_names = selected_children
@@ -721,8 +743,12 @@ pub(crate) fn apply_collection_import_with_audit(
         &paths.root,
     )?;
 
-    let fail = |primary: String, phase: &str| -> Result<ImportCollectionApplyResult> {
-        let rollback = rollback_collection_imports(paths, targets);
+    let fail = |primary: String,
+                phase: &str,
+                imported: &[ImportedCandidate]|
+     -> Result<ImportCollectionApplyResult> {
+        let receipt_targets = collection_import_targets_from_imported(imported);
+        let rollback = rollback_collection_imports(paths, &receipt_targets);
         let (rollback_outcome, rollback_error) = match rollback {
             Ok(()) => ("succeeded", None),
             Err(error) => ("partial", Some(error)),
@@ -758,7 +784,7 @@ pub(crate) fn apply_collection_import_with_audit(
 
     let batch = match import_candidates_with_paths(paths, items) {
         Ok(batch) => batch,
-        Err(error) => return fail(error, "import_validation"),
+        Err(error) => return fail(error, "import_validation", &[]),
     };
     if !batch.errors.is_empty() {
         return fail(
@@ -767,6 +793,7 @@ pub(crate) fn apply_collection_import_with_audit(
                 batch.errors.len()
             ),
             "import",
+            &batch.imported,
         );
     }
     let collection_record = match persist_collection(
@@ -780,6 +807,7 @@ pub(crate) fn apply_collection_import_with_audit(
             return fail(
                 format!("Collection metadata could not be saved: {error}"),
                 "persist",
+                &batch.imported,
             )
         }
     };
@@ -820,6 +848,22 @@ pub(crate) fn persist_collection(
     let transaction = connection
         .transaction()
         .map_err(|error| error.to_string())?;
+    let existing_reviewed_sha: Option<Option<String>> = transaction
+        .query_row(
+            "SELECT reviewed_head_sha FROM skill_collections WHERE id = ?1",
+            rusqlite::params![preview.id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    if let Some(existing_reviewed_sha) = existing_reviewed_sha {
+        if existing_reviewed_sha.as_ref() != preview.reviewed_head_sha.as_ref() {
+            return Err(
+                "Collection already has a different reviewed SHA; collection updates are not available until Phase D."
+                    .to_string(),
+            );
+        }
+    }
     transaction
         .execute(
             "INSERT INTO skill_collections (
@@ -856,19 +900,19 @@ pub(crate) fn persist_collection(
             ],
         )
         .map_err(|error| error.to_string())?;
-    transaction
-        .execute(
-            "DELETE FROM skill_collection_members WHERE collection_id = ?1",
-            rusqlite::params![preview.id],
-        )
-        .map_err(|error| error.to_string())?;
     for (child, imported) in children.iter().zip(imported.iter()) {
         transaction
             .execute(
                 "INSERT INTO skill_collection_members (
                     collection_id, skill_name, relative_path, reviewed_head_sha,
                     snapshot_hash, content_hash, managed_skill_name
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(collection_id, relative_path) DO UPDATE SET
+                    skill_name = excluded.skill_name,
+                    reviewed_head_sha = excluded.reviewed_head_sha,
+                    snapshot_hash = excluded.snapshot_hash,
+                    content_hash = excluded.content_hash,
+                    managed_skill_name = excluded.managed_skill_name",
                 rusqlite::params![
                     preview.id,
                     child.name,
@@ -881,6 +925,29 @@ pub(crate) fn persist_collection(
             )
             .map_err(|error| error.to_string())?;
     }
+    let members = transaction
+        .prepare(
+            "SELECT collection_id, skill_name, relative_path, reviewed_head_sha,
+                    snapshot_hash, content_hash, managed_skill_name
+               FROM skill_collection_members
+              WHERE collection_id = ?1
+              ORDER BY relative_path",
+        )
+        .map_err(|error| error.to_string())?
+        .query_map(rusqlite::params![preview.id], |row| {
+            Ok(SkillCollectionMember {
+                collection_id: row.get(0)?,
+                skill_name: row.get(1)?,
+                relative_path: row.get(2)?,
+                reviewed_head_sha: row.get(3)?,
+                snapshot_hash: row.get(4)?,
+                content_hash: row.get(5)?,
+                managed_skill_name: row.get(6)?,
+            })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
     transaction.commit().map_err(|error| error.to_string())?;
     Ok(SkillCollection {
         id: preview.id.clone(),
@@ -895,19 +962,7 @@ pub(crate) fn persist_collection(
         source_url: preview.source_url.clone(),
         requested_reference: preview.requested_reference.clone(),
         available: true,
-        members: children
-            .iter()
-            .zip(imported)
-            .map(|(child, imported)| SkillCollectionMember {
-                collection_id: preview.id.clone(),
-                skill_name: child.name.clone(),
-                relative_path: child.relative_path.clone(),
-                reviewed_head_sha: preview.reviewed_head_sha.clone(),
-                snapshot_hash: child.snapshot_hash.clone(),
-                content_hash: child.content_hash.clone(),
-                managed_skill_name: imported.name.clone(),
-            })
-            .collect(),
+        members,
     })
 }
 

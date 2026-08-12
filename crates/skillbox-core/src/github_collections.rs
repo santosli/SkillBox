@@ -5,9 +5,9 @@ use std::path::{Component, Path, PathBuf};
 use std::time::Instant;
 
 const MAX_REMOTE_COLLECTION_CHILDREN: usize = 500;
-const MAX_REMOTE_COLLECTION_ENTRIES: usize = 20_000;
-const MAX_REMOTE_COLLECTION_FILE_BYTES: u64 = 8 * 1024 * 1024;
-const MAX_REMOTE_COLLECTION_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_REMOTE_COLLECTION_ENTRIES: usize = skillbox_git::MAX_STRICT_TREE_ENTRIES;
+const MAX_REMOTE_COLLECTION_FILE_BYTES: u64 = skillbox_git::MAX_STRICT_TREE_FILE_BYTES;
+const MAX_REMOTE_COLLECTION_TOTAL_BYTES: u64 = skillbox_git::MAX_STRICT_TREE_TOTAL_BYTES;
 const MAX_REMOTE_COLLECTION_DEPTH: usize = 12;
 
 pub fn preview_github_skill_collection(
@@ -125,7 +125,6 @@ pub fn apply_github_skill_collection(
         let mut selected_names = HashSet::new();
         let mut items = Vec::new();
         let mut selected_children = Vec::new();
-        let mut targets = Vec::new();
         for selection in &request.selections {
             let child = collection
                 .children
@@ -177,7 +176,6 @@ pub fn apply_github_skill_collection(
                     skill.name
                 ));
             }
-            targets.push(target);
             items.push(ImportRequestItem {
                 source_path,
                 skill_type: selection.skill_type,
@@ -194,7 +192,6 @@ pub fn apply_github_skill_collection(
             collection,
             &selected_children,
             items,
-            &targets,
             &request.actor,
         )
     })();
@@ -242,6 +239,13 @@ fn build_github_skill_collection_preview(
     if skill_dirs.is_empty() {
         return Err("The repository contains no valid SKILL.md directories.".to_string());
     }
+    if skill_dirs.len() > MAX_REMOTE_COLLECTION_CHILDREN {
+        return Err(format!(
+            "GitHub collection contains {} skill directories, exceeding the safety limit of {}. Narrow the repository or select a smaller source.",
+            skill_dirs.len(),
+            MAX_REMOTE_COLLECTION_CHILDREN
+        ));
+    }
 
     let usage_by_skill = if paths.database_path.is_file() {
         load_usage_by_skill(&paths.database_path).unwrap_or_default()
@@ -249,7 +253,7 @@ fn build_github_skill_collection_preview(
         HashMap::new()
     };
     let mut candidates = Vec::new();
-    for skill_dir in skill_dirs.iter().take(MAX_REMOTE_COLLECTION_CHILDREN) {
+    for skill_dir in &skill_dirs {
         match read_remote_skill(skill_dir) {
             Ok(skill) => {
                 let conflict = managed_target_conflict(paths, &skill, SkillKind::Remote)?;
@@ -484,7 +488,17 @@ fn walk_remote_tree(
         }
         let entry = entry.map_err(|error| error.to_string())?;
         let path = entry.path();
-        if safe_collection_relative_path(root, &path).is_none() {
+        if safe_collection_relative_path(root, &path).is_none()
+            || path
+                .strip_prefix(root)
+                .ok()
+                .map(|relative| {
+                    relative.components().any(|component| {
+                        matches!(component, Component::Normal(value) if value == ".git" || value.to_string_lossy().contains(':'))
+                    })
+                })
+                .unwrap_or(true)
+        {
             return Err("GitHub collection tree contains an unsafe path.".to_string());
         }
         let file_type = entry.file_type().map_err(|error| error.to_string())?;
@@ -699,6 +713,30 @@ mod tests {
         assert_eq!(preview.diagnostics.child_count, 100);
         assert_eq!(preview.diagnostics.valid_child_count, 100);
         assert!(preview.diagnostics.elapsed_ms < 30_000);
+        assert!(!paths.database_path.exists());
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn preview_rejects_more_than_five_hundred_children_without_partial_collection() {
+        let temp = temporary_work_dir("github-collection-child-limit");
+        let checkout = temp.join("checkout");
+        for index in 0..=MAX_REMOTE_COLLECTION_CHILDREN {
+            write_skill(&checkout, &format!("skill-{index:03}"));
+        }
+        let paths = managed_paths(temp.join("managed"));
+
+        let error = build_github_skill_collection_preview(
+            &source(),
+            "0123456789012345678901234567890123456789",
+            &checkout,
+            &paths,
+            1,
+            Instant::now(),
+        )
+        .unwrap_err();
+
+        assert!(error.contains("exceeding the safety limit"), "{error}");
         assert!(!paths.database_path.exists());
         let _ = fs::remove_dir_all(temp);
     }

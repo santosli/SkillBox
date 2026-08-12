@@ -16,7 +16,7 @@ English | [简体中文](README.zh-CN.md)
 
 SkillBox is a local-first macOS desktop app with a Rust core and CLI for managing `SKILL.md`-based skill and capability packages without treating any supported agent runtime as the source of truth.
 
-Current release: `v0.8.0`. SkillBox is useful today for local skill management, but it is still early software. Keep backups of important skills, and review each filesystem change before applying it.
+Current release: `v0.8.0`. SkillBox is useful today for local skill management, but it is still early software. Keep backups of important skills, and review each filesystem change before applying it. GitHub multi-skill collection preview/apply targets the upcoming v0.9.0 qualification and remains unreleased in Draft PR #57.
 
 ## Promo Video
 
@@ -32,7 +32,7 @@ A 30-second overview of SkillBox: runtime-aware workspaces, review-before-write 
 - **Reviewed Git changes in both directions.** Inspect local user-skill diffs before commit/push. The shipped v0.7 line adds an explicit Check remote -> Review incoming changes -> Apply fast-forward flow for safe inbound updates; diverged history remains a normal Git conflict to resolve outside SkillBox.
 - **Evidence-aware Calls, references, and operation history.** Count locally confirmed executions plus defensible structured invocations as Calls, keep lower-signal history references separate, and explain coverage without storing full chat transcripts.
 - **Safe storage and deployment defaults.** Use ordered SQLite migrations, recovery backups, integrity checks, and ownership-checked symlinks instead of silently overwriting runtime content.
-- **Git-backed local collections.** Import Review groups skills from the same local Git worktree into one repository card while keeping each child independently selectable, deployable, and usage-tracked. GitHub multi-skill preview/apply is the current unreleased Phase C work; collection-level update/rollback remains future work.
+- **Git-backed local collections.** Import Review groups skills from the same local Git worktree into one repository card while keeping each child independently selectable, deployable, and usage-tracked. GitHub multi-skill preview/apply is implemented for the upcoming v0.9.0 qualification and remains unreleased in Draft PR #57; collection-level update/rollback remains future work.
 - **Installed-source provenance.** Copied skills with valid v3 installer lockfile entries can appear under one normalized GitHub source collection even without a local Git worktree. This is display-only provenance: it does not invent a branch/HEAD or enable updates, and each child keeps the normal reviewed import path.
 - **Compatibility before deployment.** Rust-owned runtime profiles identify each workspace and report preserved frontmatter warnings or hard blockers before a confirmed symlink deployment.
 - **Signed macOS distribution.** Install a notarized DMG or Homebrew cask and apply signed app updates only after confirmation.

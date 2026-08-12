@@ -336,6 +336,16 @@ mod tests {
     }
 
     #[test]
+    fn does_not_infer_slash_ref_for_ambiguous_repository_root_url() {
+        let source =
+            parse_github_skill_url("https://github.com/acme/repo/tree/release/1.0").unwrap();
+
+        assert_eq!(source.reference, "release");
+        assert_eq!(source.path, "1.0");
+        assert!(!source.is_root);
+    }
+
+    #[test]
     fn normalizes_blob_raw_and_api_urls_to_skill_directory() {
         assert_eq!(
             parse_github_skill_url("https://github.com/acme/repo/blob/main/skills/demo/SKILL.md")

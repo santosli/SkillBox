@@ -175,17 +175,20 @@ GitHub repository/root URL 的多 skill workflow 由 Rust core 承载：
   返回 actionable error；无效 child 不会隐藏其它安全有效 child，除非触发全局安全上限。
 - 为了让 reviewed SHA 可重现，collection workflow 要求 repository URL 显式携带
   `/tree/<ref>`（或等价的显式 `ref`）。裸仓库 URL 不会假设 `main`，而是返回要求显式
-  ref 的结构化结果；用户可以继续使用原有 single-skill URL 语义。带 slash 的 ref
-  仍按现有 parser 的明确歧义边界处理。
+  ref 的结构化结果；用户可以继续使用原有 single-skill URL 语义。对于 collection
+  root URL，`/tree/<...>` 无法安全推断带 slash 的 ref；请使用明确的 commit SHA
+  或不含 slash 的 ref。只有已知 child skill-root 片段能够区分 ref 与路径时，才解析
+  带 slash 的 ref。
 - Root `SKILL.md` 只有在仓库没有其它 ancestor/descendant `SKILL.md` root 时才作为
   root-only skill 支持。父子重叠 roots 会在 preview 阶段 fail closed，避免一个 child
   snapshot 包含另一个 child 或产生 overlapping apply。
 - 远程 tree 只读且不可信：禁止 `.git`、traversal、absolute/control/backslash/colon
   paths、symlink、gitlink/submodule、unsafe file type、超限文件/条目/总字节，并禁用
-  hooks、filters、scripts、custom helpers 和 arbitrary shell。URL 中带 slash 的 ref
-  保持现有 parser 的明确歧义边界，不通过猜测路径扩大权限。
+  hooks、filters、scripts、custom helpers 和 arbitrary shell。root collection URL
+  不会猜测带 slash 的 ref，也不会通过猜测路径扩大权限；请改用明确 SHA、无 slash
+  ref，或包含已知 child skill-root 的 unambiguous URL。
 
-Phase C 是当前 v0.8.x 的 Draft/unreleased change set；只有 review、merge 和 release
+Phase C 是面向 v0.9.0 的 Draft/unreleased change set；只有 review、merge 和 release
 qualification 完成后才可描述为 shipped。Phase D 的 collection-level update/rollback
 仍未实现。Collection operations 不运行 hooks、filters、submodules、repository
 scripts、custom helpers 或 arbitrary shell。

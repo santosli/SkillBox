@@ -4,7 +4,7 @@ SkillBox is early-stage software. This roadmap describes the public direction,
 not a date-based commitment. Implementation details can change as the app gets
 more real-world use.
 
-## Current Focus: 0.8.x
+## Current Focus: 0.9.x
 
 SkillBox `v0.8.0` is shipped. The 0.6 line made `SKILL.md` deployment targets
 explicit and portable without moving runtime knowledge into React:
@@ -22,19 +22,21 @@ and notarized `v0.7.1` distribution. The current release identity and
 distribution invariants remain documented in `docs/release.md`.
 
 Copy-snapshot deployment and broader recovery hardening remain planned product
-work. Git-backed Skill Collections are the active `v0.8.x` milestone; Phase A+B
-shipped in `v0.8.0`, Phase C is the current unreleased Draft implementation,
-and collection-level update/rollback remains planned Phase D work.
+work. Git-backed Skill Collections are the active `v0.9.0` milestone; Phase A+B
+shipped in `v0.8.0`, Phase C is implemented in the current Draft change set and
+awaits merge and `v0.9` release qualification, while collection-level
+update/rollback remains planned Phase D work for a later `v0.9.x` release.
 
 ## Near-Term Priorities
 
 These are the next areas where focused contributions are most useful:
 
-- **Git-backed Skill Collections (v0.8.x).** Rust now treats one
+- **Git-backed Skill Collections (v0.9.0).** Rust now treats one
   canonical Git repository/worktree and reviewed SHA as a local collection
   source while keeping child `SKILL.md` directories independently selectable
-  and deployable. Phase C's one-fetch GitHub preview/apply is under review in
-  the current Draft change set; collection update/rollback remains open. Track
+  and deployable. Phase C's one-fetch GitHub preview/apply is implemented in
+  the current Draft change set for `v0.9.0`, awaiting merge and release
+  qualification; collection update/rollback remains open. Track
   the remaining scope in [GitHub issue #46](https://github.com/santosli/SkillBox/issues/46).
 - **Deployment portability.** Add copy-snapshot deployment as an explicit
   alternative to the current compatibility-checked symlink path.
@@ -130,10 +132,10 @@ targets, and unsupported deployment modes block deployment. SkillBox does not
 rewrite frontmatter, translate formats, select a target automatically, or write
 to a runtime before a fresh preview is explicitly confirmed.
 
-### 0.8 Git-backed Skill Collections
+### 0.9 Git-backed Skill Collections
 
 [Git-backed Skill Collections](https://github.com/santosli/SkillBox/issues/46)
-are targeted for `v0.8.x`. Phase A+B shipped in `v0.8.0`: a collection is a
+are targeted for `v0.9.0`. Phase A+B shipped in `v0.8.0`: a collection is a
 repository/source entity identified by its canonical Git repository or
 worktree plus ref/HEAD. A GitHub remote is optional. Child `SKILL.md`
 directories remain independent skills for selection, deployment, Calls, and
@@ -164,13 +166,14 @@ snapshots while retaining collection provenance. Update and rollback remain
 reviewed and commit-consistent at collection level; runtime deployment remains
 an independent per-skill action.
 
-Delivery is phased within the `v0.8.x` target:
+Delivery is phased across the `v0.8.0` and `v0.9.x` releases:
 
 1. **Implemented:** Repository detection and local Import Review grouping.
 2. **Implemented:** Collection/source persistence and child relationships.
-3. **Current Draft:** GitHub multi-skill install preview/apply with one
-   repository fetch. It is not part of the published `v0.8.0` release until
-   this change is reviewed, merged, and released.
+3. **Implemented for `v0.9.0` / awaiting qualification:** GitHub multi-skill
+   install preview/apply with one repository fetch. It is not part of the
+   published `v0.8.0` release and remains unreleased until this Draft is
+   reviewed, merged, and release-qualified.
 4. Collection-level update/rollback and UI detail.
 
 Phase 4 is not implemented and must not be described as shipped.

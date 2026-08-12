@@ -2,10 +2,11 @@
 
 ## Status
 
-Accepted for v0.8.x. Phase A+B shipped in v0.8.0. The current Draft change set
-implements the one-fetch GitHub multi-skill preview/apply boundary as Phase C;
-it is not shipped until merged and released. Collection-level update/rollback
-remains planned Phase D work.
+Accepted for the v0.8.0/v0.9.x collection milestone. Phase A+B shipped in
+v0.8.0. The current Draft change set implements the one-fetch GitHub multi-skill
+preview/apply boundary as Phase C for v0.9.0; it is not shipped until merged
+and release-qualified. Collection-level update/rollback remains planned Phase D
+work for a later v0.9.x release.
 
 ## Context
 

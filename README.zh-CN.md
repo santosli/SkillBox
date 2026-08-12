@@ -16,7 +16,7 @@
 
 SkillBox 是一个 local-first 的 macOS 桌面应用，带 Rust core/CLI，用来管理基于 `SKILL.md` 的 skill 与能力包，同时避免把任一受支持的 agent runtime 当作唯一真相源。
 
-当前版本：`v0.8.0`。SkillBox 现在已经可以用于本地 skill 管理，但仍是早期软件。重要 skills 请保留备份，并在应用每一次文件系统变更前先 review。
+当前版本：`v0.8.0`。SkillBox 现在已经可以用于本地 skill 管理，但仍是早期软件。重要 skills 请保留备份，并在应用每一次文件系统变更前先 review。GitHub 多 skill collection preview/apply 已按 v0.9.0 实现但仍在 Draft PR #57 中、尚未发布。
 
 ## 宣传视频
 
@@ -32,7 +32,7 @@ SkillBox 是一个 local-first 的 macOS 桌面应用，带 Rust core/CLI，用�
 - **双向 Git 变更都先审查。** 本地 user-skill diff 会在 commit/push 前 review。已发布的 v0.7 增加显式的 Check remote -> Review incoming changes -> Apply fast-forward 入站流程；远端历史分叉仍在 SkillBox 外按正常 Git 冲突处理。
 - **按证据分类的 Calls、引用与操作历史。** Calls 只统计本机 confirmed execution 与可辩护的 structured invocation，低信号 history references 单独展示，并且不保存完整聊天 transcript。
 - **安全的存储与部署默认值。** 使用顺序 SQLite migrations、恢复备份、完整性检查和 ownership-checked symlink，不静默覆盖 runtime 内容。
-- **Git-backed 本地 Skill Collections。** Import Review 会把同一 Git worktree 中的 skills 聚合为一个仓库卡片，同时保留每个子 skill 的独立选择、部署和 usage。GitHub 多 skill preview/apply 是当前未发布的 Phase C 工作；collection 级更新/回滚仍是后续工作。
+- **Git-backed 本地 Skill Collections。** Import Review 会把同一 Git worktree 中的 skills 聚合为一个仓库卡片，同时保留每个子 skill 的独立选择、部署和 usage。GitHub 多 skill preview/apply 已按 v0.9.0 实现但仍在 Draft PR #57 中、尚未发布；collection 级更新/回滚仍是后续工作。
 - **已安装来源 provenance。** 没有本地 Git worktree、但拥有有效 v3 installer lockfile 条目的复制 skill，也可以按规范化 GitHub source 聚合展示。这只是来源展示，不会伪造 branch/HEAD 或开放更新；每个 child 仍走原有的逐 skill review/import 流程。
 - **部署前检查 compatibility。** Rust-owned runtime profiles 标识 workspace，并在确认 symlink 部署前报告会原样保留的 frontmatter warnings 或 hard blockers。
 - **签名的 macOS 分发。** 可安装已公证 DMG 或 Homebrew cask，app 更新也只在用户确认后应用。

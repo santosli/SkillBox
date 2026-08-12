@@ -57,8 +57,9 @@
 The `0.6` implementation and release qualification are complete. SkillBox
 `v0.8.0` is the current shipped release, including reviewed inbound sync,
 History query/layout fixes, and Skill Collections Phase A+B. The current
-unreleased work follows [issue #46](https://github.com/santosli/SkillBox/issues/46):
-Phase C is in a Draft implementation for review, while Phase D remains planned.
+`v0.9.0` work follows [issue #46](https://github.com/santosli/SkillBox/issues/46):
+Phase C is implemented in Draft PR #57 and awaits merge and release
+qualification; Phase D remains planned for a later `v0.9.x` release.
 The next milestones follow [the versioned evolution path](roadmap.md#versioned-evolution-path):
 
 ### 0.7 — Safe Sync, Deployment, And Recovery
@@ -84,17 +85,18 @@ The next milestones follow [the versioned evolution path](roadmap.md#versioned-e
   classification, and Calls/reference semantics backward compatible.
 - Keep native non-`SKILL.md` formats behind the future adapter boundary.
 
-### 0.8.x — Git-backed Skill Collections
+### 0.9.x — Git-backed Skill Collections
 
 - [Git-backed Skill Collections](https://github.com/santosli/SkillBox/issues/46)
-  are the active v0.8.x milestone. Phase A+B shipped in v0.8.0: local repository
+  are the active v0.9.0 milestone. Phase A+B shipped in v0.8.0: local repository
   grouping and schema-backed collection/member relationships are available in
   Import Review. A collection records canonical worktree/repository identity,
   reviewed HEAD, and child-relative provenance; child skills remain independent
   for selection, import, deployment, Calls, and history.
-- Phase C, one-fetch GitHub multi-skill preview/apply, is in the current Draft
-  change set for review but is not shipped. Phase D, commit-consistent
-  collection update/rollback, remains planned and is not shipped.
+- Phase C, one-fetch GitHub multi-skill preview/apply, is implemented in Draft
+  PR #57 for v0.9.0 and awaits merge/release qualification. It is not shipped
+  yet. Phase D, commit-consistent collection update/rollback, remains planned
+  for a later v0.9.x release.
 - Collection scans must remain read-only. Apply must revalidate repository
   identity, HEAD/ref, and tree snapshot; execute no hooks, submodules, filters,
   scripts, or arbitrary shell; and preserve existing path, overwrite,

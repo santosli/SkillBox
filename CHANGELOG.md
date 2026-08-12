@@ -9,9 +9,9 @@ version tags such as `v0.3.0`.
 
 - Add one-fetch GitHub repository collection preview/apply with explicit child
   selection, stale ref/tree validation, and per-skill managed provenance. This
-  Phase C change is unreleased; collection-level update/rollback remains planned.
+  Phase C change targets v0.9.0 and remains unreleased pending review and release qualification; collection-level update/rollback remains planned.
 - Update collection roadmap/status wording to distinguish the shipped v0.8.0
-  local A+B work from the unreleased Phase C implementation.
+  local A+B work from the v0.9.0-targeted, unreleased Phase C implementation.
 
 ## 0.8.0
 

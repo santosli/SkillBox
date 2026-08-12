@@ -7856,6 +7856,151 @@ fn github_collection_preview_and_apply_selects_children_at_one_reviewed_sha() {
 }
 
 #[test]
+fn github_collection_incremental_apply_preserves_members_at_one_reviewed_sha() {
+    let root = temp_dir("github-collection-incremental-apply");
+    let managed_root = root.join("SkillBox");
+    let (remote, work) = bare_remote_with_multiple_skill_content(
+        "github-collection-incremental-apply-origin",
+        &["alpha", "beta"],
+    );
+    let _rewrite = github_repo_rewrite("acme", "github-collection-incremental-apply", &remote);
+    let source_url = "https://github.com/acme/github-collection-incremental-apply/tree/main";
+
+    let first = preview_github_skill_collection(
+        PreviewGithubSkillCollectionRequest {
+            source_url: source_url.to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+    let reviewed_sha = first.collection.reviewed_head_sha.clone();
+    let alpha = first
+        .collection
+        .children
+        .iter()
+        .find(|child| child.name == "alpha")
+        .unwrap()
+        .clone();
+    let first_result = apply_github_skill_collection(
+        GithubSkillCollectionApplyRequest {
+            source_url: source_url.to_string(),
+            collection_id: first.collection.id.clone(),
+            preview_id: first.collection.preview_id,
+            selections: vec![ImportCollectionChildSelection {
+                relative_path: alpha.relative_path.clone(),
+                group_id: alpha.group_id,
+                variant_id: alpha.variant_id,
+                skill_type: SkillKind::User,
+            }],
+            actor: "test".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+    assert_eq!(first_result.collection.members.len(), 1);
+
+    let second = preview_github_skill_collection(
+        PreviewGithubSkillCollectionRequest {
+            source_url: source_url.to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+    assert_eq!(second.collection.reviewed_head_sha, reviewed_sha);
+    let beta = second
+        .collection
+        .children
+        .iter()
+        .find(|child| child.name == "beta")
+        .unwrap()
+        .clone();
+    let second_result = apply_github_skill_collection(
+        GithubSkillCollectionApplyRequest {
+            source_url: source_url.to_string(),
+            collection_id: second.collection.id.clone(),
+            preview_id: second.collection.preview_id,
+            selections: vec![ImportCollectionChildSelection {
+                relative_path: beta.relative_path,
+                group_id: beta.group_id,
+                variant_id: beta.variant_id,
+                skill_type: SkillKind::User,
+            }],
+            actor: "test".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    assert_eq!(second_result.collection.members.len(), 2);
+    assert_eq!(
+        list_skill_collections(&managed_root).unwrap()[0]
+            .members
+            .len(),
+        2
+    );
+
+    fs::write(
+        work.join("skills/beta/SKILL.md"),
+        "---\nname: beta\ndescription: Changed\n---\n\n# Changed\n",
+    )
+    .unwrap();
+    run_git(&work, &["add", "."]);
+    run_git(
+        &work,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Advance collection",
+        ],
+    );
+    run_git(&work, &["push", "origin", "main"]);
+    let third = preview_github_skill_collection(
+        PreviewGithubSkillCollectionRequest {
+            source_url: source_url.to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+    let changed_beta = third
+        .collection
+        .children
+        .iter()
+        .find(|child| child.name == "beta")
+        .unwrap()
+        .clone();
+    let error = apply_github_skill_collection(
+        GithubSkillCollectionApplyRequest {
+            source_url: source_url.to_string(),
+            collection_id: third.collection.id,
+            preview_id: third.collection.preview_id,
+            selections: vec![ImportCollectionChildSelection {
+                relative_path: changed_beta.relative_path,
+                group_id: changed_beta.group_id,
+                variant_id: changed_beta.variant_id,
+                skill_type: SkillKind::User,
+            }],
+            actor: "test".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+    assert!(
+        error.contains("different reviewed SHA") || error.contains("Managed target"),
+        "{error}"
+    );
+    assert_eq!(
+        list_skill_collections(&managed_root).unwrap()[0]
+            .members
+            .len(),
+        2
+    );
+}
+
+#[test]
 fn github_collection_identity_is_stable_across_commits_on_one_ref() {
     let root = temp_dir("github-collection-stable-identity");
     let managed_root = root.join("SkillBox");
@@ -7936,9 +8081,13 @@ fn collection_batch_failure_rolls_back_remote_current_index_and_audits_one_opera
     collection.source_url = Some("https://github.com/acme/collection/tree/main".to_string());
     collection.requested_reference = Some("main".to_string());
     let paths = ensure_managed_layout(managed_root.clone()).unwrap();
-    let skill = read_skill(&child.source_path).unwrap();
-    let target = collection_import_target(&paths, &skill, SkillKind::Remote);
     let missing = repository.join("skills/missing");
+    let external_missing_root = paths.remote_skills_root.join("missing");
+    make_skill(
+        &external_missing_root.join("versions/external"),
+        "missing",
+        "External content that rollback must preserve",
+    );
     let error = apply_collection_import_with_audit(
         &paths,
         &collection,
@@ -7955,21 +8104,15 @@ fn collection_batch_failure_rolls_back_remote_current_index_and_audits_one_opera
                 deploy_back_to_source: false,
             },
         ],
-        std::slice::from_ref(&target),
         "test",
     )
     .unwrap_err();
 
     assert!(error.contains("Collection import did not complete"));
-    assert!(!target.path.exists());
-    assert!(!target
-        .remote_root
-        .as_ref()
-        .unwrap()
-        .join("current")
-        .exists());
-    assert!(!target.remote_root.as_ref().unwrap().exists());
-    assert!(!managed_root.join("user-skills/alpha").exists());
+    assert!(!paths.remote_skills_root.join("alpha").exists());
+    assert!(external_missing_root
+        .join("versions/external/SKILL.md")
+        .is_file());
     let operations = list_operations(OperationFilter::default(), &managed_root)
         .unwrap()
         .operations;

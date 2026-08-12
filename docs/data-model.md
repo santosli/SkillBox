@@ -338,7 +338,8 @@ ref；preview id 另外绑定 resolved SHA、完整 tree、child snapshot/status
 裸 repository URL 不自动声明 `main`，必须返回 explicit-ref-required 结果。远程
 collection apply 只在一次 bounded fetch 后写入选中的 child，并在 apply
 前重新验证 source URL、ref、resolved SHA、child relative path、snapshot 和
-managed target；Phase D 的 collection-level update/rollback 不属于此迁移。
+managed target；当前 Draft Phase C 目标为 v0.9.0，尚未发布；Phase D 的
+collection-level update/rollback 不属于此迁移。
 
 Import Review 返回的 `ImportCandidateCollection` 还有一个只读的
 `source_kind`：`git_worktree` 表示可绑定 canonical worktree/HEAD 的本地 Git

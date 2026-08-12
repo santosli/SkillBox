@@ -20,7 +20,10 @@ const PUSH_TIMEOUT: Duration = Duration::from_secs(30);
 const LOCAL_GIT_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_REF_DIFF_FILES: usize = 500;
 const MAX_DIFF_BYTES_PER_FILE: usize = 256 * 1024;
-const MAX_TREE_ENTRIES: usize = 20_000;
+pub const MAX_STRICT_TREE_ENTRIES: usize = 20_000;
+pub const MAX_STRICT_TREE_FILE_BYTES: u64 = 8 * 1024 * 1024;
+pub const MAX_STRICT_TREE_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_TREE_ENTRIES: usize = MAX_STRICT_TREE_ENTRIES;
 const MAX_SHOW_FILE_BYTES: usize = 2 * 1024 * 1024;
 const BACKUP_REF_PREFIX: &str = "refs/skillbox/backups/";
 static COMMAND_OUTPUT_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -1539,6 +1542,9 @@ impl GitService {
         self.run_fetch_setup(checkout_root, repo_url, deadline)?;
         self.run_fetch(checkout_root, reference, deadline)?;
         if reject_unsafe_tree_entries {
+            // Validate the object tree while it is still only in Git's object
+            // database. Checkout is the first step allowed to materialize the
+            // untrusted remote worktree.
             self.validate_fetched_tree(checkout_root, deadline)?;
         }
         let sha = self.run_fetch_command(
@@ -1698,40 +1704,13 @@ impl GitService {
     }
 
     fn validate_fetched_tree(&self, repo: &Path, deadline: Instant) -> Result<(), String> {
-        let listing = self.run_fetch_command(
+        let listing = self.run_fetch_command_bytes(
             repo,
-            &["ls-tree", "-r", "-z", "FETCH_HEAD"],
+            &["ls-tree", "-r", "-z", "--long", "FETCH_HEAD"],
             deadline,
             "git validate fetched tree",
         )?;
-        for entry in listing.split('\0').filter(|entry| !entry.is_empty()) {
-            let (metadata, path) = entry
-                .split_once('\t')
-                .ok_or_else(|| "Fetched Git tree contains an invalid entry.".to_string())?;
-            let mode = metadata
-                .split_whitespace()
-                .next()
-                .ok_or_else(|| "Fetched Git tree contains an invalid entry.".to_string())?;
-            if path.is_empty()
-                || path.starts_with('/')
-                || path.contains('\\')
-                || path
-                    .split('/')
-                    .any(|part| part.is_empty() || part == "." || part == "..")
-                || path.chars().any(char::is_control)
-            {
-                return Err("Fetched Git tree contains an unsafe path.".to_string());
-            }
-            match mode {
-                "100644" | "100755" => {}
-                "120000" => return Err("Fetched Git tree contains a symlink entry.".to_string()),
-                "160000" => {
-                    return Err("Fetched Git tree contains a Git submodule entry.".to_string())
-                }
-                _ => return Err("Fetched Git tree contains an unsupported file mode.".to_string()),
-            }
-        }
-        Ok(())
+        validate_strict_tree_listing(&listing)
     }
 
     fn run_fetch_command(
@@ -1754,6 +1733,27 @@ impl GitService {
             self.command_output_with_timeout(command, remaining_git_deadline(deadline)?, label)?;
         self.success_stdout(output)
             .map(|value| value.trim().to_string())
+    }
+
+    fn run_fetch_command_bytes(
+        &self,
+        repo: &Path,
+        args: &[&str],
+        deadline: Instant,
+        label: &str,
+    ) -> Result<Vec<u8>, String> {
+        let mut command = Command::new("git");
+        isolate_git_config_environment(&mut command, false);
+        command
+            .arg("-c")
+            .arg("core.hooksPath=/dev/null")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .env("LC_ALL", "C");
+        let output =
+            self.command_output_with_timeout(command, remaining_git_deadline(deadline)?, label)?;
+        self.success_stdout_bytes(output)
     }
 
     fn checkout_fetched_ref(
@@ -2712,6 +2712,90 @@ fn parse_merge_tree_analysis(output: &[u8]) -> Result<GitMergeTreeAnalysis, Stri
     })
 }
 
+fn validate_strict_tree_listing(output: &[u8]) -> Result<(), String> {
+    let mut entry_count = 0usize;
+    let mut total_bytes = 0u64;
+
+    for record in output
+        .split(|byte| *byte == 0)
+        .filter(|record| !record.is_empty())
+    {
+        entry_count = entry_count.saturating_add(1);
+        if entry_count > MAX_STRICT_TREE_ENTRIES {
+            return Err(format!(
+                "Fetched Git tree contains more than {MAX_STRICT_TREE_ENTRIES} entries."
+            ));
+        }
+
+        let tab_index = record
+            .iter()
+            .position(|byte| *byte == b'\t')
+            .ok_or_else(|| "Fetched Git tree contains an invalid entry.".to_string())?;
+        let (metadata, path) = record.split_at(tab_index);
+        let path = &path[1..];
+        let metadata = std::str::from_utf8(metadata)
+            .map_err(|_| "Fetched Git tree contains invalid entry metadata.".to_string())?;
+        let path = std::str::from_utf8(path)
+            .map_err(|_| "Fetched Git tree contains a non-UTF-8 path.".to_string())?;
+        let mut fields = metadata.split_ascii_whitespace();
+        let mode = fields
+            .next()
+            .ok_or_else(|| "Fetched Git tree omitted an entry mode.".to_string())?;
+        let object_type = fields
+            .next()
+            .ok_or_else(|| "Fetched Git tree omitted an object type.".to_string())?;
+        let _object_id = fields
+            .next()
+            .ok_or_else(|| "Fetched Git tree omitted an object id.".to_string())?;
+        let size = fields
+            .next()
+            .ok_or_else(|| "Fetched Git tree omitted an entry size.".to_string())?;
+
+        if path.is_empty()
+            || path.starts_with('/')
+            || path.contains('\\')
+            || path.chars().any(char::is_control)
+            || path.split('/').any(|part| {
+                part.is_empty()
+                    || part == "."
+                    || part == ".."
+                    || part == ".git"
+                    || part.contains(':')
+            })
+        {
+            return Err("Fetched Git tree contains an unsafe path.".to_string());
+        }
+
+        match mode {
+            "100644" | "100755" => {
+                if object_type != "blob" {
+                    return Err("Fetched Git tree contains an unsupported entry type.".to_string());
+                }
+                let size = size
+                    .parse::<u64>()
+                    .map_err(|_| "Fetched Git tree returned an invalid entry size.".to_string())?;
+                if size > MAX_STRICT_TREE_FILE_BYTES {
+                    return Err(format!(
+                        "Fetched Git tree contains a file over the {MAX_STRICT_TREE_FILE_BYTES} byte safety limit."
+                    ));
+                }
+                total_bytes = total_bytes.checked_add(size).ok_or_else(|| {
+                    "Fetched Git tree exceeds the total byte safety limit.".to_string()
+                })?;
+                if total_bytes > MAX_STRICT_TREE_TOTAL_BYTES {
+                    return Err(format!(
+                        "Fetched Git tree exceeds the {MAX_STRICT_TREE_TOTAL_BYTES} byte safety limit."
+                    ));
+                }
+            }
+            "120000" => return Err("Fetched Git tree contains a symlink entry.".to_string()),
+            "160000" => return Err("Fetched Git tree contains a Git submodule entry.".to_string()),
+            _ => return Err("Fetched Git tree contains an unsupported file mode.".to_string()),
+        }
+    }
+    Ok(())
+}
+
 fn parse_tree_entries(output: &[u8]) -> Result<Vec<GitTreeEntry>, String> {
     let records = output
         .split(|byte| *byte == 0)
@@ -3417,6 +3501,88 @@ mod tests {
             gitlink_error.contains("Git submodule entry"),
             "{gitlink_error}"
         );
+    }
+
+    #[test]
+    fn strict_tree_listing_rejects_limits_and_unsafe_paths_before_checkout() {
+        let entry =
+            |path: &str, size: u64| format!("100644 blob {} {}\t{path}\0", "0".repeat(40), size);
+
+        let oversized = entry("large.bin", MAX_STRICT_TREE_FILE_BYTES + 1);
+        let error = validate_strict_tree_listing(oversized.as_bytes()).unwrap_err();
+        assert!(error.contains("file over"), "{error}");
+
+        let total = (0..9)
+            .map(|index| entry(&format!("file-{index}.bin"), MAX_STRICT_TREE_FILE_BYTES))
+            .collect::<String>();
+        let error = validate_strict_tree_listing(total.as_bytes()).unwrap_err();
+        assert!(error.contains("safety limit"), "{error}");
+
+        let entries = (0..=MAX_STRICT_TREE_ENTRIES)
+            .map(|index| entry(&format!("file-{index}.bin"), 1))
+            .collect::<String>();
+        let error = validate_strict_tree_listing(entries.as_bytes()).unwrap_err();
+        assert!(error.contains("more than"), "{error}");
+
+        for path in [".git/config", "bad:name", "/absolute", "a/../b", "a//b"] {
+            let error = validate_strict_tree_listing(entry(path, 1).as_bytes()).unwrap_err();
+            assert!(error.contains("unsafe path"), "{path}: {error}");
+        }
+    }
+
+    #[test]
+    fn snapshot_fetch_ref_tree_rejects_oversized_and_colon_entries_before_checkout() {
+        let git = GitService::new();
+        let publish = |label: &str, extra_path: &str, extra_size: Option<u64>| {
+            let remote = temp_dir(&format!("{label}-remote")).join("remote.git");
+            Command::new("git")
+                .args(["init", "--bare"])
+                .arg(&remote)
+                .output()
+                .unwrap();
+            let work = temp_dir(&format!("{label}-work"));
+            git.init_main(&work).unwrap();
+            fs::create_dir_all(work.join("skills/demo")).unwrap();
+            fs::write(work.join("skills/demo/SKILL.md"), "name: demo\n").unwrap();
+            let extra = work.join(extra_path);
+            if let Some(size) = extra_size {
+                if let Some(parent) = extra.parent() {
+                    fs::create_dir_all(parent).unwrap();
+                }
+                fs::File::create(extra).unwrap().set_len(size).unwrap();
+            } else {
+                fs::write(extra, "unsafe\n").unwrap();
+            }
+            git.add_all(&work).unwrap();
+            git.commit(&work, label).unwrap();
+            git.set_origin_url(&work, remote.to_str().unwrap()).unwrap();
+            git.push_origin_main(&work, true).unwrap();
+            remote
+        };
+
+        let oversized_remote = publish(
+            "git-snapshot-oversized",
+            "large.bin",
+            Some(MAX_STRICT_TREE_FILE_BYTES + 1),
+        );
+        let oversized_checkout = temp_dir("git-snapshot-oversized-checkout").join("checkout");
+        let error = git
+            .fetch_ref_tree(
+                oversized_remote.to_str().unwrap(),
+                "main",
+                &oversized_checkout,
+            )
+            .unwrap_err();
+        assert!(error.contains("file over"), "{error}");
+        assert!(!oversized_checkout.join("skills/demo/SKILL.md").exists());
+
+        let colon_remote = publish("git-snapshot-colon", "bad:name.txt", None);
+        let colon_checkout = temp_dir("git-snapshot-colon-checkout").join("checkout");
+        let error = git
+            .fetch_ref_tree(colon_remote.to_str().unwrap(), "main", &colon_checkout)
+            .unwrap_err();
+        assert!(error.contains("unsafe path"), "{error}");
+        assert!(!colon_checkout.join("skills/demo/SKILL.md").exists());
     }
 
     #[test]
