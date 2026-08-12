@@ -58,7 +58,7 @@ The `0.6` implementation and release qualification are complete. SkillBox
 `v0.8.0` is the current shipped release, including reviewed inbound sync,
 History query/layout fixes, and Skill Collections Phase A+B. The current
 `v0.9.0` work follows [issue #46](https://github.com/santosli/SkillBox/issues/46):
-Phase C is implemented in Draft PR #57 and awaits merge and release
+Phase C is implemented for `v0.9.0` and awaits merge and release
 qualification; Phase D remains planned for a later `v0.9.x` release.
 The next milestones follow [the versioned evolution path](roadmap.md#versioned-evolution-path):
 

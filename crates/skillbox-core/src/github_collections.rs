@@ -121,6 +121,16 @@ pub fn apply_github_skill_collection(
                     .to_string(),
             );
         }
+        if let Some(existing_reviewed_sha) =
+            persisted_collection_reviewed_sha(&paths.database_path, &collection.id)?
+        {
+            if existing_reviewed_sha.as_ref() != collection.reviewed_head_sha.as_ref() {
+                return Err(
+                    "Collection already has a different reviewed SHA; collection updates are not available until Phase D."
+                        .to_string(),
+                );
+            }
+        }
 
         let mut selected_names = HashSet::new();
         let mut items = Vec::new();

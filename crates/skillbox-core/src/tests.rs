@@ -8135,6 +8135,221 @@ fn collection_batch_failure_rolls_back_remote_current_index_and_audits_one_opera
     assert!(list_skill_collections(&managed_root).unwrap().is_empty());
 }
 
+#[cfg(unix)]
+#[test]
+fn collection_batch_rollback_preserves_same_content_identity_replacement() {
+    let root = temp_dir("collection-batch-identity-replacement");
+    let repository = root.join("collection");
+    let managed_root = root.join("SkillBox");
+    fs::create_dir_all(&repository).unwrap();
+    run_git(&repository, &["init", "-b", "main"]);
+    make_skill(&repository.join("skills/alpha"), "alpha", "Alpha");
+    run_git(&repository, &["add", "."]);
+    run_git(
+        &repository,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Collection",
+        ],
+    );
+
+    let scan = scan_import_candidates(std::slice::from_ref(&repository), &managed_root).unwrap();
+    let mut collection = scan.collections.into_iter().next().unwrap();
+    let child = collection.children[0].clone();
+    collection.source_kind = ImportCandidateCollectionSourceKind::GithubRemote;
+    collection.source_url = Some("https://github.com/acme/collection/tree/main".to_string());
+    collection.requested_reference = Some("main".to_string());
+    let paths = ensure_managed_layout(managed_root.clone()).unwrap();
+    let missing = repository.join("skills/missing");
+    let _hook = install_collection_import_test_hook(|imported| {
+        assert_eq!(imported.len(), 1);
+        let imported_path = &imported[0].managed_path;
+        let replacement_path = imported_path.with_file_name("external-replacement");
+        let skill_md = fs::read(imported_path.join("SKILL.md")).unwrap();
+        fs::rename(imported_path, &replacement_path).unwrap();
+        fs::create_dir_all(imported_path).unwrap();
+        fs::write(imported_path.join("SKILL.md"), skill_md).unwrap();
+
+        let current = imported_path
+            .parent()
+            .and_then(Path::parent)
+            .unwrap()
+            .join("current");
+        fs::remove_file(&current).unwrap();
+        std::os::unix::fs::symlink(&replacement_path, &current).unwrap();
+    });
+
+    let error = apply_collection_import_with_audit(
+        &paths,
+        &collection,
+        std::slice::from_ref(&child),
+        vec![
+            ImportRequestItem {
+                source_path: child.source_path.clone(),
+                skill_type: SkillKind::Remote,
+                deploy_back_to_source: false,
+            },
+            ImportRequestItem {
+                source_path: missing,
+                skill_type: SkillKind::Remote,
+                deploy_back_to_source: false,
+            },
+        ],
+        "test",
+    )
+    .unwrap_err();
+
+    assert!(error.contains("filesystem identity changed"), "{error}");
+    let replacement_path = paths
+        .remote_skills_root
+        .join("alpha/versions/external-replacement");
+    assert!(replacement_path.join("SKILL.md").is_file());
+    let current = paths.remote_skills_root.join("alpha/current");
+    assert_eq!(
+        fs::canonicalize(current).unwrap(),
+        fs::canonicalize(replacement_path).unwrap()
+    );
+    let operations = list_operations(OperationFilter::default(), &managed_root)
+        .unwrap()
+        .operations;
+    let collection_operation = operations
+        .iter()
+        .find(|operation| operation.operation_type == "import_collection")
+        .unwrap();
+    assert_eq!(collection_operation.status, OperationStatus::Failed);
+    assert_eq!(
+        collection_operation
+            .payload
+            .get("partialRecovery")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert!(list_skill_collections(&managed_root).unwrap().is_empty());
+}
+
+#[test]
+fn github_collection_apply_rejects_new_sha_before_new_child_writes() {
+    let root = temp_dir("github-collection-new-child-sha");
+    let managed_root = root.join("SkillBox");
+    let (remote, work) = bare_remote_with_multiple_skill_content(
+        "github-collection-new-child-sha-origin",
+        &["alpha", "beta"],
+    );
+    let _rewrite = github_repo_rewrite("acme", "github-collection-new-child-sha", &remote);
+    let source_url = "https://github.com/acme/github-collection-new-child-sha/tree/main";
+
+    let first = preview_github_skill_collection(
+        PreviewGithubSkillCollectionRequest {
+            source_url: source_url.to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+    let alpha = first
+        .collection
+        .children
+        .iter()
+        .find(|child| child.name == "alpha")
+        .unwrap()
+        .clone();
+    let first_result = apply_github_skill_collection(
+        GithubSkillCollectionApplyRequest {
+            source_url: source_url.to_string(),
+            collection_id: first.collection.id.clone(),
+            preview_id: first.collection.preview_id,
+            selections: vec![ImportCollectionChildSelection {
+                relative_path: alpha.relative_path,
+                group_id: alpha.group_id,
+                variant_id: alpha.variant_id,
+                skill_type: SkillKind::User,
+            }],
+            actor: "test".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+    let operations_before = list_operations(OperationFilter::default(), &managed_root)
+        .unwrap()
+        .operations
+        .len();
+
+    make_skill(&work.join("skills/charlie"), "charlie", "Charlie");
+    run_git(&work, &["add", "."]);
+    run_git(
+        &work,
+        &[
+            "-c",
+            "user.name=SkillBox",
+            "-c",
+            "user.email=skillbox@example.invalid",
+            "commit",
+            "-m",
+            "Add Charlie",
+        ],
+    );
+    run_git(&work, &["push", "origin", "main"]);
+
+    let second = preview_github_skill_collection(
+        PreviewGithubSkillCollectionRequest {
+            source_url: source_url.to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+    assert_ne!(
+        first_result.collection.reviewed_head_sha,
+        second.collection.reviewed_head_sha
+    );
+    let charlie = second
+        .collection
+        .children
+        .iter()
+        .find(|child| child.name == "charlie")
+        .unwrap()
+        .clone();
+    let error = apply_github_skill_collection(
+        GithubSkillCollectionApplyRequest {
+            source_url: source_url.to_string(),
+            collection_id: second.collection.id,
+            preview_id: second.collection.preview_id,
+            selections: vec![ImportCollectionChildSelection {
+                relative_path: charlie.relative_path,
+                group_id: charlie.group_id,
+                variant_id: charlie.variant_id,
+                skill_type: SkillKind::User,
+            }],
+            actor: "test".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+
+    assert!(error.contains("different reviewed SHA"), "{error}");
+    assert!(!managed_root.join("user-skills/charlie").exists());
+    let paths = managed_paths(&managed_root);
+    assert!(!managed_index_contains(&paths.database_path, "charlie").unwrap());
+    assert_eq!(
+        list_skill_collections(&managed_root).unwrap()[0]
+            .members
+            .iter()
+            .map(|member| member.managed_skill_name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["alpha"]
+    );
+    assert_eq!(
+        list_operations(OperationFilter::default(), &managed_root)
+            .unwrap()
+            .operations
+            .len(),
+        operations_before
+    );
+}
+
 #[test]
 fn github_collection_apply_rejects_new_remote_sha_before_managed_writes() {
     let root = temp_dir("github-collection-stale");

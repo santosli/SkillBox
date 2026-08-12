@@ -23,9 +23,9 @@ distribution invariants remain documented in `docs/release.md`.
 
 Copy-snapshot deployment and broader recovery hardening remain planned product
 work. Git-backed Skill Collections are the active `v0.9.0` milestone; Phase A+B
-shipped in `v0.8.0`, Phase C is implemented in the current Draft change set and
-awaits merge and `v0.9` release qualification, while collection-level
-update/rollback remains planned Phase D work for a later `v0.9.x` release.
+shipped in `v0.8.0`, and the Phase C implementation is complete for `v0.9.0`
+and awaits merge and release qualification. Collection-level update/rollback
+remains planned Phase D work for a later `v0.9.x` release.
 
 ## Near-Term Priorities
 
@@ -34,9 +34,9 @@ These are the next areas where focused contributions are most useful:
 - **Git-backed Skill Collections (v0.9.0).** Rust now treats one
   canonical Git repository/worktree and reviewed SHA as a local collection
   source while keeping child `SKILL.md` directories independently selectable
-  and deployable. Phase C's one-fetch GitHub preview/apply is implemented in
-  the current Draft change set for `v0.9.0`, awaiting merge and release
-  qualification; collection update/rollback remains open. Track
+  and deployable. Phase C's one-fetch GitHub preview/apply is implemented for
+  `v0.9.0`, awaiting merge and release qualification; collection
+  update/rollback remains open. Track
   the remaining scope in [GitHub issue #46](https://github.com/santosli/SkillBox/issues/46).
 - **Deployment portability.** Add copy-snapshot deployment as an explicit
   alternative to the current compatibility-checked symlink path.
@@ -67,8 +67,8 @@ verified; completing a feature list alone does not qualify a release.
 | **0.5 — Local usage discovery and release awareness** | Evidence-aware local skill rankings with time-range, skill-type, agent, and workspace filters; separate Calls and history references; auditable multi-provider history sync; daily signed app-update awareness without automatic downloads. | CLI and desktop reconcile confirmed/inferred/reference evidence consistently; Calls never include low-signal references or claim provider-native totals; history providers resolve real local skills, deduplicate and upgrade stable identities, and preserve successful imports when another provider fails; schema upgrades and representative ranking queries are tested; update checks are rate-limited and every install is revalidated after an explicit click. |
 | **0.6 — Runtime profiles and portability** | Rust-owned runtime profiles model roots, precedence, frontmatter capabilities, and compatibility without hard-coding agent behavior in React. | Each supported profile has fixtures and compatibility tests; unsupported fields are reported before deployment; runtime-specific behavior remains behind an adapter boundary. |
 | **0.7 — Safe sync, deployment, and recovery** | Reviewed inbound user-skills Git updates are shipped; copy-snapshot deployment and broader restore/audit hardening remain planned follow-ups to the existing symlink path. | Worktree and branch-relation states are explicit; conflicts are never auto-merged; incoming trees, stale previews, deployed deletion/rename blockers, backup refs, index reconciliation, overwrite protection, and recovery paths have automated coverage. |
-| **0.8 — Skill Collections and product hardening** | Git-backed Skill Collections add repository-level discovery, reviewed multi-skill sources, and commit-consistent update/rollback while large-library performance, diagnostics, accessibility, onboarding, and recovery mature for sustained daily use. | Collections use one canonical repository/worktree identity and reviewed SHA, perform one bounded fetch/check per remote repository, require explicit child selection, preserve per-skill deploy/Calls independence, and pass rollback/recovery and untrusted-tree tests with CLI/Tauri parity. Performance budgets and critical UI workflows are verified; supported upgrade and recovery procedures are documented and exercised. |
-| **0.9 — Release candidate** | Feature scope is frozen while security, migration compatibility, packaging, updater, Homebrew, and real-world beta feedback are closed out. | Threat-model review is complete; upgrades from every supported prior release are tested; blocker defects are closed; signed and notarized distribution rehearsals pass. |
+| **0.8 — Skill Collections foundation and product hardening** | Git-backed Skill Collections add repository-level discovery, persisted reviewed provenance, installed-source display grouping, and large-library import-review performance. | Collections use one canonical local repository/worktree identity, preserve per-skill selection/deploy/Calls independence, and pass local grouping, migration, recovery, and untrusted-input tests with CLI/Tauri parity. |
+| **0.9 — Reviewed GitHub Skill Collection install** | Phase C adds one-fetch GitHub multi-skill preview/apply with explicit child selection and one reviewed commit SHA. Collection-level update/rollback remains later Phase D work. | Remote trees are bounded and fail closed before checkout; source/ref/tree/selection/managed state are stale-checked; selected children apply transactionally/compensatably; CLI/Tauri parity, recovery, and desktop review gates pass. |
 | **1.0 — Stable local skill management** | SkillBox offers a documented, supportable contract for discovering, importing, managing, deploying, updating, synchronizing, diagnosing, and recovering supported skills. | Core workflows meet their definitions of done; supported runtimes and limitations are explicit; migrations and recovery are proven; release artifacts and docs match; no open blocker or known data-loss issue remains. |
 
 ### 0.5 Usage Evidence And Ranking Boundaries
@@ -160,11 +160,12 @@ permissions, and child imports continue through the ordinary per-skill safety
 contract.
 
 A remote repository URL will use one bounded fetch/check to preview all valid
-children. Preview will report added, changed, removed, and invalid children,
-plus path/name conflicts. Apply will install only explicitly selected child
-snapshots while retaining collection provenance. Update and rollback remain
-reviewed and commit-consistent at collection level; runtime deployment remains
-an independent per-skill action.
+children. Preview reports eligible/invalid children, duplicate-name and managed
+conflict diagnostics, plus bounded path/name conflicts; it does not claim a
+removed-child diff because collection updates are Phase D. Apply installs only
+explicitly selected child snapshots while retaining collection provenance.
+Runtime deployment, Calls, and History remain per-skill; collection-level
+update/rollback remains Phase D.
 
 Delivery is phased across the `v0.8.0` and `v0.9.x` releases:
 
@@ -172,8 +173,8 @@ Delivery is phased across the `v0.8.0` and `v0.9.x` releases:
 2. **Implemented:** Collection/source persistence and child relationships.
 3. **Implemented for `v0.9.0` / awaiting qualification:** GitHub multi-skill
    install preview/apply with one repository fetch. It is not part of the
-   published `v0.8.0` release and remains unreleased until this Draft is
-   reviewed, merged, and release-qualified.
+   published `v0.8.0` release and remains unreleased until merged and
+   release-qualified.
 4. Collection-level update/rollback and UI detail.
 
 Phase 4 is not implemented and must not be described as shipped.

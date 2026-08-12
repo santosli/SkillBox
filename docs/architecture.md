@@ -244,8 +244,8 @@ target，然后才导入并保存 `skill_collections` / `skill_collection_member
 Phase C 的 GitHub multi-skill one-fetch install 只允许显式 child selection，并在 apply
 前重新验证 canonical source URL、ref、resolved SHA、child snapshot 和 managed target；
 裸 repository URL 不假设 `main`，必须通过结构化结果要求显式 ref；root-only skill 也
-拒绝与 nested `SKILL.md` roots 重叠。它在当前 Draft 中实现，目标为 v0.9.0，
-但尚未发布。
+拒绝与 nested `SKILL.md` roots 重叠。它已按 v0.9.0 实现但尚未完成 release
+qualification，尚未发布。
 Phase D 的 collection-level update/rollback 尚未实现。当前实现也不自动部署、不执行 hooks、filters、submodules、repository
 scripts、custom helpers 或 arbitrary shell。
 
