@@ -70,6 +70,8 @@ React UI
 - `bind_remote_source` -> `skillbox_core::bind_remote_source`
 - `preview_github_remote_skill_install` -> `skillbox_core::preview_github_remote_skill_install`
 - `install_github_remote_skill` -> `skillbox_core::install_github_remote_skill`
+- `preview_github_skill_collection` -> `skillbox_core::preview_github_skill_collection`
+- `apply_github_skill_collection` -> `skillbox_core::apply_github_skill_collection`
 - `list_remote_skill_versions` -> `skillbox_core::list_remote_skill_versions`
 - `preview_remote_version_change` -> `skillbox_core::preview_remote_version_change`
 - `apply_remote_version_change` -> `skillbox_core::apply_remote_version_change`
@@ -208,10 +210,15 @@ Code、Cursor；它只决定 discovery/recommendation 顺序，不授权自动�
 
 ### Local Git Skill Collections
 
-Phase A+B 的 Collection model 只覆盖本地 Git discovery、Import Review
-grouping 和成功导入后的 provenance persistence。Rust `GitService` 返回
+Phase A+B 的 Collection model 覆盖本地 Git discovery、Import Review
+grouping 和成功导入后的 provenance persistence。当前 Draft 的 Phase C 扩展同一
+model 支持 GitHub repository/root 的一次 fetch collection preview/apply。Rust `GitService` 返回
 canonical worktree root、Git common directory、branch/detached state、HEAD
 和 sanitized origin；core 以 worktree/common-dir pair 作为 collection identity。
+GitHub remote collections 使用稳定的 canonical source URL + explicit requested ref
+作为 collection identity；resolved SHA、完整 child tree、selection 和 status 只进入
+每次 preview identity。因此同一 repo/ref 的新 commit 会得到新的 preview，但不会伪造
+成另一个长期 collection；Phase D 仍未提供更新/回滚语义。
 
 对于没有 live Git metadata 的复制安装，Import Review 可以读取配置 runtime
 root 旁边受支持的 v3 `.skill-lock.json`。Rust 只解析 bounded JSON，校验
@@ -233,9 +240,12 @@ target，然后才导入并保存 `skill_collections` / `skill_collection_member
 前不创建 collection rows；失败时使用受保护的 compensatable rollback，并报告无法
 回滚的部分，而不是声称跨文件系统 transaction。
 
-Phase C 的 GitHub multi-skill one-fetch install，以及 Phase D 的 collection-level
-update/rollback 尚未实现。当前实现也不自动部署、不执行 hooks、filters、submodules、
-repository scripts、custom helpers 或 arbitrary shell。
+Phase C 的 GitHub multi-skill one-fetch install 只允许显式 child selection，并在 apply
+前重新验证 canonical source URL、ref、resolved SHA、child snapshot 和 managed target；
+裸 repository URL 不假设 `main`，必须通过结构化结果要求显式 ref；root-only skill 也
+拒绝与 nested `SKILL.md` roots 重叠。它在当前 Draft 中实现但尚未随 v0.8.0 发布。
+Phase D 的 collection-level update/rollback 尚未实现。当前实现也不自动部署、不执行 hooks、filters、submodules、repository
+scripts、custom helpers 或 arbitrary shell。
 
 不要在没有 adapter 语义的情况下猜测某个 agent 的目录布局。新增 agent 支持时，先定义 adapter 的发现路径、原生格式、部署方式和冲突处理。
 

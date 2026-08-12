@@ -598,12 +598,22 @@ fn fetch_github_skill_source_snapshot(
     root_snapshot: &Path,
 ) -> Result<(String, PathBuf)> {
     if source.is_root {
-        let sha = git.fetch_ref_tree(&source.repo_url, &source.reference, checkout)?;
+        let sha = git.fetch_ref_tree_with_timeout_allow_legacy_tree(
+            &source.repo_url,
+            &source.reference,
+            checkout,
+            Duration::from_secs(30),
+        )?;
         copy_skill_dir_from_checkout(checkout, root_snapshot, checkout)?;
         Ok((sha, root_snapshot.to_path_buf()))
     } else {
-        let sha =
-            git.fetch_ref_path(&source.repo_url, &source.reference, &source.path, checkout)?;
+        let sha = git.fetch_ref_path_with_timeout_allow_legacy_tree(
+            &source.repo_url,
+            &source.reference,
+            &source.path,
+            checkout,
+            Duration::from_secs(30),
+        )?;
         Ok((sha, checkout.join(&source.path)))
     }
 }
@@ -1268,10 +1278,12 @@ pub(crate) fn remote_skill_path_changed(
         };
         let checkout = temp.join("checkout");
         let latest_path = if source_is_root {
-            git.fetch_ref_tree_with_timeout(repo_url, latest_sha, &checkout, timeout)?;
+            git.fetch_ref_tree_with_timeout_allow_legacy_tree(
+                repo_url, latest_sha, &checkout, timeout,
+            )?;
             checkout
         } else {
-            git.fetch_ref_path_with_timeout(
+            git.fetch_ref_path_with_timeout_allow_legacy_tree(
                 repo_url,
                 latest_sha,
                 source_repo_path,
@@ -1561,10 +1573,21 @@ pub(crate) fn remote_version_preview_target(
     let checkout = temp.join("checkout");
     let git = skillbox_git::GitService::new();
     if source_is_root {
-        git.fetch_ref_tree(&repo_url, to_version, &checkout)?;
+        git.fetch_ref_tree_with_timeout_allow_legacy_tree(
+            &repo_url,
+            to_version,
+            &checkout,
+            Duration::from_secs(30),
+        )?;
         Ok(checkout)
     } else {
-        git.fetch_ref_path(&repo_url, to_version, &source_path, &checkout)?;
+        git.fetch_ref_path_with_timeout_allow_legacy_tree(
+            &repo_url,
+            to_version,
+            &source_path,
+            &checkout,
+            Duration::from_secs(30),
+        )?;
         Ok(checkout.join(source_path))
     }
 }
@@ -1922,7 +1945,12 @@ pub(crate) fn ensure_github_version_snapshot(
     let result = (|| {
         let checkout = temp.join("checkout");
         let git = skillbox_git::GitService::new();
-        git.fetch_ref_tree(&repo_url, target_sha, &checkout)?;
+        git.fetch_ref_tree_with_timeout_allow_legacy_tree(
+            &repo_url,
+            target_sha,
+            &checkout,
+            Duration::from_secs(30),
+        )?;
         let fetched_skill_path = if source_is_root {
             checkout.clone()
         } else {

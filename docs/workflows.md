@@ -151,16 +151,55 @@ Review/apply：
   时才形成 collection card；单个匹配仍作为普通 standalone candidate 显示。live Git
   worktree collection 保留其 repository/HEAD 语义，不受这个展示降噪门槛影响。
 
-当前边界：Phase C 的 GitHub repository one-fetch multi-skill preview/apply 与 Phase D
-的 collection-level update/rollback 尚未实现。Collection operations 不运行 hooks、
-filters、submodules、repository scripts、custom helpers 或 arbitrary shell。
+### 2.2 GitHub Skill Collection Preview/Apply (Phase C)
+
+GitHub repository/root URL 的多 skill workflow 由 Rust core 承载：
+
+- CLI：`github-collection-preview <github-url> [--managed-root <path>]`，然后使用
+  `github-collection-apply <github-url> --collection-id <id> --preview-id <id>
+  --select <path|group|variant|type,...> [--managed-root <path>]`。
+- Tauri：`preview_github_skill_collection` 和
+  `apply_github_skill_collection`。Desktop 从 Import Review 展示 collection card，
+  只提交结构化 child selections，不在 React 中解析 Git 或文件系统。
+- Preview 对 repository/root source 执行一次 bounded `fetch_ref_tree`，扫描完整
+  checkout，返回 canonical sanitized URL、requested ref、resolved SHA、child groups、
+  bounded errors 和 aggregate diagnostics；Git service 的结构化 fetch 结果证明实际 fetch
+  次数，而不是由 UI 估算。子项可以是 importable、invalid、duplicate
+  name、already managed 或 managed conflict；只有显式选择的 eligible child 才会 apply。
+- Apply 重新 fetch 一次并重新校验 URL/ref/SHA、collection/preview identity、relative
+  path、full snapshot/content hash、duplicate name 和 managed target，然后才进行选中
+  child 的普通 per-skill import。所有成功 child 绑定同一个 reviewed SHA；每个 child
+  仍独立 deploy、Calls、History、更新和 rollback。
+- Repository-root URL（root `SKILL.md` 或多个 child）进入 collection review；指向
+  单一子目录的 URL 继续走既有 single-skill GitHub install。空仓库或没有有效 child
+  返回 actionable error；无效 child 不会隐藏其它安全有效 child，除非触发全局安全上限。
+- 为了让 reviewed SHA 可重现，collection workflow 要求 repository URL 显式携带
+  `/tree/<ref>`（或等价的显式 `ref`）。裸仓库 URL 不会假设 `main`，而是返回要求显式
+  ref 的结构化结果；用户可以继续使用原有 single-skill URL 语义。带 slash 的 ref
+  仍按现有 parser 的明确歧义边界处理。
+- Root `SKILL.md` 只有在仓库没有其它 ancestor/descendant `SKILL.md` root 时才作为
+  root-only skill 支持。父子重叠 roots 会在 preview 阶段 fail closed，避免一个 child
+  snapshot 包含另一个 child 或产生 overlapping apply。
+- 远程 tree 只读且不可信：禁止 `.git`、traversal、absolute/control/backslash/colon
+  paths、symlink、gitlink/submodule、unsafe file type、超限文件/条目/总字节，并禁用
+  hooks、filters、scripts、custom helpers 和 arbitrary shell。URL 中带 slash 的 ref
+  保持现有 parser 的明确歧义边界，不通过猜测路径扩大权限。
+
+Phase C 是当前 v0.8.x 的 Draft/unreleased change set；只有 review、merge 和 release
+qualification 完成后才可描述为 shipped。Phase D 的 collection-level update/rollback
+仍未实现。Collection operations 不运行 hooks、filters、submodules、repository
+scripts、custom helpers 或 arbitrary shell。
 
 完成验证：
 
-- `cargo test -p skillbox-core --offline schema_v8_collection_migration_is_idempotent_for_existing_database`
+- `cargo test -p skillbox-core --offline schema_v9_github_collection_migration_is_idempotent_for_existing_database`
 - `cargo test -p skillbox-core --offline scan_import_candidates_groups_git_repository_children_and_keeps_external_copies_unlinked`
 - `cargo test -p skillbox-core --offline git_collection_apply_persists_selected_children_and_rejects_stale_head_before_writes`
 - `cargo run -p skillbox-cli --offline -- collection-preview <repository-root> --managed-root <temp-skillbox-root>`
+- `cargo test -p skillbox-core --offline github_collections::tests`
+- `cargo test -p skillbox-core --offline github_collection_identity_is_stable_across_commits_on_one_ref`
+- `cargo test -p skillbox-core --offline collection_batch_failure_rolls_back_remote_current_index_and_audits_one_operation`
+- `cargo run -p skillbox-cli --offline -- github-collection-preview <github-url> --managed-root <temp-skillbox-root>`
 - `npm test` 和桌面 Import Review 的 collection collapsed/expanded/narrow visual QA。
 
 ## 3. Revert Local Import
@@ -1114,7 +1153,8 @@ returns structured JSON while the desktop provides interactive review.
 | Remote source binding, update, rollback, and versions | Full | Full | Desktop provides all-file visual review; CLI returns structured diff/version data. |
 | User-skills Git status and outbound commit/push | Full | Full | Desktop adds selected-file diff review. Existing push defaults and `push_failed` semantics remain unchanged. |
 | Reviewed inbound user-skills fast-forward (v0.7 shipped) | Full | Full | Both use Check -> Preview -> Apply with the same Rust validation and stale-preview contract. Desktop adds visual repository/skill/deployment review and conflict diagnostics. Neither interface auto-merges, rebases, resets, stashes, or resolves divergence. |
-| Local Git Skill Collections Phase A+B | Full | Full | `collection-preview`/`collection-apply` and `collections` expose Rust-owned local worktree discovery, selected-child apply, and persisted provenance. GitHub multi-skill fetch and collection-level update/rollback remain planned. |
+| Local Git Skill Collections Phase A+B | Full | Full | `collection-preview`/`collection-apply` and `collections` expose Rust-owned local worktree discovery, selected-child apply, and persisted provenance; shipped in v0.8.0. |
+| GitHub Skill Collection Phase C | Full | Full | Draft/unreleased `github-collection-preview`/`github-collection-apply` perform one fetch per preview/apply, explicit child selection, stale SHA/tree checks, and per-skill import. Collection-level update/rollback remains unsupported. |
 | Workspaces | Partial | Full | CLI lists/scans/adds/forgets exact roots. Desktop also previews a project directory, initializes one selected supported root, and offers the native folder picker. |
 | Usage rankings and local history sync | Full | Full | Both use the same confirmed/inferred/reference evidence model and provider backfills. |
 | Aggregate usage diagnostics | Full | Limited | CLI `usage-audit` is the automation-oriented aggregate report. Desktop exposes the relevant coverage summary and disclosure, not the complete diagnostic JSON. |

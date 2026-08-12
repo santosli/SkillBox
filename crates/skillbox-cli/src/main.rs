@@ -58,6 +58,35 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 managed_root(command_args),
             )?)
         }
+        "github-collection-preview" => {
+            let source_url = positional(command_args).into_iter().next().ok_or_else(|| {
+                "Usage: skillbox github-collection-preview <github-url> [--managed-root <path>]"
+                    .to_string()
+            })?;
+            print_json(&skillbox_core::preview_github_skill_collection_result(
+                skillbox_core::PreviewGithubSkillCollectionRequest { source_url },
+                managed_root(command_args),
+            )?)
+        }
+        "github-collection-apply" => {
+            let source_url = positional(command_args).into_iter().next().ok_or_else(|| {
+                "Usage: skillbox github-collection-apply <github-url> --collection-id <id> --preview-id <id> --select <path|group|variant|type,...>"
+                    .to_string()
+            })?;
+            let collection_id = required_option_value(command_args, "--collection-id")?;
+            let preview_id = required_option_value(command_args, "--preview-id")?;
+            let selections = collection_selections(command_args)?;
+            print_json(&skillbox_core::apply_github_skill_collection(
+                skillbox_core::GithubSkillCollectionApplyRequest {
+                    source_url,
+                    collection_id,
+                    preview_id,
+                    selections,
+                    actor: "cli".to_string(),
+                },
+                managed_root(command_args),
+            )?)
+        }
         "collection-apply" => {
             let root = positional(command_args).into_iter().next().ok_or_else(|| {
                 "Usage: skillbox collection-apply <repository-root> --collection-id <id> --preview-id <id> --select <path|group|variant|type,...>"
@@ -668,6 +697,8 @@ Commands:
   skillbox collections [--managed-root <path>]
   skillbox collection-preview <repository-root> [--managed-root <path>]
   skillbox collection-apply <repository-root> --collection-id <id> --preview-id <id> --select <path|group|variant|type,...> [--managed-root <path>]
+  skillbox github-collection-preview <github-url> [--managed-root <path>]
+  skillbox github-collection-apply <github-url> --collection-id <id> --preview-id <id> --select <path|group|variant|type,...> [--managed-root <path>]
   skillbox install-preview <github-url> [--target <path>] [--managed-root <path>]
   skillbox install <github-url> --preview-id <id> [--target <path>] [--confirm-warnings] [--managed-root <path>]
   skillbox import <source-dir> --type user|remote [--managed-root <path>]
@@ -922,6 +953,8 @@ mod tests {
         assert!(help.contains("skillbox collections [--managed-root <path>]"));
         assert!(help.contains("skillbox collection-preview <repository-root>"));
         assert!(help.contains("skillbox collection-apply <repository-root>"));
+        assert!(help.contains("skillbox github-collection-preview <github-url>"));
+        assert!(help.contains("skillbox github-collection-apply <github-url>"));
 
         let selections = collection_selections(&[
             "--select".to_string(),
@@ -933,6 +966,24 @@ mod tests {
         assert_eq!(selections[0].skill_type, skillbox_core::SkillKind::User);
         assert_eq!(selections[1].relative_path, "skills/beta");
         assert_eq!(selections[1].skill_type, skillbox_core::SkillKind::Remote);
+    }
+
+    #[test]
+    fn github_collection_preview_command_uses_structured_core_result() {
+        let root = temp_dir("cli-github-collection-preview").join("SkillBox");
+        let remote = bare_remote_with_skill_content("cli-github-collection-preview-origin", "demo");
+        let _rewrite = github_repo_rewrite("acme", "cli-github-collection-preview", &remote);
+
+        run(vec![
+            "github-collection-preview".to_string(),
+            "https://github.com/acme/cli-github-collection-preview/tree/main".to_string(),
+            "--managed-root".to_string(),
+            root.to_string_lossy().to_string(),
+        ])
+        .unwrap();
+
+        assert!(!root.join("user-skills").exists());
+        assert!(!root.join("remote-skills").exists());
     }
 
     #[test]
@@ -1498,18 +1549,11 @@ tools:
 
     struct GitConfigRewriteGuard {
         _lock: std::sync::MutexGuard<'static, ()>,
-        previous: Vec<(&'static str, Option<std::ffi::OsString>)>,
+        _rewrite: skillbox_git::TestTrustedUrlRewriteGuard,
     }
 
     impl Drop for GitConfigRewriteGuard {
-        fn drop(&mut self) {
-            for (key, value) in self.previous.drain(..) {
-                match value {
-                    Some(value) => std::env::set_var(key, value),
-                    None => std::env::remove_var(key),
-                }
-            }
-        }
+        fn drop(&mut self) {}
     }
 
     fn github_repo_rewrite(
@@ -1518,25 +1562,14 @@ tools:
         remote: &std::path::Path,
     ) -> GitConfigRewriteGuard {
         let lock = GIT_CONFIG_LOCK.lock().unwrap();
-        let keys = ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"];
-        let previous = keys
-            .into_iter()
-            .map(|key| (key, std::env::var_os(key)))
-            .collect::<Vec<_>>();
-
-        std::env::set_var("GIT_CONFIG_COUNT", "1");
-        std::env::set_var(
-            "GIT_CONFIG_KEY_0",
-            format!("url.file://{}.insteadOf", remote.display()),
-        );
-        std::env::set_var(
-            "GIT_CONFIG_VALUE_0",
+        let rewrite = skillbox_git::test_trusted_url_rewrite(
+            format!("file://{}", remote.display()),
             format!("https://github.com/{owner}/{repo}.git"),
         );
 
         GitConfigRewriteGuard {
             _lock: lock,
-            previous,
+            _rewrite: rewrite,
         }
     }
 }

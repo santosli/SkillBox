@@ -417,6 +417,36 @@ async fn apply_import_collection(
 }
 
 #[tauri::command]
+async fn preview_github_skill_collection(
+    request: skillbox_core::PreviewGithubSkillCollectionRequest,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = skillbox_core::preview_github_skill_collection_result(
+            request,
+            skillbox_core::default_managed_root(),
+        )?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("GitHub collection preview task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn apply_github_skill_collection(
+    request: skillbox_core::GithubSkillCollectionApplyRequest,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = skillbox_core::apply_github_skill_collection(
+            request,
+            skillbox_core::default_managed_root(),
+        )?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("GitHub collection apply task failed: {error}"))?
+}
+
+#[tauri::command]
 async fn import_candidates(items: Vec<skillbox_core::ImportRequestItem>) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let result =
@@ -1157,6 +1187,8 @@ pub fn run() {
             scan_workspace_import_candidates,
             list_skill_collections,
             apply_import_collection,
+            preview_github_skill_collection,
+            apply_github_skill_collection,
             import_candidates,
             list_import_records,
             revert_import,

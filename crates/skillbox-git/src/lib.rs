@@ -8,6 +8,12 @@ use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+thread_local! {
+    static TEST_TRUSTED_URL_REWRITES: std::cell::RefCell<Vec<(String, String)>> = const {
+        std::cell::RefCell::new(Vec::new())
+    };
+}
+
 const DEFAULT_LS_REMOTE_TIMEOUT: Duration = Duration::from_secs(30);
 const FETCH_REF_TIMEOUT: Duration = Duration::from_secs(30);
 const PUSH_TIMEOUT: Duration = Duration::from_secs(30);
@@ -76,6 +82,12 @@ pub struct GitTreeEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitTreeFetchResult {
+    pub resolved_sha: String,
+    pub fetch_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitRepositoryIdentity {
     pub worktree_root: std::path::PathBuf,
     pub common_dir: std::path::PathBuf,
@@ -113,6 +125,33 @@ pub struct GitLogEntry {
 #[derive(Debug, Clone, Copy)]
 pub struct GitService {
     preflight_timeout: Duration,
+}
+
+#[doc(hidden)]
+pub struct TestTrustedUrlRewriteGuard {
+    previous: Vec<(String, String)>,
+}
+
+#[doc(hidden)]
+pub fn test_trusted_url_rewrite(
+    replacement: impl Into<String>,
+    source_prefix: impl Into<String>,
+) -> TestTrustedUrlRewriteGuard {
+    let rewrite = (replacement.into(), source_prefix.into());
+    let previous = TEST_TRUSTED_URL_REWRITES.with(|rewrites| {
+        let mut rewrites = rewrites.borrow_mut();
+        std::mem::replace(&mut *rewrites, vec![rewrite])
+    });
+    TestTrustedUrlRewriteGuard { previous }
+}
+
+impl Drop for TestTrustedUrlRewriteGuard {
+    fn drop(&mut self) {
+        let previous = std::mem::take(&mut self.previous);
+        TEST_TRUSTED_URL_REWRITES.with(|rewrites| {
+            *rewrites.borrow_mut() = previous;
+        });
+    }
 }
 
 impl Default for GitService {
@@ -1397,6 +1436,14 @@ impl GitService {
         validate_git_remote_arg(repo_url)?;
         validate_git_reference_arg(reference)?;
         let mut command = Command::new("git");
+        isolate_git_config_environment(&mut command, true);
+        TEST_TRUSTED_URL_REWRITES.with(|rewrites| {
+            for (replacement, source_prefix) in rewrites.borrow().iter() {
+                command
+                    .arg("-c")
+                    .arg(format!("url.{replacement}.insteadOf={source_prefix}"));
+            }
+        });
         command
             .arg("ls-remote")
             .arg("--")
@@ -1444,31 +1491,63 @@ impl GitService {
         checkout_root: impl AsRef<Path>,
         timeout: Duration,
     ) -> Result<String, String> {
+        self.fetch_ref_path_with_timeout_internal(
+            repo_url,
+            reference,
+            path,
+            checkout_root,
+            timeout,
+            true,
+        )
+    }
+
+    /// Fetch a requested path for legacy single-skill import/update flows.
+    /// Those flows intentionally snapshot safe internal symlinks; collection
+    /// previews use the strict full-tree API instead.
+    pub fn fetch_ref_path_with_timeout_allow_legacy_tree(
+        &self,
+        repo_url: &str,
+        reference: &str,
+        path: &str,
+        checkout_root: impl AsRef<Path>,
+        timeout: Duration,
+    ) -> Result<String, String> {
+        self.fetch_ref_path_with_timeout_internal(
+            repo_url,
+            reference,
+            path,
+            checkout_root,
+            timeout,
+            false,
+        )
+    }
+
+    fn fetch_ref_path_with_timeout_internal(
+        &self,
+        repo_url: &str,
+        reference: &str,
+        path: &str,
+        checkout_root: impl AsRef<Path>,
+        timeout: Duration,
+        reject_unsafe_tree_entries: bool,
+    ) -> Result<String, String> {
         validate_git_remote_arg(repo_url)?;
         validate_git_reference_arg(reference)?;
         let checkout_root = checkout_root.as_ref();
+        let deadline = Instant::now() + timeout.min(self.preflight_timeout);
         fs::create_dir_all(checkout_root).map_err(|error| error.to_string())?;
-        self.run(checkout_root, &["init", "-b", "main"])?;
-        self.run(checkout_root, &["remote", "add", "origin", repo_url])?;
-        self.run_network(
+        self.run_fetch_setup(checkout_root, repo_url, deadline)?;
+        self.run_fetch(checkout_root, reference, deadline)?;
+        if reject_unsafe_tree_entries {
+            self.validate_fetched_tree(checkout_root, deadline)?;
+        }
+        let sha = self.run_fetch_command(
             checkout_root,
-            &["fetch", "--depth", "1", "origin", "--", reference],
-            timeout,
-            "git fetch",
+            &["rev-parse", "FETCH_HEAD"],
+            deadline,
+            "git rev-parse",
         )?;
-        let sha = self
-            .run(checkout_root, &["rev-parse", "FETCH_HEAD"])?
-            .trim()
-            .to_string();
-        self.run_owned(
-            checkout_root,
-            &[
-                "checkout".to_string(),
-                "FETCH_HEAD".to_string(),
-                "--".to_string(),
-                path.to_string(),
-            ],
-        )?;
+        self.checkout_fetched_ref(checkout_root, Some(path), deadline)?;
         Ok(sha)
     }
 
@@ -1488,23 +1567,85 @@ impl GitService {
         checkout_root: impl AsRef<Path>,
         timeout: Duration,
     ) -> Result<String, String> {
+        self.fetch_ref_tree_with_timeout_diagnostics(repo_url, reference, checkout_root, timeout)
+            .map(|result| result.resolved_sha)
+    }
+
+    /// Fetch a full tree for the legacy single-skill update path. That path
+    /// may snapshot a safe, internal symlink as part of the requested skill;
+    /// collection previews use the strict diagnostics API below instead.
+    pub fn fetch_ref_tree_with_timeout_allow_legacy_tree(
+        &self,
+        repo_url: &str,
+        reference: &str,
+        checkout_root: impl AsRef<Path>,
+        timeout: Duration,
+    ) -> Result<String, String> {
+        self.fetch_ref_tree_with_timeout_diagnostics_internal(
+            repo_url,
+            reference,
+            checkout_root,
+            timeout,
+            false,
+        )
+        .map(|result| result.resolved_sha)
+    }
+
+    pub fn fetch_ref_tree_with_diagnostics(
+        &self,
+        repo_url: &str,
+        reference: &str,
+        checkout_root: impl AsRef<Path>,
+    ) -> Result<GitTreeFetchResult, String> {
+        self.fetch_ref_tree_with_timeout_diagnostics(
+            repo_url,
+            reference,
+            checkout_root,
+            FETCH_REF_TIMEOUT,
+        )
+    }
+
+    pub fn fetch_ref_tree_with_timeout_diagnostics(
+        &self,
+        repo_url: &str,
+        reference: &str,
+        checkout_root: impl AsRef<Path>,
+        timeout: Duration,
+    ) -> Result<GitTreeFetchResult, String> {
+        self.fetch_ref_tree_with_timeout_diagnostics_internal(
+            repo_url,
+            reference,
+            checkout_root,
+            timeout,
+            true,
+        )
+    }
+
+    fn fetch_ref_tree_with_timeout_diagnostics_internal(
+        &self,
+        repo_url: &str,
+        reference: &str,
+        checkout_root: impl AsRef<Path>,
+        timeout: Duration,
+        reject_unsafe_tree_entries: bool,
+    ) -> Result<GitTreeFetchResult, String> {
         validate_git_remote_arg(repo_url)?;
         validate_git_reference_arg(reference)?;
         let checkout_root = checkout_root.as_ref();
+        let deadline = Instant::now() + timeout.min(self.preflight_timeout);
         fs::create_dir_all(checkout_root).map_err(|error| error.to_string())?;
-        self.run(checkout_root, &["init", "-b", "main"])?;
-        self.run(checkout_root, &["remote", "add", "origin", repo_url])?;
-        self.run_network(
+        self.run_fetch_setup(checkout_root, repo_url, deadline)?;
+        self.run_fetch(checkout_root, reference, deadline)?;
+        if reject_unsafe_tree_entries {
+            self.validate_fetched_tree(checkout_root, deadline)?;
+        }
+        let sha = self.run_fetch_command(
             checkout_root,
-            &["fetch", "--depth", "1", "origin", "--", reference],
-            timeout,
-            "git fetch",
+            &["rev-parse", "FETCH_HEAD"],
+            deadline,
+            "git rev-parse",
         )?;
-        let sha = self
-            .run(checkout_root, &["rev-parse", "FETCH_HEAD"])?
-            .trim()
-            .to_string();
-        self.run(checkout_root, &["checkout", "FETCH_HEAD"])?;
+        self.checkout_fetched_ref(checkout_root, None, deadline)?;
         let git_metadata = checkout_root.join(".git");
         match fs::symlink_metadata(&git_metadata) {
             Ok(metadata) if metadata.is_dir() => {
@@ -1516,7 +1657,135 @@ impl GitService {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.to_string()),
         }
-        Ok(sha)
+        Ok(GitTreeFetchResult {
+            resolved_sha: sha,
+            fetch_count: 1,
+        })
+    }
+
+    fn run_fetch_setup(
+        &self,
+        repo: &Path,
+        repo_url: &str,
+        deadline: Instant,
+    ) -> Result<(), String> {
+        self.run_fetch_command(repo, &["init", "-b", "main"], deadline, "git init")?;
+        self.run_fetch_command(
+            repo,
+            &["remote", "add", "origin", repo_url],
+            deadline,
+            "git remote add",
+        )?;
+        Ok(())
+    }
+
+    fn run_fetch(&self, repo: &Path, reference: &str, deadline: Instant) -> Result<(), String> {
+        let mut command = self.hardened_network_command(repo, deadline)?;
+        command.args(["fetch", "--depth", "1", "origin", "--", reference]);
+        let output = self.command_output_with_timeout(
+            command,
+            remaining_git_deadline(deadline)?,
+            "git fetch",
+        )?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(network_git_error(
+                "git fetch",
+                String::from_utf8_lossy(&output.stderr).trim(),
+            ))
+        }
+    }
+
+    fn validate_fetched_tree(&self, repo: &Path, deadline: Instant) -> Result<(), String> {
+        let listing = self.run_fetch_command(
+            repo,
+            &["ls-tree", "-r", "-z", "FETCH_HEAD"],
+            deadline,
+            "git validate fetched tree",
+        )?;
+        for entry in listing.split('\0').filter(|entry| !entry.is_empty()) {
+            let (metadata, path) = entry
+                .split_once('\t')
+                .ok_or_else(|| "Fetched Git tree contains an invalid entry.".to_string())?;
+            let mode = metadata
+                .split_whitespace()
+                .next()
+                .ok_or_else(|| "Fetched Git tree contains an invalid entry.".to_string())?;
+            if path.is_empty()
+                || path.starts_with('/')
+                || path.contains('\\')
+                || path
+                    .split('/')
+                    .any(|part| part.is_empty() || part == "." || part == "..")
+                || path.chars().any(char::is_control)
+            {
+                return Err("Fetched Git tree contains an unsafe path.".to_string());
+            }
+            match mode {
+                "100644" | "100755" => {}
+                "120000" => return Err("Fetched Git tree contains a symlink entry.".to_string()),
+                "160000" => {
+                    return Err("Fetched Git tree contains a Git submodule entry.".to_string())
+                }
+                _ => return Err("Fetched Git tree contains an unsupported file mode.".to_string()),
+            }
+        }
+        Ok(())
+    }
+
+    fn run_fetch_command(
+        &self,
+        repo: &Path,
+        args: &[&str],
+        deadline: Instant,
+        label: &str,
+    ) -> Result<String, String> {
+        let mut command = Command::new("git");
+        isolate_git_config_environment(&mut command, false);
+        command
+            .arg("-c")
+            .arg("core.hooksPath=/dev/null")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .env("LC_ALL", "C");
+        let output =
+            self.command_output_with_timeout(command, remaining_git_deadline(deadline)?, label)?;
+        self.success_stdout(output)
+            .map(|value| value.trim().to_string())
+    }
+
+    fn checkout_fetched_ref(
+        &self,
+        repo: &Path,
+        path: Option<&str>,
+        deadline: Instant,
+    ) -> Result<(), String> {
+        let mut command = Command::new("git");
+        isolate_git_config_environment(&mut command, false);
+        command
+            .arg("-c")
+            .arg("core.hooksPath=/dev/null")
+            .arg("-c")
+            .arg("core.attributesfile=/dev/null")
+            .arg("-C")
+            .arg(repo)
+            .args(["checkout", "FETCH_HEAD"])
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GIT_ASKPASS", "true")
+            .env("LC_ALL", "C");
+        if let Some(path) = path {
+            command.args(["--", path]);
+        }
+        let output = self.command_output_with_timeout(
+            command,
+            remaining_git_deadline(deadline)?,
+            "git checkout fetched tree",
+        )?;
+        self.success_stdout(output).map(|_| ())
     }
 
     pub fn diff_no_index_tree(
@@ -1610,8 +1879,19 @@ impl GitService {
 
     fn hardened_network_command(&self, repo: &Path, deadline: Instant) -> Result<Command, String> {
         self.reject_untrusted_repository_network_config(repo, deadline)?;
-        let trusted_network_config = self.trusted_global_network_config(deadline)?;
+        let mut trusted_network_config = self.trusted_global_network_config(deadline)?;
+        TEST_TRUSTED_URL_REWRITES.with(|rewrites| {
+            trusted_network_config.extend(rewrites.borrow().iter().map(
+                |(replacement, source_prefix)| {
+                    (
+                        format!("url.{replacement}.insteadof"),
+                        source_prefix.clone(),
+                    )
+                },
+            ));
+        });
         let mut command = Command::new("git");
+        isolate_git_config_environment(&mut command, false);
         command
             .arg("-c")
             .arg("core.hooksPath=/dev/null")
@@ -1649,6 +1929,7 @@ impl GitService {
         deadline: Instant,
     ) -> Result<Vec<(String, String)>, String> {
         let mut command = Command::new("git");
+        isolate_git_config_environment(&mut command, true);
         command
             .args(["config", "--global", "--null", "--list"])
             .env("LC_ALL", "C");
@@ -1662,9 +1943,7 @@ impl GitService {
         }
         Ok(parse_null_git_config(&output.stdout)
             .into_iter()
-            .filter(|(key, _)| {
-                is_credential_helper_key(key) || key.eq_ignore_ascii_case("core.sshcommand")
-            })
+            .filter(|(key, _)| is_trusted_global_network_key(key))
             .collect())
     }
 
@@ -1701,6 +1980,7 @@ impl GitService {
         deadline: Instant,
     ) -> Result<bool, String> {
         let mut command = Command::new("git");
+        isolate_git_config_environment(&mut command, false);
         command
             .arg("-C")
             .arg(repo)
@@ -1740,6 +2020,7 @@ impl GitService {
         deadline: Instant,
     ) -> Result<Vec<(String, String)>, String> {
         let mut command = Command::new("git");
+        isolate_git_config_environment(&mut command, false);
         command
             .arg("-C")
             .arg(repo)
@@ -2011,9 +2292,50 @@ fn parse_null_git_config(output: &[u8]) -> Vec<(String, String)> {
         .collect()
 }
 
+fn isolate_git_config_environment(command: &mut Command, preserve_global: bool) {
+    let trusted_global = preserve_global.then(|| std::env::var_os("GIT_CONFIG_GLOBAL"));
+    for key in [
+        "GIT_CONFIG_COUNT",
+        "GIT_CONFIG_PARAMETERS",
+        "GIT_CONFIG_SYSTEM",
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_NOSYSTEM",
+        "GIT_CONFIG_PATH",
+        "GIT_CONFIG",
+        "GIT_TEMPLATE_DIR",
+    ] {
+        command.env_remove(key);
+    }
+    for index in 0..128 {
+        command.env_remove(format!("GIT_CONFIG_KEY_{index}"));
+        command.env_remove(format!("GIT_CONFIG_VALUE_{index}"));
+    }
+    command
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_TEMPLATE_DIR", "/dev/null");
+    if preserve_global {
+        if let Some(path) = trusted_global.flatten() {
+            command.env("GIT_CONFIG_GLOBAL", path);
+        } else {
+            command.env_remove("GIT_CONFIG_GLOBAL");
+        }
+    } else {
+        command.env("GIT_CONFIG_GLOBAL", "/dev/null");
+    }
+}
+
 fn is_credential_helper_key(key: &str) -> bool {
     let key = key.to_ascii_lowercase();
     key == "credential.helper" || (key.starts_with("credential.") && key.ends_with(".helper"))
+}
+
+fn is_trusted_global_network_key(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    is_credential_helper_key(&key)
+        || key == "core.sshcommand"
+        || (key.starts_with("url.")
+            && (key.ends_with(".insteadof") || key.ends_with(".pushinsteadof")))
 }
 
 fn local_network_config_is_untrusted(key: &str) -> bool {
@@ -2872,12 +3194,229 @@ mod tests {
         let temp = temp_dir("git-snapshot-tree-work");
         let checkout = temp.join("checkout");
 
-        let sha = fetch_ref_tree(remote.to_str().unwrap(), "main", &checkout).unwrap();
+        let fetch = GitService::new()
+            .fetch_ref_tree_with_diagnostics(remote.to_str().unwrap(), "main", &checkout)
+            .unwrap();
 
-        assert!(!sha.is_empty());
+        assert!(!fetch.resolved_sha.is_empty());
+        assert_eq!(fetch.fetch_count, 1);
         assert!(checkout.join("skills/demo/SKILL.md").exists());
         assert!(checkout.join("README.md").exists());
         assert!(!checkout.join(".git").exists());
+    }
+
+    #[test]
+    fn snapshot_fetch_ref_tree_ignores_global_filter_selected_by_remote_attributes() {
+        const CHILD: &str = "SKILLBOX_REMOTE_ATTRIBUTE_FILTER_CHILD";
+        if let Some(root) = std::env::var_os(CHILD) {
+            let root = PathBuf::from(root);
+            let git = GitService::new();
+            let remote = root.join("remote.git");
+            Command::new("git")
+                .args(["init", "--bare"])
+                .arg(&remote)
+                .output()
+                .unwrap();
+            let work = root.join("work");
+            git.init_main(&work).unwrap();
+            fs::create_dir_all(work.join("skills/demo")).unwrap();
+            fs::write(
+                work.join(".gitattributes"),
+                "skills/demo/SKILL.md filter=marker\n",
+            )
+            .unwrap();
+            fs::write(work.join("skills/demo/SKILL.md"), "name: demo\n").unwrap();
+            git.add_all(&work).unwrap();
+            git.commit(&work, "Remote attribute fixture").unwrap();
+            git.set_origin_url(&work, remote.to_str().unwrap()).unwrap();
+            git.push_origin_main(&work, true).unwrap();
+
+            let marker = root.join("filter-invoked");
+            let filter = root.join("filter.sh");
+            fs::write(
+                &filter,
+                format!("#!/bin/sh\nprintf invoked > '{}'\ncat\n", marker.display()),
+            )
+            .unwrap();
+            fs::set_permissions(&filter, fs::Permissions::from_mode(0o700)).unwrap();
+            let global_config = root.join("global.gitconfig");
+            fs::write(
+                &global_config,
+                format!("[filter \"marker\"]\n\tsmudge = !{}\n", filter.display()),
+            )
+            .unwrap();
+            std::env::set_var("GIT_CONFIG_GLOBAL", &global_config);
+
+            let checkout = root.join("checkout");
+            let sha = git
+                .fetch_ref_tree(remote.to_str().unwrap(), "main", &checkout)
+                .unwrap();
+            assert!(!sha.is_empty());
+            assert!(checkout.join("skills/demo/SKILL.md").exists());
+            assert!(
+                !marker.exists(),
+                "remote .gitattributes activated a global filter during checkout"
+            );
+            return;
+        }
+
+        let root = temp_dir("git-remote-attribute-filter-child");
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::snapshot_fetch_ref_tree_ignores_global_filter_selected_by_remote_attributes",
+                "--nocapture",
+            ])
+            .env(CHILD, &root)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn snapshot_fetch_ref_tree_ignores_process_git_config_filter_injection() {
+        const CHILD: &str = "SKILLBOX_PROCESS_FILTER_CHILD";
+        if let Some(root) = std::env::var_os(CHILD) {
+            let root = PathBuf::from(root);
+            let git = GitService::new();
+            let remote = root.join("remote.git");
+            Command::new("git")
+                .args(["init", "--bare"])
+                .arg(&remote)
+                .output()
+                .unwrap();
+            let work = root.join("work");
+            git.init_main(&work).unwrap();
+            fs::create_dir_all(work.join("skills/demo")).unwrap();
+            fs::write(
+                work.join(".gitattributes"),
+                "skills/demo/SKILL.md filter=marker\n",
+            )
+            .unwrap();
+            fs::write(work.join("skills/demo/SKILL.md"), "name: demo\n").unwrap();
+            git.add_all(&work).unwrap();
+            git.commit(&work, "Process config fixture").unwrap();
+            git.set_origin_url(&work, remote.to_str().unwrap()).unwrap();
+            git.push_origin_main(&work, true).unwrap();
+
+            let marker = root.join("process-filter-invoked");
+            let filter = root.join("process-filter.sh");
+            fs::write(
+                &filter,
+                format!("#!/bin/sh\nprintf invoked > '{}'\ncat\n", marker.display()),
+            )
+            .unwrap();
+            fs::set_permissions(&filter, fs::Permissions::from_mode(0o700)).unwrap();
+            std::env::set_var("GIT_CONFIG_COUNT", "1");
+            std::env::set_var("GIT_CONFIG_KEY_0", "filter.marker.smudge");
+            std::env::set_var("GIT_CONFIG_VALUE_0", format!("!{}", filter.display()));
+            std::env::set_var(
+                "GIT_CONFIG_PARAMETERS",
+                "'filter.marker.smudge'='!injected'",
+            );
+
+            let checkout = root.join("checkout");
+            let sha = git
+                .fetch_ref_tree(remote.to_str().unwrap(), "main", &checkout)
+                .unwrap();
+            assert!(!sha.is_empty());
+            assert!(checkout.join("skills/demo/SKILL.md").exists());
+            assert!(!marker.exists(), "process-level Git filter executed");
+            return;
+        }
+
+        let root = temp_dir("git-process-filter-child");
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::snapshot_fetch_ref_tree_ignores_process_git_config_filter_injection",
+                "--nocapture",
+            ])
+            .env(CHILD, &root)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn snapshot_fetch_ref_tree_rejects_symlink_and_gitlink_entries_before_checkout() {
+        let git = GitService::new();
+
+        let symlink_remote = temp_dir("git-snapshot-symlink-remote").join("remote.git");
+        Command::new("git")
+            .args(["init", "--bare"])
+            .arg(&symlink_remote)
+            .output()
+            .unwrap();
+        let symlink_work = temp_dir("git-snapshot-symlink-work");
+        git.init_main(&symlink_work).unwrap();
+        fs::create_dir_all(symlink_work.join("skills/demo")).unwrap();
+        fs::write(symlink_work.join("skills/demo/SKILL.md"), "name: demo\n").unwrap();
+        std::os::unix::fs::symlink("outside", symlink_work.join("link")).unwrap();
+        git.add_all(&symlink_work).unwrap();
+        git.commit(&symlink_work, "Symlink fixture").unwrap();
+        git.set_origin_url(&symlink_work, symlink_remote.to_str().unwrap())
+            .unwrap();
+        git.push_origin_main(&symlink_work, true).unwrap();
+        let symlink_error = git
+            .fetch_ref_tree(
+                symlink_remote.to_str().unwrap(),
+                "main",
+                temp_dir("git-snapshot-symlink-checkout").join("checkout"),
+            )
+            .unwrap_err();
+        assert!(symlink_error.contains("symlink entry"), "{symlink_error}");
+
+        let nested = temp_dir("git-snapshot-gitlink-nested");
+        git.init_main(&nested).unwrap();
+        fs::write(nested.join("nested.txt"), "nested\n").unwrap();
+        git.add_all(&nested).unwrap();
+        let nested_sha = git.commit(&nested, "Nested fixture").unwrap();
+        let gitlink_remote = temp_dir("git-snapshot-gitlink-remote").join("remote.git");
+        Command::new("git")
+            .args(["init", "--bare"])
+            .arg(&gitlink_remote)
+            .output()
+            .unwrap();
+        let gitlink_work = temp_dir("git-snapshot-gitlink-work");
+        git.init_main(&gitlink_work).unwrap();
+        fs::create_dir_all(gitlink_work.join("skills/demo")).unwrap();
+        fs::write(gitlink_work.join("skills/demo/SKILL.md"), "name: demo\n").unwrap();
+        run_git(
+            &gitlink_work,
+            &[
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                &format!("160000,{nested_sha},vendor/submodule"),
+            ],
+        )
+        .unwrap();
+        run_git(&gitlink_work, &["add", "--", "skills/demo/SKILL.md"]).unwrap();
+        git.commit(&gitlink_work, "Gitlink fixture").unwrap();
+        git.set_origin_url(&gitlink_work, gitlink_remote.to_str().unwrap())
+            .unwrap();
+        git.push_origin_main(&gitlink_work, true).unwrap();
+        let gitlink_error = git
+            .fetch_ref_tree(
+                gitlink_remote.to_str().unwrap(),
+                "main",
+                temp_dir("git-snapshot-gitlink-checkout").join("checkout"),
+            )
+            .unwrap_err();
+        assert!(
+            gitlink_error.contains("Git submodule entry"),
+            "{gitlink_error}"
+        );
     }
 
     #[test]
@@ -3011,17 +3550,17 @@ mod tests {
         let fetch_ref_path_start = source.find("pub fn fetch_ref_path").unwrap();
         let diff_no_index_start = source.find("pub fn diff_no_index_tree").unwrap();
         let fetch_ref_path_source = &source[fetch_ref_path_start..diff_no_index_start];
-        let run_network_start = source.find("fn run_network").unwrap();
-        let run_with_config_start = source.find("fn run_with_config").unwrap();
-        let run_network_source = &source[run_network_start..run_with_config_start];
+        let run_fetch_start = source.find("fn run_fetch(").unwrap();
+        let run_fetch_command_start = source.find("fn run_fetch_command").unwrap();
+        let run_fetch_source = &source[run_fetch_start..run_fetch_command_start];
         let hardened_network_start = source.find("fn hardened_network_command").unwrap();
         let trusted_config_start = source.find("fn trusted_global_network_config").unwrap();
         let hardened_network_source = &source[hardened_network_start..trusted_config_start];
 
-        assert!(fetch_ref_path_source.contains("run_network"));
+        assert!(fetch_ref_path_source.contains("run_fetch"));
         assert!(fetch_ref_path_source.contains("FETCH_REF_TIMEOUT"));
-        assert!(run_network_source.contains("command_output_with_timeout"));
-        assert!(run_network_source.contains("hardened_network_command"));
+        assert!(run_fetch_source.contains("command_output_with_timeout"));
+        assert!(run_fetch_source.contains("hardened_network_command"));
         assert!(hardened_network_source.contains("GIT_TERMINAL_PROMPT"));
         assert!(hardened_network_source.contains("GIT_ASKPASS"));
         assert!(hardened_network_source.contains("GCM_INTERACTIVE"));

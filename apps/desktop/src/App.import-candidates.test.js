@@ -9,6 +9,7 @@ import {
   collectionSkillCountLabel,
   importCandidateGroupLocationCount,
   importCandidateGroupTabs,
+  normalizeGithubSkillCollectionPreviewResult,
   normalizeImportCollections,
   normalizeImportCandidateGroup,
   normalizeImportCandidateGroups,
@@ -67,6 +68,7 @@ import {
 import {
   browserImportScanOptions,
   createImportScanRequestController,
+  createRemoteImportRequestController,
   importScanCommandArgs,
   importScanProgressDetail,
   importScanProgressLabel,
@@ -133,6 +135,22 @@ test('closing and reopening Import Review isolates late scan A from active scan 
 
   controller.finish(scanB);
   assert.equal(controller.begin(), 4);
+});
+
+test('remote preview controller ignores duplicate clicks and late close/reopen results', () => {
+  const controller = createRemoteImportRequestController();
+  const first = controller.begin();
+  assert.equal(first, 1);
+  assert.equal(controller.begin(), null);
+  controller.invalidate();
+  const second = controller.begin();
+  assert.equal(second, 3);
+  assert.equal(controller.isCurrent(first), false);
+  assert.equal(controller.isCurrent(second), true);
+  controller.finish(second);
+  assert.equal(controller.isCurrent(second), true);
+  controller.invalidate();
+  assert.equal(controller.isCurrent(second), false);
 });
 
 test('normalizes backend is_selected false without selecting importable candidate', () => {
@@ -415,6 +433,8 @@ test('normalizes Git-backed collection children and submits one selected child r
   const requests = selectedImportCollectionRequests(groups, collections);
   assert.deepEqual(requests, [{
     collectionId: 'collection-demo',
+    sourceKind: 'git_worktree',
+    sourceUrl: '',
     worktreeRoot: '/Users/example/skills-repo',
     previewId: 'preview-demo',
     selections: [{
@@ -424,6 +444,83 @@ test('normalizes Git-backed collection children and submits one selected child r
       skillType: 'user'
     }]
   }]);
+});
+
+test('normalizes a GitHub collection without inventing a local worktree root', () => {
+  const collections = normalizeImportCollections([{
+    id: 'github-collection-demo',
+    source_kind: 'github_remote',
+    source_url: 'https://github.com/acme/skills',
+    requested_reference: 'main',
+    reviewed_head_sha: '1234567890abcdef',
+    children: [{
+      id: 'child-demo',
+      group_id: 'skill-demo',
+      variant_id: 'variant-demo',
+      name: 'demo',
+      relative_path: 'skills/demo',
+      import_status: 'importable',
+      selected_type: 'remote',
+      is_selected: true,
+      locations: []
+    }]
+  }]);
+  const groups = normalizeImportCandidateGroups([{
+    id: 'skill-demo',
+    name: 'demo',
+    selected_variant_id: 'variant-demo',
+    variants: [{
+      id: 'variant-demo',
+      candidate: { name: 'demo', import_status: 'importable', is_selected: true },
+      selected_type: 'remote',
+      locations: []
+    }]
+  }]);
+
+  assert.equal(collections[0].sourceKind, 'github_remote');
+  assert.equal(collections[0].canonicalWorktreeRoot, '');
+  assert.deepEqual(selectedImportCollectionRequests(groups, collections), [{
+    collectionId: 'github-collection-demo',
+    sourceKind: 'github_remote',
+    sourceUrl: 'https://github.com/acme/skills',
+    worktreeRoot: '',
+    previewId: '',
+    selections: [{
+      relativePath: 'skills/demo',
+      groupId: 'skill-demo',
+      variantId: 'variant-demo',
+      skillType: 'remote'
+    }]
+  }]);
+});
+
+test('routes structured GitHub collection preview outcomes without parsing human errors', () => {
+  const collection = { id: 'collection-demo' };
+  assert.deepEqual(
+    normalizeGithubSkillCollectionPreviewResult({
+      kind: 'collection',
+      preview: collection
+    }),
+    { kind: 'collection', preview: collection }
+  );
+  assert.deepEqual(
+    normalizeGithubSkillCollectionPreviewResult({
+      kind: 'single_skill',
+      message: 'Use the single-skill preview.'
+    }),
+    { kind: 'single_skill', message: 'Use the single-skill preview.' }
+  );
+  assert.deepEqual(
+    normalizeGithubSkillCollectionPreviewResult({
+      kind: 'explicit_reference_required',
+      message: 'Use /tree/<ref>.'
+    }),
+    { kind: 'explicit_reference_required', message: 'Use /tree/<ref>.' }
+  );
+  assert.throws(
+    () => normalizeGithubSkillCollectionPreviewResult({ error: 'points to one skill' }),
+    /invalid result/
+  );
 });
 
 test('installed-source collections stay on per-skill apply and suppress imported type review', () => {

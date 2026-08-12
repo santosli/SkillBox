@@ -2,8 +2,10 @@
 
 ## Status
 
-Accepted for v0.8.0 Phase A+B. GitHub multi-skill fetch and collection-level
-update/rollback remain planned Phase C/D work.
+Accepted for v0.8.x. Phase A+B shipped in v0.8.0. The current Draft change set
+implements the one-fetch GitHub multi-skill preview/apply boundary as Phase C;
+it is not shipped until merged and released. Collection-level update/rollback
+remains planned Phase D work.
 
 ## Context
 
@@ -63,5 +65,11 @@ preserved and the failure explains the recovery boundary.
   versions remain independent and do not require a rescan after migration.
 - Collection availability is derived from the canonical worktree at read time;
   moving or deleting the worktree does not delete managed skills or provenance.
-- Phase C will add one-fetch GitHub repository preview/apply; Phase D will add
-  reviewed collection update/rollback. Neither is part of the current contract.
+- Phase C adds one-fetch GitHub repository preview/apply through a separate
+  remote collection source kind and schema-v9 source metadata. It re-fetches
+  and revalidates the full reviewed tree before selected child writes; it does
+  not provide collection update/rollback. A repository URL must carry an explicit
+  ref; bare URLs return a structured explicit-ref-required result rather than
+  assuming `main`. Root-only skills are accepted only when no nested skill root
+  overlaps them, and fetched Git trees reject symlinks and gitlinks before
+  checkout materialization. Phase D remains outside the current contract.

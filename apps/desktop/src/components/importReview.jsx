@@ -399,6 +399,7 @@ function CollectionReviewCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const isInstalledSource = collection.sourceKind === 'installed_source';
+  const isGithubRemote = collection.sourceKind === 'github_remote';
   const disclosureId = `${collection.id}-children`;
   const selectedCount = collection.children.filter((child) => {
     const group = groups.find((candidateGroup) => candidateGroup.id === child.groupId);
@@ -413,12 +414,19 @@ function CollectionReviewCard({
           <div className="candidateTitle">
             <strong>{collection.displayName}</strong>
             <Badge tone="slate">
-              {isInstalledSource ? 'Installed source collection' : 'Git collection'}
+              {isInstalledSource ? 'Installed source collection' : isGithubRemote ? 'GitHub collection' : 'Git collection'}
             </Badge>
             <Badge tone="slate">{collectionSkillCountLabel(collection.children.length)}</Badge>
           </div>
           {isInstalledSource ? (
             <small>Source: {collection.originUrl || 'Installed source metadata'}</small>
+          ) : isGithubRemote ? (
+            <>
+              <small>
+                Ref {collection.requestedReference || collection.branch || 'default'} · {shortSha}
+              </small>
+              <small>{collection.sourceUrl || collection.originUrl}</small>
+            </>
           ) : (
             <>
               <small>
@@ -478,6 +486,12 @@ function CollectionReviewCard({
                   </div>
                   <code>{child.relativePath}</code>
                   <span className="candidateUsage">Calls {group.usageCount || 0}</span>
+                  {isGithubRemote && child.diff ? (
+                    <details className="collectionChildDiff">
+                      <summary>Preview SKILL.md diff</summary>
+                      <pre>{child.diff}</pre>
+                    </details>
+                  ) : null}
                   {child.locations.length > 1 ? (
                     <small>{child.locations.length} runtime/source locations resolve to this child.</small>
                   ) : null}

@@ -7,6 +7,7 @@ pub struct GitHubSkillSource {
     pub owner: String,
     pub repo: String,
     pub reference: String,
+    pub reference_explicit: bool,
     pub path: String,
     pub is_root: bool,
     pub url: String,
@@ -117,6 +118,8 @@ pub fn parse_github_skill_url(input: &str) -> Result<GitHubSkillSource, String> 
         owner,
         repo,
         reference,
+        reference_explicit: matches!(kind.as_str(), "tree" | "blob" | "raw")
+            || (kind == "api" && url.query_pairs().any(|(key, _)| key == "ref")),
         path: skill_path,
         is_root,
         kind,
@@ -406,6 +409,7 @@ mod tests {
                 source.url, "https://github.com/acme/repo/tree/main",
                 "{url}"
             );
+            assert_eq!(source.reference_explicit, url.contains("/tree/"));
         }
     }
 

@@ -51,7 +51,13 @@ pub(crate) fn fetch_remote_source_skill_path(
             fs::remove_dir_all(checkout).map_err(|error| error.to_string())?;
         }
 
-        match git.fetch_ref_path(repo_url, reference, candidate, checkout) {
+        match git.fetch_ref_path_with_timeout_allow_legacy_tree(
+            repo_url,
+            reference,
+            candidate,
+            checkout,
+            std::time::Duration::from_secs(30),
+        ) {
             Ok(sha) => return Ok((sha, candidate.clone())),
             Err(error) => {
                 if first_error.is_none() {
