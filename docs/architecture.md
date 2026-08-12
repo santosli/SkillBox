@@ -70,6 +70,8 @@ React UI
 - `bind_remote_source` -> `skillbox_core::bind_remote_source`
 - `preview_github_remote_skill_install` -> `skillbox_core::preview_github_remote_skill_install`
 - `install_github_remote_skill` -> `skillbox_core::install_github_remote_skill`
+- `preview_github_skill_collection` -> `skillbox_core::preview_github_skill_collection`
+- `apply_github_skill_collection` -> `skillbox_core::apply_github_skill_collection`
 - `list_remote_skill_versions` -> `skillbox_core::list_remote_skill_versions`
 - `preview_remote_version_change` -> `skillbox_core::preview_remote_version_change`
 - `apply_remote_version_change` -> `skillbox_core::apply_remote_version_change`
@@ -208,10 +210,16 @@ Code、Cursor；它只决定 discovery/recommendation 顺序，不授权自动�
 
 ### Local Git Skill Collections
 
-Phase A+B 的 Collection model 只覆盖本地 Git discovery、Import Review
-grouping 和成功导入后的 provenance persistence。Rust `GitService` 返回
+Phase A+B 的 Collection model 覆盖本地 Git discovery、Import Review
+grouping 和成功导入后的 provenance persistence。面向 v0.9.0 的 Phase C
+实现扩展同一
+model 支持 GitHub repository/root 的一次 fetch collection preview/apply。Rust `GitService` 返回
 canonical worktree root、Git common directory、branch/detached state、HEAD
 和 sanitized origin；core 以 worktree/common-dir pair 作为 collection identity。
+GitHub remote collections 使用稳定的 canonical source URL + explicit requested ref
+作为 collection identity；resolved SHA、完整 child tree、selection 和 status 只进入
+每次 preview identity。因此同一 repo/ref 的新 commit 会得到新的 preview，但不会伪造
+成另一个长期 collection；Phase D 仍未提供更新/回滚语义。
 
 对于没有 live Git metadata 的复制安装，Import Review 可以读取配置 runtime
 root 旁边受支持的 v3 `.skill-lock.json`。Rust 只解析 bounded JSON，校验
@@ -233,9 +241,13 @@ target，然后才导入并保存 `skill_collections` / `skill_collection_member
 前不创建 collection rows；失败时使用受保护的 compensatable rollback，并报告无法
 回滚的部分，而不是声称跨文件系统 transaction。
 
-Phase C 的 GitHub multi-skill one-fetch install，以及 Phase D 的 collection-level
-update/rollback 尚未实现。当前实现也不自动部署、不执行 hooks、filters、submodules、
-repository scripts、custom helpers 或 arbitrary shell。
+Phase C 的 GitHub multi-skill one-fetch install 只允许显式 child selection，并在 apply
+前重新验证 canonical source URL、ref、resolved SHA、child snapshot 和 managed target；
+裸 repository URL 不假设 `main`，必须通过结构化结果要求显式 ref；root-only skill 也
+拒绝与 nested `SKILL.md` roots 重叠。它已按 v0.9.0 实现但尚未完成 release
+qualification，尚未发布。
+Phase D 的 collection-level update/rollback 尚未实现。当前实现也不自动部署、不执行 hooks、filters、submodules、repository
+scripts、custom helpers 或 arbitrary shell。
 
 不要在没有 adapter 语义的情况下猜测某个 agent 的目录布局。新增 agent 支持时，先定义 adapter 的发现路径、原生格式、部署方式和冲突处理。
 
@@ -324,8 +336,7 @@ GitHub remote source 可以是仓库中的 skill 子目录，也可以是根目�
 - Rust CLI 有 `remote-source-candidates`、`remote-source-preview`、`bind-remote-source`、`remote-versions`、`remote-preview-change`、`remote-apply-change`、`usage-record`、`usage-rankings`、`usage-audit`、各 provider history backfill、`usage-hook`、`usage-hook-status`、`usage-hook-install`、`doctor` 和 `operations`。
 - Rust CLI 有 `workspaces`、`workspace-scan`、`workspace-add`、`workspace-forget` 来管理 workspace registry。
 - Rust core、CLI 和 Tauri 已覆盖 `~/.skillbox/user-skills` 的 outbound Git
-  commit/push；reviewed inbound `origin/main` fast-forward 已实现并处于 v0.7
-  Draft qualification，尚未作为 released capability 声明。
+  commit/push；reviewed inbound `origin/main` fast-forward 已随 v0.7.0 发布。
 - Rust core 已覆盖 remote skill 的 GitHub install preview/apply、GitHub update check、source binding、diff preview、update/rollback apply 和 operation log。
 - Rust core 和 Tauri 已覆盖 usage stats 显式上报，以及 Codex App、Codex CLI、Claude Code CLI 的 Stop hook 注入入口。schema v7 把本机 evidence 分为 `confirmed`、`inferred` 和 `reference`；用户可见 `Calls` 只包含前两类，History references 单独展示。Rankings 支持 time range、User/Remote/System skill type、Agent 和 Workspace 的结构化过滤，并返回同一过滤快照内的 evidence totals、时间覆盖和可重叠 provenance source counts，以及 Codex、Claude Code、Cursor 最近一次 history scan 的文件/session 数。桌面 `Sync histories` 顺序调用三个 provider；单个 provider 失败不会撤销其他 provider 已成功写入或升级的幂等事件。
 - Codex 本地 store 没有稳定的 provider-native skill-run total。Codex 结构化逐回合 skill carrier 只能作为 defensible `inferred` Calls；`usage-audit` 明确报告这个已知 undercount，不读取或返回聊天正文。

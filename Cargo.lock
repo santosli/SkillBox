@@ -3217,6 +3217,7 @@ dependencies = [
  "serde",
  "serde_json",
  "skillbox-core",
+ "skillbox-git",
  "skillbox-github",
 ]
 

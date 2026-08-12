@@ -6367,6 +6367,32 @@ dd {
   font-size: 11px;
 }
 
+.collectionChildDiff {
+  max-width: 100%;
+  margin-top: 7px;
+  color: var(--skillbox-text-muted);
+  font-size: 11px;
+}
+
+.collectionChildDiff summary {
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.collectionChildDiff pre {
+  max-width: 100%;
+  max-height: 180px;
+  margin: 6px 0 0;
+  overflow: auto;
+  border: 1px solid var(--skillbox-border-soft);
+  border-radius: 6px;
+  background: var(--skillbox-surface-muted);
+  padding: 8px;
+  color: var(--skillbox-text-secondary);
+  font: 10px/1.45 "SF Mono", ui-monospace, Menlo, monospace;
+  white-space: pre-wrap;
+}
+
 .collectionChildUnlinkedLocations {
   display: grid;
   gap: 3px;

@@ -117,6 +117,8 @@ export function normalizeImportCollections(collections = []) {
     canonicalWorktreeRoot: collection.canonicalWorktreeRoot || collection.canonical_worktree_root || '',
     canonicalRepositoryId: collection.canonicalRepositoryId || collection.canonical_repository_id || '',
     originUrl: collection.originUrl || collection.origin_url || '',
+    sourceUrl: collection.sourceUrl || collection.source_url || '',
+    requestedReference: collection.requestedReference || collection.requested_reference || '',
     branch: collection.branch || '',
     detached: Boolean(collection.detached),
     reviewedHeadSha: collection.reviewedHeadSha || collection.reviewed_head_sha || '',
@@ -130,6 +132,7 @@ export function normalizeImportCollections(collections = []) {
       sourcePath: child.sourcePath || child.source_path || '',
       realPath: child.realPath || child.real_path || '',
       snapshotHash: child.snapshotHash || child.snapshot_hash || '',
+      diff: child.diff || '',
       contentHash: child.contentHash || child.content_hash || '',
       importStatus: child.importStatus || child.import_status || 'importable',
       suggestedTypes: child.suggestedTypes || child.suggested_types || [],
@@ -146,10 +149,23 @@ export function normalizeImportCollections(collections = []) {
   }));
 }
 
+export function normalizeGithubSkillCollectionPreviewResult(result = {}) {
+  if (result.kind === 'collection' && result.preview) {
+    return { kind: 'collection', preview: result.preview };
+  }
+  if (result.kind === 'single_skill' || result.kind === 'explicit_reference_required') {
+    return {
+      kind: result.kind,
+      message: result.message || 'GitHub collection preview could not continue.'
+    };
+  }
+  throw new Error('GitHub collection preview returned an invalid result.');
+}
+
 export function importCollectionGroupIds(collections = [], { liveOnly = false } = {}) {
   return new Set(
     collections
-      .filter((collection) => !liveOnly || collection.sourceKind === 'git_worktree')
+      .filter((collection) => !liveOnly || ['git_worktree', 'github_remote'].includes(collection.sourceKind))
       .flatMap((collection) => collection.children.map((child) => child.groupId))
   );
 }
@@ -181,13 +197,13 @@ export function filterImportCollectionsByQuery(collections = [], query = '') {
 }
 
 export function selectedImportCollectionRequests(groups = [], collections = []) {
-  return collections.filter((collection) => collection.sourceKind === 'git_worktree').map((collection) => {
+  return collections.filter((collection) => ['git_worktree', 'github_remote'].includes(collection.sourceKind)).map((collection) => {
     const selections = collection.children
       .map((child) => {
         const group = groups.find((candidateGroup) => candidateGroup.id === child.groupId);
         if (!group || !group.isSelected || group.selectedVariantId !== child.variantId) return null;
         const variant = group.variants.find((candidateVariant) => candidateVariant.id === child.variantId);
-        if (!variant || !variant.selectedType || variant.candidate.conflict) return null;
+        if (!variant || !variant.selectedType || variant.candidate.conflict || child.conflict) return null;
         return {
           relativePath: child.relativePath,
           groupId: child.groupId,
@@ -200,6 +216,8 @@ export function selectedImportCollectionRequests(groups = [], collections = []) 
       ? null
       : {
           collectionId: collection.id,
+          sourceKind: collection.sourceKind,
+          sourceUrl: collection.sourceUrl || collection.originUrl || '',
           worktreeRoot: collection.canonicalWorktreeRoot,
           previewId: collection.previewId,
           selections

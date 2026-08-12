@@ -7,6 +7,7 @@ pub struct GitHubSkillSource {
     pub owner: String,
     pub repo: String,
     pub reference: String,
+    pub reference_explicit: bool,
     pub path: String,
     pub is_root: bool,
     pub url: String,
@@ -117,6 +118,8 @@ pub fn parse_github_skill_url(input: &str) -> Result<GitHubSkillSource, String> 
         owner,
         repo,
         reference,
+        reference_explicit: matches!(kind.as_str(), "tree" | "blob" | "raw")
+            || (kind == "api" && url.query_pairs().any(|(key, _)| key == "ref")),
         path: skill_path,
         is_root,
         kind,
@@ -333,6 +336,16 @@ mod tests {
     }
 
     #[test]
+    fn does_not_infer_slash_ref_for_ambiguous_repository_root_url() {
+        let source =
+            parse_github_skill_url("https://github.com/acme/repo/tree/release/1.0").unwrap();
+
+        assert_eq!(source.reference, "release");
+        assert_eq!(source.path, "1.0");
+        assert!(!source.is_root);
+    }
+
+    #[test]
     fn normalizes_blob_raw_and_api_urls_to_skill_directory() {
         assert_eq!(
             parse_github_skill_url("https://github.com/acme/repo/blob/main/skills/demo/SKILL.md")
@@ -406,6 +419,7 @@ mod tests {
                 source.url, "https://github.com/acme/repo/tree/main",
                 "{url}"
             );
+            assert_eq!(source.reference_explicit, url.contains("/tree/"));
         }
     }
 

@@ -1104,6 +1104,7 @@ pub struct ImportCandidateCollectionChild {
     pub real_path: PathBuf,
     pub content_hash: String,
     pub snapshot_hash: String,
+    pub diff: String,
     pub import_status: ImportCandidateStatus,
     pub conflict: Option<String>,
     pub usage_count: usize,
@@ -1127,6 +1128,8 @@ pub struct ImportCandidateCollection {
     pub branch: Option<String>,
     pub detached: bool,
     pub reviewed_head_sha: Option<String>,
+    pub source_url: Option<String>,
+    pub requested_reference: Option<String>,
     pub children: Vec<ImportCandidateCollectionChild>,
     pub errors: Vec<ImportCandidateError>,
 }
@@ -1136,6 +1139,7 @@ pub struct ImportCandidateCollection {
 pub enum ImportCandidateCollectionSourceKind {
     GitWorktree,
     InstalledSource,
+    GithubRemote,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1252,6 +1256,9 @@ pub struct SkillCollection {
     pub branch: Option<String>,
     pub detached: bool,
     pub reviewed_head_sha: Option<String>,
+    pub source_kind: ImportCandidateCollectionSourceKind,
+    pub source_url: Option<String>,
+    pub requested_reference: Option<String>,
     pub available: bool,
     pub members: Vec<SkillCollectionMember>,
 }
@@ -1261,6 +1268,55 @@ pub struct ImportCollectionApplyResult {
     pub collection: SkillCollection,
     pub imported: Vec<ImportedCandidate>,
     pub errors: Vec<ImportCandidateError>,
+    #[serde(default)]
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreviewGithubSkillCollectionRequest {
+    pub source_url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GithubSkillCollectionApplyRequest {
+    pub source_url: String,
+    pub collection_id: String,
+    pub preview_id: String,
+    pub selections: Vec<ImportCollectionChildSelection>,
+    pub actor: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubSkillCollectionDiagnostics {
+    pub fetch_count: usize,
+    pub child_count: usize,
+    pub valid_child_count: usize,
+    pub invalid_child_count: usize,
+    pub duplicate_name_count: usize,
+    pub elapsed_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GithubSkillCollectionPreview {
+    pub collection: ImportCandidateCollection,
+    pub groups: Vec<ImportCandidateGroup>,
+    pub errors: Vec<ImportCandidateError>,
+    pub diagnostics: GithubSkillCollectionDiagnostics,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum GithubSkillCollectionPreviewResult {
+    Collection {
+        preview: Box<GithubSkillCollectionPreview>,
+    },
+    SingleSkill {
+        message: String,
+    },
+    ExplicitReferenceRequired {
+        message: String,
+    },
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]

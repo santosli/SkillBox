@@ -7,7 +7,11 @@ version tags such as `v0.3.0`.
 
 ## Unreleased
 
-- No unreleased changes.
+- Add one-fetch GitHub repository collection preview/apply with explicit child
+  selection, stale ref/tree validation, and per-skill managed provenance. This
+  Phase C change targets v0.9.0 and remains unreleased pending v0.9.0 release qualification; collection-level update/rollback remains planned.
+- Update collection roadmap/status wording to distinguish the shipped v0.8.0
+  local A+B work from the v0.9.0-targeted, unreleased Phase C implementation.
 
 ## 0.8.0
 

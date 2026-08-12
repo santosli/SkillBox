@@ -2,10 +2,86 @@ use crate::*;
 use skillbox_git::{GitRepositoryIdentity, GitService};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
 
 const MAX_COLLECTION_CHILDREN: usize = 500;
 const MAX_COLLECTION_ERRORS: usize = 32;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CollectionFsEntryKind {
+    Directory,
+    Symlink,
+    RegularFile,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CollectionFsIdentity {
+    kind: CollectionFsEntryKind,
+    device: u64,
+    inode: u64,
+}
+
+fn collection_fs_identity(path: &Path) -> Result<CollectionFsIdentity> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
+    let file_type = metadata.file_type();
+    let kind = if file_type.is_dir() {
+        CollectionFsEntryKind::Directory
+    } else if file_type.is_symlink() {
+        CollectionFsEntryKind::Symlink
+    } else if file_type.is_file() {
+        CollectionFsEntryKind::RegularFile
+    } else {
+        CollectionFsEntryKind::Other
+    };
+    Ok(CollectionFsIdentity {
+        kind,
+        device: metadata.dev(),
+        inode: metadata.ino(),
+    })
+}
+
+#[cfg(test)]
+type CollectionImportTestHook = Box<dyn Fn(&[ImportedCandidate])>;
+
+#[cfg(test)]
+thread_local! {
+    static TEST_COLLECTION_IMPORT_HOOK: std::cell::RefCell<Option<CollectionImportTestHook>> =
+        std::cell::RefCell::new(None);
+}
+
+#[cfg(test)]
+pub(crate) struct CollectionImportHookGuard;
+
+#[cfg(test)]
+pub(crate) fn install_collection_import_test_hook<F>(hook: F) -> CollectionImportHookGuard
+where
+    F: Fn(&[ImportedCandidate]) + 'static,
+{
+    TEST_COLLECTION_IMPORT_HOOK.with(|slot| {
+        *slot.borrow_mut() = Some(Box::new(hook));
+    });
+    CollectionImportHookGuard
+}
+
+#[cfg(test)]
+fn run_collection_import_test_hook(imported: &[ImportedCandidate]) {
+    TEST_COLLECTION_IMPORT_HOOK.with(|slot| {
+        if let Some(hook) = slot.borrow().as_ref() {
+            hook(imported);
+        }
+    });
+}
+
+#[cfg(test)]
+impl Drop for CollectionImportHookGuard {
+    fn drop(&mut self) {
+        TEST_COLLECTION_IMPORT_HOOK.with(|slot| {
+            *slot.borrow_mut() = None;
+        });
+    }
+}
 
 #[derive(Debug, Default)]
 pub(crate) struct CollectionDiscoveryStats {
@@ -164,6 +240,7 @@ where
                 real_path: candidate.real_path.clone(),
                 content_hash: candidate.content_hash.clone(),
                 snapshot_hash,
+                diff: String::new(),
                 import_status: candidate.import_status,
                 conflict: candidate.conflict.clone(),
                 usage_count: candidate.usage_count,
@@ -267,6 +344,8 @@ impl CollectionBuilder {
             branch: self.identity.branch,
             detached,
             reviewed_head_sha: self.identity.head,
+            source_url: None,
+            requested_reference: None,
             children,
             errors: self
                 .errors
@@ -305,7 +384,7 @@ fn safe_collection_relative_path(root: &Path, path: &Path) -> Option<PathBuf> {
     Some(relative.to_path_buf())
 }
 
-fn sanitize_origin_url(value: &str) -> String {
+pub(crate) fn sanitize_origin_url(value: &str) -> String {
     let mut value = value.trim().to_string();
     if let Some(index) = value.find(['?', '#']) {
         value.truncate(index);
@@ -321,13 +400,37 @@ fn sanitize_origin_url(value: &str) -> String {
     value
 }
 
+fn collection_source_kind_string(kind: ImportCandidateCollectionSourceKind) -> &'static str {
+    match kind {
+        ImportCandidateCollectionSourceKind::GitWorktree => "git_worktree",
+        ImportCandidateCollectionSourceKind::InstalledSource => "installed_source",
+        ImportCandidateCollectionSourceKind::GithubRemote => "github_remote",
+    }
+}
+
+fn parse_collection_source_kind(
+    value: &str,
+) -> rusqlite::Result<ImportCandidateCollectionSourceKind> {
+    match value {
+        "git_worktree" => Ok(ImportCandidateCollectionSourceKind::GitWorktree),
+        "installed_source" => Ok(ImportCandidateCollectionSourceKind::InstalledSource),
+        "github_remote" => Ok(ImportCandidateCollectionSourceKind::GithubRemote),
+        _ => Err(rusqlite::Error::InvalidColumnType(
+            0,
+            "source_kind".to_string(),
+            rusqlite::types::Type::Text,
+        )),
+    }
+}
+
 pub fn list_skill_collections(managed_root: impl AsRef<Path>) -> Result<Vec<SkillCollection>> {
     let paths = ensure_managed_layout(expand_home(managed_root.as_ref().to_path_buf()))?;
     let connection = open_database(&paths.database_path)?;
     let mut statement = connection
         .prepare(
             "SELECT id, display_name, canonical_worktree_root, canonical_repository_id,
-                    origin_url, branch, detached, reviewed_head_sha, available
+                    origin_url, branch, detached, reviewed_head_sha, source_kind, source_url,
+                    requested_reference, available
                FROM skill_collections
               ORDER BY display_name COLLATE NOCASE, id",
         )
@@ -343,7 +446,10 @@ pub fn list_skill_collections(managed_root: impl AsRef<Path>) -> Result<Vec<Skil
                 branch: row.get(5)?,
                 detached: row.get::<_, i64>(6)? != 0,
                 reviewed_head_sha: row.get(7)?,
-                available: row.get::<_, i64>(8)? != 0,
+                source_kind: parse_collection_source_kind(&row.get::<_, String>(8)?)?,
+                source_url: row.get(9)?,
+                requested_reference: row.get(10)?,
+                available: row.get::<_, i64>(11)? != 0,
                 members: Vec::new(),
             })
         })
@@ -376,7 +482,9 @@ pub fn list_skill_collections(managed_root: impl AsRef<Path>) -> Result<Vec<Skil
             .map_err(|error| error.to_string())?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|error| error.to_string())?;
-        collection.available = collection.canonical_worktree_root.is_dir();
+        if collection.source_kind == ImportCandidateCollectionSourceKind::GitWorktree {
+            collection.available = collection.canonical_worktree_root.is_dir();
+        }
     }
     Ok(collections)
 }
@@ -414,7 +522,6 @@ pub fn apply_import_collection(
     let mut selected_names = HashSet::new();
     let mut items = Vec::new();
     let mut selected_children = Vec::new();
-    let mut targets = Vec::new();
     for selection in &request.selections {
         let child = collection
             .children
@@ -470,7 +577,6 @@ pub fn apply_import_collection(
                 skill.name
             ));
         }
-        targets.push(target);
         items.push(ImportRequestItem {
             source_path,
             skill_type: selection.skill_type,
@@ -478,45 +584,37 @@ pub fn apply_import_collection(
         });
         selected_children.push(child.clone());
     }
-    let batch = import_candidates_with_paths(&paths, items)?;
-    if !batch.errors.is_empty() {
-        return Err(collection_apply_error(
-            format!(
-                "Collection import did not complete: {} skill(s) failed.",
-                batch.errors.len()
-            ),
-            rollback_collection_imports(&paths, &targets),
-        ));
+    if let Some(existing_reviewed_sha) =
+        persisted_collection_reviewed_sha(&paths.database_path, &collection.id)?
+    {
+        if existing_reviewed_sha.as_ref() != collection.reviewed_head_sha.as_ref() {
+            return Err(
+                "Collection already has a different reviewed SHA; collection updates are not available until Phase D."
+                    .to_string(),
+            );
+        }
     }
-    let collection_record = match persist_collection(
-        &paths.database_path,
+    apply_collection_import_with_audit(
+        &paths,
         &collection,
         &selected_children,
-        &batch.imported,
-    ) {
-        Ok(record) => record,
-        Err(error) => {
-            return Err(collection_apply_error(
-                format!("Collection metadata could not be saved: {error}"),
-                rollback_collection_imports(&paths, &targets),
-            ));
-        }
-    };
-    Ok(ImportCollectionApplyResult {
-        collection: collection_record,
-        imported: batch.imported,
-        errors: batch.errors,
-    })
+        items,
+        &request.actor,
+    )
 }
 
-struct CollectionImportTarget {
-    name: String,
-    path: PathBuf,
-    remote_root: Option<PathBuf>,
-    expected_snapshot_hash: String,
+pub(crate) struct CollectionImportTarget {
+    pub(crate) name: String,
+    pub(crate) path: PathBuf,
+    pub(crate) remote_root: Option<PathBuf>,
+    pub(crate) expected_snapshot_hash: String,
+    pub(crate) expected_path_identity: Option<CollectionFsIdentity>,
+    pub(crate) expected_current_identity: Option<CollectionFsIdentity>,
+    pub(crate) expected_versions_identity: Option<CollectionFsIdentity>,
+    pub(crate) expected_remote_root_identity: Option<CollectionFsIdentity>,
 }
 
-fn collection_import_target(
+pub(crate) fn collection_import_target(
     paths: &ManagedPaths,
     skill: &Skill,
     kind: SkillKind,
@@ -528,6 +626,10 @@ fn collection_import_target(
             remote_root: None,
             expected_snapshot_hash: skill_directory_snapshot_hash(&skill.real_path)
                 .unwrap_or_default(),
+            expected_path_identity: None,
+            expected_current_identity: None,
+            expected_versions_identity: None,
+            expected_remote_root_identity: None,
         },
         SkillKind::Remote => CollectionImportTarget {
             name: skill.name.clone(),
@@ -539,12 +641,140 @@ fn collection_import_target(
             remote_root: Some(paths.remote_skills_root.join(&skill.name)),
             expected_snapshot_hash: skill_directory_snapshot_hash(&skill.real_path)
                 .unwrap_or_default(),
+            expected_path_identity: None,
+            expected_current_identity: None,
+            expected_versions_identity: None,
+            expected_remote_root_identity: None,
         },
     }
 }
 
-fn managed_index_contains(database_path: &Path, skill_name: &str) -> Result<bool> {
-    let connection = open_database(database_path)?;
+fn collection_import_targets_from_imported(
+    imported: &[ImportedCandidate],
+) -> (Vec<CollectionImportTarget>, Vec<String>) {
+    let mut targets = Vec::new();
+    let mut errors = Vec::new();
+    for result in imported {
+        let remote_root = match result.kind {
+            SkillKind::User => None,
+            SkillKind::Remote => result
+                .managed_path
+                .parent()
+                .and_then(Path::parent)
+                .map(Path::to_path_buf),
+        };
+        let expected_snapshot_hash = match skill_directory_snapshot_hash(&result.managed_path) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                errors.push(format!(
+                    "Unable to record rollback snapshot for {}: {error}",
+                    result.name
+                ));
+                continue;
+            }
+        };
+        let expected_path_identity = match collection_fs_identity(&result.managed_path) {
+            Ok(identity) if identity.kind == CollectionFsEntryKind::Directory => identity,
+            Ok(_) => {
+                errors.push(format!(
+                    "Unable to record a directory rollback identity for {}.",
+                    result.name
+                ));
+                continue;
+            }
+            Err(error) => {
+                errors.push(format!(
+                    "Unable to record rollback identity for {}: {error}",
+                    result.name
+                ));
+                continue;
+            }
+        };
+        let expected_current_identity = match remote_root.as_ref() {
+            None => None,
+            Some(remote_root) => match collection_fs_identity(&remote_root.join("current")) {
+                Ok(identity) if identity.kind == CollectionFsEntryKind::Symlink => Some(identity),
+                Ok(_) => {
+                    errors.push(format!(
+                        "Unable to record a symlink rollback identity for {}.",
+                        result.name
+                    ));
+                    continue;
+                }
+                Err(error) => {
+                    errors.push(format!(
+                        "Unable to record rollback identity for {} current: {error}",
+                        result.name
+                    ));
+                    continue;
+                }
+            },
+        };
+        let (expected_versions_identity, expected_remote_root_identity) = match remote_root.as_ref()
+        {
+            None => (None, None),
+            Some(remote_root) => {
+                let versions = remote_root.join("versions");
+                let versions_identity = match collection_fs_identity(&versions) {
+                    Ok(identity) if identity.kind == CollectionFsEntryKind::Directory => identity,
+                    Ok(_) => {
+                        errors.push(format!(
+                            "Unable to record a versions-directory rollback identity for {}.",
+                            result.name
+                        ));
+                        continue;
+                    }
+                    Err(error) => {
+                        errors.push(format!(
+                            "Unable to record rollback versions identity for {}: {error}",
+                            result.name
+                        ));
+                        continue;
+                    }
+                };
+                let root_identity = match collection_fs_identity(remote_root) {
+                    Ok(identity) if identity.kind == CollectionFsEntryKind::Directory => identity,
+                    Ok(_) => {
+                        errors.push(format!(
+                            "Unable to record a collection rollback root identity for {}.",
+                            result.name
+                        ));
+                        continue;
+                    }
+                    Err(error) => {
+                        errors.push(format!(
+                            "Unable to record rollback root identity for {}: {error}",
+                            result.name
+                        ));
+                        continue;
+                    }
+                };
+                (Some(versions_identity), Some(root_identity))
+            }
+        };
+        targets.push(CollectionImportTarget {
+            name: result.name.clone(),
+            path: result.managed_path.clone(),
+            remote_root,
+            expected_snapshot_hash,
+            expected_path_identity: Some(expected_path_identity),
+            expected_current_identity,
+            expected_versions_identity,
+            expected_remote_root_identity,
+        });
+    }
+    (targets, errors)
+}
+
+pub(crate) fn managed_index_contains(database_path: &Path, skill_name: &str) -> Result<bool> {
+    if !database_path.is_file() {
+        return Ok(false);
+    }
+    let connection = rusqlite::Connection::open_with_flags(
+        database_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .map_err(|error| error.to_string())?;
     connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM skills WHERE name = ?1)",
@@ -554,89 +784,181 @@ fn managed_index_contains(database_path: &Path, skill_name: &str) -> Result<bool
         .map_err(|error| error.to_string())
 }
 
-fn rollback_collection_imports(
+pub(crate) fn persisted_collection_reviewed_sha(
+    database_path: &Path,
+    collection_id: &str,
+) -> Result<Option<Option<String>>> {
+    if !database_path.is_file() {
+        return Ok(None);
+    }
+    let connection = rusqlite::Connection::open_with_flags(
+        database_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .map_err(|error| error.to_string())?;
+    connection
+        .query_row(
+            "SELECT reviewed_head_sha FROM skill_collections WHERE id = ?1",
+            rusqlite::params![collection_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())
+}
+
+pub(crate) fn rollback_collection_imports(
     paths: &ManagedPaths,
     targets: &[CollectionImportTarget],
 ) -> Result<()> {
     let mut errors = Vec::new();
     for target in targets {
-        let exists = match fs::symlink_metadata(&target.path) {
-            Ok(metadata) if metadata.file_type().is_dir() => true,
-            Ok(metadata) if metadata.file_type().is_symlink() => {
+        let current = target.remote_root.as_ref().map(|root| root.join("current"));
+        let mut current_removed = current.is_none();
+        if let Some(current) = &current {
+            match (target.expected_current_identity, collection_fs_identity(current)) {
+                (Some(expected), Ok(actual)) if actual == expected => {
+                    if let Err(error) = fs::remove_file(current) {
+                        errors.push(format!(
+                            "Unable to remove rollback current for {}: {error}",
+                            target.name
+                        ));
+                    } else {
+                        current_removed = true;
+                    }
+                }
+                (Some(_), Ok(_)) => errors.push(format!(
+                    "Preserved rollback current for {} because its filesystem identity changed.",
+                    target.name
+                )),
+                (Some(_), Err(error)) => errors.push(format!(
+                    "Preserved rollback current for {} because its identity could not be verified: {error}",
+                    target.name
+                )),
+                (None, _) => errors.push(format!(
+                    "Preserved rollback current for {} because no filesystem identity was recorded.",
+                    target.name
+                )),
+            }
+        }
+
+        let target_removed = match (
+            target.expected_path_identity,
+            collection_fs_identity(&target.path),
+        ) {
+            (Some(expected), Ok(actual)) if actual == expected => {
+                match skill_directory_snapshot_hash(&target.path) {
+                    Ok(snapshot) if snapshot == target.expected_snapshot_hash => {
+                        if let Err(error) = fs::remove_dir_all(&target.path) {
+                            errors.push(format!(
+                                "Unable to remove rollback target for {}: {error}",
+                                target.name
+                            ));
+                            false
+                        } else {
+                            if let Err(error) =
+                                remove_skill_index(&paths.database_path, &target.name)
+                            {
+                                errors.push(format!(
+                                    "Unable to restore index for {}: {error}",
+                                    target.name
+                                ));
+                            }
+                            true
+                        }
+                    }
+                    Ok(_) => {
+                        errors.push(format!(
+                            "Preserved rollback target for {} because its contents changed.",
+                            target.name
+                        ));
+                        false
+                    }
+                    Err(error) => {
+                        errors.push(format!(
+                            "Preserved rollback target for {} because its contents could not be verified: {error}",
+                            target.name
+                        ));
+                        false
+                    }
+                }
+            }
+            (Some(_), Ok(_)) => {
                 errors.push(format!(
-                    "Refusing to remove unexpected symlink at {}",
-                    target.path.display()
+                    "Preserved rollback target for {} because its filesystem identity changed.",
+                    target.name
                 ));
                 false
             }
-            Ok(_) => {
+            (Some(_), Err(error)) => {
                 errors.push(format!(
-                    "Refusing to remove unexpected non-directory at {}",
-                    target.path.display()
+                    "Preserved rollback target for {} because its identity could not be verified: {error}",
+                    target.name
                 ));
                 false
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
-            Err(error) => {
+            (None, _) => {
                 errors.push(format!(
-                    "Unable to inspect {}: {error}",
-                    target.path.display()
+                    "Preserved rollback target for {} because no filesystem identity was recorded.",
+                    target.name
                 ));
                 false
             }
         };
-        if exists {
-            match skill_directory_snapshot_hash(&target.path) {
-                Ok(snapshot) if snapshot == target.expected_snapshot_hash => {
-                    if let Err(error) = fs::remove_dir_all(&target.path) {
+
+        if let Some(remote_root) = &target.remote_root {
+            if target_removed && current_removed {
+                let versions = remote_root.join("versions");
+                let versions_owned = matches!(
+                    (target.expected_versions_identity, collection_fs_identity(&versions)),
+                    (Some(expected), Ok(actual)) if expected == actual
+                );
+                let root_owned = matches!(
+                    (
+                        target.expected_remote_root_identity,
+                        collection_fs_identity(remote_root)
+                    ),
+                    (Some(expected), Ok(actual)) if expected == actual
+                );
+                if !versions_owned || !root_owned {
+                    errors.push(format!(
+                        "Preserved rollback root for {} because its filesystem identity changed.",
+                        target.name
+                    ));
+                    continue;
+                }
+                if let Err(error) = fs::remove_dir(&versions) {
+                    errors.push(format!(
+                        "Unable to clean rollback versions for {}: {error}",
+                        target.name
+                    ));
+                    continue;
+                }
+                let root_still_owned = matches!(
+                    (
+                        target.expected_remote_root_identity,
+                        collection_fs_identity(remote_root)
+                    ),
+                    (Some(expected), Ok(actual)) if expected == actual
+                );
+                if root_still_owned {
+                    if let Err(error) = fs::remove_dir(remote_root) {
                         errors.push(format!(
-                            "Unable to remove {}: {error}",
-                            target.path.display()
-                        ));
-                    } else if let Err(error) =
-                        remove_skill_index(&paths.database_path, &target.name)
-                    {
-                        errors.push(format!(
-                            "Unable to restore index for {}: {error}",
+                            "Unable to clean rollback root for {}: {error}",
                             target.name
                         ));
                     }
+                } else {
+                    errors.push(format!(
+                        "Preserved rollback root for {} because its filesystem identity changed.",
+                        target.name
+                    ));
                 }
-                Ok(_) => errors.push(format!(
-                    "Preserved {} because its contents changed during collection import.",
-                    target.path.display()
-                )),
-                Err(error) => errors.push(format!(
-                    "Preserved {} because its contents could not be verified: {error}",
-                    target.path.display()
-                )),
+            } else {
+                errors.push(format!(
+                    "Preserved rollback root for {} because an owned entry was not safely removed.",
+                    target.name
+                ));
             }
-        }
-        if let Some(remote_root) = &target.remote_root {
-            let current = remote_root.join("current");
-            match fs::symlink_metadata(&current) {
-                Ok(metadata) if metadata.file_type().is_symlink() => {
-                    let points_to_target = fs::canonicalize(&current)
-                        .ok()
-                        .zip(fs::canonicalize(&target.path).ok())
-                        .is_some_and(|(current, target)| current == target);
-                    if points_to_target {
-                        if let Err(error) = fs::remove_file(&current) {
-                            errors.push(format!("Unable to remove {}: {error}", current.display()));
-                        }
-                    }
-                }
-                Ok(_) => errors.push(format!(
-                    "Preserved unexpected remote current entry at {}",
-                    current.display()
-                )),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => {
-                    errors.push(format!("Unable to inspect {}: {error}", current.display()))
-                }
-            }
-            let _ = fs::remove_dir(remote_root.join("versions"));
-            let _ = fs::remove_dir(remote_root);
         }
     }
     if errors.is_empty() {
@@ -646,14 +968,7 @@ fn rollback_collection_imports(
     }
 }
 
-fn collection_apply_error(primary: String, rollback: Result<()>) -> String {
-    match rollback {
-        Ok(()) => primary,
-        Err(error) => format!("{primary} Collection rollback was incomplete: {error}"),
-    }
-}
-
-fn import_candidates_with_paths(
+pub(crate) fn import_candidates_with_paths(
     paths: &ManagedPaths,
     items: Vec<ImportRequestItem>,
 ) -> Result<ImportBatchResult> {
@@ -662,7 +977,7 @@ fn import_candidates_with_paths(
     let mut errors = Vec::new();
     for item in items {
         let source_path = item.source_path.clone();
-        match import_one_candidate(paths, item) {
+        match import_one_candidate_unlogged(paths, item) {
             Ok(candidate) => imported.push(candidate),
             Err(error) => errors.push(ImportCandidateError { source_path, error }),
         }
@@ -670,7 +985,151 @@ fn import_candidates_with_paths(
     Ok(ImportBatchResult { imported, errors })
 }
 
-fn persist_collection(
+pub(crate) fn apply_collection_import_with_audit(
+    paths: &ManagedPaths,
+    collection: &ImportCandidateCollection,
+    selected_children: &[ImportCandidateCollectionChild],
+    items: Vec<ImportRequestItem>,
+    actor: &str,
+) -> Result<ImportCollectionApplyResult> {
+    let selected_names = selected_children
+        .iter()
+        .map(|child| child.name.clone())
+        .collect::<Vec<_>>();
+    let operation = start_operation(
+        OperationStart {
+            operation_type: "import_collection".to_string(),
+            actor: actor.to_string(),
+            entity_type: "skill_collection".to_string(),
+            entity_name: collection.display_name.clone(),
+            summary: format!("Import selected skills from {}", collection.display_name),
+            payload: serde_json::json!({
+                "collectionId": collection.id,
+                "sourceKind": collection.source_kind,
+                "sourceUrl": collection.source_url,
+                "reviewedHeadSha": collection.reviewed_head_sha,
+                "selectedSkillNames": selected_names,
+                "phase": "validated"
+            }),
+        },
+        &paths.root,
+    )?;
+
+    let fail = |primary: String,
+                phase: &str,
+                _imported: &[ImportedCandidate],
+                receipt_targets: &[CollectionImportTarget],
+                receipt_errors: &[String]|
+     -> Result<ImportCollectionApplyResult> {
+        let rollback = rollback_collection_imports(paths, receipt_targets);
+        let rollback_error = match rollback {
+            Ok(()) if receipt_errors.is_empty() => None,
+            Ok(()) => Some(receipt_errors.join(" ")),
+            Err(error) if receipt_errors.is_empty() => Some(error),
+            Err(error) => Some(format!("{} {error}", receipt_errors.join(" "))),
+        };
+        let rollback_outcome = if rollback_error.is_some() {
+            "partial"
+        } else {
+            "succeeded"
+        };
+        let mut error_message = primary.clone();
+        if let Some(error) = rollback_error.as_deref() {
+            error_message.push_str(&format!(" Collection rollback was incomplete: {error}"));
+        }
+        let payload = serde_json::json!({
+            "collectionId": collection.id,
+            "reviewedHeadSha": collection.reviewed_head_sha,
+            "selectedSkillNames": selected_names,
+            "phase": phase,
+            "rollback": rollback_outcome,
+            "rollbackError": rollback_error,
+            "partialRecovery": rollback_outcome == "partial"
+        });
+        match finish_operation(
+            OperationFinish {
+                id: operation.id.clone(),
+                status: OperationStatus::Failed,
+                summary: format!("Collection import failed for {}", collection.display_name),
+                error: Some(error_message.clone()),
+                payload,
+            },
+            &paths.root,
+        ) {
+            Ok(_) => Err(error_message),
+            Err(log_error) => Err(format!(
+                "{error_message} (operation log failed: {log_error})"
+            )),
+        }
+    };
+
+    let batch = match import_candidates_with_paths(paths, items) {
+        Ok(batch) => batch,
+        Err(error) => return fail(error, "import_validation", &[], &[], &[]),
+    };
+    // Capture ownership receipts immediately after successful imports and
+    // before any later-child failure or test/concurrency seam can replace them.
+    let (receipt_targets, receipt_errors) =
+        collection_import_targets_from_imported(&batch.imported);
+    #[cfg(test)]
+    run_collection_import_test_hook(&batch.imported);
+    if !batch.errors.is_empty() {
+        return fail(
+            format!(
+                "Collection import did not complete: {} skill(s) failed.",
+                batch.errors.len()
+            ),
+            "import",
+            &batch.imported,
+            &receipt_targets,
+            &receipt_errors,
+        );
+    }
+    let collection_record = match persist_collection(
+        &paths.database_path,
+        collection,
+        selected_children,
+        &batch.imported,
+    ) {
+        Ok(record) => record,
+        Err(error) => {
+            return fail(
+                format!("Collection metadata could not be saved: {error}"),
+                "persist",
+                &batch.imported,
+                &receipt_targets,
+                &receipt_errors,
+            )
+        }
+    };
+    let mut warnings = Vec::new();
+    if let Err(error) = finish_operation(
+        OperationFinish {
+            id: operation.id,
+            status: OperationStatus::Succeeded,
+            summary: format!("Imported selected skills from {}", collection.display_name),
+            error: None,
+            payload: serde_json::json!({
+                "collectionId": collection.id,
+                "reviewedHeadSha": collection.reviewed_head_sha,
+                "selectedSkillNames": selected_names,
+                "importedSkillNames": batch.imported.iter().map(|item| item.name.clone()).collect::<Vec<_>>(),
+                "phase": "completed"
+            }),
+        },
+        &paths.root,
+    ) {
+        warnings.push(format!("Collection import completed, but its operation history could not be finalized: {error}"));
+    }
+    Ok(ImportCollectionApplyResult {
+        collection: collection_record,
+        imported: batch.imported,
+        errors: batch.errors,
+        warnings,
+    })
+}
+
+pub(crate) fn persist_collection(
     database_path: &Path,
     preview: &ImportCandidateCollection,
     children: &[ImportCandidateCollectionChild],
@@ -680,12 +1139,29 @@ fn persist_collection(
     let transaction = connection
         .transaction()
         .map_err(|error| error.to_string())?;
+    let existing_reviewed_sha: Option<Option<String>> = transaction
+        .query_row(
+            "SELECT reviewed_head_sha FROM skill_collections WHERE id = ?1",
+            rusqlite::params![preview.id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    if let Some(existing_reviewed_sha) = existing_reviewed_sha {
+        if existing_reviewed_sha.as_ref() != preview.reviewed_head_sha.as_ref() {
+            return Err(
+                "Collection already has a different reviewed SHA; collection updates are not available until Phase D."
+                    .to_string(),
+            );
+        }
+    }
     transaction
         .execute(
             "INSERT INTO skill_collections (
                 id, display_name, canonical_worktree_root, canonical_repository_id,
-                origin_url, branch, detached, reviewed_head_sha, available, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9)
+                origin_url, branch, detached, reviewed_head_sha, source_kind, source_url,
+                requested_reference, available, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 1, ?12)
              ON CONFLICT(id) DO UPDATE SET
                 display_name = excluded.display_name,
                 canonical_worktree_root = excluded.canonical_worktree_root,
@@ -694,6 +1170,9 @@ fn persist_collection(
                 branch = excluded.branch,
                 detached = excluded.detached,
                 reviewed_head_sha = excluded.reviewed_head_sha,
+                source_kind = excluded.source_kind,
+                source_url = excluded.source_url,
+                requested_reference = excluded.requested_reference,
                 available = 1,
                 updated_at = excluded.updated_at",
             rusqlite::params![
@@ -705,14 +1184,11 @@ fn persist_collection(
                 preview.branch,
                 i64::from(preview.detached),
                 preview.reviewed_head_sha,
+                collection_source_kind_string(preview.source_kind),
+                preview.source_url,
+                preview.requested_reference,
                 current_rfc3339_timestamp(),
             ],
-        )
-        .map_err(|error| error.to_string())?;
-    transaction
-        .execute(
-            "DELETE FROM skill_collection_members WHERE collection_id = ?1",
-            rusqlite::params![preview.id],
         )
         .map_err(|error| error.to_string())?;
     for (child, imported) in children.iter().zip(imported.iter()) {
@@ -721,7 +1197,13 @@ fn persist_collection(
                 "INSERT INTO skill_collection_members (
                     collection_id, skill_name, relative_path, reviewed_head_sha,
                     snapshot_hash, content_hash, managed_skill_name
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(collection_id, relative_path) DO UPDATE SET
+                    skill_name = excluded.skill_name,
+                    reviewed_head_sha = excluded.reviewed_head_sha,
+                    snapshot_hash = excluded.snapshot_hash,
+                    content_hash = excluded.content_hash,
+                    managed_skill_name = excluded.managed_skill_name",
                 rusqlite::params![
                     preview.id,
                     child.name,
@@ -734,6 +1216,29 @@ fn persist_collection(
             )
             .map_err(|error| error.to_string())?;
     }
+    let members = transaction
+        .prepare(
+            "SELECT collection_id, skill_name, relative_path, reviewed_head_sha,
+                    snapshot_hash, content_hash, managed_skill_name
+               FROM skill_collection_members
+              WHERE collection_id = ?1
+              ORDER BY relative_path",
+        )
+        .map_err(|error| error.to_string())?
+        .query_map(rusqlite::params![preview.id], |row| {
+            Ok(SkillCollectionMember {
+                collection_id: row.get(0)?,
+                skill_name: row.get(1)?,
+                relative_path: row.get(2)?,
+                reviewed_head_sha: row.get(3)?,
+                snapshot_hash: row.get(4)?,
+                content_hash: row.get(5)?,
+                managed_skill_name: row.get(6)?,
+            })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
     transaction.commit().map_err(|error| error.to_string())?;
     Ok(SkillCollection {
         id: preview.id.clone(),
@@ -744,20 +1249,11 @@ fn persist_collection(
         branch: preview.branch.clone(),
         detached: preview.detached,
         reviewed_head_sha: preview.reviewed_head_sha.clone(),
+        source_kind: preview.source_kind,
+        source_url: preview.source_url.clone(),
+        requested_reference: preview.requested_reference.clone(),
         available: true,
-        members: children
-            .iter()
-            .zip(imported)
-            .map(|(child, imported)| SkillCollectionMember {
-                collection_id: preview.id.clone(),
-                skill_name: child.name.clone(),
-                relative_path: child.relative_path.clone(),
-                reviewed_head_sha: preview.reviewed_head_sha.clone(),
-                snapshot_hash: child.snapshot_hash.clone(),
-                content_hash: child.content_hash.clone(),
-                managed_skill_name: imported.name.clone(),
-            })
-            .collect(),
+        members,
     })
 }
 

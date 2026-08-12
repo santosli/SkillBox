@@ -2,7 +2,7 @@ use crate::*;
 use fs2::FileExt;
 use std::fs::{File, OpenOptions};
 
-pub(crate) const LATEST_DATABASE_SCHEMA_VERSION: i64 = 8;
+pub(crate) const LATEST_DATABASE_SCHEMA_VERSION: i64 = 9;
 
 pub(crate) fn open_database(database_path: &Path) -> Result<Connection> {
     let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
@@ -96,6 +96,7 @@ pub(crate) fn run_database_migrations(connection: &mut Connection) -> Result<()>
         (6_i64, "runtime_profiles"),
         (7_i64, "usage_evidence_classification"),
         (8_i64, "skill_collections"),
+        (9_i64, "github_skill_collections"),
     ] {
         let applied: bool = connection
             .query_row(
@@ -120,6 +121,7 @@ pub(crate) fn run_database_migrations(connection: &mut Connection) -> Result<()>
             6 => apply_runtime_profiles_migration(&transaction)?,
             7 => apply_usage_evidence_classification_migration(&transaction)?,
             8 => apply_skill_collections_migration(&transaction)?,
+            9 => apply_github_skill_collections_migration(&transaction)?,
             _ => return Err(format!("Unknown database migration version: {version}")),
         }
         transaction
@@ -426,6 +428,22 @@ fn apply_skill_collections_migration(connection: &Connection) -> Result<()> {
             ",
         )
         .map_err(|error| error.to_string())
+}
+
+fn apply_github_skill_collections_migration(connection: &Connection) -> Result<()> {
+    ensure_database_column(
+        connection,
+        "skill_collections",
+        "source_kind",
+        "TEXT NOT NULL DEFAULT 'git_worktree'",
+    )?;
+    ensure_database_column(connection, "skill_collections", "source_url", "TEXT")?;
+    ensure_database_column(
+        connection,
+        "skill_collections",
+        "requested_reference",
+        "TEXT",
+    )
 }
 
 fn usage_evidence_repair_required(connection: &Connection) -> Result<bool> {

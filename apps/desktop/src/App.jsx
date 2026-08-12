@@ -50,6 +50,7 @@ import {
 import {
   normalizeImportCandidateGroups,
   normalizeImportCollections,
+  normalizeGithubSkillCollectionPreviewResult,
   normalizeImportCandidate,
   selectedImportCollectionRequests,
   selectedImportCandidates,
@@ -61,6 +62,7 @@ import {
 import {
   browserImportScanOptions,
   createImportScanRequestController,
+  createRemoteImportRequestController,
   importScanCommandArgs,
   waitForImportScanDelay
 } from './importScanProgress.js';
@@ -474,6 +476,7 @@ export default function App() {
   const historyRequestRef = useRef(0);
   const importScanControllerRef = useRef(null);
   const importScanTimingRef = useRef(null);
+  const remoteImportRequestControllerRef = useRef(null);
   const authoritativeGenerationRef = useRef(0);
   const pageRef = useRef(page);
   const dismissNotice = () => setNotice('');
@@ -1212,6 +1215,7 @@ export default function App() {
   }
 
   function openRemoteImport() {
+    remoteImportRequestControllerRef.current?.invalidate();
     setError('');
     setNotice('');
     setImportReview((current) => ({ ...current, open: false }));
@@ -1224,6 +1228,7 @@ export default function App() {
   }
 
   function closeRemoteImport() {
+    remoteImportRequestControllerRef.current?.invalidate();
     setRemoteImport((current) => ({ ...current, open: false, error: '' }));
   }
 
@@ -1233,6 +1238,7 @@ export default function App() {
 
   async function submitRemoteImport(event) {
     event.preventDefault();
+    const mode = remoteImport.mode;
 
     const value = remoteImport.value.trim();
     if (!value) {
@@ -1240,18 +1246,27 @@ export default function App() {
       return;
     }
 
-    if (remoteImport.mode === 'url' && !isHttpUrl(value)) {
+    if (mode === 'url' && !isHttpUrl(value)) {
       setRemoteImport((current) => ({ ...current, error: 'Enter a full http(s) skill URL.' }));
       return;
     }
 
-    if (remoteImport.mode === 'markdown' && !value.toLowerCase().endsWith('.md')) {
+    if (mode === 'markdown' && !value.toLowerCase().endsWith('.md')) {
       setRemoteImport((current) => ({ ...current, error: 'Enter a local Markdown file path ending in .md.' }));
       return;
     }
 
+    if (!remoteImportRequestControllerRef.current) {
+      remoteImportRequestControllerRef.current = createRemoteImportRequestController();
+    }
+    const requestController = remoteImportRequestControllerRef.current;
+    const requestId = requestController.begin();
+    if (requestId == null) {
+      return;
+    }
+
     if (!window.__TAURI_INTERNALS__) {
-      if (remoteImport.mode === 'url') {
+      if (mode === 'url') {
         const preview = normalizeRemoteInstallPreview({
           preview_id: 'browser-preview',
           skill_name: remoteImportCandidate(remoteImport.mode, value).name || 'remote-skill',
@@ -1297,6 +1312,7 @@ export default function App() {
         setRemoteImport((current) => ({ ...current, open: false, value: '', error: '' }));
         setNotice('Browser preview is using a provided remote source.');
         setStatus('prototype');
+        requestController.finish(requestId);
         return;
       }
       setImportReview({
@@ -1310,6 +1326,7 @@ export default function App() {
       setRemoteImport((current) => ({ ...current, open: false, value: '', error: '' }));
       setNotice('Browser preview is using a provided remote source.');
       setStatus('prototype');
+      requestController.finish(requestId);
       return;
     }
 
@@ -1331,49 +1348,102 @@ export default function App() {
           error: ''
         });
         await waitForNextPaint();
-        const result = await invoke('preview_github_remote_skill_install', {
-          request: {
-            source_url: value,
-            target_root: null
+        if (!requestController.isCurrent(requestId)) {
+          return;
+        }
+        const routedResult = normalizeGithubSkillCollectionPreviewResult(
+          await invoke('preview_github_skill_collection', {
+            request: { source_url: value }
+          })
+        );
+        if (!requestController.isCurrent(requestId)) {
+          return;
+        }
+        if (routedResult.kind === 'single_skill') {
+          const result = await invoke('preview_github_remote_skill_install', {
+            request: {
+              source_url: value,
+              target_root: null
+            }
+          });
+          if (!requestController.isCurrent(requestId)) {
+            return;
           }
-        });
-        const preview = normalizeRemoteInstallPreview(result);
-        setRemoteInstallDialog({
-          open: true,
-          loading: false,
-          applying: false,
-          preview,
-          activePath: preview.activePath,
-          confirmWarnings: false,
-          title: `Install ${preview.skillName}`,
-          subtitle: 'Review the GitHub skill before SkillBox copies it into the managed store.',
-          applyLabel: 'Install from GitHub',
-          applyingLabel: 'Installing...',
-          error: ''
-        });
-        setRemoteImport((current) => ({ ...current, value: '', error: '' }));
-        setStatus('ready');
-        return;
+          const preview = normalizeRemoteInstallPreview(result);
+          setRemoteInstallDialog({
+            open: true,
+            loading: false,
+            applying: false,
+            preview,
+            activePath: preview.activePath,
+            confirmWarnings: false,
+            title: `Install ${preview.skillName}`,
+            subtitle: 'Review the GitHub skill before SkillBox copies it into the managed store.',
+            applyLabel: 'Install from GitHub',
+            applyingLabel: 'Installing...',
+            error: ''
+          });
+          setRemoteImport((current) => ({ ...current, value: '', error: '' }));
+          setStatus('ready');
+          requestController.finish(requestId);
+          return;
+        }
+        if (routedResult.kind === 'explicit_reference_required') {
+          throw new Error(routedResult.message);
+        }
+        {
+          const collectionResult = routedResult.preview;
+          const collections = normalizeImportCollections([collectionResult.collection]);
+          const candidates = normalizeImportCandidateGroups(
+            collectionResult.groups || [],
+            []
+          );
+          setImportReview({
+            open: true,
+            loading: false,
+            candidates,
+            collections,
+            errors: collectionResult.errors || collectionResult.collection?.errors || [],
+            scanError: '',
+            scanProgress: null,
+            diagnostics: collectionResult.diagnostics || null,
+            title: 'GitHub Collection Review',
+            subtitle: 'Review selected skills from one repository snapshot before SkillBox writes managed state.',
+            noticePrefix: '',
+            remoteRequestId: requestId
+          });
+          setRemoteImport((current) => ({ ...current, value: '', error: '' }));
+          setRemoteInstallDialog((current) => ({ ...current, open: false, loading: false }));
+          setStatus('ready');
+          requestController.finish(requestId);
+          return;
+        }
       } else {
         setNotice('Markdown file import is not wired yet.');
       }
     } catch (submitError) {
+      if (!requestController.isCurrent(requestId)) {
+        return;
+      }
       setRemoteImport((current) => ({
         ...current,
-        open: remoteImport.mode !== 'url',
+        open: mode !== 'url',
         error: submitError.message || String(submitError) || 'Unable to prepare this import.'
       }));
       setRemoteInstallDialog((current) => ({ ...current, loading: false, error: submitError.message || String(submitError) }));
       setStatus('ready');
+      requestController.finish(requestId);
       return;
     }
 
     setRemoteImport((current) => ({ ...current, open: false, value: '', error: '' }));
     setStatus('ready');
+    requestController.finish(requestId);
   }
 
   function closeImportReview() {
     importScanControllerRef.current?.invalidate();
+    remoteImportRequestControllerRef.current?.invalidate();
     setImportReview((current) => ({
       ...current,
       open: false,
@@ -1426,6 +1496,12 @@ export default function App() {
   }
 
   async function runCandidateImport(selected, noticePrefix = '', collectionRequests = []) {
+    const remoteRequestId = collectionRequests.length > 0
+      ? importReview.remoteRequestId
+      : null;
+    const isCurrentRemoteRequest = () =>
+      remoteRequestId == null
+      || remoteImportRequestControllerRef.current?.isCurrent(remoteRequestId) === true;
     setStatus('importing');
     setError('');
     setNotice('');
@@ -1448,26 +1524,44 @@ export default function App() {
         : { imported: [], errors: [] };
       const collectionResults = [];
       for (const request of collectionRequests) {
-        collectionResults.push(await invoke('apply_import_collection', {
-          request: {
-            collection_id: request.collectionId,
-            worktree_root: request.worktreeRoot,
-            preview_id: request.previewId,
-            selections: request.selections.map((selection) => ({
-              relative_path: selection.relativePath,
-              group_id: selection.groupId,
-              variant_id: selection.variantId,
-              skill_type: selection.skillType
-            })),
-            actor: 'desktop'
-          }
-        }));
+        const command = request.sourceKind === 'github_remote'
+          ? 'apply_github_skill_collection'
+          : 'apply_import_collection';
+        const requestBody = {
+          collection_id: request.collectionId,
+          preview_id: request.previewId,
+          selections: request.selections.map((selection) => ({
+            relative_path: selection.relativePath,
+            group_id: selection.groupId,
+            variant_id: selection.variantId,
+            skill_type: selection.skillType
+          })),
+          actor: 'desktop'
+        };
+        if (request.sourceKind === 'github_remote') {
+          requestBody.source_url = request.sourceUrl;
+        } else {
+          requestBody.worktree_root = request.worktreeRoot;
+        }
+        collectionResults.push(await invoke(command, { request: requestBody }));
+        if (!isCurrentRemoteRequest()) {
+          return;
+        }
       }
 
+      if (!isCurrentRemoteRequest()) {
+        return;
+      }
       setImportReview({ open: false, candidates: [], collections: [], errors: [], noticePrefix: '' });
       await refresh();
+      if (!isCurrentRemoteRequest()) {
+        return;
+      }
       if (page === 'rankings') {
         await loadUsageRankings(usageRankingFilters);
+        if (!isCurrentRemoteRequest()) {
+          return;
+        }
       }
       const collectionCount = collectionResults.reduce(
         (count, collection) => count + (collection.imported || []).length,
@@ -1479,6 +1573,9 @@ export default function App() {
       ].filter(Boolean).join(' ');
       setNotice(importNotice(noticePrefix, summary || 'Import completed.'));
     } catch (importError) {
+      if (!isCurrentRemoteRequest()) {
+        return;
+      }
       setError(importError.message || 'Unable to import selected skills.');
       setStatus('ready');
     }
@@ -3711,6 +3808,7 @@ export default function App() {
 
   function closeRemoteInstallDialog() {
     if (remoteInstallDialog.applying) return;
+    remoteImportRequestControllerRef.current?.invalidate();
     setRemoteInstallDialog((current) => ({ ...current, open: false, error: '' }));
   }
 

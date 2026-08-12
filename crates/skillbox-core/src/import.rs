@@ -620,7 +620,7 @@ pub(crate) fn import_one_candidate(
     )
 }
 
-fn import_one_candidate_unlogged(
+pub(crate) fn import_one_candidate_unlogged(
     paths: &ManagedPaths,
     item: ImportRequestItem,
 ) -> Result<ImportedCandidate> {

@@ -329,6 +329,18 @@ selected-child import 成功后写入，写入使用 SQLite transaction，重复
 现有 skill/deployment/usage/import rows，也不要求用户 rescan；collection source 不可用
 时保留 provenance，并在读取 collection detail 时派生 `available=false`。
 
+schema v9 为 `skill_collections` 增加 `source_kind`、`source_url` 和
+`requested_reference`。已有本地 worktree rows 回填为 `git_worktree`，其
+canonical root/HEAD/availability 语义不变；GitHub Phase C rows 使用
+`github_remote`，保存无凭据的 canonical repository URL 和用户请求的 ref。
+GitHub collection id 稳定绑定 source kind、canonical source URL 和 explicit requested
+ref；preview id 另外绑定 resolved SHA、完整 tree、child snapshot/status 和 selection。
+裸 repository URL 不自动声明 `main`，必须返回 explicit-ref-required 结果。远程
+collection apply 只在一次 bounded fetch 后写入选中的 child，并在 apply
+前重新验证 source URL、ref、resolved SHA、child relative path、snapshot 和
+managed target；Phase C 按 v0.9.0 实现但尚未完成 release qualification，尚未发布；Phase D 的
+collection-level update/rollback 不属于此迁移。
+
 Import Review 返回的 `ImportCandidateCollection` 还有一个只读的
 `source_kind`：`git_worktree` 表示可绑定 canonical worktree/HEAD 的本地 Git
 来源；`installed_source` 表示由受支持的 v3 installer lockfile 归并的来源
