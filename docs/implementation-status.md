@@ -93,10 +93,10 @@ The next milestones follow [the versioned evolution path](roadmap.md#versioned-e
   Import Review. A collection records canonical worktree/repository identity,
   reviewed HEAD, and child-relative provenance; child skills remain independent
   for selection, import, deployment, Calls, and history.
-- Phase C, one-fetch GitHub multi-skill preview/apply, is implemented in Draft
-  PR #57 for v0.9.0 and awaits merge/release qualification. It is not shipped
-  yet. Phase D, commit-consistent collection update/rollback, remains planned
-  for a later v0.9.x release.
+- Phase C, one-fetch GitHub multi-skill preview/apply, is implemented for
+  v0.9.0 and awaits merge and release qualification. It is not shipped yet.
+  Phase D, commit-consistent collection update/rollback, remains planned for a
+  later v0.9.x release.
 - Collection scans must remain read-only. Apply must revalidate repository
   identity, HEAD/ref, and tree snapshot; execute no hooks, submodules, filters,
   scripts, or arbitrary shell; and preserve existing path, overwrite,

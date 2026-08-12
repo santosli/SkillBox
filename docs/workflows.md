@@ -620,7 +620,7 @@ scripts、custom helpers 或 arbitrary shell。
 
 ### Reviewed Inbound Fast-Forward
 
-v0.7 Draft contract:
+v0.7.0 reviewed inbound fast-forward contract:
 
 - Rust CLI:
   - `skillbox user-skills-inbound-check`
