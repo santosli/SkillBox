@@ -7,6 +7,8 @@ version tags such as `v0.3.0`.
 
 ## Unreleased
 
+- No unreleased changes.
+
 ## 0.8.0
 
 - Group scanned copied skills with validated v3 GitHub installer-lockfile provenance into display-only Installed source collections, while keeping live Git collections authoritative and selected children on the existing per-skill import path.
