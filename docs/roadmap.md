@@ -173,8 +173,8 @@ Delivery is phased across the `v0.8.0` and `v0.9.x` releases:
 2. **Implemented:** Collection/source persistence and child relationships.
 3. **Implemented for `v0.9.0` / awaiting qualification:** GitHub multi-skill
    install preview/apply with one repository fetch. It is not part of the
-   published `v0.8.0` release and remains unreleased until merged and
-   release-qualified.
+   published `v0.8.0` release; it is implemented on main and remains
+   unreleased pending `v0.9.0` release qualification.
 4. Collection-level update/rollback and UI detail.
 
 Phase 4 is not implemented and must not be described as shipped.
