@@ -548,11 +548,27 @@ test('collection review keeps child selection and type controls inside one expan
   const collectionSource = appSource.match(
     /function CollectionReviewCard\(\{(?<body>[\s\S]*?)\n\}\n\nfunction WorkspaceSkillTabs/
   )?.groups.body || '';
+  const collectionCheckboxSource = appSource.match(
+    /function CollectionSelectionCheckbox\(\{(?<body>[\s\S]*?)\n\}\n\nfunction CollectionReviewCard/
+  )?.groups.body || '';
+  const candidateReviewListSource = appSource.match(
+    /function CandidateReviewList\(\{(?<body>[\s\S]*?)\n\}\n\nfunction CollectionSelectionCheckbox/
+  )?.groups.body || '';
   const collectionRule = css.match(/\.collectionReviewCard\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const childRule = css.match(/\.collectionChildRow\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const collectionActionsRule = css.match(/\.collectionReviewActions\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
 
   assert.match(collectionSource, /aria-controls={disclosureId}/);
   assert.match(collectionSource, /collection\.children\.map/);
+  assert.match(collectionSource, /collectionSelectionState\(groups, selectionCollection\)/);
+  assert.match(collectionSource, /<CollectionSelectionCheckbox/);
+  assert.match(collectionSource, /onToggleCollectionSelected\(selectionCollection\)/);
+  assert.match(collectionCheckboxSource, /checkboxRef\.current\.indeterminate = indeterminate/);
+  assert.match(collectionCheckboxSource, /aria-label=\{`Select all eligible skills in \$\{collectionName\}`\}/);
+  assert.match(collectionCheckboxSource, /aria-describedby=\{ariaDescribedBy\}/);
+  assert.match(collectionCheckboxSource, /disabled=\{disabled\}/);
+  assert.match(candidateReviewListSource, /selectionCollection=\{collections\.find/);
+  assert.match(candidateReviewListSource, /onToggleCollectionSelected/);
   assert.match(collectionSource, /onToggleSelected\(group\)/);
   assert.match(collectionSource, /onTypeChange\(group, 'user'\)/);
   assert.match(collectionSource, /onTypeChange\(group, 'remote'\)/);
@@ -562,6 +578,8 @@ test('collection review keeps child selection and type controls inside one expan
   assert.doesNotMatch(collectionSource, /disabled=\{!canClassifyImportCandidateGroup\(group\)\}/);
   assert.match(collectionSource, /relativePath/);
   assert.match(collectionRule, /min-width:\s*0;/);
+  assert.match(collectionActionsRule, /display:\s*flex;/);
+  assert.match(css, /\.candidateCheck input:indeterminate \+ span/);
   assert.match(childRule, /grid-template-columns:\s*28px minmax\(0,\s*1fr\) auto;/);
 });
 

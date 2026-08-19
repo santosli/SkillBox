@@ -6329,6 +6329,19 @@ dd {
   font-weight: 650;
 }
 
+.collectionReviewActions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.collectionReviewSelectAll {
+  flex: 0 0 auto;
+}
+
 .collectionReviewChildren {
   display: grid;
   margin-top: 10px;
@@ -6521,6 +6534,17 @@ dd {
   border-left: 2px solid var(--skillbox-surface);
   content: "";
   transform: rotate(-45deg) translate(1px, -1px);
+}
+
+.candidateCheck input:indeterminate + span {
+  border-color: var(--skillbox-blue);
+  background: var(--skillbox-blue);
+}
+
+.candidateCheck input:indeterminate + span::after {
+  width: 8px;
+  border-top: 2px solid var(--skillbox-surface);
+  content: "";
 }
 
 .candidateCheck input:disabled + span {
@@ -7096,6 +7120,11 @@ dd {
   .collectionReviewHeader {
     flex-direction: column;
     gap: 8px;
+  }
+
+  .collectionReviewActions {
+    width: 100%;
+    justify-content: flex-end;
   }
 
   .collectionChildRow {

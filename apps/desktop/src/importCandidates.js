@@ -335,6 +335,50 @@ export function toggleImportCandidateGroupSelection(groups, targetGroups = group
     : group);
 }
 
+export function collectionEligibleGroupIds(groups = [], collection = {}) {
+  const groupById = new Map(groups.map((group) => [group.id, group]));
+  const eligibleIds = new Set();
+
+  for (const child of collection.children || []) {
+    const group = groupById.get(child.groupId);
+    if (
+      !group
+      || group.selectedVariantId !== child.variantId
+      || child.importStatus !== 'importable'
+      || child.conflict
+      || !isSelectableImportCandidateGroup(group)
+    ) {
+      continue;
+    }
+    eligibleIds.add(group.id);
+  }
+
+  return eligibleIds;
+}
+
+export function collectionSelectionState(groups = [], collection = {}) {
+  const eligibleGroupIds = collectionEligibleGroupIds(groups, collection);
+  const eligibleGroups = groups.filter((group) => eligibleGroupIds.has(group.id));
+  const selectedCount = eligibleGroups.filter((group) => group.isSelected).length;
+  const eligibleCount = eligibleGroups.length;
+
+  return {
+    eligibleGroupIds,
+    eligibleCount,
+    selectedCount,
+    allSelected: eligibleCount > 0 && selectedCount === eligibleCount,
+    indeterminate: selectedCount > 0 && selectedCount < eligibleCount
+  };
+}
+
+export function toggleImportCollectionSelection(groups = [], collection = {}) {
+  const eligibleGroupIds = collectionEligibleGroupIds(groups, collection);
+  return toggleImportCandidateGroupSelection(
+    groups,
+    groups.filter((group) => eligibleGroupIds.has(group.id))
+  );
+}
+
 export function selectedImportCandidates(groups = [], collections = []) {
   const liveCollectionGroupIds = importCollectionGroupIds(collections, { liveOnly: true });
   return groups
