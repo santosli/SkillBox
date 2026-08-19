@@ -11011,6 +11011,92 @@ fn scan_import_candidates_groups_validated_installed_source_lockfile_entries() {
 }
 
 #[test]
+fn scan_import_candidates_groups_installer_plugin_children_without_using_plugin_name_as_identity() {
+    let root = temp_dir("candidate-installed-source-hyperframes-plugin");
+    let agents_root = root.join(".agents/skills");
+    let claude_root = root.join(".claude/skills");
+    let codex_root = root.join(".codex/skills");
+    let cursor_root = root.join(".cursor/skills");
+    let managed_root = root.join("SkillBox");
+    let source_url = "https://github.com/heygen-com/hyperframes.git";
+    let names = [
+        "hyperframes",
+        "hyperframes-animation",
+        "hyperframes-cli",
+        "hyperframes-core",
+    ];
+
+    for name in names {
+        make_skill(
+            &agents_root.join(name),
+            name,
+            "HyperFrames installer-provenance skill",
+        );
+        for runtime_root in [&claude_root, &codex_root, &cursor_root] {
+            fs::create_dir_all(runtime_root).unwrap();
+            symlink_dir(&agents_root.join(name), &runtime_root.join(name)).unwrap();
+        }
+    }
+    let skills = names
+        .iter()
+        .map(|name| {
+            (
+                (*name).to_string(),
+                serde_json::json!({
+                    "sourceType": "github",
+                    "sourceUrl": source_url,
+                    "skillPath": format!("skills/{name}/SKILL.md"),
+                    "pluginName": "core-skills",
+                    "skillFolderHash": "stale-lock-hash"
+                }),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>();
+    fs::create_dir_all(root.join(".agents")).unwrap();
+    fs::write(
+        root.join(".agents/.skill-lock.json"),
+        serde_json::to_vec(&serde_json::json!({ "version": 3, "skills": skills })).unwrap(),
+    )
+    .unwrap();
+
+    let scan = scan_import_candidates(
+        &[agents_root, claude_root, codex_root, cursor_root],
+        &managed_root,
+    )
+    .unwrap();
+
+    let collections = scan
+        .collections
+        .iter()
+        .filter(|collection| {
+            collection.source_kind == ImportCandidateCollectionSourceKind::InstalledSource
+                && collection.origin_url.as_deref()
+                    == Some("https://github.com/heygen-com/hyperframes")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(collections.len(), 1);
+    let collection = collections[0];
+    assert_eq!(collection.children.len(), names.len());
+    assert!(collection
+        .children
+        .iter()
+        .all(|child| { names.contains(&child.name.as_str()) && child.locations.len() == 4 }));
+    assert!(scan
+        .standalone_groups
+        .iter()
+        .all(|group| !names.contains(&group.name.as_str())));
+    assert_eq!(
+        scan.diagnostics.installed_source_lockfile_entries,
+        names.len()
+    );
+    assert_eq!(
+        scan.diagnostics.installed_source_lockfile_matches,
+        names.len()
+    );
+    assert_eq!(scan.diagnostics.installed_source_collections, 1);
+}
+
+#[test]
 fn scan_import_candidates_keeps_single_installed_source_match_standalone() {
     let root = temp_dir("candidate-installed-source-lockfile-singleton");
     let agents_root = root.join(".agents/skills");

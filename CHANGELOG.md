@@ -8,6 +8,8 @@ version tags such as `v0.3.0`.
 ## Unreleased
 
 - Add collection-level Import Review selection that selects or clears every eligible child in one collection without changing blocked, imported, system, conflicted, or unresolved-type children.
+- Recognize copied installer skills as one Installed Source Collection when their
+  valid v3 GitHub provenance uses a shared package-level `pluginName`.
 
 ## 0.9.0
 

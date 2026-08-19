@@ -252,18 +252,12 @@ fn parse_lockfile_entry(name: &str, value: &Value, root: &Path) -> Option<Lockfi
     let source_url = skillbox_github::normalize_github_repo_url(&source_url).ok()?;
     let skill_path = bounded_string(object.get("skillPath")?)?;
     validate_lockfile_skill_path(&skill_path, name)?;
-    let plugin_name = object
-        .get("pluginName")
-        .and_then(|value| value.as_str())
-        .unwrap_or("");
-    if plugin_name.len() > MAX_LOCKFILE_STRING_BYTES {
-        return None;
-    }
-    if !plugin_name.is_empty()
-        && !plugin_name.eq_ignore_ascii_case(name)
-        && !plugin_name.eq_ignore_ascii_case(lockfile_skill_name(&skill_path)?)
-    {
-        return None;
+    if let Some(plugin_name) = object.get("pluginName") {
+        // The installer may use this optional field for a package or collection
+        // identifier (for example, several skills can belong to one plugin).
+        // It is bounded metadata only: the lock entry key and safe skillPath
+        // remain the authority for matching one scanned child skill.
+        bounded_string(plugin_name)?;
     }
     Some(LockfileEntry {
         root: root.to_path_buf(),

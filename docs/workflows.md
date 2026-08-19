@@ -143,6 +143,9 @@ Review/apply：
   与 safe `skillPath`/name 匹配，并且 `sourceType=github`、source URL 可被
   canonicalize 为无凭据 GitHub repository identity 时，才会显示为
   `Installed source collection`。
+- `pluginName` 是 installer 的 optional、有界 package metadata，不参与 child identity：
+  多个 skill 可共享同一个 plugin name。每个 child 仍必须通过 lockfile entry key、safe
+  `skillPath`、candidate name/root/path 和 normalized GitHub source URL 的匹配。
 - 这类 collection 只用于展示来源和聚合 child，不提供 branch、HEAD、fetch、更新或
   `collection-apply`。它不使用 lockfile hash 替代完整 snapshot 校验；用户选中的
   child 仍逐项走现有 per-skill Import Review/apply，`.agents` 与 `.claude` 的等价
