@@ -198,6 +198,7 @@ export function filterImportCollectionsByQuery(collections = [], query = '') {
 
 export function selectedImportCollectionRequests(groups = [], collections = []) {
   return collections.filter((collection) => ['git_worktree', 'github_remote'].includes(collection.sourceKind)).map((collection) => {
+    if (collectionTypeChoiceState(groups, collection).required) return null;
     const selections = collection.children
       .map((child) => {
         const group = groups.find((candidateGroup) => candidateGroup.id === child.groupId);
@@ -330,6 +331,16 @@ export function collectionTypeChoiceState(groups = [], collection = {}) {
   };
 }
 
+export function collectionTypeReviewGroupIds(groups = [], collections = []) {
+  const groupIds = new Set();
+  for (const collection of collections) {
+    const typeState = collectionTypeChoiceState(groups, collection);
+    if (!typeState.required) continue;
+    for (const groupId of typeState.actionableGroupIds) groupIds.add(groupId);
+  }
+  return groupIds;
+}
+
 export function updateImportCollectionType(groups = [], collection = {}, skillType) {
   if (!['user', 'remote'].includes(skillType)) return groups;
   const { actionableGroupIds } = collectionTypeChoiceState(groups, collection);
@@ -406,6 +417,7 @@ export function toggleImportCandidateGroupSelection(groups, targetGroups = group
 }
 
 export function collectionEligibleGroupIds(groups = [], collection = {}) {
+  if (collectionTypeChoiceState(groups, collection).required) return new Set();
   const groupById = new Map(groups.map((group) => [group.id, group]));
   const eligibleIds = new Set();
 
@@ -449,13 +461,30 @@ export function toggleImportCollectionSelection(groups = [], collection = {}) {
   );
 }
 
+export function importReviewSelectableGroups(groups = [], collections = []) {
+  const typeReviewGroupIds = collectionTypeReviewGroupIds(groups, collections);
+  return groups.filter((group) => (
+    isSelectableImportCandidateGroup(group)
+    && !typeReviewGroupIds.has(group.id)
+  ));
+}
+
+export function toggleImportReviewSelection(groups = [], collections = []) {
+  return toggleImportCandidateGroupSelection(
+    groups,
+    importReviewSelectableGroups(groups, collections)
+  );
+}
+
 export function selectedImportCandidates(groups = [], collections = []) {
   const liveCollectionGroupIds = importCollectionGroupIds(collections, { liveOnly: true });
+  const typeReviewGroupIds = collectionTypeReviewGroupIds(groups, collections);
   return groups
     .filter((group) => (
       group.isSelected
       && isSelectableImportCandidateGroup(group)
       && !liveCollectionGroupIds.has(group.id)
+      && !typeReviewGroupIds.has(group.id)
     ))
     .map(selectedImportCandidate);
 }

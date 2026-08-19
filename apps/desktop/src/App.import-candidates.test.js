@@ -12,6 +12,7 @@ import {
   collectionTypeChoiceState,
   importCandidateGroupLocationCount,
   importCandidateGroupTabs,
+  importReviewSelectableGroups,
   normalizeGithubSkillCollectionPreviewResult,
   normalizeImportCollections,
   normalizeImportCandidateGroup,
@@ -23,6 +24,7 @@ import {
   toggleImportCandidateGroup,
   toggleImportCandidateGroupSelection,
   toggleImportCollectionSelection,
+  toggleImportReviewSelection,
   updateImportCandidateGroupType,
   updateImportCollectionType,
   visibleImportCandidates,
@@ -471,7 +473,7 @@ test('toggles every eligible child in one complete collection without changing b
       variants: [{
         id: 'variant-beta',
         candidate: { name: 'beta', import_status: 'importable', is_selected: true },
-        selected_type: 'remote'
+        selected_type: 'user'
       }]
     },
     {
@@ -522,7 +524,6 @@ test('toggles every eligible child in one complete collection without changing b
     children: [
       { group_id: 'skill-alpha', variant_id: 'variant-alpha', import_status: 'importable' },
       { group_id: 'skill-beta', variant_id: 'variant-beta', import_status: 'importable' },
-      { group_id: 'skill-needs-type', variant_id: 'variant-needs-type', import_status: 'importable', requires_type_review: true },
       { group_id: 'skill-conflict', variant_id: 'variant-conflict', import_status: 'importable', conflict: 'managed target' },
       { group_id: 'skill-imported', variant_id: 'variant-imported', import_status: 'imported' }
     ]
@@ -561,7 +562,7 @@ test('collection selection uses the complete collection rather than a filtered c
     {
       id: 'skill-hidden-by-filter',
       selected_variant_id: 'variant-hidden',
-      variants: [{ id: 'variant-hidden', candidate: { name: 'hidden', import_status: 'importable', is_selected: false }, selected_type: 'remote' }]
+      variants: [{ id: 'variant-hidden', candidate: { name: 'hidden', import_status: 'importable', is_selected: false }, selected_type: 'user' }]
     },
     {
       id: 'skill-standalone',
@@ -678,14 +679,37 @@ test('collection type choice resolves and selects every actionable child without
     selectedType: null,
     required: true
   });
-  const mixedExplicitGroups = updateImportCandidateGroupType(groups, 'skill-unresolved', 'user');
+  const mixedExplicitGroups = toggleImportCandidateGroup(
+    updateImportCandidateGroupType(groups, 'skill-unresolved', 'user'),
+    'skill-explicit'
+  );
   assert.deepEqual(collectionTypeChoiceState(mixedExplicitGroups, collection), {
     actionableGroupIds: new Set(['skill-unresolved', 'skill-explicit']),
     actionableCount: 2,
     selectedType: null,
     required: true
   });
-  assert.equal(collectionSelectionState(groups, collection).eligibleCount, 1);
+  assert.deepEqual(collectionSelectionState(mixedExplicitGroups, collection), {
+    eligibleGroupIds: new Set(),
+    eligibleCount: 0,
+    selectedCount: 0,
+    allSelected: false,
+    indeterminate: false
+  });
+  assert.deepEqual(selectedImportCollectionRequests(mixedExplicitGroups, [collection]), []);
+  assert.deepEqual(
+    importReviewSelectableGroups(mixedExplicitGroups, [collection]).map((group) => group.id),
+    ['skill-other-collection', 'skill-standalone']
+  );
+  const toggledReview = toggleImportReviewSelection(mixedExplicitGroups, [collection]);
+  assert.equal(toggledReview[0].isSelected, true);
+  assert.equal(toggledReview[1].isSelected, true);
+  assert.equal(toggledReview[5].isSelected, true);
+  assert.equal(toggledReview[6].isSelected, true);
+  assert.deepEqual(selectedImportCandidates(mixedExplicitGroups, [{
+    ...collection,
+    sourceKind: 'installed_source'
+  }]), []);
 
   const asUser = updateImportCollectionType(groups, collection, 'user');
   assert.deepEqual(asUser.slice(0, 2).map((group) => ({

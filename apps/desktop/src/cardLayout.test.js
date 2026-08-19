@@ -582,6 +582,10 @@ test('collection review keeps child selection and collection type controls insid
   assert.match(collectionSource, /onCollectionTypeChange\(selectionCollection, 'remote'\)/);
   assert.match(collectionSource, /typeState\.actionableCount > 0/);
   assert.doesNotMatch(collectionSource, /No pending skills/);
+  assert.match(collectionSource, /const selected = !typeState\.required/);
+  assert.match(collectionSource, /disabled=\{!canSelect \|\| typeState\.required \|\| selectionDisabled\}/);
+  assert.match(appSource, /const selectableCount = importReviewSelectableGroups\(groups, collections\)\.length/);
+  assert.match(appSource, /selectedImportCollectionRequests\(groups, collections\)/);
   assert.match(collectionCheckboxSource, /checkboxRef\.current\.indeterminate = indeterminate/);
   assert.match(collectionCheckboxSource, /aria-label=\{`Select all eligible skills in \$\{collectionName\}`\}/);
   assert.match(collectionCheckboxSource, /aria-describedby=\{ariaDescribedBy\}/);
@@ -590,6 +594,7 @@ test('collection review keeps child selection and collection type controls insid
   assert.match(candidateReviewListSource, /onToggleCollectionSelected/);
   assert.match(candidateReviewListSource, /onCollectionTypeChange/);
   assert.match(appSource, /updateImportCollectionType\(current\.candidates, collection, skillType\)/);
+  assert.match(appComponentSource, /toggleImportReviewSelection\(current\.candidates, current\.collections\)/);
   assert.match(collectionSource, /onToggleSelected\(group\)/);
   assert.match(collectionSource, /collectionChildTypeState\(group, child\)/);
   assert.match(collectionSource, /collection\.sourceKind === 'installed_source'/);

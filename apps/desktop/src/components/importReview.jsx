@@ -15,9 +15,12 @@ import {
   importCandidateGroupLocationCount,
   importCandidateGroupStatus,
   importCandidateGroupTabs,
+  importReviewSelectableGroups,
   isSelectableImportCandidateGroup,
   selectedImportCandidate,
-  selectedImportCandidateVariant
+  selectedImportCandidateVariant,
+  selectedImportCandidates,
+  selectedImportCollectionRequests
 } from '../importCandidates.js';
 import {
   candidateImportSourcePaths,
@@ -221,10 +224,10 @@ export function ImportReview({
   subtitle = 'Confirm each skill type before SkillBox copies it into the managed store.',
   title = 'Import Review'
 }) {
-  const selectableCount = groups.filter(isSelectableImportCandidateGroup).length;
-  const selectedCount = groups.filter(
-    (group) => group.isSelected && isSelectableImportCandidateGroup(group)
-  ).length;
+  const selectableCount = importReviewSelectableGroups(groups, collections).length;
+  const selectedCount = selectedImportCandidates(groups, collections).length
+    + selectedImportCollectionRequests(groups, collections)
+      .reduce((count, request) => count + request.selections.length, 0);
   const isAllSelected = selectableCount > 0 && selectedCount === selectableCount;
 
   return (
@@ -566,7 +569,9 @@ function CollectionReviewCard({
             const group = groups.find((candidateGroup) => candidateGroup.id === child.groupId);
             if (!group) return null;
             const variant = group.variants.find((candidateVariant) => candidateVariant.id === child.variantId);
-            const selected = group.isSelected && group.selectedVariantId === child.variantId;
+            const selected = !typeState.required
+              && group.isSelected
+              && group.selectedVariantId === child.variantId;
             const {
               canSelect,
               readOnlyLabel
@@ -576,7 +581,7 @@ function CollectionReviewCard({
                 <label className="candidateCheck">
                   <input
                     checked={selected}
-                    disabled={!canSelect}
+                    disabled={!canSelect || typeState.required || selectionDisabled}
                     type="checkbox"
                     aria-label={`Select ${child.name} from ${collection.displayName}`}
                     onChange={() => onToggleSelected(group)}

@@ -57,7 +57,7 @@ import {
   selectImportCandidateVariant,
   toggleImportCollectionSelection,
   toggleImportCandidateGroup,
-  toggleImportCandidateGroupSelection,
+  toggleImportReviewSelection,
   updateImportCandidateGroupType,
   updateImportCollectionType
 } from './importCandidates.js';
@@ -1466,7 +1466,7 @@ export default function App() {
   function toggleAllImportCandidates() {
     setImportReview((current) => ({
       ...current,
-      candidates: toggleImportCandidateGroupSelection(current.candidates)
+      candidates: toggleImportReviewSelection(current.candidates, current.collections)
     }));
   }
 

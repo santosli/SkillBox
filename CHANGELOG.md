@@ -7,7 +7,7 @@ version tags such as `v0.3.0`.
 
 ## Unreleased
 
-- Move User/Remote classification for collection imports into one collection-header control that applies to all actionable pending children while preserving per-child selection and import requests.
+- Move User/Remote classification for collection imports into one collection-header control that applies to all actionable pending children, blocks mixed-type collection requests until explicitly resolved, and preserves per-child selection and import requests.
 - Add collection-level Import Review selection that selects or clears every eligible child in one collection without changing blocked, imported, system, conflicted, or unresolved-type children.
 - Recognize copied installer skills as one Installed Source Collection when their
   valid v3 GitHub provenance uses a shared package-level `pluginName`.
