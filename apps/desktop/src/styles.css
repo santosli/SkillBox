@@ -6332,10 +6332,67 @@ dd {
 .collectionReviewActions {
   display: flex;
   flex: 0 0 auto;
-  align-items: center;
+  align-items: flex-start;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 12px;
   min-width: 0;
+}
+
+.collectionReviewTypeAction {
+  display: grid;
+  width: 248px;
+  box-sizing: border-box;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.collectionReviewTypeAction.required {
+  border-color: var(--skillbox-amber-border);
+  background: var(--skillbox-surface-orange);
+}
+
+.collectionReviewTypeHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--skillbox-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.collectionReviewTypeHeader strong,
+.collectionReviewTypeAction p {
+  color: var(--skillbox-orange-text);
+}
+
+.collectionReviewTypeHeader strong {
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.collectionReviewTypeAction p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.collectionReviewTypeAction .candidateTypeSwitch {
+  width: 100%;
+}
+
+.collectionReviewTypeAction .candidateTypeSwitch button {
+  min-width: 0;
+  flex: 1 1 0;
+}
+
+.collectionReviewSelectionAction {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 8px;
 }
 
 .collectionReviewSelectAll {
@@ -6453,22 +6510,6 @@ dd {
   color: var(--skillbox-text-muted);
   font-size: 11px;
   font-weight: 650;
-}
-
-.collectionChildType .candidateTypeSwitch {
-  width: 156px;
-}
-
-.collectionChildType .candidateTypeSwitch button {
-  min-width: 0;
-  flex: 1 1 0;
-}
-
-.collectionChildType.required {
-  border: 1px solid var(--skillbox-amber-border);
-  border-radius: 8px;
-  background: var(--skillbox-surface-orange);
-  padding: 6px;
 }
 
 .collectionChildTypeReadOnly {
@@ -7025,6 +7066,18 @@ dd {
 }
 
 @media (max-width: 1100px) {
+  .collectionReviewHeader {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .collectionReviewActions {
+    width: 100%;
+    align-items: flex-end;
+    justify-content: space-between;
+  }
+
   .usageRankingControls {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -7123,7 +7176,16 @@ dd {
   }
 
   .collectionReviewActions {
+    align-items: stretch;
+    flex-direction: column;
+    justify-content: flex-end;
+  }
+
+  .collectionReviewTypeAction {
     width: 100%;
+  }
+
+  .collectionReviewSelectionAction {
     justify-content: flex-end;
   }
 
@@ -7141,10 +7203,6 @@ dd {
   .collectionChildTypeReadOnly {
     max-width: none;
     text-align: left;
-  }
-
-  .collectionChildType .candidateTypeSwitch {
-    width: min(100%, 240px);
   }
 
   .importScanError {

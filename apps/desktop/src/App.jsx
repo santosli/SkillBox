@@ -57,8 +57,9 @@ import {
   selectImportCandidateVariant,
   toggleImportCollectionSelection,
   toggleImportCandidateGroup,
-  toggleImportCandidateGroupSelection,
-  updateImportCandidateGroupType
+  toggleImportReviewSelection,
+  updateImportCandidateGroupType,
+  updateImportCollectionType
 } from './importCandidates.js';
 import {
   browserImportScanOptions,
@@ -1465,7 +1466,7 @@ export default function App() {
   function toggleAllImportCandidates() {
     setImportReview((current) => ({
       ...current,
-      candidates: toggleImportCandidateGroupSelection(current.candidates)
+      candidates: toggleImportReviewSelection(current.candidates, current.collections)
     }));
   }
 
@@ -4535,6 +4536,12 @@ export default function App() {
             setImportReview((current) => ({
               ...current,
               candidates: toggleImportCollectionSelection(current.candidates, collection)
+            }))
+          }
+          onCollectionTypeChange={(collection, skillType) =>
+            setImportReview((current) => ({
+              ...current,
+              candidates: updateImportCollectionType(current.candidates, collection, skillType)
             }))
           }
           onToggleSelected={(group) =>

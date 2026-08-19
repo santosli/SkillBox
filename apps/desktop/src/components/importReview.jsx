@@ -7,6 +7,7 @@ import {
   collectionChildTypeState,
   collectionSelectionState,
   collectionSkillCountLabel,
+  collectionTypeChoiceState,
   filterImportCandidateGroups,
   filterImportCandidateGroupsByQuery,
   filterImportCollectionsByQuery,
@@ -14,9 +15,12 @@ import {
   importCandidateGroupLocationCount,
   importCandidateGroupStatus,
   importCandidateGroupTabs,
+  importReviewSelectableGroups,
   isSelectableImportCandidateGroup,
   selectedImportCandidate,
-  selectedImportCandidateVariant
+  selectedImportCandidateVariant,
+  selectedImportCandidates,
+  selectedImportCollectionRequests
 } from '../importCandidates.js';
 import {
   candidateImportSourcePaths,
@@ -209,6 +213,7 @@ export function ImportReview({
   scanProgress = null,
   onClose,
   onImport,
+  onCollectionTypeChange,
   onRetry,
   onToggleAll,
   onToggleCollectionSelected,
@@ -219,10 +224,10 @@ export function ImportReview({
   subtitle = 'Confirm each skill type before SkillBox copies it into the managed store.',
   title = 'Import Review'
 }) {
-  const selectableCount = groups.filter(isSelectableImportCandidateGroup).length;
-  const selectedCount = groups.filter(
-    (group) => group.isSelected && isSelectableImportCandidateGroup(group)
-  ).length;
+  const selectableCount = importReviewSelectableGroups(groups, collections).length;
+  const selectedCount = selectedImportCandidates(groups, collections).length
+    + selectedImportCollectionRequests(groups, collections)
+      .reduce((count, request) => count + request.selections.length, 0);
   const isAllSelected = selectableCount > 0 && selectedCount === selectableCount;
 
   return (
@@ -267,6 +272,7 @@ export function ImportReview({
             <CandidateReviewList
               collections={collections}
               groups={groups}
+              onCollectionTypeChange={onCollectionTypeChange}
               onSelectVariant={onSelectVariant}
               onToggleCollectionSelected={onToggleCollectionSelected}
               onToggleSelected={onToggleSelected}
@@ -323,6 +329,7 @@ function ImportScanProgress({ progress }) {
 function CandidateReviewList({
   collections,
   groups,
+  onCollectionTypeChange,
   onSelectVariant,
   onToggleCollectionSelected,
   onToggleSelected,
@@ -377,10 +384,10 @@ function CandidateReviewList({
           collection={collection}
           groups={groups}
           key={collection.id}
+          onCollectionTypeChange={onCollectionTypeChange}
           onSelectVariant={onSelectVariant}
           onToggleCollectionSelected={onToggleCollectionSelected}
           onToggleSelected={onToggleSelected}
-          onTypeChange={onTypeChange}
           selectionCollection={collections.find((candidate) => candidate.id === collection.id) || collection}
           selectionDisabled={selectionDisabled}
         />
@@ -440,10 +447,10 @@ function CollectionSelectionCheckbox({
 function CollectionReviewCard({
   collection,
   groups,
+  onCollectionTypeChange,
   onSelectVariant,
   onToggleCollectionSelected,
   onToggleSelected,
-  onTypeChange,
   selectionCollection,
   selectionDisabled
 }) {
@@ -452,7 +459,10 @@ function CollectionReviewCard({
   const isGithubRemote = collection.sourceKind === 'github_remote';
   const disclosureId = `${collection.id}-children`;
   const selectionSummaryId = `${collection.id}-selection-summary`;
+  const typeLabelId = `${collection.id}-type-label`;
+  const typeHelpId = `${collection.id}-type-help`;
   const selectionState = collectionSelectionState(groups, selectionCollection);
+  const typeState = collectionTypeChoiceState(groups, selectionCollection);
   const shortSha = collection.reviewedHeadSha ? collection.reviewedHeadSha.slice(0, 8) : 'uncommitted';
 
   return (
@@ -486,19 +496,60 @@ function CollectionReviewCard({
           )}
         </div>
         <div className="collectionReviewActions">
-          <CollectionSelectionCheckbox
-            allSelected={selectionState.allSelected}
-            ariaDescribedBy={selectionSummaryId}
-            collectionName={collection.displayName}
-            disabled={selectionDisabled || selectionState.eligibleCount === 0}
-            indeterminate={selectionState.indeterminate}
-            onChange={() => onToggleCollectionSelected(selectionCollection)}
-          />
-          <span className="collectionReviewSelection" id={selectionSummaryId}>
-            {selectionState.eligibleCount === 0
-              ? 'No eligible skills'
-              : `${selectionState.selectedCount} of ${selectionState.eligibleCount} eligible selected`}
-          </span>
+          {typeState.actionableCount > 0 ? (
+            <div className={`collectionReviewTypeAction ${typeState.required ? 'required' : ''}`}>
+              <div className="collectionReviewTypeHeader">
+                <span id={typeLabelId}>Import as</span>
+                {typeState.required ? <strong>Required</strong> : null}
+              </div>
+              {typeState.required ? (
+                <p id={typeHelpId}>Choose one type for every pending skill in this collection.</p>
+              ) : null}
+              <div
+                aria-describedby={typeState.required ? typeHelpId : undefined}
+                aria-labelledby={typeLabelId}
+                aria-required={typeState.required}
+                className="candidateTypeSwitch"
+                role="radiogroup"
+              >
+                <button
+                  aria-checked={typeState.selectedType === 'user'}
+                  className={typeState.selectedType === 'user' ? 'active' : ''}
+                  disabled={selectionDisabled}
+                  role="radio"
+                  type="button"
+                  onClick={() => onCollectionTypeChange(selectionCollection, 'user')}
+                >
+                  User
+                </button>
+                <button
+                  aria-checked={typeState.selectedType === 'remote'}
+                  className={typeState.selectedType === 'remote' ? 'active' : ''}
+                  disabled={selectionDisabled}
+                  role="radio"
+                  type="button"
+                  onClick={() => onCollectionTypeChange(selectionCollection, 'remote')}
+                >
+                  Remote
+                </button>
+              </div>
+            </div>
+          ) : null}
+          <div className="collectionReviewSelectionAction">
+            <CollectionSelectionCheckbox
+              allSelected={selectionState.allSelected}
+              ariaDescribedBy={selectionSummaryId}
+              collectionName={collection.displayName}
+              disabled={selectionDisabled || selectionState.eligibleCount === 0}
+              indeterminate={selectionState.indeterminate}
+              onChange={() => onToggleCollectionSelected(selectionCollection)}
+            />
+            <span className="collectionReviewSelection" id={selectionSummaryId}>
+              {selectionState.eligibleCount === 0
+                ? 'No eligible skills'
+                : `${selectionState.selectedCount} of ${selectionState.eligibleCount} eligible selected`}
+            </span>
+          </div>
         </div>
       </div>
       <button
@@ -518,13 +569,11 @@ function CollectionReviewCard({
             const group = groups.find((candidateGroup) => candidateGroup.id === child.groupId);
             if (!group) return null;
             const variant = group.variants.find((candidateVariant) => candidateVariant.id === child.variantId);
-            const selected = group.isSelected && group.selectedVariantId === child.variantId;
+            const selected = !typeState.required
+              && group.isSelected
+              && group.selectedVariantId === child.variantId;
             const {
-              canClassify,
               canSelect,
-              childType,
-              importableChild,
-              needsTypeChoice,
               readOnlyLabel
             } = collectionChildTypeState(group, child);
             return (
@@ -532,7 +581,7 @@ function CollectionReviewCard({
                 <label className="candidateCheck">
                   <input
                     checked={selected}
-                    disabled={!canSelect}
+                    disabled={!canSelect || typeState.required || selectionDisabled}
                     type="checkbox"
                     aria-label={`Select ${child.name} from ${collection.displayName}`}
                     onChange={() => onToggleSelected(group)}
@@ -544,7 +593,6 @@ function CollectionReviewCard({
                     <strong>{child.name}</strong>
                     {child.importStatus !== 'importable' ? <Badge tone="slate">{child.importStatus}</Badge> : null}
                     {child.conflict ? <Badge tone="red">Conflict</Badge> : null}
-                    {needsTypeChoice ? <Badge tone="amber">Choose type</Badge> : null}
                   </div>
                   <code>{child.relativePath}</code>
                   <span className="candidateUsage">Calls {group.usageCount || 0}</span>
@@ -584,35 +632,11 @@ function CollectionReviewCard({
                     </div>
                   ) : null}
                 </div>
-                <div className={`collectionChildType ${needsTypeChoice ? 'required' : ''}`}>
-                  {importableChild && canClassify ? (
-                    <>
-                      <span>{needsTypeChoice ? 'Skill type · Required' : (childType === 'remote' ? 'Remote' : 'User')}</span>
-                      <div className="candidateTypeSwitch" role="radiogroup" aria-label={`${child.name} skill type`}>
-                        <button
-                          aria-checked={childType === 'user'}
-                          className={childType === 'user' ? 'active' : ''}
-                          role="radio"
-                          type="button"
-                          onClick={() => onTypeChange(group, 'user')}
-                        >
-                          User
-                        </button>
-                        <button
-                          aria-checked={childType === 'remote'}
-                          className={childType === 'remote' ? 'active' : ''}
-                          role="radio"
-                          type="button"
-                          onClick={() => onTypeChange(group, 'remote')}
-                        >
-                          Remote
-                        </button>
-                      </div>
-                    </>
-                  ) : (
+                {readOnlyLabel ? (
+                  <div className="collectionChildType">
                     <span className="collectionChildTypeReadOnly">{readOnlyLabel}</span>
-                  )}
-                </div>
+                  </div>
+                ) : null}
               </div>
             );
           })}
