@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>SkillBox - Local AI Agent Skill Manager for macOS</title>
-    <meta name="description" content="SkillBox is a local-first macOS app for managing Agents, Codex, Claude Code, Cursor, and project-local SKILL.md roots with one-fetch GitHub collection reviews, explicit child selection, and runtime compatibility previews.">
+    <meta name="description" content="SkillBox is a local-first macOS app for managing Agents, Codex, Claude Code, Cursor, and project-local SKILL.md roots with one-fetch GitHub collection reviews, one shared type choice, eligible-child selection, and runtime compatibility previews.">
     <meta name="robots" content="index, follow">
     <link rel="canonical" href="https://santosli.github.io/SkillBox/">
     <meta name="theme-color" content="#08111f">
@@ -13,7 +13,7 @@
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="SkillBox">
     <meta property="og:title" content="SkillBox - Local AI Agent Skill Manager for macOS">
-    <meta property="og:description" content="Manage SKILL.md libraries locally, review one-fetch GitHub collections, check runtime compatibility, and separate Calls from History references.">
+    <meta property="og:description" content="Manage SKILL.md libraries locally, review one-fetch GitHub collections with one type choice and eligible-child selection, check runtime compatibility, and separate Calls from History references.">
     <meta property="og:url" content="https://santosli.github.io/SkillBox/">
     <meta property="og:image" content="https://santosli.github.io/SkillBox/assets/skillbox-promo-poster.jpg">
     <meta property="og:image:width" content="1920">
@@ -64,7 +64,7 @@
               "https://santosli.github.io/SkillBox/assets/skillbox-dashboard.png",
               "https://santosli.github.io/SkillBox/assets/skillbox-workspaces.png",
               "https://santosli.github.io/SkillBox/assets/skillbox-rankings.png",
-              "https://santosli.github.io/SkillBox/assets/skillbox-github-install-review.png"
+              "https://santosli.github.io/SkillBox/assets/skillbox-collection-import-review.png"
             ],
             "offers": {
               "@type": "Offer",
@@ -144,7 +144,7 @@
 
       <section class="section demo-section" id="demo" aria-labelledby="demo-title">
         <div class="section-heading">
-          <p class="eyebrow">30-second overview</p>
+          <p class="eyebrow">v0.9.0 · 30-second overview</p>
           <h2 id="demo-title">See the workflow before installing.</h2>
           <p>
             The demo follows one managed library through runtime-aware workspaces, reviewed GitHub installs,
@@ -156,7 +156,7 @@
             <source src="assets/skillbox-promo.mp4" type="video/mp4">
             <a href="assets/skillbox-promo.mp4">Download the SkillBox promo video.</a>
           </video>
-          <figcaption>SkillBox keeps runtime folders intentional while <code>~/.skillbox</code> remains the local source of truth.</figcaption>
+          <figcaption>This v0.9.0 promo keeps runtime folders intentional while <code>~/.skillbox</code> remains the local source of truth. Current-main collection header refinements appear below.</figcaption>
         </figure>
       </section>
 
@@ -176,14 +176,17 @@
         <article class="feature-card reversed">
           <div class="feature-copy">
             <p class="eyebrow">GitHub collections</p>
-            <h2>Review one snapshot. Choose only the children you need.</h2>
+            <h2>Choose one type. Import only eligible children.</h2>
             <p>
               SkillBox fetches one bounded repository ref, shows the resolved SHA, child status, and runtime
-              compatibility before it writes. Select eligible child skills explicitly: nothing deploys automatically,
-              and collection-level update and rollback remain Phase D work.
+              compatibility before it writes. The current project UI applies one explicit User/Remote choice to
+              actionable children, then selects or clears the eligible set from the collection header. Mixed or
+              unresolved type state stays blocked, every child remains independently managed, nothing deploys
+              automatically, and collection-level update and rollback remain Phase D work.
             </p>
+            <p class="feature-note">Phase C shipped in v0.9.0; the shared header controls shown here are merged after that release. Validated copied skills may also group by normalized GitHub source as display-only provenance, without inventing branch, HEAD, or update authority.</p>
           </div>
-          <img src="assets/skillbox-github-install-review.png" alt="SkillBox GitHub collection review showing one repository SHA, child status, compatibility, and explicit child selection">
+          <img class="collection-review-image" src="assets/skillbox-collection-import-review.png" alt="SkillBox collection import review showing one shared Remote type choice, selected eligible children, and a blocked conflict">
         </article>
 
         <article class="feature-card">
@@ -293,9 +296,11 @@
           <article class="faq-item">
             <h3>How does a GitHub skill collection work?</h3>
             <p>
-              A repository or tree ref is fetched once and reviewed as one snapshot. You select eligible child
-              <code>SKILL.md</code> directories individually or with Select all; each selected child remains an
-              independent managed skill. Collection-level update and rollback are not included yet.
+              A repository or tree ref is fetched once and reviewed as one snapshot. In the current project UI,
+              one collection-header User/Remote decision resolves actionable children and Select all changes only
+              the eligible set; unresolved, invalid, imported, system, or conflicted children stay unchanged. Each
+              selected child remains an independent managed skill, and collection-level update and rollback are not
+              included yet.
             </p>
           </article>
           <article class="faq-item">

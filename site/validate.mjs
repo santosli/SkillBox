@@ -15,6 +15,7 @@ const requiredFiles = [
   `site/${googleVerificationFile}`,
   "site-dist/privacy.html",
   "site-dist/telemetry.js",
+  "site-dist/assets/skillbox-collection-import-review.png",
   `site-dist/${googleVerificationFile}`,
   "site/build.mjs",
   ".github/workflows/pages.yml",
@@ -27,7 +28,8 @@ const requiredFiles = [
   "docs/promo/skillbox-intro/assets/skillbox-history.png",
   "docs/promo/skillbox-intro/assets/skillbox-skill-detail.png",
   "docs/promo/skillbox-intro/assets/skillbox-github-install-review.png",
-  "docs/promo/skillbox-intro/assets/skillbox-app-icon.png"
+  "docs/promo/skillbox-intro/assets/skillbox-app-icon.png",
+  "docs/screenshots/skillbox-collection-import-review.png"
 ];
 
 const checks = [];
@@ -139,15 +141,23 @@ expect(
     && /assets\/skillbox-workspaces\.png/.test(html)
     && /assets\/skillbox-rankings-coverage\.png/.test(html)
     && /assets\/skillbox-history\.png/.test(html)
-    && /assets\/skillbox-github-install-review\.png/.test(html)
+    && /assets\/skillbox-collection-import-review\.png/.test(html)
 );
 expect(
   "homepage explains GitHub collection review boundary",
   /one bounded repository ref/.test(html)
     && /resolved SHA/.test(html)
-    && /Select eligible child skills explicitly/.test(html)
-    && /nothing deploys automatically/.test(html)
+    && /one explicit User\/Remote choice/.test(html)
+    && /selects or clears the eligible set/.test(html)
+    && /Mixed or\s+unresolved type state stays blocked/.test(html)
+    && /nothing deploys\s+automatically/.test(html)
     && /collection-level\s+update and rollback remain Phase D work/.test(html)
+);
+expect(
+  "public README and homepage retire the stale collection review visual",
+  !/skillbox-github-install-review\.png/.test(html)
+    && !/skillbox-github-install-review\.png/.test(readme)
+    && !/skillbox-github-install-review\.png/.test(readmeZh)
 );
 expect(
   "homepage explains evidence-aware local metrics",
@@ -157,6 +167,7 @@ expect(
 );
 expect("homepage has no stale versioned visual references", !/v0?41|v041|skillbox-import-review-crop/.test(html));
 expect("video embed uses controls and metadata preload", /<video controls preload="metadata" poster="assets\/skillbox-promo-poster\.jpg"/.test(html));
+expect("promo is labeled as a v0.9.0 release artifact", /v0\.9\.0 · 30-second overview/.test(html) && /This v0\.9\.0 promo/.test(html));
 expect("download CTA uses latest release", /https:\/\/github\.com\/santosli\/SkillBox\/releases\/latest/.test(html));
 expect("Homebrew command present", /brew install --cask skillbox/.test(html));
 expect("Google verification source contains expected token", googleVerificationSource.trim() === googleVerificationToken);
@@ -171,6 +182,19 @@ expect("workflow copies promo video through build script", /node site\/build\.mj
 const buildScript = await readFile(path.join(root, "site", "build.mjs"), "utf8");
 expect("build copies the website privacy page", /"privacy\.html"/.test(buildScript));
 expect("build copies the telemetry consent controller", /"telemetry\.js"/.test(buildScript));
+expect(
+  "build copies the canonical collection review screenshot from docs",
+  /docs[^\n]*screenshots/.test(buildScript)
+    && /skillbox-collection-import-review\.png/.test(buildScript)
+    && !/assets\/skillbox-github-install-review\.png/.test(buildScript)
+);
+expect(
+  "homepage keeps installed-source provenance display-only",
+  /Validated copied skills/.test(html)
+    && /normalized GitHub source/.test(html)
+    && /display-only provenance/.test(html)
+    && /without inventing branch, HEAD, or update authority/.test(html)
+);
 expect("workflow watches site paths", /site\/\*\*/.test(workflow));
 expect("workflow watches promo paths", /docs\/promo\/skillbox-intro\/\*\*/.test(workflow));
 expect("README has website link", /https:\/\/santosli\.github\.io\/SkillBox\//.test(readme));

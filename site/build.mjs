@@ -6,6 +6,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dist = path.join(root, "site-dist");
 const site = path.join(root, "site");
 const promo = path.join(root, "docs", "promo", "skillbox-intro");
+const screenshots = path.join(root, "docs", "screenshots");
 const assets = path.join(dist, "assets");
 
 await rm(dist, { recursive: true, force: true });
@@ -24,11 +25,15 @@ for (const [from, to] of [
   ["assets/skillbox-rankings-coverage.png", "skillbox-rankings-coverage.png"],
   ["assets/skillbox-history.png", "skillbox-history.png"],
   ["assets/skillbox-skill-detail.png", "skillbox-skill-detail.png"],
-  ["assets/skillbox-github-install-review.png", "skillbox-github-install-review.png"],
   ["assets/skillbox-app-icon.png", "skillbox-app-icon.png"]
 ]) {
   await cp(path.join(promo, from), path.join(assets, to));
 }
+
+await cp(
+  path.join(screenshots, "skillbox-collection-import-review.png"),
+  path.join(assets, "skillbox-collection-import-review.png")
+);
 
 await cp(path.join(promo, "assets", "fonts"), path.join(assets, "fonts"), { recursive: true });
 
