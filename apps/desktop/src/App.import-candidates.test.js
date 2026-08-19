@@ -9,6 +9,7 @@ import {
   collectionEligibleGroupIds,
   collectionSelectionState,
   collectionSkillCountLabel,
+  collectionTypeChoiceState,
   importCandidateGroupLocationCount,
   importCandidateGroupTabs,
   normalizeGithubSkillCollectionPreviewResult,
@@ -19,9 +20,11 @@ import {
   selectedImportCandidates,
   selectedImportCollectionRequests,
   selectImportCandidateVariant,
+  toggleImportCandidateGroup,
   toggleImportCandidateGroupSelection,
   toggleImportCollectionSelection,
   updateImportCandidateGroupType,
+  updateImportCollectionType,
   visibleImportCandidates,
   workspaceSkillTabs
 } from './importCandidates.js';
@@ -581,6 +584,204 @@ test('collection selection uses the complete collection rather than a filtered c
   assert.equal(collectionSelectionState(toggled, completeCollection).selectedCount, 2);
 });
 
+test('collection type choice resolves and selects every actionable child without changing excluded or unrelated groups', () => {
+  const groups = normalizeImportCandidateGroups([
+    {
+      id: 'skill-unresolved',
+      name: 'unresolved',
+      selected_variant_id: 'variant-unresolved',
+      variants: [{
+        id: 'variant-unresolved',
+        candidate: { name: 'unresolved', import_status: 'importable', is_selected: false },
+        requires_type_review: true,
+        selected_type: null
+      }]
+    },
+    {
+      id: 'skill-explicit',
+      name: 'explicit',
+      selected_variant_id: 'variant-explicit',
+      variants: [{
+        id: 'variant-explicit',
+        candidate: { name: 'explicit', import_status: 'importable', is_selected: false },
+        selected_type: 'remote'
+      }]
+    },
+    {
+      id: 'skill-imported',
+      name: 'imported',
+      selected_variant_id: 'variant-imported',
+      variants: [{
+        id: 'variant-imported',
+        candidate: { name: 'imported', import_status: 'imported', is_selected: false },
+        selected_type: 'remote'
+      }]
+    },
+    {
+      id: 'skill-system',
+      name: 'system',
+      selected_variant_id: 'variant-system',
+      variants: [{
+        id: 'variant-system',
+        candidate: { name: 'system', import_status: 'system', is_selected: false },
+        selected_type: null
+      }]
+    },
+    {
+      id: 'skill-conflict',
+      name: 'conflict',
+      selected_variant_id: 'variant-conflict',
+      variants: [{
+        id: 'variant-conflict',
+        candidate: { name: 'conflict', import_status: 'importable', conflict: 'managed target', is_selected: false },
+        selected_type: 'user'
+      }]
+    },
+    {
+      id: 'skill-other-collection',
+      name: 'other',
+      selected_variant_id: 'variant-other',
+      variants: [{
+        id: 'variant-other',
+        candidate: { name: 'other', import_status: 'importable', is_selected: false },
+        selected_type: 'user'
+      }]
+    },
+    {
+      id: 'skill-standalone',
+      name: 'standalone',
+      selected_variant_id: 'variant-standalone',
+      variants: [{
+        id: 'variant-standalone',
+        candidate: { name: 'standalone', import_status: 'importable', is_selected: false },
+        selected_type: 'remote'
+      }]
+    }
+  ]);
+  const collection = normalizeImportCollections([{
+    id: 'collection-one',
+    source_kind: 'git_worktree',
+    preview_id: 'preview-one',
+    canonical_worktree_root: '/Users/example/collection-one',
+    children: [
+      { group_id: 'skill-unresolved', variant_id: 'variant-unresolved', relative_path: 'skills/unresolved', import_status: 'importable', requires_type_review: true },
+      { group_id: 'skill-explicit', variant_id: 'variant-explicit', relative_path: 'skills/explicit', import_status: 'importable', selected_type: 'remote' },
+      { group_id: 'skill-imported', variant_id: 'variant-imported', relative_path: 'skills/imported', import_status: 'imported', selected_type: 'user' },
+      { group_id: 'skill-system', variant_id: 'variant-system', relative_path: 'skills/system', import_status: 'system' },
+      { group_id: 'skill-conflict', variant_id: 'variant-conflict', relative_path: 'skills/conflict', import_status: 'importable', conflict: 'managed target' }
+    ]
+  }])[0];
+
+  assert.deepEqual(collectionTypeChoiceState(groups, collection), {
+    actionableGroupIds: new Set(['skill-unresolved', 'skill-explicit']),
+    actionableCount: 2,
+    selectedType: null,
+    required: true
+  });
+  const mixedExplicitGroups = updateImportCandidateGroupType(groups, 'skill-unresolved', 'user');
+  assert.deepEqual(collectionTypeChoiceState(mixedExplicitGroups, collection), {
+    actionableGroupIds: new Set(['skill-unresolved', 'skill-explicit']),
+    actionableCount: 2,
+    selectedType: null,
+    required: true
+  });
+  assert.equal(collectionSelectionState(groups, collection).eligibleCount, 1);
+
+  const asUser = updateImportCollectionType(groups, collection, 'user');
+  assert.deepEqual(asUser.slice(0, 2).map((group) => ({
+    selected: group.isSelected,
+    type: group.variants[0].selectedType
+  })), [
+    { selected: true, type: 'user' },
+    { selected: true, type: 'user' }
+  ]);
+  assert.deepEqual(asUser.slice(2).map((group) => ({
+    selected: group.isSelected,
+    type: group.variants[0].selectedType
+  })), [
+    { selected: false, type: 'remote' },
+    { selected: false, type: 'user' },
+    { selected: false, type: 'user' },
+    { selected: false, type: 'user' },
+    { selected: false, type: 'remote' }
+  ]);
+  assert.deepEqual(collectionTypeChoiceState(asUser, collection), {
+    actionableGroupIds: new Set(['skill-unresolved', 'skill-explicit']),
+    actionableCount: 2,
+    selectedType: 'user',
+    required: false
+  });
+  assert.deepEqual(collectionSelectionState(asUser, collection), {
+    eligibleGroupIds: new Set(['skill-unresolved', 'skill-explicit']),
+    eligibleCount: 2,
+    selectedCount: 2,
+    allSelected: true,
+    indeterminate: false
+  });
+
+  const manuallyDeselected = toggleImportCandidateGroup(asUser, 'skill-unresolved');
+  assert.equal(collectionTypeChoiceState(manuallyDeselected, collection).selectedType, 'user');
+  assert.equal(collectionSelectionState(manuallyDeselected, collection).selectedCount, 1);
+
+  const asRemote = updateImportCollectionType(manuallyDeselected, collection, 'remote');
+  assert.deepEqual(asRemote.slice(0, 2).map((group) => ({
+    selected: group.isSelected,
+    type: group.variants[0].selectedType
+  })), [
+    { selected: true, type: 'remote' },
+    { selected: true, type: 'remote' }
+  ]);
+  assert.deepEqual(selectedImportCollectionRequests(asRemote, [collection])[0].selections, [
+    { relativePath: 'skills/unresolved', groupId: 'skill-unresolved', variantId: 'variant-unresolved', skillType: 'remote' },
+    { relativePath: 'skills/explicit', groupId: 'skill-explicit', variantId: 'variant-explicit', skillType: 'remote' }
+  ]);
+});
+
+test('collection type choice uses the complete collection and preserves Rust managed child types', () => {
+  const groups = normalizeImportCandidateGroups([
+    {
+      id: 'skill-visible',
+      selected_variant_id: 'variant-visible',
+      variants: [{ id: 'variant-visible', candidate: { name: 'visible', import_status: 'importable', is_selected: false }, selected_type: null }]
+    },
+    {
+      id: 'skill-hidden',
+      selected_variant_id: 'variant-hidden',
+      variants: [{ id: 'variant-hidden', candidate: { name: 'hidden', import_status: 'importable', is_selected: false }, selected_type: null }]
+    },
+    {
+      id: 'skill-imported',
+      selected_variant_id: 'variant-imported',
+      variants: [{ id: 'variant-imported', candidate: { name: 'imported', import_status: 'imported', is_selected: false }, selected_type: 'remote' }]
+    }
+  ]);
+  const completeCollection = normalizeImportCollections([{
+    id: 'collection-filtered',
+    children: [
+      { group_id: 'skill-visible', variant_id: 'variant-visible', import_status: 'importable' },
+      { group_id: 'skill-hidden', variant_id: 'variant-hidden', import_status: 'importable' },
+      { group_id: 'skill-imported', variant_id: 'variant-imported', import_status: 'imported', selected_type: 'user' }
+    ]
+  }])[0];
+
+  const updated = updateImportCollectionType(groups, completeCollection, 'remote');
+  assert.deepEqual(updated.slice(0, 2).map((group) => group.variants[0].selectedType), ['remote', 'remote']);
+  assert.deepEqual(updated.slice(0, 2).map((group) => group.isSelected), [true, true]);
+  assert.equal(updated[2].variants[0].selectedType, 'remote');
+
+  const importedState = collectionChildTypeState(updated[2], completeCollection.children[2]);
+  assert.equal(importedState.childType, 'user');
+  assert.equal(importedState.readOnlyLabel, 'Managed as User');
+  assert.deepEqual(collectionTypeChoiceState([], {
+    children: [completeCollection.children[2]]
+  }), {
+    actionableGroupIds: new Set(),
+    actionableCount: 0,
+    selectedType: null,
+    required: false
+  });
+});
+
 test('normalizes a GitHub collection without inventing a local worktree root', () => {
   const collections = normalizeImportCollections([{
     id: 'github-collection-demo',
@@ -758,10 +959,8 @@ test('collection child type state keeps mixed importable review actionable and b
   assert.equal(mixedState.canSelect, false);
   assert.equal(mixedState.needsTypeChoice, true);
 
-  const resolvedState = collectionChildTypeState(mixedGroup, {
-    ...mixedChild,
-    selectedType: 'remote'
-  });
+  const resolvedGroup = updateImportCandidateGroupType([mixedGroup], 'skill-mixed', 'remote')[0];
+  const resolvedState = collectionChildTypeState(resolvedGroup, mixedChild);
   assert.equal(resolvedState.canSelect, true);
   assert.equal(resolvedState.needsTypeChoice, false);
 

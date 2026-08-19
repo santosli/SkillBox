@@ -255,7 +255,9 @@ export function collectionChildTypeState(group, child) {
       ...group,
       selectedVariantId: child.variantId
     });
-  const childType = child.selectedType || (selectedVariant ? variant?.selectedType : null);
+  const childType = importableChild && selectedVariant && variant
+    ? variant.selectedType
+    : child.selectedType || (selectedVariant ? variant?.selectedType : null);
   const canSelect = canClassify && Boolean(childType);
   const needsTypeChoice = canClassify && child.requiresTypeReview && !childType;
   const readOnlyLabel = child.importStatus === 'imported' && childType
@@ -264,9 +266,11 @@ export function collectionChildTypeState(group, child) {
       ? 'Resolve conflict before import'
       : child.importStatus === 'system'
         ? 'System skill'
-        : childType
-          ? `${childType === 'remote' ? 'Remote' : 'User'} suggestion`
-          : 'Choose a variant first';
+        : !selectedVariant
+          ? 'Choose a variant first'
+          : child.importStatus !== 'importable' && childType
+            ? `${childType === 'remote' ? 'Remote' : 'User'} (read only)`
+            : '';
 
   return {
     childType,
@@ -277,6 +281,72 @@ export function collectionChildTypeState(group, child) {
     readOnlyLabel,
     selectedVariant
   };
+}
+
+function collectionActionableGroups(groups = [], collection = {}) {
+  const groupById = new Map(groups.map((group) => [group.id, group]));
+  const actionable = [];
+  const seenGroupIds = new Set();
+
+  for (const child of collection.children || []) {
+    const group = groupById.get(child.groupId);
+    if (
+      !group
+      || seenGroupIds.has(group.id)
+      || group.selectedVariantId !== child.variantId
+      || child.importStatus !== 'importable'
+      || child.conflict
+      || !canClassifyImportCandidateGroup(group)
+    ) {
+      continue;
+    }
+    const variant = selectedImportCandidateVariant(group);
+    if (!variant || variant.id !== child.variantId) continue;
+    seenGroupIds.add(group.id);
+    actionable.push({ group, variant });
+  }
+
+  return actionable;
+}
+
+export function collectionTypeChoiceState(groups = [], collection = {}) {
+  const actionable = collectionActionableGroups(groups, collection);
+  const selectedTypes = new Set(
+    actionable
+      .map(({ variant }) => variant.selectedType)
+      .filter((type) => ['user', 'remote'].includes(type))
+  );
+  const allHaveType = actionable.length > 0
+    && actionable.every(({ variant }) => ['user', 'remote'].includes(variant.selectedType));
+  const selectedType = allHaveType && selectedTypes.size === 1
+    ? [...selectedTypes][0]
+    : null;
+
+  return {
+    actionableGroupIds: new Set(actionable.map(({ group }) => group.id)),
+    actionableCount: actionable.length,
+    selectedType,
+    required: actionable.length > 0 && !selectedType
+  };
+}
+
+export function updateImportCollectionType(groups = [], collection = {}, skillType) {
+  if (!['user', 'remote'].includes(skillType)) return groups;
+  const { actionableGroupIds } = collectionTypeChoiceState(groups, collection);
+
+  return groups.map((group) => actionableGroupIds.has(group.id)
+    ? {
+        ...group,
+        isSelected: true,
+        variants: group.variants.map((variant) => variant.id === group.selectedVariantId
+          ? {
+              ...variant,
+              selectedType: skillType,
+              candidate: { ...variant.candidate, skillType }
+            }
+          : variant)
+      }
+    : group);
 }
 
 export function collectionSkillCountLabel(count) {

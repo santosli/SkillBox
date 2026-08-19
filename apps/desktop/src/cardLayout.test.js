@@ -544,7 +544,7 @@ test('import review opens before scanning and exposes staged accessible progress
   assert.match(progressSource, /importScanProgressDetail/);
 });
 
-test('collection review keeps child selection and type controls inside one expandable card', () => {
+test('collection review keeps child selection and collection type controls inside one expandable card', () => {
   const collectionSource = appSource.match(
     /function CollectionReviewCard\(\{(?<body>[\s\S]*?)\n\}\n\nfunction WorkspaceSkillTabs/
   )?.groups.body || '';
@@ -557,28 +557,53 @@ test('collection review keeps child selection and type controls inside one expan
   const collectionRule = css.match(/\.collectionReviewCard\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const childRule = css.match(/\.collectionChildRow\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const collectionActionsRule = css.match(/\.collectionReviewActions\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const collectionTypeRule = css.match(/\.collectionReviewTypeAction\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const requiredCollectionTypeRule = css.match(
+    /\.collectionReviewTypeAction\.required\s*\{(?<body>[^}]*)\}/s
+  )?.groups.body || '';
 
   assert.match(collectionSource, /aria-controls={disclosureId}/);
   assert.match(collectionSource, /collection\.children\.map/);
   assert.match(collectionSource, /collectionSelectionState\(groups, selectionCollection\)/);
+  assert.match(collectionSource, /collectionTypeChoiceState\(groups, selectionCollection\)/);
   assert.match(collectionSource, /<CollectionSelectionCheckbox/);
   assert.match(collectionSource, /onToggleCollectionSelected\(selectionCollection\)/);
+  assert.match(collectionSource, /id=\{typeLabelId\}>Import as/);
+  assert.match(collectionSource, /<strong>Required<\/strong>/);
+  assert.match(collectionSource, /Choose one type for every pending skill in this collection/);
+  assert.match(collectionSource, /aria-describedby=\{typeState\.required \? typeHelpId : undefined\}/);
+  assert.match(collectionSource, /aria-labelledby=\{typeLabelId\}/);
+  assert.match(collectionSource, /aria-required=\{typeState\.required\}/);
+  assert.match(collectionSource, /role="radiogroup"/);
+  assert.match(collectionSource, /role="radio"/);
+  assert.match(collectionSource, /aria-checked=\{typeState\.selectedType === 'user'\}/);
+  assert.match(collectionSource, /aria-checked=\{typeState\.selectedType === 'remote'\}/);
+  assert.match(collectionSource, /onCollectionTypeChange\(selectionCollection, 'user'\)/);
+  assert.match(collectionSource, /onCollectionTypeChange\(selectionCollection, 'remote'\)/);
+  assert.match(collectionSource, /typeState\.actionableCount > 0/);
+  assert.doesNotMatch(collectionSource, /No pending skills/);
   assert.match(collectionCheckboxSource, /checkboxRef\.current\.indeterminate = indeterminate/);
   assert.match(collectionCheckboxSource, /aria-label=\{`Select all eligible skills in \$\{collectionName\}`\}/);
   assert.match(collectionCheckboxSource, /aria-describedby=\{ariaDescribedBy\}/);
   assert.match(collectionCheckboxSource, /disabled=\{disabled\}/);
   assert.match(candidateReviewListSource, /selectionCollection=\{collections\.find/);
   assert.match(candidateReviewListSource, /onToggleCollectionSelected/);
+  assert.match(candidateReviewListSource, /onCollectionTypeChange/);
+  assert.match(appSource, /updateImportCollectionType\(current\.candidates, collection, skillType\)/);
   assert.match(collectionSource, /onToggleSelected\(group\)/);
-  assert.match(collectionSource, /onTypeChange\(group, 'user'\)/);
-  assert.match(collectionSource, /onTypeChange\(group, 'remote'\)/);
-  assert.match(collectionSource, /collectionChildTypeState\(group, child\)/);
   assert.match(collectionSource, /collectionChildTypeState\(group, child\)/);
   assert.match(collectionSource, /collection\.sourceKind === 'installed_source'/);
   assert.doesNotMatch(collectionSource, /disabled=\{!canClassifyImportCandidateGroup\(group\)\}/);
+  assert.doesNotMatch(collectionSource, /aria-label=\{`\$\{child\.name\} skill type`\}/);
+  assert.doesNotMatch(collectionSource, /onTypeChange\(group/);
+  assert.match(collectionSource, /readOnlyLabel \?/);
   assert.match(collectionSource, /relativePath/);
   assert.match(collectionRule, /min-width:\s*0;/);
   assert.match(collectionActionsRule, /display:\s*flex;/);
+  assert.match(collectionTypeRule, /width:\s*248px;/);
+  assert.match(collectionTypeRule, /box-sizing:\s*border-box;/);
+  assert.match(requiredCollectionTypeRule, /border-color:\s*var\(--skillbox-amber-border\);/);
+  assert.match(requiredCollectionTypeRule, /background:\s*var\(--skillbox-surface-orange\);/);
   assert.match(css, /\.candidateCheck input:indeterminate \+ span/);
   assert.match(childRule, /grid-template-columns:\s*28px minmax\(0,\s*1fr\) auto;/);
 });
