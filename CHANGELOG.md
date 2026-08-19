@@ -7,14 +7,14 @@ version tags such as `v0.3.0`.
 
 ## Unreleased
 
-- No unreleased changes.
+- Add collection-level Import Review selection that selects or clears every eligible child in one collection without changing blocked, imported, system, conflicted, or unresolved-type children.
 
 ## 0.9.0
 
 - Add one-fetch GitHub repository collection preview/apply with explicit child
   selection, stale ref/tree validation, and per-skill managed provenance. This
-  Phase C change targets v0.9.0 and remains unreleased pending v0.9.0 release
-  qualification; collection-level update/rollback remains planned.
+  Phase C change shipped in v0.9.0; collection-level update/rollback remains
+  planned.
 - Distinguish the shipped v0.8.0 local A+B work from the v0.9.0-targeted Phase C
   implementation in the public roadmap and implementation status.
 - Add one-fetch GitHub multi-skill collection preview/apply for repository and tree URLs.

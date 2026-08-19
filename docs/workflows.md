@@ -62,6 +62,8 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 已 imported 的多个 runtime symlink 只有解析到同一个 managed `real_path` 时才作为 alias 合并。
 - Rust 先按规范化 skill name 输出一组，再按完整目录快照、状态和冲突划分 variants。等价副本是一个 variant 的 locations；User/Remote 类型建议不参与内容 identity。同名但有实质差异的来源仍在同一张卡片内，并标记 `Needs review`。
 - Import Review 默认折叠 locations；展开后显示每个路径、symlink source、location 级类型建议、状态和冲突。搜索匹配任一 variant/location，tab、Select all 和结果摘要按 group 计数。
+- 每张 collection card 的 header 都有原生 Select all eligible checkbox。它按完整 collection
+  而非当前搜索/Tab 可见子集切换：全部 eligible child 已选时清空，否则选中全部。imported、system、conflict、invalid、未选择对应 variant 或尚未完成 User/Remote 类型选择的 child 不计入且不会被改变；部分选择以原生 indeterminate 状态和 `selected / eligible` 计数表达。
 - 只有唯一安全 importable variant 时才预选。多个 material variants 必须由用户用 radio 明确选择一个；一个 variant 内的类型建议混合时显示 `Mixed type suggestions`，并在导入前要求明确选择 User 或 Remote。Desktop 只提交所选 primary `source_path` 和分类，core 拒绝同一批次为同名 skill 提交多个来源；其它 locations 不会被修改。
 - agent adapter 引入后，候选项还应携带 `agent_id`、原生格式和 target scope。
 - 检查 managed target 是否冲突。

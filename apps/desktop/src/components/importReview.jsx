@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ChevronDown, LoaderCircle, MapPin, Search } from 'lucide-react';
 import codexAppIcon from '../assets/codex-app-icon.png';
 import codexCliIcon from '../assets/codex-cli-icon.png';
 import {
   canClassifyImportCandidateGroup,
   collectionChildTypeState,
+  collectionSelectionState,
   collectionSkillCountLabel,
   filterImportCandidateGroups,
   filterImportCandidateGroupsByQuery,
@@ -210,6 +211,7 @@ export function ImportReview({
   onImport,
   onRetry,
   onToggleAll,
+  onToggleCollectionSelected,
   onToggleSelected,
   onSelectVariant,
   onTypeChange,
@@ -266,8 +268,10 @@ export function ImportReview({
               collections={collections}
               groups={groups}
               onSelectVariant={onSelectVariant}
+              onToggleCollectionSelected={onToggleCollectionSelected}
               onToggleSelected={onToggleSelected}
               onTypeChange={onTypeChange}
+              selectionDisabled={status === 'importing'}
             />
           ) : null}
         </div>
@@ -316,7 +320,15 @@ function ImportScanProgress({ progress }) {
   );
 }
 
-function CandidateReviewList({ collections, groups, onSelectVariant, onToggleSelected, onTypeChange }) {
+function CandidateReviewList({
+  collections,
+  groups,
+  onSelectVariant,
+  onToggleCollectionSelected,
+  onToggleSelected,
+  onTypeChange,
+  selectionDisabled
+}) {
   const [activeTab, setActiveTab] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const searchedGroups = filterImportCandidateGroupsByQuery(groups, searchQuery);
@@ -366,8 +378,11 @@ function CandidateReviewList({ collections, groups, onSelectVariant, onToggleSel
           groups={groups}
           key={collection.id}
           onSelectVariant={onSelectVariant}
+          onToggleCollectionSelected={onToggleCollectionSelected}
           onToggleSelected={onToggleSelected}
           onTypeChange={onTypeChange}
+          selectionCollection={collections.find((candidate) => candidate.id === collection.id) || collection}
+          selectionDisabled={selectionDisabled}
         />
       ))}
       {standaloneGroups.length > 0 ? (
@@ -390,21 +405,54 @@ function CandidateReviewList({ collections, groups, onSelectVariant, onToggleSel
   );
 }
 
+function CollectionSelectionCheckbox({
+  allSelected,
+  ariaDescribedBy,
+  collectionName,
+  disabled,
+  indeterminate,
+  onChange
+}) {
+  const checkboxRef = useRef(null);
+
+  useEffect(() => {
+    if (checkboxRef.current) {
+      checkboxRef.current.indeterminate = indeterminate;
+    }
+  }, [indeterminate]);
+
+  return (
+    <label className="candidateCheck collectionReviewSelectAll">
+      <input
+        ref={checkboxRef}
+        aria-describedby={ariaDescribedBy}
+        aria-label={`Select all eligible skills in ${collectionName}`}
+        checked={allSelected}
+        disabled={disabled}
+        type="checkbox"
+        onChange={onChange}
+      />
+      <span />
+    </label>
+  );
+}
+
 function CollectionReviewCard({
   collection,
   groups,
   onSelectVariant,
+  onToggleCollectionSelected,
   onToggleSelected,
-  onTypeChange
+  onTypeChange,
+  selectionCollection,
+  selectionDisabled
 }) {
   const [expanded, setExpanded] = useState(false);
   const isInstalledSource = collection.sourceKind === 'installed_source';
   const isGithubRemote = collection.sourceKind === 'github_remote';
   const disclosureId = `${collection.id}-children`;
-  const selectedCount = collection.children.filter((child) => {
-    const group = groups.find((candidateGroup) => candidateGroup.id === child.groupId);
-    return group?.isSelected && group.selectedVariantId === child.variantId;
-  }).length;
+  const selectionSummaryId = `${collection.id}-selection-summary`;
+  const selectionState = collectionSelectionState(groups, selectionCollection);
   const shortSha = collection.reviewedHeadSha ? collection.reviewedHeadSha.slice(0, 8) : 'uncommitted';
 
   return (
@@ -437,7 +485,21 @@ function CollectionReviewCard({
             </>
           )}
         </div>
-        <span className="collectionReviewSelection">{selectedCount} selected</span>
+        <div className="collectionReviewActions">
+          <CollectionSelectionCheckbox
+            allSelected={selectionState.allSelected}
+            ariaDescribedBy={selectionSummaryId}
+            collectionName={collection.displayName}
+            disabled={selectionDisabled || selectionState.eligibleCount === 0}
+            indeterminate={selectionState.indeterminate}
+            onChange={() => onToggleCollectionSelected(selectionCollection)}
+          />
+          <span className="collectionReviewSelection" id={selectionSummaryId}>
+            {selectionState.eligibleCount === 0
+              ? 'No eligible skills'
+              : `${selectionState.selectedCount} of ${selectionState.eligibleCount} eligible selected`}
+          </span>
+        </div>
       </div>
       <button
         aria-controls={disclosureId}

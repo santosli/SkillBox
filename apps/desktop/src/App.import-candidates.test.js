@@ -6,6 +6,8 @@ import {
   filterImportCandidatesByQuery,
   filterWorkspaceSkillCandidates,
   collectionChildTypeState,
+  collectionEligibleGroupIds,
+  collectionSelectionState,
   collectionSkillCountLabel,
   importCandidateGroupLocationCount,
   importCandidateGroupTabs,
@@ -18,6 +20,7 @@ import {
   selectedImportCollectionRequests,
   selectImportCandidateVariant,
   toggleImportCandidateGroupSelection,
+  toggleImportCollectionSelection,
   updateImportCandidateGroupType,
   visibleImportCandidates,
   workspaceSkillTabs
@@ -444,6 +447,138 @@ test('normalizes Git-backed collection children and submits one selected child r
       skillType: 'user'
     }]
   }]);
+});
+
+test('toggles every eligible child in one complete collection without changing blocked or unrelated groups', () => {
+  const groups = normalizeImportCandidateGroups([
+    {
+      id: 'skill-alpha',
+      name: 'alpha',
+      selected_variant_id: 'variant-alpha',
+      variants: [{
+        id: 'variant-alpha',
+        candidate: { name: 'alpha', import_status: 'importable', is_selected: false },
+        selected_type: 'user'
+      }]
+    },
+    {
+      id: 'skill-beta',
+      name: 'beta',
+      selected_variant_id: 'variant-beta',
+      variants: [{
+        id: 'variant-beta',
+        candidate: { name: 'beta', import_status: 'importable', is_selected: true },
+        selected_type: 'remote'
+      }]
+    },
+    {
+      id: 'skill-needs-type',
+      name: 'needs-type',
+      selected_variant_id: 'variant-needs-type',
+      variants: [{
+        id: 'variant-needs-type',
+        candidate: { name: 'needs-type', import_status: 'importable', is_selected: false },
+        requires_type_review: true,
+        selected_type: null
+      }]
+    },
+    {
+      id: 'skill-conflict',
+      name: 'conflict',
+      selected_variant_id: 'variant-conflict',
+      variants: [{
+        id: 'variant-conflict',
+        candidate: { name: 'conflict', import_status: 'importable', conflict: 'managed target', is_selected: false },
+        selected_type: 'user'
+      }]
+    },
+    {
+      id: 'skill-imported',
+      name: 'imported',
+      selected_variant_id: 'variant-imported',
+      variants: [{
+        id: 'variant-imported',
+        candidate: { name: 'imported', import_status: 'imported', is_selected: false },
+        selected_type: 'remote'
+      }]
+    },
+    {
+      id: 'skill-other-collection',
+      name: 'other',
+      selected_variant_id: 'variant-other',
+      variants: [{
+        id: 'variant-other',
+        candidate: { name: 'other', import_status: 'importable', is_selected: false },
+        selected_type: 'user'
+      }]
+    }
+  ]);
+  const collection = normalizeImportCollections([{
+    id: 'collection-one',
+    source_kind: 'git_worktree',
+    children: [
+      { group_id: 'skill-alpha', variant_id: 'variant-alpha', import_status: 'importable' },
+      { group_id: 'skill-beta', variant_id: 'variant-beta', import_status: 'importable' },
+      { group_id: 'skill-needs-type', variant_id: 'variant-needs-type', import_status: 'importable', requires_type_review: true },
+      { group_id: 'skill-conflict', variant_id: 'variant-conflict', import_status: 'importable', conflict: 'managed target' },
+      { group_id: 'skill-imported', variant_id: 'variant-imported', import_status: 'imported' }
+    ]
+  }])[0];
+
+  assert.deepEqual([...collectionEligibleGroupIds(groups, collection)], ['skill-alpha', 'skill-beta']);
+  assert.deepEqual(collectionSelectionState(groups, collection), {
+    eligibleGroupIds: new Set(['skill-alpha', 'skill-beta']),
+    eligibleCount: 2,
+    selectedCount: 1,
+    allSelected: false,
+    indeterminate: true
+  });
+
+  const selected = toggleImportCollectionSelection(groups, collection);
+  assert.deepEqual(selected.map((group) => group.isSelected), [true, true, false, false, false, false]);
+  assert.deepEqual(collectionSelectionState(selected, collection), {
+    eligibleGroupIds: new Set(['skill-alpha', 'skill-beta']),
+    eligibleCount: 2,
+    selectedCount: 2,
+    allSelected: true,
+    indeterminate: false
+  });
+
+  const unselected = toggleImportCollectionSelection(selected, collection);
+  assert.deepEqual(unselected.map((group) => group.isSelected), [false, false, false, false, false, false]);
+});
+
+test('collection selection uses the complete collection rather than a filtered child subset', () => {
+  const groups = normalizeImportCandidateGroups([
+    {
+      id: 'skill-visible',
+      selected_variant_id: 'variant-visible',
+      variants: [{ id: 'variant-visible', candidate: { name: 'visible', import_status: 'importable', is_selected: false }, selected_type: 'user' }]
+    },
+    {
+      id: 'skill-hidden-by-filter',
+      selected_variant_id: 'variant-hidden',
+      variants: [{ id: 'variant-hidden', candidate: { name: 'hidden', import_status: 'importable', is_selected: false }, selected_type: 'remote' }]
+    },
+    {
+      id: 'skill-standalone',
+      selected_variant_id: 'variant-standalone',
+      variants: [{ id: 'variant-standalone', candidate: { name: 'standalone', import_status: 'importable', is_selected: false }, selected_type: 'user' }]
+    }
+  ]);
+  const completeCollection = normalizeImportCollections([{
+    id: 'collection-filtered',
+    children: [
+      { group_id: 'skill-visible', variant_id: 'variant-visible', import_status: 'importable' },
+      { group_id: 'skill-hidden-by-filter', variant_id: 'variant-hidden', import_status: 'importable' }
+    ]
+  }])[0];
+  const visibleSubset = { ...completeCollection, children: [completeCollection.children[0]] };
+
+  assert.equal(visibleSubset.children.length, 1);
+  const toggled = toggleImportCollectionSelection(groups, completeCollection);
+  assert.deepEqual(toggled.map((group) => group.isSelected), [true, true, false]);
+  assert.equal(collectionSelectionState(toggled, completeCollection).selectedCount, 2);
 });
 
 test('normalizes a GitHub collection without inventing a local worktree root', () => {

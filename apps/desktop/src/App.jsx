@@ -55,6 +55,7 @@ import {
   selectedImportCollectionRequests,
   selectedImportCandidates,
   selectImportCandidateVariant,
+  toggleImportCollectionSelection,
   toggleImportCandidateGroup,
   toggleImportCandidateGroupSelection,
   updateImportCandidateGroupType
@@ -4529,6 +4530,12 @@ export default function App() {
             updateImportCandidateGroup(group.id, (groups) =>
               selectImportCandidateVariant(groups, group.id, variant.id)
             )
+          }
+          onToggleCollectionSelected={(collection) =>
+            setImportReview((current) => ({
+              ...current,
+              candidates: toggleImportCollectionSelection(current.candidates, collection)
+            }))
           }
           onToggleSelected={(group) =>
             updateImportCandidateGroup(group.id, (groups) => toggleImportCandidateGroup(groups, group.id))
