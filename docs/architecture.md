@@ -229,6 +229,9 @@ repository URL、safe `skillPath` 和已扫描 candidate name，再把相同 sou
 路径，不执行网络，不伪造 branch/HEAD，也不允许 `apply_import_collection`；
 选中的 child 仍走普通 per-skill import。live Git worktree identity 优先，
 lockfile hash 不会跳过完整目录 snapshot 校验。
+`pluginName` 仅作为有界 installer package metadata：它可以被多个 child 共享，不能作为
+child identity 或 source grouping authority；entry key、safe `skillPath`、扫描到的
+candidate 和 normalized source URL 才是匹配边界。
 因此 nested repositories 是独立 collection，worktree/runtime symlink 解析到同一
 child 时只保留一个 child identity，而 Git metadata 外的相似 copy 不会因为内容相似
 被声明为成员，只会作为 unlinked location 展示。
