@@ -16,7 +16,7 @@ English | [简体中文](README.zh-CN.md)
 
 SkillBox is a local-first macOS desktop app with a Rust core and CLI for managing `SKILL.md`-based skill and capability packages without treating any supported agent runtime as the source of truth.
 
-Current release: `v0.9.0`. SkillBox is useful today for local skill management, but it is still early software. Keep backups of important skills, and review each filesystem change before applying it. GitHub multi-skill collection preview/apply is implemented for the upcoming v0.9.0 qualification and remains unreleased.
+Current release: `v0.9.0`. SkillBox is useful today for local skill management, but it is still early software. Keep backups of important skills, and review each filesystem change before applying it. GitHub multi-skill collection preview/apply shipped in v0.9.0; collection-level update/rollback remains planned for a later v0.9.x release.
 
 ## Promo Video
 
@@ -32,7 +32,7 @@ A 30-second overview of SkillBox: runtime-aware workspaces, review-before-write 
 - **Reviewed Git changes in both directions.** Inspect local user-skill diffs before commit/push. The shipped v0.7 line adds an explicit Check remote -> Review incoming changes -> Apply fast-forward flow for safe inbound updates; diverged history remains a normal Git conflict to resolve outside SkillBox.
 - **Evidence-aware Calls, references, and operation history.** Count locally confirmed executions plus defensible structured invocations as Calls, keep lower-signal history references separate, and explain coverage without storing full chat transcripts.
 - **Safe storage and deployment defaults.** Use ordered SQLite migrations, recovery backups, integrity checks, and ownership-checked symlinks instead of silently overwriting runtime content.
-- **Git-backed local collections.** Import Review groups skills from the same local Git worktree into one repository card while keeping each child independently selectable, deployable, and usage-tracked. GitHub multi-skill preview/apply is implemented for v0.9.0 and remains unreleased pending v0.9.0 release qualification; collection-level update/rollback remains future work.
+- **Git-backed local and GitHub collections.** Import Review groups skills from the same local Git worktree or reviewed GitHub repository snapshot into one collection card while keeping each child independently selectable, deployable, and usage-tracked. GitHub preview/apply fetches one bounded ref, shows the resolved SHA and child status, and never deploys automatically. Collection-level update/rollback remains planned for a later v0.9.x release.
 - **Installed-source provenance.** Copied skills with valid v3 installer lockfile entries can appear under one normalized GitHub source collection even without a local Git worktree. This is display-only provenance: it does not invent a branch/HEAD or enable updates, and each child keeps the normal reviewed import path.
 - **Compatibility before deployment.** Rust-owned runtime profiles identify each workspace and report preserved frontmatter warnings or hard blockers before a confirmed symlink deployment.
 - **Signed macOS distribution.** Install a notarized DMG or Homebrew cask and apply signed app updates only after confirmation.
@@ -61,7 +61,7 @@ History separates Calls, history references, and management operations. The stan
 
 ![SkillBox GitHub install review](docs/screenshots/skillbox-github-install-review.png)
 
-GitHub installs and workspace deployments use a preview-first flow. SkillBox shows incoming file changes and runtime-profile compatibility before writing managed state; blocked targets cannot proceed, and warnings require explicit confirmation.
+GitHub installs and workspace deployments use a preview-first flow. A multi-skill GitHub review shows one repository/ref, one resolved SHA, and explicit child selection before any managed write; nothing deploys automatically. SkillBox shows incoming file changes and runtime-profile compatibility before writing managed state; blocked targets cannot proceed, and warnings require explicit confirmation. Collection-level update/rollback is not included yet.
 
 ## What SkillBox Manages
 

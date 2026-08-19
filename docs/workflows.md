@@ -188,9 +188,9 @@ GitHub repository/root URL 的多 skill workflow 由 Rust core 承载：
   不会猜测带 slash 的 ref，也不会通过猜测路径扩大权限；请改用明确 SHA、无 slash
   ref，或包含已知 child skill-root 的 unambiguous URL。
 
-Phase C 已按 v0.9.0 实现，但仍未发布，待 v0.9.0 release qualification 完成后才可
-描述为 shipped。Phase D 的 collection-level update/rollback
-仍未实现。Collection operations 不运行 hooks、filters、submodules、repository
+Phase C 已随 v0.9.0 发布：GitHub multi-skill collection preview/apply 使用一次有界
+fetch/check、显式 child 选择和一个 reviewed resolved SHA。Phase D 的
+collection-level update/rollback 仍未实现。Collection operations 不运行 hooks、filters、submodules、repository
 scripts、custom helpers 或 arbitrary shell。
 
 完成验证：
@@ -1157,7 +1157,7 @@ returns structured JSON while the desktop provides interactive review.
 | User-skills Git status and outbound commit/push | Full | Full | Desktop adds selected-file diff review. Existing push defaults and `push_failed` semantics remain unchanged. |
 | Reviewed inbound user-skills fast-forward (v0.7 shipped) | Full | Full | Both use Check -> Preview -> Apply with the same Rust validation and stale-preview contract. Desktop adds visual repository/skill/deployment review and conflict diagnostics. Neither interface auto-merges, rebases, resets, stashes, or resolves divergence. |
 | Local Git Skill Collections Phase A+B | Full | Full | `collection-preview`/`collection-apply` and `collections` expose Rust-owned local worktree discovery, selected-child apply, and persisted provenance; shipped in v0.8.0. |
-| GitHub Skill Collection Phase C | Full | Full | The unreleased `v0.9.0` implementation of `github-collection-preview`/`github-collection-apply` performs one fetch per preview/apply, explicit child selection, stale SHA/tree checks, and per-skill import. Collection-level update/rollback remains unsupported. |
+| GitHub Skill Collection Phase C | Full | Full | The shipped `v0.9.0` `github-collection-preview`/`github-collection-apply` performs one fetch per preview/apply, explicit child selection, stale SHA/tree checks, and per-skill import. Collection-level update/rollback remains unsupported Phase D work. |
 | Workspaces | Partial | Full | CLI lists/scans/adds/forgets exact roots. Desktop also previews a project directory, initializes one selected supported root, and offers the native folder picker. |
 | Usage rankings and local history sync | Full | Full | Both use the same confirmed/inferred/reference evidence model and provider backfills. |
 | Aggregate usage diagnostics | Full | Limited | CLI `usage-audit` is the automation-oriented aggregate report. Desktop exposes the relevant coverage summary and disclosure, not the complete diagnostic JSON. |

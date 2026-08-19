@@ -3,9 +3,9 @@
 ## Status
 
 Accepted for the v0.8.0/v0.9.x collection milestone. Phase A+B shipped in
-v0.8.0. The one-fetch GitHub multi-skill preview/apply boundary is implemented
-for v0.9.0 and remains unreleased pending v0.9.0 release qualification. Collection-level
-update/rollback remains planned Phase D work for a later v0.9.x release.
+v0.8.0. The one-fetch GitHub multi-skill preview/apply boundary shipped in
+v0.9.0. Collection-level update/rollback remains planned Phase D work for a
+later v0.9.x release.
 
 ## Context
 

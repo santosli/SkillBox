@@ -55,6 +55,118 @@ export const previewImportCandidates = [
   }
 ];
 
+const previewGithubCollectionGroups = [
+  {
+    id: 'skill-release-notes',
+    name: 'release-notes',
+    description: 'Draft release notes from reviewed repository changes.',
+    usageCount: 8,
+    requiresReview: false,
+    selectedVariantId: 'variant-release-notes',
+    variants: [{
+      id: 'variant-release-notes',
+      requiresTypeReview: false,
+      selectedType: 'remote',
+      suggestedTypes: ['remote'],
+      candidate: {
+        name: 'release-notes',
+        description: 'Draft release notes from reviewed repository changes.',
+        sourcePath: 'skills/release-notes',
+        sourceRoot: 'github://skillbox-labs/skillbox-workflows',
+        contentHash: 'collection-release-notes-01',
+        suggestedType: 'remote',
+        skillType: 'remote',
+        importOrigin: 'github-collection',
+        isSelected: true,
+        conflict: null
+      },
+      locations: []
+    }]
+  },
+  {
+    id: 'skill-design-audit',
+    name: 'design-audit',
+    description: 'Review interface changes against a product design system.',
+    usageCount: 4,
+    requiresReview: false,
+    selectedVariantId: 'variant-design-audit',
+    variants: [{
+      id: 'variant-design-audit',
+      requiresTypeReview: false,
+      selectedType: 'user',
+      suggestedTypes: ['user'],
+      candidate: {
+        name: 'design-audit',
+        description: 'Review interface changes against a product design system.',
+        sourcePath: 'skills/design-audit',
+        sourceRoot: 'github://skillbox-labs/skillbox-workflows',
+        contentHash: 'collection-design-audit-01',
+        suggestedType: 'user',
+        skillType: 'user',
+        importOrigin: 'github-collection',
+        isSelected: false,
+        conflict: null
+      },
+      locations: []
+    }]
+  },
+  {
+    id: 'skill-prompt-linter',
+    name: 'prompt-linter',
+    description: 'Check prompt files for unsafe or ambiguous instructions.',
+    usageCount: 2,
+    requiresReview: false,
+    selectedVariantId: 'variant-prompt-linter',
+    variants: [{
+      id: 'variant-prompt-linter',
+      requiresTypeReview: false,
+      selectedType: null,
+      suggestedTypes: ['remote'],
+      candidate: {
+        name: 'prompt-linter',
+        description: 'Check prompt files for unsafe or ambiguous instructions.',
+        sourcePath: 'skills/prompt-linter',
+        sourceRoot: 'github://skillbox-labs/skillbox-workflows',
+        contentHash: 'collection-prompt-linter-01',
+        suggestedType: 'remote',
+        skillType: 'remote',
+        importOrigin: 'github-collection',
+        isSelected: false,
+        conflict: 'A managed skill with this name has a different reviewed source.'
+      },
+      locations: []
+    }]
+  },
+  {
+    id: 'skill-unsafe-helper',
+    name: 'unsafe-helper',
+    description: 'Repository child rejected by the untrusted-tree validator.',
+    usageCount: 0,
+    requiresReview: false,
+    selectedVariantId: 'variant-unsafe-helper',
+    variants: [{
+      id: 'variant-unsafe-helper',
+      requiresTypeReview: false,
+      selectedType: null,
+      suggestedTypes: [],
+      candidate: {
+        name: 'unsafe-helper',
+        description: 'Repository child rejected by the untrusted-tree validator.',
+        sourcePath: 'skills/unsafe-helper',
+        sourceRoot: 'github://skillbox-labs/skillbox-workflows',
+        contentHash: 'collection-unsafe-helper-01',
+        suggestedType: null,
+        skillType: null,
+        importOrigin: 'github-collection',
+        importStatus: 'invalid',
+        isSelected: false,
+        conflict: 'Invalid child: unsafe file entry.'
+      },
+      locations: []
+    }]
+  }
+];
+
 export const previewImportCandidateGroups = [
   {
     id: 'skill-general-video',
@@ -130,7 +242,8 @@ export const previewImportCandidateGroups = [
         isSymlink: false
       }]
     }]
-  }))
+  })),
+  ...previewGithubCollectionGroups
 ];
 
 export const previewImportCollections = [
@@ -138,12 +251,15 @@ export const previewImportCollections = [
     id: 'collection-skillbox-workflows',
     previewId: 'preview-skillbox-workflows-v1',
     displayName: 'skillbox-workflows',
-    canonicalWorktreeRoot: '~/Projects/skillbox-workflows',
-    canonicalRepositoryId: '~/Projects/skillbox-workflows/.git',
-    originUrl: 'https://github.com/example/skillbox-workflows.git',
+    sourceKind: 'github_remote',
+    sourceUrl: 'https://github.com/skillbox-labs/skillbox-workflows.git',
+    requestedReference: 'main',
+    canonicalWorktreeRoot: null,
+    canonicalRepositoryId: null,
+    originUrl: 'https://github.com/skillbox-labs/skillbox-workflows.git',
     branch: 'main',
     detached: false,
-    reviewedHeadSha: 'a1b2c3d4e5f6a7b8c9d0',
+    reviewedHeadSha: 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0',
     children: [
       {
         id: 'collection-child-general-video',
@@ -166,6 +282,90 @@ export const previewImportCollections = [
           ...previewImportCandidateGroups[0].variants[0].locations
         ],
         unlinkedLocations: []
+      },
+      {
+        id: 'collection-child-release-notes',
+        groupId: 'skill-release-notes',
+        variantId: 'variant-release-notes',
+        name: 'release-notes',
+        relativePath: 'skills/release-notes',
+        sourcePath: 'skills/release-notes',
+        realPath: 'skills/release-notes',
+        contentHash: 'collection-release-notes-01',
+        snapshotHash: 'snapshot-skillbox-release-notes',
+        importStatus: 'importable',
+        conflict: null,
+        usageCount: 8,
+        suggestedTypes: ['remote'],
+        requiresTypeReview: false,
+        selectedType: 'remote',
+        isSelected: true,
+        locations: [],
+        unlinkedLocations: [],
+        diff: 'A skills/release-notes/SKILL.md\n+ A reviewed release workflow\n+ A bounded source note\nM README.md'
+      },
+      {
+        id: 'collection-child-design-audit',
+        groupId: 'skill-design-audit',
+        variantId: 'variant-design-audit',
+        name: 'design-audit',
+        relativePath: 'skills/design-audit',
+        sourcePath: 'skills/design-audit',
+        realPath: 'skills/design-audit',
+        contentHash: 'collection-design-audit-01',
+        snapshotHash: 'snapshot-skillbox-design-audit',
+        importStatus: 'importable',
+        conflict: null,
+        usageCount: 4,
+        suggestedTypes: ['user'],
+        requiresTypeReview: false,
+        selectedType: 'user',
+        isSelected: false,
+        locations: [],
+        unlinkedLocations: [],
+        diff: 'A skills/design-audit/SKILL.md\n+ A design review checklist'
+      },
+      {
+        id: 'collection-child-prompt-linter',
+        groupId: 'skill-prompt-linter',
+        variantId: 'variant-prompt-linter',
+        name: 'prompt-linter',
+        relativePath: 'skills/prompt-linter',
+        sourcePath: 'skills/prompt-linter',
+        realPath: 'skills/prompt-linter',
+        contentHash: 'collection-prompt-linter-01',
+        snapshotHash: 'snapshot-skillbox-prompt-linter',
+        importStatus: 'importable',
+        conflict: 'A managed skill with this name has a different reviewed source.',
+        usageCount: 2,
+        suggestedTypes: ['remote'],
+        requiresTypeReview: false,
+        selectedType: null,
+        isSelected: false,
+        locations: [],
+        unlinkedLocations: [],
+        diff: 'M skills/prompt-linter/SKILL.md\n+ Managed version differs from reviewed source\n- Existing local rule'
+      },
+      {
+        id: 'collection-child-unsafe-helper',
+        groupId: 'skill-unsafe-helper',
+        variantId: 'variant-unsafe-helper',
+        name: 'unsafe-helper',
+        relativePath: 'skills/unsafe-helper',
+        sourcePath: 'skills/unsafe-helper',
+        realPath: 'skills/unsafe-helper',
+        contentHash: 'collection-unsafe-helper-01',
+        snapshotHash: null,
+        importStatus: 'invalid',
+        conflict: 'Invalid child: unsafe file entry.',
+        usageCount: 0,
+        suggestedTypes: [],
+        requiresTypeReview: false,
+        selectedType: null,
+        isSelected: false,
+        locations: [],
+        unlinkedLocations: [],
+        diff: null
       }
     ],
     errors: []

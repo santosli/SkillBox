@@ -1,8 +1,8 @@
 # SkillBox Intro Promo
 
-Source for the 30-second horizontal SkillBox promotional video refreshed for the v0.6.1 product surface.
+Source for the 30-second horizontal SkillBox promotional video refreshed for the v0.9.0 product surface.
 
-The composition is a HyperFrames HTML artifact. It introduces one local home for agent skills, runtime-profile-aware Workspaces, reviewed GitHub installs and deployment compatibility, evidence-aware Calls with separate History references, and the GitHub CTA.
+The composition is a HyperFrames HTML artifact. It introduces one local home for agent skills, runtime-profile-aware Workspaces, reviewed GitHub collection installs with one repository SHA and explicit child selection, evidence-aware Calls with separate History references, and the GitHub CTA. Collection-level update/rollback remains a later Phase D capability and is not implied by the video.
 
 All product screenshots come from the deterministic browser preview fixture. They contain generic paths, skill names, and counts rather than local user data.
 
@@ -17,14 +17,14 @@ Open the Studio URL reported by the command for the `skillbox-intro` project.
 ## Render
 
 ```sh
-npx hyperframes render --output /tmp/skillbox-promo-v061-render.mp4 --quality high
-ffmpeg -i /tmp/skillbox-promo-v061-render.mp4 \
+npx hyperframes render --output /tmp/skillbox-promo-v090-render.mp4 --quality high
+ffmpeg -i /tmp/skillbox-promo-v090-render.mp4 \
   -c:v copy -af loudnorm=I=-16:TP=-1:LRA=11 \
   -c:a aac -b:a 192k -ar 48000 -t 30 \
-  /tmp/skillbox-promo-v061.mp4
+  /tmp/skillbox-promo-v090.mp4
 ```
 
-The first command renders the deterministic composition. The second normalizes the public audio master and writes `/tmp/skillbox-promo-v061.mp4`.
+The first command renders the deterministic composition. The second normalizes the public audio master and writes `/tmp/skillbox-promo-v090.mp4`.
 
 The public README uses these committed media files from this folder:
 
@@ -41,10 +41,10 @@ Current verification commands:
 npx hyperframes lint
 npx hyperframes validate
 npx hyperframes inspect --json
-ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height,r_frame_rate,duration -of default=noprint_wrappers=1 /tmp/skillbox-promo-v061.mp4
-ffprobe -v error -select_streams a:0 -show_entries stream=codec_name,channels,sample_rate,duration -of default=noprint_wrappers=1 /tmp/skillbox-promo-v061.mp4
-ffmpeg -hide_banner -nostats -i /tmp/skillbox-promo-v061.mp4 -af loudnorm=I=-16:TP=-1:LRA=11:print_format=summary -f null -
-ffmpeg -hide_banner -nostats -i /tmp/skillbox-promo-v061.mp4 -af silencedetect=noise=-45dB:d=0.5 -f null -
+ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height,r_frame_rate,duration -of default=noprint_wrappers=1 /tmp/skillbox-promo-v090.mp4
+ffprobe -v error -select_streams a:0 -show_entries stream=codec_name,channels,sample_rate,duration -of default=noprint_wrappers=1 /tmp/skillbox-promo-v090.mp4
+ffmpeg -hide_banner -nostats -i /tmp/skillbox-promo-v090.mp4 -af loudnorm=I=-16:TP=-1:LRA=11:print_format=summary -f null -
+ffmpeg -hide_banner -nostats -i /tmp/skillbox-promo-v090.mp4 -af silencedetect=noise=-45dB:d=0.5 -f null -
 ```
 
 Known accepted lint warning:

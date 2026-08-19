@@ -142,6 +142,14 @@ expect(
     && /assets\/skillbox-github-install-review\.png/.test(html)
 );
 expect(
+  "homepage explains GitHub collection review boundary",
+  /one bounded repository ref/.test(html)
+    && /resolved SHA/.test(html)
+    && /Select eligible child skills explicitly/.test(html)
+    && /nothing deploys automatically/.test(html)
+    && /collection-level\s+update and rollback remain Phase D work/.test(html)
+);
+expect(
   "homepage explains evidence-aware local metrics",
   /locally confirmed and defensible inferred invocations/.test(html)
     && /History references stay separate/.test(html)

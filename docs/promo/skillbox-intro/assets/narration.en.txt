@@ -1,7 +1,7 @@
 SkillBox gives agent skills one local home.
 Manage SKILL dot M D libraries across Codex, Claude Code, Cursor, and project roots.
-Preview GitHub installs and runtime compatibility before anything is written.
-Calls use confirmed and high-confidence local evidence.
-History references stay separate.
+Review one GitHub repository snapshot, its resolved S H A, and child skills before anything is written.
+Select only the skills you want; nothing deploys automatically.
+Calls use confirmed and defensible inferred local evidence. History references stay separate.
 Keep your source of truth local, and every deployment intentional.
 Get SkillBox on GitHub.

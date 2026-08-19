@@ -39,7 +39,8 @@
 - Implemented SQLite-backed workspace registry for global and project-local skills roots, including `.codex/skills`, `.agents/skills`, `.claude/skills`, scan-time auto registration, imported skill counts, preview-confirmed single-root project initialization, manual add/forget, Rust CLI compatibility commands, Tauri commands, and a searchable desktop Workspaces page with type filters and per-workspace skill review/import.
 - Implemented import records and import revert in Rust core, Rust CLI, Tauri commands, and Skill Detail UI, including backup restoration, conservative legacy reconciliation, multi-workspace blocking, and warning/danger confirmation states.
 - Implemented Rust-owned Import Review groups with stable content/status variant identities, full-snapshot-equivalent locations, location-level User/Remote advice with explicit mixed-suggestion confirmation, explicit selection for materially different same-name variants, group-level Calls/search/tab counts, and one-primary-only import enforcement that preserves existing revert guarantees.
-- Implemented v0.8.0 Skill Collections Phase A+B: Rust discovers the nearest safe Git worktree for local Import Review, groups repository children with canonical worktree/HEAD identity, keeps external copies unlinked, and persists reviewed collection/member provenance after a stale-checked child import. GitHub multi-skill fetch and collection-level update/rollback are not part of the published v0.8.0 release.
+- Implemented v0.8.0 Skill Collections Phase A+B: Rust discovers the nearest safe Git worktree for local Import Review, groups repository children with canonical worktree/HEAD identity, keeps external copies unlinked, and persists reviewed collection/member provenance after a stale-checked child import.
+- Shipped GitHub Skill Collections Phase C in v0.9.0: one bounded fetch/check previews a complete repository/tree ref, exposes eligible and blocked children with one reviewed resolved SHA, and applies only explicitly selected children with stale and recovery protections. Collection-level update/rollback remains planned Phase D work for a later v0.9.x release.
 - Added a bounded installer-lockfile fallback for copied skills: valid v3 GitHub provenance can form a display-only `installed_source` collection after filesystem scanning, while live Git identity wins and selected children retain the ordinary per-skill import/apply contract.
 - Added signed macOS app update checks and user-confirmed install/restart through the Tauri updater plugin, plus release workflow assets for updater archives, signatures, and `latest.json`.
 - Added daily macOS updater metadata checks with a SQLite-backed successful-result cache, a sidebar Update reminder, one-click metadata recheck plus signed install/restart, and retry-safe pending updates without automatic downloads.
@@ -55,11 +56,11 @@
 ## Next Implementation Targets
 
 The `0.6` implementation and release qualification are complete. SkillBox
-`v0.8.0` is the current shipped release, including reviewed inbound sync,
-History query/layout fixes, and Skill Collections Phase A+B. The current
-`v0.9.0` work follows [issue #46](https://github.com/santosli/SkillBox/issues/46):
-Phase C is implemented for `v0.9.0` and remains unreleased pending `v0.9.0`
-release qualification; Phase D remains planned for a later `v0.9.x` release.
+`v0.9.0` is the current shipped release, including reviewed inbound sync,
+History query/layout fixes, Skill Collections Phase A+B, and the one-fetch
+GitHub collection preview/apply workflow. The remaining scope in [issue #46](https://github.com/santosli/SkillBox/issues/46)
+is Phase D: collection-level update/rollback, planned for a later `v0.9.x`
+release.
 The next milestones follow [the versioned evolution path](roadmap.md#versioned-evolution-path):
 
 ### 0.7 — Safe Sync, Deployment, And Recovery
@@ -88,16 +89,15 @@ The next milestones follow [the versioned evolution path](roadmap.md#versioned-e
 ### 0.9.x — Git-backed Skill Collections
 
 - [Git-backed Skill Collections](https://github.com/santosli/SkillBox/issues/46)
-  are the active v0.9.0 milestone. Phase A+B shipped in v0.8.0: local repository
-  grouping and schema-backed collection/member relationships are available in
-  Import Review. A collection records canonical worktree/repository identity,
-  reviewed HEAD, and child-relative provenance; child skills remain independent
-  for selection, import, deployment, Calls, and history.
-- Phase C, one-fetch GitHub multi-skill preview/apply, is implemented for
-  v0.9.0 and remains unreleased pending v0.9.0 release qualification. It is
-  not shipped yet.
-  Phase D, commit-consistent collection update/rollback, remains planned for a
-  later v0.9.x release.
+  are the active v0.9.x hardening track. Phase A+B shipped in v0.8.0 and Phase
+  C shipped in v0.9.0: local repository grouping, schema-backed
+  collection/member relationships, and one-fetch GitHub multi-skill
+  preview/apply are available in Import Review. A collection records canonical
+  worktree/repository identity, reviewed HEAD/SHA, and child-relative
+  provenance; child skills remain independent for selection, import, deployment,
+  Calls, and history.
+- Phase D, commit-consistent collection update/rollback, remains planned for a
+  later v0.9.x release and is not shipped.
 - Collection scans must remain read-only. Apply must revalidate repository
   identity, HEAD/ref, and tree snapshot; execute no hooks, submodules, filters,
   scripts, or arbitrary shell; and preserve existing path, overwrite,
