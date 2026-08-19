@@ -211,7 +211,7 @@ Code、Cursor；它只决定 discovery/recommendation 顺序，不授权自动�
 ### Local Git Skill Collections
 
 Phase A+B 的 Collection model 覆盖本地 Git discovery、Import Review
-grouping 和成功导入后的 provenance persistence。面向 v0.9.0 的 Phase C
+grouping 和成功导入后的 provenance persistence。v0.9.0 的 Phase C
 实现扩展同一
 model 支持 GitHub repository/root 的一次 fetch collection preview/apply。Rust `GitService` 返回
 canonical worktree root、Git common directory、branch/detached state、HEAD

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>SkillBox - Local AI Agent Skill Manager for macOS</title>
-    <meta name="description" content="SkillBox is a local-first macOS app for managing Agents, Codex, Claude Code, Cursor, and project-local SKILL.md roots with reviewed GitHub installs and runtime compatibility previews.">
+    <meta name="description" content="SkillBox is a local-first macOS app for managing Agents, Codex, Claude Code, Cursor, and project-local SKILL.md roots with one-fetch GitHub collection reviews, explicit child selection, and runtime compatibility previews.">
     <meta name="robots" content="index, follow">
     <link rel="canonical" href="https://santosli.github.io/SkillBox/">
     <meta name="theme-color" content="#08111f">
@@ -13,7 +13,7 @@
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="SkillBox">
     <meta property="og:title" content="SkillBox - Local AI Agent Skill Manager for macOS">
-    <meta property="og:description" content="Manage SKILL.md libraries locally, review GitHub installs, check runtime compatibility, and separate Calls from History references.">
+    <meta property="og:description" content="Manage SKILL.md libraries locally, review one-fetch GitHub collections, check runtime compatibility, and separate Calls from History references.">
     <meta property="og:url" content="https://santosli.github.io/SkillBox/">
     <meta property="og:image" content="https://santosli.github.io/SkillBox/assets/skillbox-promo-poster.jpg">
     <meta property="og:image:width" content="1920">
@@ -117,7 +117,7 @@
           <p class="hero-value">Local skill manager for AI agents.</p>
           <p class="hero-support">
             Keep Agents, Codex, Claude Code, Cursor, and project-local <code>SKILL.md</code> roots organized from one managed store.
-            Review GitHub installs and runtime compatibility before SkillBox writes or deploys anything.
+            Review one GitHub repository snapshot, resolved SHA, and selected child skills before SkillBox writes or deploys anything.
           </p>
           <div class="hero-actions" aria-label="Primary actions">
             <a class="button primary" href="https://github.com/santosli/SkillBox/releases/latest">Download for macOS</a>
@@ -148,7 +148,7 @@
           <h2 id="demo-title">See the workflow before installing.</h2>
           <p>
             The demo follows one managed library through runtime-aware workspaces, reviewed GitHub installs,
-            compatibility checks, evidence-aware Calls, and transparent local coverage.
+            one-SHA child selection, compatibility checks, evidence-aware Calls, and transparent local coverage.
           </p>
         </div>
         <figure class="video-frame">
@@ -175,14 +175,15 @@
 
         <article class="feature-card reversed">
           <div class="feature-copy">
-            <p class="eyebrow">Review</p>
-            <h2>Review before write. Check compatibility before deploy.</h2>
+            <p class="eyebrow">GitHub collections</p>
+            <h2>Review one snapshot. Choose only the children you need.</h2>
             <p>
-              GitHub installs show incoming file diffs. Runtime profiles explain compatible targets,
-              preserved warnings, and blockers before anything is written.
+              SkillBox fetches one bounded repository ref, shows the resolved SHA, child status, and runtime
+              compatibility before it writes. Select eligible child skills explicitly: nothing deploys automatically,
+              and collection-level update and rollback remain Phase D work.
             </p>
           </div>
-          <img src="assets/skillbox-github-install-review.png" alt="SkillBox GitHub install review showing file changes and a runtime compatibility warning">
+          <img src="assets/skillbox-github-install-review.png" alt="SkillBox GitHub collection review showing one repository SHA, child status, compatibility, and explicit child selection">
         </article>
 
         <article class="feature-card">
@@ -245,6 +246,10 @@
             <strong>No silent overwrite</strong>
             <span>Existing runtime content is reviewed instead of being replaced behind your back.</span>
           </div>
+          <div>
+            <strong>One reviewed SHA</strong>
+            <span>GitHub collection children share the reviewed snapshot; collection update and rollback are not automatic.</span>
+          </div>
         </div>
       </section>
 
@@ -283,6 +288,14 @@
             <p>
               GitHub-backed remote skills stay linked to their source and version history. SkillBox previews remote
               diffs before applying changes, so imports and updates can be reviewed before they touch runtime folders.
+            </p>
+          </article>
+          <article class="faq-item">
+            <h3>How does a GitHub skill collection work?</h3>
+            <p>
+              A repository or tree ref is fetched once and reviewed as one snapshot. You select eligible child
+              <code>SKILL.md</code> directories individually or with Select all; each selected child remains an
+              independent managed skill. Collection-level update and rollback are not included yet.
             </p>
           </article>
           <article class="faq-item">

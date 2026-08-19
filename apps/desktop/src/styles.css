@@ -6301,6 +6301,15 @@ dd {
   min-width: 0;
 }
 
+.collectionReviewIdentity small {
+  display: block;
+  max-width: 100%;
+  margin-top: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .collectionReviewIdentity code {
   display: block;
   max-width: 100%;

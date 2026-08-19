@@ -6,7 +6,7 @@ more real-world use.
 
 ## Current Focus: 0.9.x
 
-SkillBox `v0.8.0` is shipped. The 0.6 line made `SKILL.md` deployment targets
+SkillBox `v0.9.0` is shipped. The 0.6 line made `SKILL.md` deployment targets
 explicit and portable without moving runtime knowledge into React:
 
 - a versioned Rust runtime-profile registry for Agents, Codex, Claude Code,
@@ -22,21 +22,20 @@ and notarized `v0.7.1` distribution. The current release identity and
 distribution invariants remain documented in `docs/release.md`.
 
 Copy-snapshot deployment and broader recovery hardening remain planned product
-work. Git-backed Skill Collections are the active `v0.9.0` milestone; Phase A+B
-shipped in `v0.8.0`, and the Phase C implementation is complete for `v0.9.0`
-and remains unreleased pending `v0.9.0` release qualification. Collection-level update/rollback
-remains planned Phase D work for a later `v0.9.x` release.
+work. Git-backed Skill Collections are the active `v0.9.x` hardening track;
+Phase A+B shipped in `v0.8.0` and one-fetch Phase C shipped in `v0.9.0`.
+Collection-level update/rollback remains planned Phase D work for a later
+`v0.9.x` release.
 
 ## Near-Term Priorities
 
 These are the next areas where focused contributions are most useful:
 
-- **Git-backed Skill Collections (v0.9.0).** Rust now treats one
+- **Git-backed Skill Collections (v0.9.x).** Rust now treats one
   canonical Git repository/worktree and reviewed SHA as a local collection
   source while keeping child `SKILL.md` directories independently selectable
-  and deployable. Phase C's one-fetch GitHub preview/apply is implemented for
-  `v0.9.0` and remains unreleased pending `v0.9.0` release qualification; collection
-  update/rollback remains open. Track
+  and deployable. Phase C's one-fetch GitHub preview/apply shipped in
+  `v0.9.0`; collection update/rollback remains open as Phase D. Track
   the remaining scope in [GitHub issue #46](https://github.com/santosli/SkillBox/issues/46).
 - **Deployment portability.** Add copy-snapshot deployment as an explicit
   alternative to the current compatibility-checked symlink path.
@@ -167,15 +166,16 @@ explicitly selected child snapshots while retaining collection provenance.
 Runtime deployment, Calls, and History remain per-skill; collection-level
 update/rollback remains Phase D.
 
-Delivery is phased across the `v0.8.0` and `v0.9.x` releases:
+Delivery was phased across the `v0.8.0` and `v0.9.0` releases; Phase D remains
+planned for later `v0.9.x` hardening:
 
 1. **Implemented:** Repository detection and local Import Review grouping.
 2. **Implemented:** Collection/source persistence and child relationships.
-3. **Implemented for `v0.9.0` / awaiting qualification:** GitHub multi-skill
-   install preview/apply with one repository fetch. It is not part of the
-   published `v0.8.0` release; it is implemented on main and remains
-   unreleased pending `v0.9.0` release qualification.
-4. Collection-level update/rollback and UI detail.
+3. **Shipped in `v0.9.0`:** GitHub multi-skill install preview/apply with one
+   repository fetch, explicit child selection, stale source/tree checks, and
+   compensatable recovery evidence.
+4. Collection-level update/rollback and deeper collection UI detail remain
+   planned Phase D work.
 
 Phase 4 is not implemented and must not be described as shipped.
 

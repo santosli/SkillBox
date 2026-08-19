@@ -2,7 +2,7 @@
 
 ## Style Prompt
 
-A 30-second horizontal product-launch short for SkillBox: dark technical, calm but confident, local-first, and security-aware. The visual language should feel like a precise desktop tool for agent builders rather than a generic SaaS landing page. Product screenshots are the hero assets; abstract motion supports the story without inventing unsupported metrics.
+A 30-second horizontal product-launch short for SkillBox v0.9.0: dark technical, calm but confident, local-first, and security-aware. The visual language should feel like a precise desktop tool for agent builders rather than a generic SaaS landing page. Product screenshots are the hero assets; abstract motion supports the story without inventing unsupported metrics. The GitHub beat must show one reviewed repository snapshot, one resolved SHA, explicit child selection, and no automatic deployment. Collection-level update/rollback is Phase D and must not be implied.
 
 ## Canvas
 
@@ -43,3 +43,11 @@ A 30-second horizontal product-launch short for SkillBox: dark technical, calm b
 - No unreadably tiny UI labels.
 - No jump cuts.
 - No crypto/neon overload.
+
+## v0.9 Narrative Beats
+
+- 0-4s: one local home for agent skills.
+- 4-10s: discover and manage skills across Codex, Claude Code, Cursor, and project roots.
+- 10-16s: review one GitHub repository/ref, resolved SHA, child status, and explicit selection before write.
+- 16-24s: Calls use confirmed plus defensible inferred local evidence; History references stay separate and local coverage is transparent.
+- 24-30s: local-first trust and the GitHub CTA. Do not suggest collection-level update/rollback is available.
