@@ -19,8 +19,12 @@ terminology, or layout change affects the README or homepage story.
 ## Update References
 
 - Check every image reference in `README.md` and `README.zh-CN.md`.
-- Keep homepage assets under `docs/promo/skillbox-intro/assets/` aligned with
-  the same current product states.
+- Keep canonical README and homepage product screenshots in this directory;
+  `site/build.mjs` copies them into the built site with version-neutral names.
+- Keep promo assets under `docs/promo/skillbox-intro/assets/` internally aligned
+  with the committed promo composition. Refresh them only as part of an
+  intentional promo update; a README/homepage screenshot refresh does not by
+  itself require changing the video source.
 - Refresh the existing promo composition only when the changed UI or message is
   visible in the public video; do not create a second unrelated promo source.
 - Remove obsolete duplicate assets only after confirming no README, site,

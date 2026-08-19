@@ -26,8 +26,8 @@
   Check remote -> Review incoming changes -> Apply fast-forward, with separate
   worktree/relation state, stale-preview rejection, untrusted-tree validation,
   deployed deletion/rename blockers, backup refs, and independent Git/SQLite
-  recovery auditing. This shipped in `v0.7.0` and is included in the current
-  `v0.7.1` release.
+  recovery auditing. This shipped in `v0.7.0` and remains included in later
+  releases.
 - Shipped the v0.7.1 History filter/layout patch: All, Calls, References, and
   Operations stay contained in the segmented control, and selected kinds query
   Rust directly so bounded mixed-history results do not hide older references.
@@ -41,6 +41,7 @@
 - Implemented Rust-owned Import Review groups with stable content/status variant identities, full-snapshot-equivalent locations, location-level User/Remote advice with explicit mixed-suggestion confirmation, explicit selection for materially different same-name variants, group-level Calls/search/tab counts, and one-primary-only import enforcement that preserves existing revert guarantees.
 - Implemented v0.8.0 Skill Collections Phase A+B: Rust discovers the nearest safe Git worktree for local Import Review, groups repository children with canonical worktree/HEAD identity, keeps external copies unlinked, and persists reviewed collection/member provenance after a stale-checked child import.
 - Shipped GitHub Skill Collections Phase C in v0.9.0: one bounded fetch/check previews a complete repository/tree ref, exposes eligible and blocked children with one reviewed resolved SHA, and applies only explicitly selected children with stale and recovery protections. Collection-level update/rollback remains planned Phase D work for a later v0.9.x release.
+- Current main adds post-v0.9.0 Import Review refinements: one collection-header User/Remote decision resolves all actionable pending children, and one collection checkbox selects or clears the complete eligible set. Unresolved or mixed type state remains ineligible until explicitly resolved; these refinements are not part of the published v0.9.0 binary.
 - Added a bounded installer-lockfile fallback for copied skills: valid v3 GitHub provenance can form a display-only `installed_source` collection after filesystem scanning, while live Git identity wins and selected children retain the ordinary per-skill import/apply contract.
 - Added signed macOS app update checks and user-confirmed install/restart through the Tauri updater plugin, plus release workflow assets for updater archives, signatures, and `latest.json`.
 - Added daily macOS updater metadata checks with a SQLite-backed successful-result cache, a sidebar Update reminder, one-click metadata recheck plus signed install/restart, and retry-safe pending updates without automatic downloads.

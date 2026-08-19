@@ -16,13 +16,13 @@
 
 SkillBox 是一个 local-first 的 macOS 桌面应用，带 Rust core/CLI，用来管理基于 `SKILL.md` 的 skill 与能力包，同时避免把任一受支持的 agent runtime 当作唯一真相源。
 
-当前版本：`v0.9.0`。SkillBox 现在已经可以用于本地 skill 管理，但仍是早期软件。重要 skills 请保留备份，并在应用每一次文件系统变更前先 review。GitHub 多 skill collection preview/apply 已随 v0.9.0 发布；collection 级更新/回滚仍计划在后续 v0.9.x 实现。
+当前版本：`v0.9.0`。SkillBox 现在已经可以用于本地 skill 管理，但仍是早期软件。重要 skills 请保留备份，并在应用每一次文件系统变更前先 review。GitHub 多 skill collection preview/apply 已随 v0.9.0 发布；collection 级更新/回滚仍计划在后续 v0.9.x 实现。下方展示的 collection header 统一类型与全选控件，是 v0.9.0 发布后已合入 current main 的改进，不属于已发布的 v0.9.0 binary。
 
 ## 宣传视频
 
 [![观看 SkillBox 宣传视频](docs/promo/skillbox-intro/skillbox-promo-poster.jpg)](docs/promo/skillbox-intro/skillbox-promo.mp4)
 
-30 秒快速了解 SkillBox：runtime-aware workspaces、写入前 review、按证据分类的 Calls、透明 coverage 和 local-first 部署。
+这段 30 秒视频展示 v0.9.0 的 SkillBox：runtime-aware workspaces、写入前 review、按证据分类的 Calls、透明 coverage 和 local-first 部署。Promo 是已发布版本素材；current-main 的 collection header 改进见下方产品截图。
 
 ## 为什么
 
@@ -32,8 +32,8 @@ SkillBox 是一个 local-first 的 macOS 桌面应用，带 Rust core/CLI，用�
 - **双向 Git 变更都先审查。** 本地 user-skill diff 会在 commit/push 前 review。已发布的 v0.7 增加显式的 Check remote -> Review incoming changes -> Apply fast-forward 入站流程；远端历史分叉仍在 SkillBox 外按正常 Git 冲突处理。
 - **按证据分类的 Calls、引用与操作历史。** Calls 只统计本机 confirmed execution 与可辩护的 structured invocation，低信号 history references 单独展示，并且不保存完整聊天 transcript。
 - **安全的存储与部署默认值。** 使用顺序 SQLite migrations、恢复备份、完整性检查和 ownership-checked symlink，不静默覆盖 runtime 内容。
-- **Git-backed 本地与 GitHub Skill Collections。** Import Review 会把同一 Git worktree 或经 review 的 GitHub repository snapshot 中的 skills 聚合为一个 collection 卡片，同时保留每个 child 的独立选择、部署和 usage。GitHub preview/apply 对一个有界 ref 只 fetch 一次，展示 resolved SHA 与 child 状态，绝不自动部署。Collection 级更新/回滚仍计划在后续 v0.9.x 实现。
-- **已安装来源 provenance。** 没有本地 Git worktree、但拥有有效 v3 installer lockfile 条目的复制 skill，也可以按规范化 GitHub source 聚合展示。这只是来源展示，不会伪造 branch/HEAD 或开放更新；每个 child 仍走原有的逐 skill review/import 流程。
+- **Git-backed 本地与 GitHub Skill Collections。** Import Review 会把同一 Git worktree 或经 review 的 GitHub repository snapshot 中的 skills 聚合为一个 collection 卡片，同时保留每个 child 独立的导入、部署和 usage 边界。当前项目 UI 在 collection header 统一选择一次 User/Remote，并可一次选中或清除全部 eligible children；类型未决或混合时，必须先显式选择，collection selection/apply 才会开放。GitHub preview/apply 对一个有界 ref 只 fetch 一次，展示 resolved SHA 与 child 状态，绝不自动部署。Collection 级更新/回滚仍计划在后续 v0.9.x 实现。
+- **已安装来源 provenance。** 没有本地 Git worktree、但拥有有效 v3 installer lockfile 条目的复制 skill，也可以按规范化 GitHub source 聚合展示。这只是来源展示，不会伪造 branch、HEAD 或更新权限；每个 child 仍走原有的逐 skill review/import 流程。
 - **部署前检查 compatibility。** Rust-owned runtime profiles 标识 workspace，并在确认 symlink 部署前报告会原样保留的 frontmatter warnings 或 hard blockers。
 - **签名的 macOS 分发。** 可安装已公证 DMG 或 Homebrew cask，app 更新也只在用户确认后应用。
 
@@ -59,9 +59,9 @@ History 会分开展示 Calls、History references 和管理操作。独立的�
 
 `Sync histories` 会从 Codex、Claude Code 和 Cursor 导入可审计的 usage evidence，但不复制聊天正文。Codex user turn 中含绝对路径的 `<skill>` 块或 `[$skill](.../SKILL.md)` 属于 inferred Calls，而不是 provider-confirmed run；catalog、普通 prose、shell/tool payload 和 output 都会排除。Claude Code 原生 Skill tool/command attribution 在解析到真实 `SKILL.md` 后属于 confirmed。Cursor state 的 `context.cursorRules` 只是 reference。有界 Cursor agent transcript 中 assistant 对绝对本机 `SKILL.md` 的结构化 `Read` 属于 inferred Call，并按 transcript user turn + skill 去重。文件后来移动或删除时，经过安全词法边界校验的历史路径仍可作为审计 evidence，但绝不成为文件系统或部署权限；`ReadFile` 仅进入诊断，在语义完成 qualification 前不计 Calls。重复扫描保持幂等，更强 evidence 会升级同一 event 并保留 provenance。Codex 本地 stores 没有稳定的 provider-native run total，因此 Calls 是已知可能 undercount 的本机下界，不是账户 analytics。migration 不会自动重扫 history；用户显式 sync 时可以恢复或升级 evidence。
 
-![SkillBox GitHub install review](docs/screenshots/skillbox-github-install-review.png)
+![SkillBox collection import review：统一选择 Remote、选中三个 eligible children，并保留一个 blocked conflict](docs/screenshots/skillbox-collection-import-review.png)
 
-GitHub install 与 workspace deploy 都先 preview。多 skill GitHub review 会展示一个 repository/ref、一个 resolved SHA 与显式 child 选择，任何内容都不会自动部署。SkillBox 会在写入 managed state 前展示文件变化和 runtime-profile compatibility；blocked target 无法继续，warning 需要显式确认。Collection 级更新/回滚目前尚未包含。
+GitHub install 与 workspace deploy 都先 preview。多 skill GitHub review 会在写入前展示一个 repository/ref 与一个 resolved SHA。当前项目 UI 通过 collection header 的一次 User/Remote 选择统一解析所有 actionable children，并且 collection checkbox 只会选择或清除 eligible children；imported、system、invalid、conflict 与其它 read-only children 都不会被改动。每个选中的 child 仍独立导入、部署和统计 usage，任何内容都不会自动部署。Collection 级更新/回滚目前尚未包含。
 
 ## SkillBox 管什么
 

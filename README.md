@@ -16,13 +16,13 @@ English | [简体中文](README.zh-CN.md)
 
 SkillBox is a local-first macOS desktop app with a Rust core and CLI for managing `SKILL.md`-based skill and capability packages without treating any supported agent runtime as the source of truth.
 
-Current release: `v0.9.0`. SkillBox is useful today for local skill management, but it is still early software. Keep backups of important skills, and review each filesystem change before applying it. GitHub multi-skill collection preview/apply shipped in v0.9.0; collection-level update/rollback remains planned for a later v0.9.x release.
+Current release: `v0.9.0`. SkillBox is useful today for local skill management, but it is still early software. Keep backups of important skills, and review each filesystem change before applying it. GitHub multi-skill collection preview/apply shipped in v0.9.0; collection-level update/rollback remains planned for a later v0.9.x release. The shared collection-header type and select-all controls shown below are current-main refinements merged after v0.9.0 and are not part of the published v0.9.0 binary.
 
 ## Promo Video
 
 [![Watch the SkillBox promo video](docs/promo/skillbox-intro/skillbox-promo-poster.jpg)](docs/promo/skillbox-intro/skillbox-promo.mp4)
 
-A 30-second overview of SkillBox: runtime-aware workspaces, review-before-write safety, evidence-aware Calls, transparent coverage, and local-first deployment.
+A 30-second v0.9.0 overview of SkillBox: runtime-aware workspaces, review-before-write safety, evidence-aware Calls, transparent coverage, and local-first deployment. The promo remains a release artifact; current-main collection header refinements are shown in the product screenshot below.
 
 ## Why
 
@@ -32,8 +32,8 @@ A 30-second overview of SkillBox: runtime-aware workspaces, review-before-write 
 - **Reviewed Git changes in both directions.** Inspect local user-skill diffs before commit/push. The shipped v0.7 line adds an explicit Check remote -> Review incoming changes -> Apply fast-forward flow for safe inbound updates; diverged history remains a normal Git conflict to resolve outside SkillBox.
 - **Evidence-aware Calls, references, and operation history.** Count locally confirmed executions plus defensible structured invocations as Calls, keep lower-signal history references separate, and explain coverage without storing full chat transcripts.
 - **Safe storage and deployment defaults.** Use ordered SQLite migrations, recovery backups, integrity checks, and ownership-checked symlinks instead of silently overwriting runtime content.
-- **Git-backed local and GitHub collections.** Import Review groups skills from the same local Git worktree or reviewed GitHub repository snapshot into one collection card while keeping each child independently selectable, deployable, and usage-tracked. GitHub preview/apply fetches one bounded ref, shows the resolved SHA and child status, and never deploys automatically. Collection-level update/rollback remains planned for a later v0.9.x release.
-- **Installed-source provenance.** Copied skills with valid v3 installer lockfile entries can appear under one normalized GitHub source collection even without a local Git worktree. This is display-only provenance: it does not invent a branch/HEAD or enable updates, and each child keeps the normal reviewed import path.
+- **Git-backed local and GitHub collections.** Import Review groups skills from the same local Git worktree or reviewed GitHub repository snapshot into one collection card while keeping each child independently importable, deployable, and usage-tracked. The current project UI makes one shared User/Remote choice in the collection header, then selects or clears all eligible children as a group; unresolved or mixed type state blocks selection and apply until you choose explicitly. GitHub preview/apply fetches one bounded ref, shows the resolved SHA and child status, and never deploys automatically. Collection-level update/rollback remains planned for a later v0.9.x release.
+- **Installed-source provenance.** Copied skills with valid v3 installer lockfile entries can appear under one normalized GitHub source collection even without a local Git worktree. This is display-only provenance: it does not invent a branch, HEAD, or update authority, and each child keeps the normal reviewed per-skill import path.
 - **Compatibility before deployment.** Rust-owned runtime profiles identify each workspace and report preserved frontmatter warnings or hard blockers before a confirmed symlink deployment.
 - **Signed macOS distribution.** Install a notarized DMG or Homebrew cask and apply signed app updates only after confirmation.
 
@@ -59,9 +59,9 @@ History separates Calls, history references, and management operations. The stan
 
 `Sync histories` imports auditable usage evidence from Codex, Claude Code, and Cursor without copying chat bodies. Codex per-turn `<skill>` blocks or `[$skill](.../SKILL.md)` links with an absolute path are inferred Calls, not provider-confirmed runs; catalog entries, prose, shell/tool payloads, and outputs are excluded. Claude Code native Skill tool/command attribution is confirmed after resolving a real `SKILL.md`. Cursor state `context.cursorRules` entries are references. A structured assistant `Read` of an absolute local `SKILL.md` in a bounded Cursor agent transcript is an inferred Call, deduplicated once per transcript user turn and skill. Safe historical paths remain auditable after the file is moved or deleted, but never become filesystem or deployment authority; `ReadFile` candidates are reported diagnostically and excluded from Calls until their semantics are qualified. Repeated scans are idempotent and stronger evidence upgrades an existing event without losing provenance. Codex local stores do not expose a stable provider-native run total, so local Calls remain a known undercount rather than account analytics. An explicit sync can recover or upgrade evidence; database migration itself does not rescan histories.
 
-![SkillBox GitHub install review](docs/screenshots/skillbox-github-install-review.png)
+![SkillBox collection import review with one Remote type choice, three selected eligible children, and a blocked conflict](docs/screenshots/skillbox-collection-import-review.png)
 
-GitHub installs and workspace deployments use a preview-first flow. A multi-skill GitHub review shows one repository/ref, one resolved SHA, and explicit child selection before any managed write; nothing deploys automatically. SkillBox shows incoming file changes and runtime-profile compatibility before writing managed state; blocked targets cannot proceed, and warnings require explicit confirmation. Collection-level update/rollback is not included yet.
+GitHub installs and workspace deployments use a preview-first flow. A multi-skill GitHub review shows one repository/ref and one resolved SHA before any managed write. In the current project UI, one collection-header User/Remote decision resolves all actionable children, and the collection checkbox selects or clears only eligible children; imported, system, invalid, conflicted, and other read-only children remain unchanged. Each selected child is still imported, deployed, and usage-tracked independently, and nothing deploys automatically. Collection-level update/rollback is not included yet.
 
 ## What SkillBox Manages
 

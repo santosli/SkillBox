@@ -65,6 +65,7 @@ Claude、OpenClaw、Cursor、Claude Code、Copilot 等需要通过 agent adapter
 - 每张 collection card 的 header 统一提供 `Import as` User/Remote radiogroup。选择后会对完整 collection（不受搜索、Tab 或折叠状态影响）中所有 importable、无冲突且 selected variant 匹配的 pending child 设置同一类型并选中；用户随后仍可逐项取消。只要这些 actionable child 尚未形成统一类型（包括都已有类型但 User/Remote 混合），collection checkbox、child selection 和最终 apply request 都保持不可用，必须先明确选择 header type。imported、system、conflict、invalid 和 read-only child 不会被重分类。child row 不再重复类型控件，只保留必要的只读状态说明；standalone group 仍使用自身的 User/Remote control。
 - 每张 collection card 的 header 都有原生 Select all eligible checkbox。它按完整 collection
   而非当前搜索/Tab 可见子集切换：全部 eligible child 已选时清空，否则选中全部。imported、system、conflict、invalid、未选择对应 variant 或尚未完成 User/Remote 类型选择的 child 不计入且不会被改变；部分选择以原生 indeterminate 状态和 `selected / eligible` 计数表达。
+- 上述 collection-header 类型与全选控件已合入 current main，但属于 `v0.9.0` 发布后的 UI 改进；已发布的 `v0.9.0` 仍包含 Phase C 的 one-fetch preview/apply、逐 child 选择和同一 reviewed SHA 边界。
 - 只有唯一安全 importable variant 时才预选。多个 material variants 必须由用户用 radio 明确选择一个；一个 variant 内的类型建议混合时显示 `Mixed type suggestions`，并在导入前要求明确选择 User 或 Remote。Desktop 只提交所选 primary `source_path` 和分类，core 拒绝同一批次为同名 skill 提交多个来源；其它 locations 不会被修改。
 - agent adapter 引入后，候选项还应携带 `agent_id`、原生格式和 target scope。
 - 检查 managed target 是否冲突。
