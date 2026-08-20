@@ -154,6 +154,11 @@ expect(
     && /collection-level\s+update and rollback remain Phase D work/.test(html)
 );
 expect(
+  "public collection copy has a durable release boundary",
+  /Phase C first shipped in v0\.9\.0/.test(html)
+    && !/merged after that release|not part of the published v0\.9\.0 binary|current-main collection header refinements/i.test(`${html}\n${readme}\n${readmeZh}`)
+);
+expect(
   "public README and homepage retire the stale collection review visual",
   !/skillbox-github-install-review\.png/.test(html)
     && !/skillbox-github-install-review\.png/.test(readme)

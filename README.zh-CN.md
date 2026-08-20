@@ -16,13 +16,13 @@
 
 SkillBox 是一个 local-first 的 macOS 桌面应用，带 Rust core/CLI，用来管理基于 `SKILL.md` 的 skill 与能力包，同时避免把任一受支持的 agent runtime 当作唯一真相源。
 
-当前版本：`v0.9.0`。SkillBox 现在已经可以用于本地 skill 管理，但仍是早期软件。重要 skills 请保留备份，并在应用每一次文件系统变更前先 review。GitHub 多 skill collection preview/apply 已随 v0.9.0 发布；collection 级更新/回滚仍计划在后续 v0.9.x 实现。下方展示的 collection header 统一类型与全选控件，是 v0.9.0 发布后已合入 current main 的改进，不属于已发布的 v0.9.0 binary。
+当前版本：`v0.9.0`。SkillBox 现在已经可以用于本地 skill 管理，但仍是早期软件。重要 skills 请保留备份，并在应用每一次文件系统变更前先 review。GitHub 多 skill collection preview/apply 首次随 v0.9.0 发布；collection 级更新/回滚仍计划在后续 v0.9.x 实现。
 
 ## 宣传视频
 
 [![观看 SkillBox 宣传视频](docs/promo/skillbox-intro/skillbox-promo-poster.jpg)](docs/promo/skillbox-intro/skillbox-promo.mp4)
 
-这段 30 秒视频展示 v0.9.0 的 SkillBox：runtime-aware workspaces、写入前 review、按证据分类的 Calls、透明 coverage 和 local-first 部署。Promo 是已发布版本素材；current-main 的 collection header 改进见下方产品截图。
+这段 30 秒视频展示 v0.9.0 的 SkillBox：runtime-aware workspaces、写入前 review、按证据分类的 Calls、透明 coverage 和 local-first 部署。Promo 保持为 v0.9.0 发布素材；当前 collection header workflow 见下方产品截图。
 
 ## 为什么
 
