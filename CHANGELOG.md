@@ -9,6 +9,12 @@ version tags such as `v0.3.0`.
 
 - No unreleased changes.
 
+## 0.9.1
+
+- Choose User or Remote once in a collection header to classify every actionable pending child, while mixed or unresolved collections stay blocked until explicitly resolved.
+- Select or clear every eligible child in a collection with one collection-level checkbox without changing imported, system, conflicted, blocked, or unresolved children.
+- Recognize copied skills as one Installed Source Collection when valid v3 GitHub installer provenance shares a package-level pluginName, while preserving per-skill review and import safety.
+
 ## 0.9.0
 
 - Add one-fetch GitHub repository collection preview/apply with explicit child
