@@ -7,6 +7,8 @@ version tags such as `v0.3.0`.
 
 ## Unreleased
 
+- No unreleased changes.
+
 ## 0.9.0
 
 - Add one-fetch GitHub repository collection preview/apply with explicit child
