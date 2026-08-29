@@ -33,7 +33,7 @@ SkillBox 是一个 local-first 的 macOS 桌面应用，带 Rust core/CLI，用�
 - **按证据分类的 Calls、引用与操作历史。** Calls 只统计本机 confirmed execution 与可辩护的 structured invocation，低信号 history references 单独展示，并且不保存完整聊天 transcript。
 - **安全的存储与部署默认值。** 使用顺序 SQLite migrations、恢复备份、完整性检查和 ownership-checked symlink，不静默覆盖 runtime 内容。
 - **Git-backed 本地与 GitHub Skill Collections。** Import Review 会把同一 Git worktree 或经 review 的 GitHub repository snapshot 中的 skills 聚合为一个 collection 卡片，同时保留每个 child 独立的导入、部署和 usage 边界。当前项目 UI 在 collection header 统一选择一次 User/Remote，并可一次选中或清除全部 eligible children；类型未决或混合时，必须先显式选择，collection selection/apply 才会开放。GitHub preview/apply 对一个有界 ref 只 fetch 一次，展示 resolved SHA 与 child 状态，绝不自动部署。Collection 级更新/回滚仍计划在后续 v0.9.x 实现。
-- **已安装来源 provenance。** 没有本地 Git worktree、但拥有有效 v3 installer lockfile 条目的复制 skill，也可以按规范化 GitHub source 聚合展示。这只是来源展示，不会伪造 branch、HEAD 或更新权限；每个 child 仍走原有的逐 skill review/import 流程。
+- **已安装来源 provenance。** 没有本地 Git worktree、但拥有有效 v3 installer lockfile 条目的复制 skill，也可以按已验证的 GitHub 或 HTTPS well-known source 聚合展示。这只是来源展示，不会伪造 branch、HEAD 或更新权限；每个 child 仍走原有的逐 skill review/import 流程。
 - **部署前检查 compatibility。** Rust-owned runtime profiles 标识 workspace，并在确认 symlink 部署前报告会原样保留的 frontmatter warnings 或 hard blockers。
 - **签名的 macOS 分发。** 可安装已公证 DMG 或 Homebrew cask，app 更新也只在用户确认后应用。
 

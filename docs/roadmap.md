@@ -153,7 +153,8 @@ automatically.
 
 When a copied runtime installation has no live Git metadata, a supported v3
 installer lockfile may provide a display-only `installed_source` grouping by
-validated canonical GitHub source URL. Live Git identity remains authoritative;
+validated canonical GitHub source URL or strictly matched HTTPS `well-known`
+source base. Live Git identity remains authoritative;
 lockfile groups never fabricate branch/HEAD, fetch/update, or collection apply
 permissions, and child imports continue through the ordinary per-skill safety
 contract.

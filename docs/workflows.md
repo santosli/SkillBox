@@ -142,19 +142,20 @@ Review/apply：
 
 - 如果 candidate 不在 live Git worktree，Rust 会按固定 runtime root 旁边的 v3
   `.skill-lock.json` 做一次 bounded provenance lookup。只有真实扫描到的 candidate
-  与 safe `skillPath`/name 匹配，并且 `sourceType=github`、source URL 可被
-  canonicalize 为无凭据 GitHub repository identity 时，才会显示为
-  `Installed source collection`。
+  与 entry key/name/root 匹配时，才可能显示为 `Installed source collection`。
+  `sourceType=github` 还要求 safe `skillPath` 和无凭据的 canonical GitHub repository
+  URL；`sourceType=well-known` 则要求规范 HTTPS base/source URL、精确的
+  `/.well-known/skills/<name>/SKILL.md` 路径和合法 SHA-256 digest。
 - `pluginName` 是 installer 的 optional、有界 package metadata，不参与 child identity：
   多个 skill 可共享同一个 plugin name。每个 child 仍必须通过 lockfile entry key、safe
-  `skillPath`、candidate name/root/path 和 normalized GitHub source URL 的匹配。
+  source path contract、candidate name/root/path 和对应 source kind 的 URL 校验。
 - 这类 collection 只用于展示来源和聚合 child，不提供 branch、HEAD、fetch、更新或
   `collection-apply`。它不使用 lockfile hash 替代完整 snapshot 校验；用户选中的
   child 仍逐项走现有 per-skill Import Review/apply，`.agents` 与 `.claude` 的等价
   symlink location 仍只保留一份。
-- lockfile 版本不支持、文件过大、条目 malformed、路径 traversal、非 GitHub/custom
-  source 或 stale/mismatched entry 都不会隐藏 candidate，也不会创建网络或文件写入。
-- installed-source fallback 只有在同一 normalized source URL 匹配至少两个已验证 child
+- lockfile 版本不支持、文件过大、条目 malformed、路径 traversal、不受支持的 source
+  type 或 stale/mismatched entry 都不会隐藏 candidate，也不会创建网络或文件写入。
+- installed-source fallback 只有在同一 source kind 和 normalized source URL 匹配至少两个已验证 child
   时才形成 collection card；单个匹配仍作为普通 standalone candidate 显示。live Git
   worktree collection 保留其 repository/HEAD 语义，不受这个展示降噪门槛影响。
 

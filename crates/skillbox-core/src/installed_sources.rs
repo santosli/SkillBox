@@ -3,6 +3,7 @@ use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use url::Url;
 
 const MAX_LOCKFILE_BYTES: u64 = 5 * 1024 * 1024;
 const MAX_LOCKFILE_ENTRIES: usize = 10_000;
@@ -23,8 +24,25 @@ pub(crate) struct InstalledSourceDiscoveryStats {
 struct LockfileEntry {
     root: PathBuf,
     skill_name: String,
-    source_url: String,
+    source_kind: LockfileSourceKind,
+    collection_url: String,
+    skill_source_url: String,
     skill_path: String,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum LockfileSourceKind {
+    Github,
+    WellKnown,
+}
+
+impl LockfileSourceKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Github => "github",
+            Self::WellKnown => "well-known",
+        }
+    }
 }
 
 pub(crate) fn discover_installed_source_collections(
@@ -71,8 +89,8 @@ pub(crate) fn discover_installed_source_collections(
         .map(|group| (group.name.to_ascii_lowercase(), group))
         .collect::<HashMap<_, _>>();
     let mut collection_children =
-        BTreeMap::<String, BTreeMap<String, ImportCandidateCollectionChild>>::new();
-    let mut seen = HashSet::<(String, String, String)>::new();
+        BTreeMap::<(String, String), BTreeMap<String, ImportCandidateCollectionChild>>::new();
+    let mut seen = HashSet::<(String, String, String, String)>::new();
 
     for candidate in candidates {
         let name = candidate.name.to_ascii_lowercase();
@@ -99,7 +117,8 @@ pub(crate) fn discover_installed_source_collections(
                 continue;
             };
             let key = (
-                entry.source_url.clone(),
+                entry.source_kind.as_str().to_string(),
+                entry.collection_url.clone(),
                 group.id.clone(),
                 variant.id.clone(),
             );
@@ -109,7 +128,10 @@ pub(crate) fn discover_installed_source_collections(
             stats.lockfile_matches += 1;
             let child = installed_source_child(entry, group, variant);
             collection_children
-                .entry(entry.source_url.clone())
+                .entry((
+                    entry.source_kind.as_str().to_string(),
+                    entry.collection_url.clone(),
+                ))
                 .or_default()
                 .insert(child.id.clone(), child);
         }
@@ -117,7 +139,7 @@ pub(crate) fn discover_installed_source_collections(
 
     let collections = collection_children
         .into_iter()
-        .filter_map(|(source_url, children)| {
+        .filter_map(|((source_kind, source_url), children)| {
             let children = children.into_values().collect::<Vec<_>>();
             // A single installer-provenance match is not enough to establish
             // a useful collection. Keep it in the normal standalone group so
@@ -140,11 +162,12 @@ pub(crate) fn discover_installed_source_collections(
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
-            let identity = format!("installed-source-v1\n{source_url}\n{child_seed}");
-            let display_name = source_url
-                .strip_prefix("https://github.com/")
-                .unwrap_or(&source_url)
-                .to_string();
+            let identity = if source_kind == LockfileSourceKind::Github.as_str() {
+                format!("installed-source-v1\n{source_url}\n{child_seed}")
+            } else {
+                format!("installed-source-v2\n{source_kind}\n{source_url}\n{child_seed}")
+            };
+            let display_name = installed_source_display_name(&source_url);
             stats.installed_source_collections += 1;
             Some(ImportCandidateCollection {
                 id: format!("installed-source-{}", &sha256(&identity)[..16]),
@@ -245,13 +268,38 @@ fn parse_lockfile_entry(name: &str, value: &Value, root: &Path) -> Option<Lockfi
     }
     let object = value.as_object()?;
     let source_type = bounded_string(object.get("sourceType")?)?;
-    if source_type != "github" {
-        return None;
-    }
-    let source_url = bounded_string(object.get("sourceUrl")?)?;
-    let source_url = skillbox_github::normalize_github_repo_url(&source_url).ok()?;
-    let skill_path = bounded_string(object.get("skillPath")?)?;
-    validate_lockfile_skill_path(&skill_path, name)?;
+    let (source_kind, collection_url, skill_source_url, skill_path) = match source_type.as_str() {
+        "github" => {
+            let source_url = bounded_string(object.get("sourceUrl")?)?;
+            let source_url = skillbox_github::normalize_github_repo_url(&source_url).ok()?;
+            let skill_path = bounded_string(object.get("skillPath")?)?;
+            validate_lockfile_skill_path(&skill_path, name)?;
+            (
+                LockfileSourceKind::Github,
+                source_url.clone(),
+                source_url,
+                skill_path,
+            )
+        }
+        "well-known" => {
+            let source_base_url = bounded_string(object.get("sourceBaseUrl")?)?;
+            let source_url = bounded_string(object.get("sourceUrl")?)?;
+            let (source_base_url, source_url) =
+                validate_well_known_source(&source_base_url, &source_url, name)?;
+            let digest = bounded_string(object.get("wellKnownDigest")?)?;
+            validate_sha256_digest(&digest)?;
+            if let Some(skill_folder_hash) = object.get("skillFolderHash") {
+                bounded_string(skill_folder_hash)?;
+            }
+            (
+                LockfileSourceKind::WellKnown,
+                source_base_url,
+                source_url,
+                format!("skills/{name}/SKILL.md"),
+            )
+        }
+        _ => return None,
+    };
     if let Some(plugin_name) = object.get("pluginName") {
         // The installer may use this optional field for a package or collection
         // identifier (for example, several skills can belong to one plugin).
@@ -262,7 +310,9 @@ fn parse_lockfile_entry(name: &str, value: &Value, root: &Path) -> Option<Lockfi
     Some(LockfileEntry {
         root: root.to_path_buf(),
         skill_name: name.to_string(),
-        source_url,
+        source_kind,
+        collection_url,
+        skill_source_url,
         skill_path,
     })
 }
@@ -291,6 +341,82 @@ fn lockfile_skill_name(value: &str) -> Option<&str> {
     }
     let name = parts.next()?;
     (!name.is_empty()).then_some(name)
+}
+
+fn validate_well_known_source(
+    source_base_url: &str,
+    source_url: &str,
+    entry_name: &str,
+) -> Option<(String, String)> {
+    validate_lockfile_skill_path(&format!("skills/{entry_name}/SKILL.md"), entry_name)?;
+    let base = parse_safe_https_url(source_base_url)?;
+    let source = parse_safe_https_url(source_url)?;
+    let normalized_base = base.as_str().trim_end_matches('/').to_string();
+    let expected = Url::parse(&format!(
+        "{normalized_base}/.well-known/skills/{entry_name}/SKILL.md"
+    ))
+    .ok()?;
+    (source == expected).then(|| (normalized_base, expected.to_string()))
+}
+
+fn parse_safe_https_url(value: &str) -> Option<Url> {
+    if value.is_empty()
+        || value.len() > MAX_LOCKFILE_STRING_BYTES
+        || value.trim() != value
+        || value.contains('\\')
+        || value.chars().any(char::is_control)
+    {
+        return None;
+    }
+    let url = Url::parse(value).ok()?;
+    if url.scheme() != "https"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || url.host_str().is_none()
+        || url.cannot_be_a_base()
+    {
+        return None;
+    }
+    let safe_path = url
+        .path_segments()?
+        .filter(|segment| !segment.is_empty())
+        .all(|segment| {
+            segment != "."
+                && segment != ".."
+                && segment
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '~'))
+        });
+    safe_path.then_some(url)
+}
+
+fn validate_sha256_digest(value: &str) -> Option<()> {
+    let digest = value.strip_prefix("sha256:")?;
+    (digest.len() == 64 && digest.chars().all(|ch| ch.is_ascii_hexdigit())).then_some(())
+}
+
+fn installed_source_display_name(source_url: &str) -> String {
+    if let Some(value) = source_url.strip_prefix("https://github.com/") {
+        return value.to_string();
+    }
+    let Ok(url) = Url::parse(source_url) else {
+        return source_url.to_string();
+    };
+    let Some(host) = url.host_str() else {
+        return source_url.to_string();
+    };
+    let host = match url.port() {
+        Some(port) => format!("{host}:{port}"),
+        None => host.to_string(),
+    };
+    let path = url.path().trim_matches('/');
+    if path.is_empty() {
+        host
+    } else {
+        format!("{host}/{path}")
+    }
 }
 
 fn candidate_matches_lock_entry(candidate: &ImportCandidate, entry: &LockfileEntry) -> bool {
@@ -338,10 +464,21 @@ fn installed_source_child(
         .strip_suffix("/SKILL.md")
         .unwrap_or(&entry.skill_path)
         .to_string();
-    let identity = format!(
-        "{}\n{}\n{}\n{}",
-        entry.source_url, group.id, variant.id, relative_path
-    );
+    let identity = match entry.source_kind {
+        LockfileSourceKind::Github => format!(
+            "{}\n{}\n{}\n{}",
+            entry.collection_url, group.id, variant.id, relative_path
+        ),
+        LockfileSourceKind::WellKnown => format!(
+            "installed-source-child-v2\n{}\n{}\n{}\n{}\n{}\n{}",
+            entry.source_kind.as_str(),
+            entry.collection_url,
+            entry.skill_source_url,
+            group.id,
+            variant.id,
+            relative_path
+        ),
+    };
     ImportCandidateCollectionChild {
         id: format!("child-{}", &sha256(&identity)[..16]),
         group_id: group.id.clone(),

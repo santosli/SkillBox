@@ -222,10 +222,11 @@ GitHub remote collections 使用稳定的 canonical source URL + explicit reques
 成另一个长期 collection；Phase D 仍未提供更新/回滚语义。
 
 对于没有 live Git metadata 的复制安装，Import Review 可以读取配置 runtime
-root 旁边受支持的 v3 `.skill-lock.json`。Rust 只解析 bounded JSON，校验
-`sourceType=github`、无 credentials/query/fragment 的 canonical GitHub
-repository URL、safe `skillPath` 和已扫描 candidate name，再把相同 source URL
-映射为 `installed_source` display collection。它不读取 lockfile 指向的本地
+root 旁边受支持的 v3 `.skill-lock.json`。Rust 只解析 bounded JSON。GitHub entry
+必须提供无 credentials/query/fragment 的 canonical repository URL、safe `skillPath`
+和已扫描 candidate name；`well-known` entry 必须提供严格匹配 candidate name 的
+HTTPS `sourceBaseUrl` / `sourceUrl` 与合法 SHA-256 digest。source kind 与规范化 URL
+共同构成 grouping identity，再映射为 `installed_source` display collection。它不读取 lockfile 指向的本地
 路径，不执行网络，不伪造 branch/HEAD，也不允许 `apply_import_collection`；
 选中的 child 仍走普通 per-skill import。live Git worktree identity 优先，
 lockfile hash 不会跳过完整目录 snapshot 校验。
@@ -247,8 +248,7 @@ target，然后才导入并保存 `skill_collections` / `skill_collection_member
 Phase C 的 GitHub multi-skill one-fetch install 只允许显式 child selection，并在 apply
 前重新验证 canonical source URL、ref、resolved SHA、child snapshot 和 managed target；
 裸 repository URL 不假设 `main`，必须通过结构化结果要求显式 ref；root-only skill 也
-拒绝与 nested `SKILL.md` roots 重叠。它已按 v0.9.0 实现但尚未完成 release
-qualification，尚未发布。
+拒绝与 nested `SKILL.md` roots 重叠。它已随 v0.9.0 发布。
 Phase D 的 collection-level update/rollback 尚未实现。当前实现也不自动部署、不执行 hooks、filters、submodules、repository
 scripts、custom helpers 或 arbitrary shell。
 
