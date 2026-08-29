@@ -555,11 +555,18 @@ test('collection review keeps child selection and collection type controls insid
     /function CandidateReviewList\(\{(?<body>[\s\S]*?)\n\}\n\nfunction CollectionSelectionCheckbox/
   )?.groups.body || '';
   const collectionRule = css.match(/\.collectionReviewCard\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const collectionHeaderRule = css.match(/\.collectionReviewHeader\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const childRule = css.match(/\.collectionChildRow\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const collectionActionsRule = css.match(/\.collectionReviewActions\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
   const collectionTypeRule = css.match(/\.collectionReviewTypeAction\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const collectionSelectionRule = css.match(
+    /\.collectionReviewSelectionAction\s*\{(?<body>[^}]*)\}/s
+  )?.groups.body || '';
   const requiredCollectionTypeRule = css.match(
     /\.collectionReviewTypeAction\.required\s*\{(?<body>[^}]*)\}/s
+  )?.groups.body || '';
+  const narrowCollectionRules = css.match(
+    /@media \(max-width: 920px\)\s*\{(?<body>[\s\S]*)\n\}/
   )?.groups.body || '';
 
   assert.match(collectionSource, /aria-controls={disclosureId}/);
@@ -604,9 +611,19 @@ test('collection review keeps child selection and collection type controls insid
   assert.match(collectionSource, /readOnlyLabel \?/);
   assert.match(collectionSource, /relativePath/);
   assert.match(collectionRule, /min-width:\s*0;/);
-  assert.match(collectionActionsRule, /display:\s*flex;/);
+  assert.match(collectionHeaderRule, /display:\s*grid;/);
+  assert.match(collectionHeaderRule, /grid-template-columns:\s*minmax\(0,\s*1fr\) minmax\(470px,\s*auto\);/);
+  assert.match(collectionHeaderRule, /align-items:\s*flex-start;/);
+  assert.match(collectionActionsRule, /display:\s*grid;/);
+  assert.match(collectionActionsRule, /width:\s*470px;/);
+  assert.match(collectionActionsRule, /grid-template-columns:\s*248px minmax\(0,\s*210px\);/);
+  assert.match(collectionActionsRule, /align-self:\s*start;/);
   assert.match(collectionTypeRule, /width:\s*248px;/);
   assert.match(collectionTypeRule, /box-sizing:\s*border-box;/);
+  assert.match(collectionSelectionRule, /grid-column:\s*2;/);
+  assert.match(collectionSelectionRule, /align-items:\s*flex-start;/);
+  assert.match(narrowCollectionRules, /\.collectionReviewActions\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
+  assert.match(narrowCollectionRules, /\.collectionReviewSelectionAction\s*\{[^}]*grid-column:\s*1;/s);
   assert.match(requiredCollectionTypeRule, /border-color:\s*var\(--skillbox-amber-border\);/);
   assert.match(requiredCollectionTypeRule, /background:\s*var\(--skillbox-surface-orange\);/);
   assert.match(css, /\.candidateCheck input:indeterminate \+ span/);
