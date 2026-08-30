@@ -9,6 +9,11 @@ version tags such as `v0.3.0`.
 
 - No unreleased changes.
 
+## 0.9.2
+
+- Align collection Import Review headers so shared type and selection controls keep stable columns, spacing, and responsive sizing across cards.
+- Group copied skills from the same verified v3 `well-known` installer source into one display-only Installed Source Collection, while keeping source matching strict and per-skill import safety unchanged.
+
 ## 0.9.1
 
 - Choose User or Remote once in a collection header to classify every actionable pending child, while mixed or unresolved collections stay blocked until explicitly resolved.
