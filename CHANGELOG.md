@@ -7,7 +7,7 @@ version tags such as `v0.3.0`.
 
 ## Unreleased
 
-- Group copied skills from the same verified v3 `well-known` installer source into one display-only Installed Source Collection, while keeping source matching strict and per-skill import safety unchanged.
+- No unreleased changes.
 
 ## 0.9.1
 
