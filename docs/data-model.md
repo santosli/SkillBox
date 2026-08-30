@@ -346,7 +346,10 @@ Import Review 返回的 `ImportCandidateCollection` 还有一个只读的
 来源；`installed_source` 表示由受支持的 v3 installer lockfile 归并的来源
 展示。后者不写新的 collection/member row，不保存假 branch/HEAD，也不改变
 schema v8 的 apply 事务；child 的真实 source path、snapshot、status、type 和
-import identity 仍来自 filesystem scan，并通过普通 per-skill import 写入。
+import identity 仍来自 filesystem scan，并通过普通 per-skill import 写入。支持的
+lockfile provenance 为 canonical GitHub repository URL + safe `skillPath`，或严格匹配
+candidate name/path 的 HTTPS `well-known` base/source URL + SHA-256 digest；source kind
+也是 display collection identity 的一部分，不能仅因 URL 或名称前缀相同而合并。
 
 `skill_user_metadata` 保存用户显式设置的 favorite 和 tags。桌面首次读取该表时会把旧 `localStorage` 中仍存在的 metadata 通过 `INSERT OR IGNORE` 迁入，因此 SQLite 中已有值不会被旧浏览器状态覆盖；迁移成功后删除旧 key。
 

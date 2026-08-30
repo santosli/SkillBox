@@ -3236,6 +3236,7 @@ dependencies = [
  "sha2 0.11.0",
  "skillbox-git",
  "skillbox-github",
+ "url",
 ]
 
 [[package]]

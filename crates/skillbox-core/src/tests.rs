@@ -11101,6 +11101,261 @@ fn scan_import_candidates_groups_installer_plugin_children_without_using_plugin_
 }
 
 #[test]
+fn scan_import_candidates_groups_verified_well_known_children_by_source_base() {
+    let root = temp_dir("candidate-installed-source-well-known");
+    let agents_root = root.join(".agents/skills");
+    let claude_root = root.join(".claude/skills");
+    let managed_root = root.join("SkillBox");
+    let source_base_url = "https://open.feishu.cn";
+    let names = [
+        "lark-approval",
+        "lark-apps",
+        "lark-attendance",
+        "lark-base",
+        "lark-doc",
+        "lark-im",
+    ];
+
+    for name in names {
+        make_skill(
+            &agents_root.join(name),
+            name,
+            "Verified well-known source skill",
+        );
+        fs::create_dir_all(&claude_root).unwrap();
+        symlink_dir(&agents_root.join(name), &claude_root.join(name)).unwrap();
+    }
+    let skills = names
+        .iter()
+        .map(|name| {
+            (
+                (*name).to_string(),
+                serde_json::json!({
+                    "sourceType": "well-known",
+                    "sourceBaseUrl": source_base_url,
+                    "sourceUrl": format!("{source_base_url}/.well-known/skills/{name}/SKILL.md"),
+                    "skillFolderHash": "",
+                    "wellKnownDigest": format!("sha256:{}", "a".repeat(64))
+                }),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>();
+    fs::create_dir_all(root.join(".agents")).unwrap();
+    fs::write(
+        root.join(".agents/.skill-lock.json"),
+        serde_json::to_vec(&serde_json::json!({ "version": 3, "skills": skills })).unwrap(),
+    )
+    .unwrap();
+
+    let scan = scan_import_candidates(&[agents_root, claude_root], &managed_root).unwrap();
+
+    assert_eq!(scan.collections.len(), 1);
+    let collection = &scan.collections[0];
+    assert_eq!(
+        collection.source_kind,
+        ImportCandidateCollectionSourceKind::InstalledSource
+    );
+    assert_eq!(collection.display_name, "open.feishu.cn");
+    assert_eq!(collection.origin_url.as_deref(), Some(source_base_url));
+    assert_eq!(collection.children.len(), names.len());
+    assert_eq!(scan.standalone_groups.len(), 0);
+    assert_eq!(
+        scan.diagnostics.installed_source_lockfile_entries,
+        names.len()
+    );
+    assert_eq!(
+        scan.diagnostics.installed_source_lockfile_matches,
+        names.len()
+    );
+    assert_eq!(scan.diagnostics.installed_source_invalid_entries, 0);
+    assert_eq!(scan.diagnostics.installed_source_collections, 1);
+    let child_names = collection
+        .children
+        .iter()
+        .map(|child| child.name.as_str())
+        .collect::<HashSet<_>>();
+    assert_eq!(child_names.len(), names.len());
+    assert!(collection
+        .children
+        .iter()
+        .all(|child| child.locations.len() == 2 && !child.snapshot_hash.is_empty()));
+}
+
+#[test]
+fn scan_import_candidates_keeps_well_known_sources_separate_and_singletons_standalone() {
+    let root = temp_dir("candidate-installed-source-well-known-separation");
+    let agents_root = root.join(".agents/skills");
+    let managed_root = root.join("SkillBox");
+    let sources = [
+        ("lark-alpha", "https://open.feishu.cn"),
+        ("lark-beta", "https://open.feishu.cn"),
+        ("lark-gamma", "https://skills.example.com/team"),
+        ("lark-delta", "https://skills.example.com/team"),
+        ("lark-single", "https://single.example.com"),
+    ];
+
+    for (name, _) in sources {
+        make_skill(&agents_root.join(name), name, "Well-known source skill");
+    }
+    let skills = sources
+        .iter()
+        .map(|(name, source_base_url)| {
+            (
+                (*name).to_string(),
+                serde_json::json!({
+                    "sourceType": "well-known",
+                    "sourceBaseUrl": source_base_url,
+                    "sourceUrl": format!("{source_base_url}/.well-known/skills/{name}/SKILL.md"),
+                    "wellKnownDigest": format!("sha256:{}", "b".repeat(64))
+                }),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>();
+    fs::create_dir_all(root.join(".agents")).unwrap();
+    fs::write(
+        root.join(".agents/.skill-lock.json"),
+        serde_json::to_vec(&serde_json::json!({ "version": 3, "skills": skills })).unwrap(),
+    )
+    .unwrap();
+
+    let scan = scan_import_candidates(std::slice::from_ref(&agents_root), &managed_root).unwrap();
+
+    assert_eq!(scan.collections.len(), 2);
+    assert_eq!(scan.collections[0].children.len(), 2);
+    assert_eq!(scan.collections[1].children.len(), 2);
+    assert_ne!(
+        scan.collections[0].origin_url,
+        scan.collections[1].origin_url
+    );
+    assert_eq!(scan.standalone_groups.len(), 1);
+    assert_eq!(scan.standalone_groups[0].name, "lark-single");
+    assert_eq!(
+        scan.diagnostics.installed_source_lockfile_matches,
+        sources.len()
+    );
+    assert_eq!(scan.diagnostics.installed_source_collections, 2);
+}
+
+#[test]
+fn scan_import_candidates_does_not_merge_github_and_well_known_provenance() {
+    let root = temp_dir("candidate-installed-source-kind-separation");
+    let agents_root = root.join(".agents/skills");
+    let managed_root = root.join("SkillBox");
+    let github_names = ["github-alpha", "github-beta"];
+    let well_known_names = ["known-alpha", "known-beta"];
+    let shared_url = "https://github.com/acme/skills";
+
+    for name in github_names.into_iter().chain(well_known_names) {
+        make_skill(&agents_root.join(name), name, "Installed source skill");
+    }
+    fs::create_dir_all(root.join(".agents")).unwrap();
+    fs::write(
+        root.join(".agents/.skill-lock.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "version": 3,
+            "skills": {
+                "github-alpha": {
+                    "sourceType": "github",
+                    "sourceUrl": format!("{shared_url}.git"),
+                    "skillPath": "skills/github-alpha/SKILL.md"
+                },
+                "github-beta": {
+                    "sourceType": "github",
+                    "sourceUrl": format!("{shared_url}.git"),
+                    "skillPath": "skills/github-beta/SKILL.md"
+                },
+                "known-alpha": {
+                    "sourceType": "well-known",
+                    "sourceBaseUrl": shared_url,
+                    "sourceUrl": format!("{shared_url}/.well-known/skills/known-alpha/SKILL.md"),
+                    "wellKnownDigest": format!("sha256:{}", "e".repeat(64))
+                },
+                "known-beta": {
+                    "sourceType": "well-known",
+                    "sourceBaseUrl": shared_url,
+                    "sourceUrl": format!("{shared_url}/.well-known/skills/known-beta/SKILL.md"),
+                    "wellKnownDigest": format!("sha256:{}", "f".repeat(64))
+                }
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let scan = scan_import_candidates(std::slice::from_ref(&agents_root), &managed_root).unwrap();
+
+    assert_eq!(scan.collections.len(), 2);
+    assert!(scan
+        .collections
+        .iter()
+        .all(|collection| collection.children.len() == 2));
+    assert_eq!(scan.diagnostics.installed_source_lockfile_matches, 4);
+    assert_eq!(scan.diagnostics.installed_source_collections, 2);
+}
+
+#[test]
+fn scan_import_candidates_rejects_unsafe_or_mismatched_well_known_provenance() {
+    let root = temp_dir("candidate-installed-source-well-known-safety");
+    let agents_root = root.join(".agents/skills");
+    let managed_root = root.join("SkillBox");
+    let names = [
+        "lark-query",
+        "lark-mismatch",
+        "lark-bad-digest",
+        "lark-wrong-type",
+    ];
+    for name in names {
+        make_skill(&agents_root.join(name), name, "Unsafe provenance skill");
+    }
+    fs::create_dir_all(root.join(".agents")).unwrap();
+    fs::write(
+        root.join(".agents/.skill-lock.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "version": 3,
+            "skills": {
+                "lark-query": {
+                    "sourceType": "well-known",
+                    "sourceBaseUrl": "https://open.feishu.cn?token=secret",
+                    "sourceUrl": "https://open.feishu.cn/.well-known/skills/lark-query/SKILL.md",
+                    "wellKnownDigest": format!("sha256:{}", "c".repeat(64))
+                },
+                "lark-mismatch": {
+                    "sourceType": "well-known",
+                    "sourceBaseUrl": "https://open.feishu.cn",
+                    "sourceUrl": "https://open.feishu.cn/.well-known/skills/other/SKILL.md",
+                    "wellKnownDigest": format!("sha256:{}", "d".repeat(64))
+                },
+                "lark-bad-digest": {
+                    "sourceType": "well-known",
+                    "sourceBaseUrl": "https://open.feishu.cn",
+                    "sourceUrl": "https://open.feishu.cn/.well-known/skills/lark-bad-digest/SKILL.md",
+                    "wellKnownDigest": "sha256:not-a-digest"
+                },
+                "lark-wrong-type": {
+                    "sourceType": "custom",
+                    "sourceBaseUrl": "https://open.feishu.cn",
+                    "sourceUrl": "https://open.feishu.cn/.well-known/skills/lark-wrong-type/SKILL.md",
+                    "wellKnownDigest": format!("sha256:{}", "e".repeat(64))
+                }
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let scan = scan_import_candidates(std::slice::from_ref(&agents_root), &managed_root).unwrap();
+
+    assert!(scan.collections.is_empty());
+    assert_eq!(scan.standalone_groups.len(), names.len());
+    assert_eq!(scan.diagnostics.installed_source_lockfile_matches, 0);
+    assert_eq!(
+        scan.diagnostics.installed_source_invalid_entries,
+        names.len()
+    );
+    assert_eq!(scan.diagnostics.installed_source_collections, 0);
+}
+
+#[test]
 fn scan_import_candidates_keeps_single_installed_source_match_standalone() {
     let root = temp_dir("candidate-installed-source-lockfile-singleton");
     let agents_root = root.join(".agents/skills");

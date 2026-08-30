@@ -38,10 +38,13 @@ and history record.
 
 Import Review also recognizes a bounded fallback provenance source: a supported
 v3 installer lockfile adjacent to a configured `.agents/skills`, `.claude/skills`,
-`.codex/skills`, or `.cursor/skills` root. Valid GitHub `sourceUrl` entries are
-grouped into an `installed_source` collection only after a real scanned
-candidate matches the lock entry's name and safe repository-relative
-`skillPath`. This is display/provenance grouping, not Git authority: it has no
+`.codex/skills`, or `.cursor/skills` root. Valid GitHub entries require a canonical
+repository `sourceUrl` and safe repository-relative `skillPath`; valid
+`well-known` entries require exact HTTPS base/source URL matching for
+`/.well-known/skills/<name>/SKILL.md` and a well-formed SHA-256 digest. Either
+kind is grouped into an `installed_source` collection only after a real scanned
+candidate matches the lock entry's name and runtime root. Source kind remains
+part of the identity. This is display/provenance grouping, not Git authority: it has no
 worktree, branch, HEAD, fetch, update, or collection-apply capability, and each
 child continues through the normal per-skill preview/import contract. Live Git
 identity always wins. Lockfile hashes never replace full snapshot validation,
