@@ -6290,10 +6290,10 @@ dd {
 }
 
 .collectionReviewHeader {
-  display: flex;
+  display: grid;
   min-width: 0;
+  grid-template-columns: minmax(0, 1fr) minmax(470px, auto);
   align-items: flex-start;
-  justify-content: space-between;
   gap: 16px;
 }
 
@@ -6330,10 +6330,13 @@ dd {
 }
 
 .collectionReviewActions {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: flex-start;
-  justify-content: flex-end;
+  display: grid;
+  width: 470px;
+  max-width: 100%;
+  grid-template-columns: 248px minmax(0, 210px);
+  align-items: start;
+  align-self: start;
+  justify-content: end;
   gap: 12px;
   min-width: 0;
 }
@@ -6390,9 +6393,12 @@ dd {
 
 .collectionReviewSelectionAction {
   display: flex;
+  grid-column: 2;
   min-height: 38px;
-  align-items: center;
+  align-items: flex-start;
+  box-sizing: border-box;
   gap: 8px;
+  padding: 8px 0;
 }
 
 .collectionReviewSelectAll {
@@ -7067,15 +7073,14 @@ dd {
 
 @media (max-width: 1100px) {
   .collectionReviewHeader {
-    align-items: stretch;
-    flex-direction: column;
+    grid-template-columns: minmax(0, 1fr);
     gap: 10px;
   }
 
   .collectionReviewActions {
     width: 100%;
-    align-items: flex-end;
-    justify-content: space-between;
+    grid-template-columns: 248px minmax(0, 210px);
+    justify-content: end;
   }
 
   .usageRankingControls {
@@ -7171,13 +7176,11 @@ dd {
   }
 
   .collectionReviewHeader {
-    flex-direction: column;
     gap: 8px;
   }
 
   .collectionReviewActions {
-    align-items: stretch;
-    flex-direction: column;
+    grid-template-columns: minmax(0, 1fr);
     justify-content: flex-end;
   }
 
@@ -7186,6 +7189,7 @@ dd {
   }
 
   .collectionReviewSelectionAction {
+    grid-column: 1;
     justify-content: flex-end;
   }
 

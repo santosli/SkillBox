@@ -1841,31 +1841,35 @@ fn mutation_lock_preserves_parent_and_symlink_resolution_before_creation() {
     let executable = std::env::current_exe().unwrap();
     for case in ["relative-parent", "symlink-parent"] {
         let root = temp_dir(&format!("managed-root-resolution-{case}"));
-        let holder_cwd;
-        let contender_cwd;
-        let holder_arg;
-        let contender_arg;
-        let expected;
-        if case == "relative-parent" {
-            holder_cwd = root.join("holder");
-            contender_cwd = root.join("contender");
-            fs::create_dir_all(&holder_cwd).unwrap();
-            fs::create_dir_all(&contender_cwd).unwrap();
-            holder_arg = PathBuf::from("../SkillBox");
-            contender_arg = PathBuf::from("../SkillBox");
-            expected = root.join("SkillBox");
-        } else {
-            let real_parent = root.join("real");
-            holder_cwd = root.join("holder");
-            contender_cwd = root.join("contender");
-            fs::create_dir_all(real_parent.join("child")).unwrap();
-            fs::create_dir_all(&holder_cwd).unwrap();
-            fs::create_dir_all(&contender_cwd).unwrap();
-            std::os::unix::fs::symlink(real_parent.join("child"), root.join("alias")).unwrap();
-            holder_arg = root.join("alias/../SkillBox");
-            contender_arg = real_parent.join("SkillBox");
-            expected = real_parent.join("SkillBox");
-        }
+        let (holder_cwd, contender_cwd, holder_arg, contender_arg, expected) =
+            if case == "relative-parent" {
+                let holder_cwd = root.join("holder");
+                let contender_cwd = root.join("contender");
+                fs::create_dir_all(&holder_cwd).unwrap();
+                fs::create_dir_all(&contender_cwd).unwrap();
+                (
+                    holder_cwd,
+                    contender_cwd,
+                    PathBuf::from("../SkillBox"),
+                    PathBuf::from("../SkillBox"),
+                    root.join("SkillBox"),
+                )
+            } else {
+                let real_parent = root.join("real");
+                let holder_cwd = root.join("holder");
+                let contender_cwd = root.join("contender");
+                fs::create_dir_all(real_parent.join("child")).unwrap();
+                fs::create_dir_all(&holder_cwd).unwrap();
+                fs::create_dir_all(&contender_cwd).unwrap();
+                std::os::unix::fs::symlink(real_parent.join("child"), root.join("alias")).unwrap();
+                (
+                    holder_cwd,
+                    contender_cwd,
+                    root.join("alias/../SkillBox"),
+                    real_parent.join("SkillBox"),
+                    real_parent.join("SkillBox"),
+                )
+            };
         let barrier = temp_dir(&format!("managed-root-resolution-barrier-{case}"));
         let ready = barrier.join("ready");
         let release = barrier.join("release");
