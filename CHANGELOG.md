@@ -9,6 +9,10 @@ version tags such as `v0.3.0`.
 
 - No unreleased changes.
 
+## 0.9.3
+
+- Let Generate in the user-skills commit review call a Settings-configured local CLI, defaulting to Cursor Agent in read-only ask mode with Grok 4.6 Fast, with a name-based Conventional Commit fallback. Generate shows progress because the agent often takes 10–20 seconds, and generic `add X skill` output is rewritten from the skill description.
+
 ## 0.9.2
 
 - Align collection Import Review headers so shared type and selection controls keep stable columns, spacing, and responsive sizing across cards.
