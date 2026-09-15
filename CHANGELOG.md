@@ -7,7 +7,7 @@ version tags such as `v0.3.0`.
 
 ## Unreleased
 
-- No unreleased changes.
+- Confirm the sidebar Update action and Settings Install and restart in a dialog before SkillBox downloads, verifies, installs, and restarts.
 
 ## 0.9.3
 

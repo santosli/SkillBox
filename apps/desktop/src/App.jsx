@@ -18,7 +18,7 @@ import {
   RemoteSourceCandidateBindDialog,
   RemoteVersionReviewDialog
 } from './components/remoteSkills.jsx';
-import { SettingsPage } from './components/settings.jsx';
+import { AppUpdateConfirmDialog, SettingsPage } from './components/settings.jsx';
 import {
   ImportRevertDialog,
   SkillDeleteDialog,
@@ -469,6 +469,7 @@ export default function App() {
   const [appUpdate, setAppUpdate] = useState(() =>
     normalizeAppUpdateStatus(null, desktopPackage.version)
   );
+  const [appUpdateDialog, setAppUpdateDialog] = useState({ open: false, error: '' });
   const appUpdateInstallBlocked =
     autoRefreshBlockedStatuses.has(status) ||
     remoteVersionDialog.applying ||
@@ -906,14 +907,43 @@ export default function App() {
     }
   }
 
+  function requestAppUpdateInstall() {
+    if (appUpdateInstallBlocked) {
+      setNotice('Finish the current SkillBox operation before installing an app update.');
+      return;
+    }
+
+    if (!appUpdate.available || appUpdate.state === 'checking' || appUpdate.state === 'installing') {
+      return;
+    }
+
+    setError('');
+    setNotice('');
+    setAppUpdateDialog({ open: true, error: '' });
+  }
+
+  function closeAppUpdateDialog() {
+    if (appUpdate.state === 'installing') {
+      return;
+    }
+
+    setAppUpdateDialog({ open: false, error: '' });
+  }
+
   async function installAppUpdate() {
-    if (!window.__TAURI_INTERNALS__) {
-      setNotice('Development preview only. Packaged release builds perform the signed update.');
+    if (!appUpdateDialog.open) {
       return;
     }
 
     if (appUpdateInstallBlocked) {
+      setAppUpdateDialog({ open: false, error: '' });
       setNotice('Finish the current SkillBox operation before installing an app update.');
+      return;
+    }
+
+    if (!window.__TAURI_INTERNALS__) {
+      setAppUpdateDialog({ open: false, error: '' });
+      setNotice('Development preview only. Packaged release builds perform the signed update.');
       return;
     }
 
@@ -922,6 +952,7 @@ export default function App() {
       state: 'installing',
       message: ''
     }));
+    setAppUpdateDialog((current) => ({ ...current, error: '' }));
 
     try {
       const checked = normalizeAppUpdateStatus(
@@ -930,6 +961,7 @@ export default function App() {
       );
       if (!checked.available) {
         setAppUpdate(checked);
+        setAppUpdateDialog({ open: false, error: '' });
         setNotice(appUpdateNotice(checked) || 'SkillBox is already up to date.');
         return;
       }
@@ -938,6 +970,7 @@ export default function App() {
         state: 'installing'
       });
       await invoke('install_app_update');
+      setAppUpdateDialog({ open: false, error: '' });
       setNotice('App update installed. Restarting SkillBox.');
     } catch (updateError) {
       const message =
@@ -947,6 +980,7 @@ export default function App() {
         state: current.available ? 'available' : 'error',
         message
       }));
+      setAppUpdateDialog((current) => ({ ...current, error: message }));
       setError(message);
     }
   }
@@ -4384,7 +4418,7 @@ export default function App() {
               }
               title={`Install SkillBox v${appUpdate.version} and restart`}
               type="button"
-              onClick={installAppUpdate}
+              onClick={requestAppUpdateInstall}
             >
               {appUpdate.state === 'installing' ? 'Updating…' : 'Update'}
             </button>
@@ -4451,7 +4485,7 @@ export default function App() {
             onCheckAppUpdate={() => checkAppUpdate()}
             onRunDoctor={runHealthCheck}
             onRepairStaleDeployments={repairStaleDeploymentRecords}
-            onInstallAppUpdate={installAppUpdate}
+            onInstallAppUpdate={requestAppUpdateInstall}
             onOpenUsageHookConfig={openUsageHookConfig}
             onInstallUsageHook={installUsageHook}
             onRefreshUsageHooks={refreshUsageHookStatuses}
@@ -4570,6 +4604,15 @@ export default function App() {
           sourceUrl={selectedRemoteUpdate?.sourceUrl || ''}
           onTagsChange={updateDashboardSkillTags}
           onToggleFavorite={toggleDashboardFavorite}
+        />
+      ) : null}
+
+      {appUpdateDialog.open ? (
+        <AppUpdateConfirmDialog
+          appUpdate={appUpdate}
+          error={appUpdateDialog.error}
+          onClose={closeAppUpdateDialog}
+          onConfirm={installAppUpdate}
         />
       ) : null}
 

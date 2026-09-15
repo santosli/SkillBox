@@ -146,9 +146,9 @@ SkillBox_0.9.3_universal.dmg.sha256
 打开 DMG，把 `SkillBox.app` 拖到 `/Applications`。
 
 通过 DMG 安装的 app 每天至多在后台检查一次已签名的 GitHub Releases。
-发现新版本时，可以点击 SkillBox 品牌旁的 Update 直接执行已签名安装并重启，
-也可以在 Settings -> App updates 查看 release notes。没有用户点击时，
-SkillBox 不会自动下载或安装 app 更新。
+发现新版本时，点击 SkillBox 品牌旁的 Update，在确认弹窗中确认后才会下载、
+校验并安装已签名更新，然后重启。也可以在 Settings -> App updates 查看
+release notes。没有用户确认时，SkillBox 不会自动下载或安装 app 更新。
 
 ### Homebrew
 
