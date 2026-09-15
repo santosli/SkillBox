@@ -112,6 +112,7 @@ test('settings exposes app update checks without downloading automatically', () 
   assert.match(appSource, /invoke\('check_app_update'/);
   assert.match(appSource, /invoke\('install_app_update'/);
   assert.match(appSource, /shouldCheckAppUpdateOnStartup/);
+  assert.match(appComponentSource, /onInstallAppUpdate=\{requestAppUpdateInstall\}/);
   assert.match(appComponentSource, /invoke\('check_app_update',\s*\{\s*force:\s*!automatic/s);
   assert.match(appComponentSource, /60 \* 60 \* 1000/);
   assert.doesNotMatch(appSource, /downloadAndInstall/);
@@ -130,6 +131,8 @@ test('sidebar exposes a disabled-while-installing update action only when an upd
   assert.match(buttonSource, /appUpdate\.state === 'installing'/);
   assert.match(buttonSource, /appUpdateInstallBlocked/);
   assert.match(buttonSource, /Updating…/);
+  assert.match(buttonSource, /onClick=\{requestAppUpdateInstall\}/);
+  assert.doesNotMatch(buttonSource, /onClick=\{installAppUpdate\}/);
   assert.match(buttonRule, /height:\s*24px;/);
   assert.match(buttonRule, /padding:\s*0 6px;/);
   assert.match(buttonRule, /background:\s*var\(--skillbox-blue\);/);
@@ -137,6 +140,10 @@ test('sidebar exposes a disabled-while-installing update action only when an upd
   assert.doesNotMatch(buttonRule, /margin-left:\s*auto;/);
   assert.match(appComponentSource, /if \(appUpdateInstallBlocked\)/);
   assert.match(appComponentSource, /Development preview only\. Packaged release builds/);
+  assert.match(appComponentSource, /appUpdateDialog\.open/);
+  assert.match(appComponentSource, /onConfirm=\{installAppUpdate\}/);
+  assert.match(appSource, /export function AppUpdateConfirmDialog/);
+  assert.match(appSource, /Install SkillBox update\?/);
   assert.match(appSource, /isDisabled \|\| installBlocked/);
   assert.match(appComponentSource, /import\.meta\.env\.DEV[\s\S]*previewAppUpdateStatus/);
 });

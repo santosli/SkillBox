@@ -147,9 +147,9 @@ Open the DMG and drag `SkillBox.app` into `/Applications`.
 
 DMG installs check signed GitHub Releases in the background at most once per
 day. When a new version is available, use the Update action beside the SkillBox
-brand for a direct signed install and restart, or review release notes in
-Settings -> App updates. SkillBox never downloads or installs an app update
-without a click.
+brand, confirm in the dialog, then SkillBox installs the signed update and
+restarts. You can also review release notes in Settings -> App updates. SkillBox
+never downloads or installs an app update without that confirmation.
 
 ### Homebrew
 

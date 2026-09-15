@@ -14,7 +14,7 @@ import {
   inboundRelationTone,
   UserSkillsInboundApplyWarning
 } from '../userSkillsInbound.js';
-import { Badge, PageTitleRow, PathList } from './common.jsx';
+import { Badge, ConfirmDialog, PageTitleRow, PathList } from './common.jsx';
 
 const settingsSections = [
   { id: 'storage', label: 'Storage', href: '#settings-storage' },
@@ -250,6 +250,32 @@ function AppUpdateSettingsPanel({ appUpdate, installBlocked, onCheck, onInstall 
         </div>
       </div>
     </aside>
+  );
+}
+
+export function AppUpdateConfirmDialog({ appUpdate, error = '', onClose, onConfirm }) {
+  const version = appUpdate?.version || '';
+  const installing = appUpdate?.state === 'installing';
+
+  return (
+    <ConfirmDialog
+      className="appUpdateConfirmDialog"
+      closeLabel="Close app update confirmation"
+      confirmLabel="Install and restart"
+      description={`Download and install SkillBox v${version}. The app will restart after installation.`}
+      error={error}
+      loading={installing}
+      loadingLabel="Installing..."
+      title="Install SkillBox update?"
+      titleId="app-update-confirm-title"
+      onClose={onClose}
+      onConfirm={onConfirm}
+    >
+      <p className="confirmDialogImpact">
+        SkillBox will download the signed updater, verify it, install the new version, and
+        restart. Your skills and settings stay on this Mac.
+      </p>
+    </ConfirmDialog>
   );
 }
 
