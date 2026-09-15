@@ -141,11 +141,21 @@ pub fn managed_preferences(managed_root: impl AsRef<Path>) -> Result<ManagedPref
     let remote_update_timeout_seconds =
         read_u32_preference(&paths.database_path, "remote_update_timeout_seconds")?
             .unwrap_or(DEFAULT_REMOTE_UPDATE_TIMEOUT_SECONDS);
+    let commit_summary_cli =
+        read_string_preference(&paths.database_path, "commit_summary_cli")?.unwrap_or_default();
+    let resolved_commit_summary_cli =
+        resolve_commit_summary_cli(&commit_summary_cli, &cursor_agent_search_paths())
+            .ok()
+            .flatten()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default();
 
     Ok(ManagedPreferences {
         skip_local_import_confirmation,
         status_refresh_interval_minutes,
         remote_update_timeout_seconds,
+        commit_summary_cli,
+        resolved_commit_summary_cli,
     })
 }
 

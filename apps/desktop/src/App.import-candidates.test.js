@@ -58,6 +58,7 @@ import {
 import {
   canCommitUserSkillsChanges,
   defaultSyncCommitMessage,
+  normalizeSuggestedUserSkillsCommit,
   normalizeUserSkillsGitChanges,
   normalizeUserSkillsGitStatus,
   suggestUserSkillsCommitMessage,
@@ -1339,12 +1340,35 @@ test('suggests generic user skills commit message for root metadata files', () =
   );
 });
 
+test('normalizes generated user skills commit messages from Rust or camelCase payloads', () => {
+  assert.deepEqual(
+    normalizeSuggestedUserSkillsCommit({
+      message: 'feat(github): add title-optimizer skill for evidence-grounded headlines',
+      source: 'cli',
+      cli_path: '/Users/santos/.local/bin/agent'
+    }),
+    {
+      message: 'feat(github): add title-optimizer skill for evidence-grounded headlines',
+      source: 'cli',
+      cliPath: '/Users/santos/.local/bin/agent'
+    }
+  );
+});
+
 test('disables user skills commit when no files can be committed', () => {
   assert.equal(canCommitUserSkillsChanges({ files: [], selectedPaths: [] }), false);
   assert.equal(
     canCommitUserSkillsChanges({
       files: [{ path: 'codex-chat-sync/SKILL.md' }],
       selectedPaths: []
+    }),
+    false
+  );
+  assert.equal(
+    canCommitUserSkillsChanges({
+      files: [{ path: 'codex-chat-sync/SKILL.md' }],
+      selectedPaths: ['codex-chat-sync/SKILL.md'],
+      generating: true
     }),
     false
   );

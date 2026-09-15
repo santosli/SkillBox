@@ -233,6 +233,16 @@ test('standard top-level pages share a full-width page frame by default', () => 
   assert.match(settingsPageRule, /max-width:\s*1220px;/);
 });
 
+test('commit review generate uses the configured local summary CLI through Rust', () => {
+  assert.match(appSource, /suggest_user_skills_commit_message/);
+  assert.match(appSource, /selected_paths:\s*selectedPaths/);
+  assert.match(appSource, /set_commit_summary_cli/);
+  assert.match(appSource, /Generating\.\.\./);
+  assert.match(appSource, /Asking Cursor Agent/);
+  assert.match(appSource, /Generated with Cursor Agent/);
+  assert.match(appSource, /Absolute path only, no arguments/);
+});
+
 test('settings sections are anchored and sync controls are grouped together', () => {
   assert.match(appSource, /id="settings-storage"/);
   assert.match(appSource, /id="settings-sync"/);
@@ -241,10 +251,13 @@ test('settings sections are anchored and sync controls are grouped together', ()
   assert.match(appSource, /function SyncRefreshSettingsPanel/);
   assert.match(appSource, /<h2>Sync & refresh<\/h2>/);
   assert.match(appSource, /<UserSkillsGitSettingsForm/);
+  assert.match(appSource, /<CommitSummaryCliSettingsForm/);
   assert.match(appSource, /<StatusRefreshSettingsForm/);
   assert.match(appSource, /onSaveUserSkillsRemote/);
+  assert.match(appSource, /onSaveCommitSummaryCli/);
   assert.match(appSource, /onSaveStatusRefreshInterval/);
   assert.match(appSource, /onSaveRemoteUpdateTimeout/);
+  assert.match(appSource, /<h3>Commit summary CLI<\/h3>/);
 });
 
 test('settings receives persistent inbound apply warnings and an explicit dismiss action', () => {
@@ -959,6 +972,7 @@ test('remote update preview command runs off the command handler', () => {
 test('blocking desktop commands run off the command handler', () => {
   for (const commandName of [
     'sync_user_skills_git',
+    'suggest_user_skills_commit_message',
     'import_candidates',
     'list_import_records',
     'revert_import',

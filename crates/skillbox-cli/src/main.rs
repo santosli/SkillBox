@@ -481,6 +481,37 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 managed_root(command_args),
             )?)
         }
+        "set-commit-summary-cli" => {
+            if has_flag(command_args, "--clear") {
+                print_json(&skillbox_core::set_commit_summary_cli(
+                    managed_root(command_args),
+                    "",
+                )?)
+            } else {
+                let path = option(command_args, "--path").ok_or_else(|| {
+                    "Usage: skillbox set-commit-summary-cli --path <executable> | --clear [--managed-root <path>]"
+                        .to_string()
+                })?;
+                print_json(&skillbox_core::set_commit_summary_cli(
+                    managed_root(command_args),
+                    path,
+                )?)
+            }
+        }
+        "suggest-user-skills-commit" => {
+            print_json(&skillbox_core::suggest_user_skills_commit_message(
+                skillbox_core::SuggestUserSkillsCommitRequest {
+                    selected_paths: option(command_args, "--select").map(|value| {
+                        value
+                            .split(',')
+                            .map(|part| part.trim().to_string())
+                            .filter(|part| !part.is_empty())
+                            .collect::<Vec<_>>()
+                    }),
+                },
+                managed_root(command_args),
+            )?)
+        }
         "sync-user-skills" => {
             let request = skillbox_core::UserSkillsSyncRequest {
                 remote_url: option(command_args, "--remote"),
@@ -708,6 +739,8 @@ Commands:
   skillbox delete-preview <skill-name> [--managed-root <path>]
   skillbox delete <skill-name> --preview-id <id> --confirm <skill-name> [--managed-root <path>]
   skillbox user-skills-status [--managed-root <path>]
+  skillbox suggest-user-skills-commit [--select <path,path>] [--managed-root <path>]
+  skillbox set-commit-summary-cli --path <executable> | --clear [--managed-root <path>]
   skillbox user-skills-inbound-check [--managed-root <path>]
   skillbox user-skills-inbound-preview [--managed-root <path>]
   skillbox user-skills-inbound-apply --preview-id <id> [--managed-root <path>]
@@ -945,6 +978,8 @@ mod tests {
         assert!(help.contains("skillbox user-skills-inbound-check"));
         assert!(help.contains("skillbox user-skills-inbound-preview"));
         assert!(help.contains("skillbox user-skills-inbound-apply --preview-id <id>"));
+        assert!(help.contains("skillbox suggest-user-skills-commit [--select <path,path>]"));
+        assert!(help.contains("skillbox set-commit-summary-cli --path <executable> | --clear"));
     }
 
     #[test]

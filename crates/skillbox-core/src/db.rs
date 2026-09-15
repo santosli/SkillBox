@@ -960,6 +960,35 @@ pub(crate) fn read_u32_preference(database_path: &Path, key: &str) -> Result<Opt
         .transpose()
 }
 
+pub(crate) fn read_string_preference(database_path: &Path, key: &str) -> Result<Option<String>> {
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
+    connection
+        .query_row(
+            "SELECT value FROM preferences WHERE key = ?1",
+            params![key],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())
+}
+
+pub(crate) fn write_string_preference(database_path: &Path, key: &str, value: &str) -> Result<()> {
+    let connection = open_database(database_path).map_err(|error| error.to_string())?;
+    connection
+        .execute(
+            "
+            INSERT INTO preferences (key, value)
+            VALUES (?1, ?2)
+            ON CONFLICT(key) DO UPDATE SET
+              value = excluded.value,
+              updated_at = CURRENT_TIMESTAMP
+            ",
+            params![key, value],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 pub(crate) fn write_u32_preference(database_path: &Path, key: &str, value: u32) -> Result<()> {
     let connection = open_database(database_path).map_err(|error| error.to_string())?;
     connection

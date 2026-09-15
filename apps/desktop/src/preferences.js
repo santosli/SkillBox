@@ -10,6 +10,7 @@ import {
 export const previewPreferenceStorageKey = 'skillbox.skipLocalImportConfirmation';
 export const previewStatusRefreshIntervalStorageKey = 'skillbox.statusRefreshIntervalMinutes';
 export const previewRemoteUpdateTimeoutStorageKey = 'skillbox.remoteUpdateTimeoutSeconds';
+export const previewCommitSummaryCliStorageKey = 'skillbox.commitSummaryCli';
 export const dashboardFavoriteStorageKey = 'skillbox.dashboardFavorites';
 export const dashboardTagStorageKey = 'skillbox.dashboardTags';
 
@@ -23,7 +24,13 @@ export function normalizePreferences(preferences) {
     ),
     remoteUpdateTimeoutSeconds: normalizeRemoteUpdateTimeoutSeconds(
       preferences?.remoteUpdateTimeoutSeconds ?? preferences?.remote_update_timeout_seconds
-    )
+    ),
+    commitSummaryCli: String(
+      preferences?.commitSummaryCli ?? preferences?.commit_summary_cli ?? ''
+    ).trim(),
+    resolvedCommitSummaryCli: String(
+      preferences?.resolvedCommitSummaryCli ?? preferences?.resolved_commit_summary_cli ?? ''
+    ).trim()
   };
 }
 
@@ -35,6 +42,7 @@ export function readPreviewPreferences() {
     const remoteUpdateTimeoutSeconds = window.localStorage.getItem(
       previewRemoteUpdateTimeoutStorageKey
     );
+    const commitSummaryCli = window.localStorage.getItem(previewCommitSummaryCliStorageKey) || '';
 
     return {
       skipLocalImportConfirmation: window.localStorage.getItem(previewPreferenceStorageKey) === 'true',
@@ -43,7 +51,9 @@ export function readPreviewPreferences() {
       ),
       remoteUpdateTimeoutSeconds: normalizeRemoteUpdateTimeoutSeconds(
         remoteUpdateTimeoutSeconds
-      )
+      ),
+      commitSummaryCli,
+      resolvedCommitSummaryCli: commitSummaryCli
     };
   } catch {
     return normalizePreferences(null);

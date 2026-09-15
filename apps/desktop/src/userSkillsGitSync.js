@@ -43,6 +43,14 @@ export function normalizeUserSkillsGitChanges(changes) {
   };
 }
 
+export function normalizeSuggestedUserSkillsCommit(result) {
+  return {
+    message: String(result?.message || '').trim(),
+    source: String(result?.source || '').trim(),
+    cliPath: String(result?.cliPath || result?.cli_path || '').trim()
+  };
+}
+
 export function suggestUserSkillsCommitMessage(files = [], selectedPaths = []) {
   const selected = new Set(selectedPaths);
   const changedFiles = files.filter((file) => selected.size === 0 || selected.has(file.path));
@@ -80,9 +88,10 @@ export function canCommitUserSkillsChanges({
   push = true,
   remoteUrl = '',
   selectedPaths = [],
-  status = ''
+  status = '',
+  generating = false
 } = {}) {
-  if (loading || status === 'syncing' || status === 'preparing_sync') return false;
+  if (loading || generating || status === 'syncing' || status === 'preparing_sync') return false;
   if (files.length === 0) return false;
   if (selectedPaths.length === 0) return false;
   if (push && !remoteUrl.trim()) return false;

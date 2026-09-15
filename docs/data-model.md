@@ -354,11 +354,14 @@ candidate name/path 的 HTTPS `well-known` base/source URL + SHA-256 digest；so
 `skill_user_metadata` 保存用户显式设置的 favorite 和 tags。桌面首次读取该表时会把旧 `localStorage` 中仍存在的 metadata 通过 `INSERT OR IGNORE` 迁入，因此 SQLite 中已有值不会被旧浏览器状态覆盖；迁移成功后删除旧 key。
 
 当前 `preferences` key-value 表除用户设置和 remote skill update cache 外，还保存
+`commit_summary_cli`、
 `app_update_check_cache`、`codex_usage_backfill_scanned_files`、
 `codex_usage_backfill_scanned_turns`、`claude_code_usage_backfill_scanned_files`、
 `cursor_usage_backfill_scanned_sessions`、
 `cursor_usage_backfill_scanned_transcript_files` 和
-`usage_backfill_audit_<source>`。`app_update_check_cache` 只记录最近一次成功的 updater metadata check 展示快照
+`usage_backfill_audit_<source>`。`commit_summary_cli` 是可选的绝对可执行文件路径，
+供 commit review Generate 调用；空值表示自动发现 Cursor Agent，否则使用内置 heuristic。
+不得保存带参数的 command line。`app_update_check_cache` 只记录最近一次成功的 updater metadata check 展示快照
 （current/available version、release date/body、checked time 和 message），用于 24 小时
 节流与跨启动恢复提醒。它不保存下载 URL、签名或安装授权；损坏、时间异常或 current
 version 不匹配时必须忽略并重新通过 Tauri updater plugin 检查；下载和安装阶段仍由

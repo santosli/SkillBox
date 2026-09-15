@@ -191,6 +191,7 @@ SkillBox 是 local-first，不需要托管账号。应用可能会：
 - 创建从 runtime 目录回指到 managed skills 的 symlink；
 - 为 `~/.skillbox/user-skills` 初始化和更新 Git metadata；
 - 在 v0.7 流程中显式 fetch 并预览 `origin/main` 的入站变更，只在用户确认后 fast-forward 共享 user-skills repository；
+- 在 commit review 中点击 Generate 时，把选中 diff 发给本地 commit-summary CLI（默认 Cursor Agent，或 Settings 里配置的绝对路径）；
 - 在你明确注入 hooks 时，修改受支持 runtime 的 hook config files。
 
 SkillBox 会把 runtime folders、GitHub URLs、下载归档和既有 skills 都视为不可信输入，不应静默覆盖非 symlink runtime target。

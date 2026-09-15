@@ -192,6 +192,7 @@ SkillBox is local-first and does not require a hosted account. The app may:
 - create symlinks from runtime directories back to managed skills;
 - initialize and update Git metadata for `~/.skillbox/user-skills`;
 - in the v0.7 flow, explicitly fetch and preview incoming `origin/main` changes, then fast-forward the shared user-skills repository only after confirmation;
+- when you click Generate in commit review, send the selected diff to a local commit-summary CLI (Cursor Agent by default, or a path you set in Settings);
 - modify supported runtime hook config files when you explicitly inject hooks.
 
 SkillBox treats runtime folders, GitHub URLs, downloaded archives, and existing skills as untrusted input. It should not silently overwrite a non-symlink runtime target.

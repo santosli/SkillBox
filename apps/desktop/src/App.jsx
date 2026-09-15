@@ -87,6 +87,7 @@ import {
 import {
   clearLegacyDashboardMetadata,
   normalizePreferences,
+  previewCommitSummaryCliStorageKey,
   previewRemoteUpdateTimeoutStorageKey,
   previewStatusRefreshIntervalStorageKey,
   readDashboardFavorites,
@@ -151,6 +152,7 @@ import {
 } from './usageRankings.js';
 import {
   defaultSyncCommitMessage,
+  normalizeSuggestedUserSkillsCommit,
   normalizeUserSkillsGitChanges,
   normalizeUserSkillsGitStatus,
   suggestUserSkillsCommitMessage,
@@ -333,7 +335,9 @@ export default function App() {
   const [preferences, setPreferences] = useState({
     skipLocalImportConfirmation: false,
     statusRefreshIntervalMinutes: 5,
-    remoteUpdateTimeoutSeconds: 30
+    remoteUpdateTimeoutSeconds: 30,
+    commitSummaryCli: '',
+    resolvedCommitSummaryCli: ''
   });
   const [localImportConfirmation, setLocalImportConfirmation] = useState({
     open: false,
@@ -363,6 +367,8 @@ export default function App() {
     push: true,
     error: '',
     syncLog: [],
+    generating: false,
+    generateSource: '',
     changes: normalizeUserSkillsGitChanges(null),
     selectedPaths: [],
     activePath: ''
@@ -1663,6 +1669,32 @@ export default function App() {
     return nextPreferences;
   }
 
+  async function saveCommitSummaryCli(cliPath) {
+    const trimmed = String(cliPath || '').trim();
+
+    if (!window.__TAURI_INTERNALS__) {
+      try {
+        window.localStorage.setItem(previewCommitSummaryCliStorageKey, trimmed);
+      } catch {
+        // Browser preview can run without durable storage; keep the session preference in React state.
+      }
+      const nextPreferences = {
+        ...preferences,
+        commitSummaryCli: trimmed,
+        resolvedCommitSummaryCli: trimmed
+      };
+      setPreferences(nextPreferences);
+      return nextPreferences;
+    }
+
+    const storedPreferences = await invoke('set_commit_summary_cli', {
+      cliPath: trimmed
+    });
+    const nextPreferences = normalizePreferences(storedPreferences);
+    setPreferences(nextPreferences);
+    return nextPreferences;
+  }
+
   async function installUsageHook(target) {
     setStatus('installing_usage_hook');
     setError('');
@@ -1751,6 +1783,8 @@ export default function App() {
       push: true,
       error: '',
       syncLog: [],
+      generating: false,
+      generateSource: '',
       changes: normalizeUserSkillsGitChanges(null),
       selectedPaths: [],
       activePath: ''
@@ -1796,7 +1830,7 @@ export default function App() {
   }
 
   function closeSyncDialog() {
-    if (status === 'syncing' || status === 'preparing_sync') {
+    if (status === 'syncing' || status === 'preparing_sync' || syncDialog.generating) {
       return;
     }
     setSyncDialog((current) => ({ ...current, open: false, error: '' }));
@@ -1809,6 +1843,9 @@ export default function App() {
       commitMessageEdited: Object.prototype.hasOwnProperty.call(patch, 'commitMessage')
         ? true
         : current.commitMessageEdited,
+      generateSource: Object.prototype.hasOwnProperty.call(patch, 'commitMessage')
+        ? ''
+        : current.generateSource,
       error: ''
     }));
   }
@@ -1858,13 +1895,60 @@ export default function App() {
     setSyncDialog((current) => ({ ...current, activePath: path }));
   }
 
-  function generateSyncDialogMessage() {
+  async function generateSyncDialogMessage() {
+    const selectedPaths = syncDialog.selectedPaths;
+    const files = syncDialog.changes.files;
     setSyncDialog((current) => ({
       ...current,
-      commitMessage: suggestUserSkillsCommitMessage(current.changes.files, current.selectedPaths),
-      commitMessageEdited: false,
+      generating: true,
+      generateSource: '',
       error: ''
     }));
+
+    if (!window.__TAURI_INTERNALS__) {
+      setSyncDialog((current) => ({
+        ...current,
+        generating: false,
+        generateSource: 'heuristic',
+        commitMessage: suggestUserSkillsCommitMessage(files, selectedPaths),
+        commitMessageEdited: false,
+        error: ''
+      }));
+      return;
+    }
+
+    try {
+      const result = normalizeSuggestedUserSkillsCommit(
+        await invoke('suggest_user_skills_commit_message', {
+          request: { selected_paths: selectedPaths }
+        })
+      );
+      setSyncDialog((current) => {
+        if (!current.open) return current;
+        return {
+          ...current,
+          generating: false,
+          generateSource: result.source || (result.message ? 'cli' : 'heuristic'),
+          commitMessage: result.message || suggestUserSkillsCommitMessage(files, selectedPaths),
+          commitMessageEdited: false,
+          error: ''
+        };
+      });
+    } catch (generateError) {
+      setSyncDialog((current) => {
+        if (!current.open) return current;
+        return {
+          ...current,
+          generating: false,
+          generateSource: '',
+          error:
+            generateError.message ||
+            generateError.error ||
+            String(generateError) ||
+            'Unable to generate commit message.'
+        };
+      });
+    }
   }
 
   async function submitSyncSetup(event) {
@@ -4374,6 +4458,7 @@ export default function App() {
             onSaveStatusRefreshInterval={saveStatusRefreshIntervalMinutes}
             onSaveRemoteUpdateTimeout={saveRemoteUpdateTimeoutSeconds}
             onSaveUserSkillsRemote={saveUserSkillsGitRemote}
+            onSaveCommitSummaryCli={saveCommitSummaryCli}
             onReviewUserSkillsInbound={openUserSkillsInboundReview}
           />
         ) : page === 'workspaces' ? (

@@ -321,6 +321,13 @@ fn set_remote_update_timeout_seconds(seconds: u32) -> Result<Value, String> {
 }
 
 #[tauri::command]
+fn set_commit_summary_cli(cli_path: String) -> Result<Value, String> {
+    let preferences =
+        skillbox_core::set_commit_summary_cli(skillbox_core::default_managed_root(), cli_path)?;
+    serde_json::to_value(preferences).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn list_skill_user_metadata() -> Result<Value, String> {
     let metadata = skillbox_core::list_skill_user_metadata(skillbox_core::default_managed_root())?;
     serde_json::to_value(metadata).map_err(|error| error.to_string())
@@ -613,6 +620,21 @@ fn user_skills_git_status() -> Result<Value, String> {
 fn user_skills_git_changes() -> Result<Value, String> {
     let changes = skillbox_core::user_skills_git_changes(skillbox_core::default_managed_root())?;
     serde_json::to_value(changes).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn suggest_user_skills_commit_message(
+    request: skillbox_core::SuggestUserSkillsCommitRequest,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = skillbox_core::suggest_user_skills_commit_message(
+            request,
+            skillbox_core::default_managed_root(),
+        )?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Commit summary task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -1179,6 +1201,7 @@ pub fn run() {
             set_skip_local_import_confirmation,
             set_status_refresh_interval_minutes,
             set_remote_update_timeout_seconds,
+            set_commit_summary_cli,
             list_skill_user_metadata,
             set_skill_user_metadata,
             migrate_legacy_skill_user_metadata,
@@ -1204,6 +1227,7 @@ pub fn run() {
             preview_github_remote_skill_install,
             user_skills_git_status,
             user_skills_git_changes,
+            suggest_user_skills_commit_message,
             set_user_skills_git_remote,
             sync_user_skills_git,
             check_user_skills_inbound,

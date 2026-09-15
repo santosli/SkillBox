@@ -46,6 +46,8 @@ React UI
 - `managed_state` -> `skillbox_core::managed_state`
 - `managed_preferences` -> `skillbox_core::managed_preferences`
 - `set_skip_local_import_confirmation` -> `skillbox_core::set_skip_local_import_confirmation`
+- `set_commit_summary_cli` -> `skillbox_core::set_commit_summary_cli`
+- `suggest_user_skills_commit_message` -> `skillbox_core::suggest_user_skills_commit_message`
 - `list_skill_user_metadata` -> `skillbox_core::list_skill_user_metadata`
 - `set_skill_user_metadata` -> `skillbox_core::set_skill_user_metadata`
 - `migrate_legacy_skill_user_metadata` -> `skillbox_core::migrate_legacy_skill_user_metadata`
@@ -115,6 +117,7 @@ cargo run -p skillbox-cli --offline -- <command>
 - `remote.rs` GitHub install preview/apply、remote source 绑定、update check、diff 预览、版本切换
 - `marketplace.rs` Claude marketplace 候选搜索
 - `git_sync.rs` user-skills Git outbound commit/push 编排
+- `commit_summary.rs` user-skills commit message 生成：校验后的本地 CLI 路径、Cursor Agent 只读 `--model cursor-grok-4.6-high-fast` 调用或内置 Conventional Commit heuristic
 - `inbound_git_sync.rs` user-skills Git fetch、relation、remote-tree review、
   stale-preview verified blob materialization、compare-and-swap ref advance、
   compensation、backup ref 与 index reconciliation
@@ -145,10 +148,10 @@ cargo run -p skillbox-cli --offline -- <command>
 - GitHub install preview/apply, GitHub-only remote source search, manual binding, update check, version listing, diff preview, update/rollback apply, and operation logging.
 - SQLite schema migration、升级前备份、完整性校验、基础表和索引写入。
 - 用户 favorites/tags 的 SQLite 持久化和桌面 legacy local-storage 迁移。
-- 共享 user-skills repository 的 outbound commit/push，以及显式
+- 共享 user-skills repository 的 outbound commit/push、可选本地 CLI 生成 commit message，以及显式
   Check remote -> Review incoming changes -> Apply fast-forward 入站编排。
 - managed store、deployment、workspace、import backup 和 metadata 的只读 Doctor 检查。
-- 用户偏好读取与写入。
+- 用户偏好读取与写入，包括 commit summary CLI 可执行文件路径。
 - skill usage 事件记录、evidence/provenance 升级、普通/System source identity、
   workspace-aware Calls/reference 聚合、aggregate-only diagnostics 和 agent hook 注入配置。
 - 未来在 runtime profile 之上承载 native agent adapter 和跨 format 的规范化扫描/部署编排。
@@ -333,7 +336,7 @@ GitHub remote source 可以是仓库中的 skill 子目录，也可以是根目�
 - Rust CLI 有 `init`、`version`、`paths`、`scan`、`parse-github-url`、
   `runtime-profiles`、`install-preview`、`install`、`import`、
   `deploy-preview`、preview-confirmed `deploy`、`user-skills-status`、
-  `sync-user-skills`、`user-skills-inbound-check`、
+  `sync-user-skills`、`suggest-user-skills-commit`、`set-commit-summary-cli`、`user-skills-inbound-check`、
   `user-skills-inbound-preview`、`user-skills-inbound-apply`、
   `check-remote-updates`，并保留 `check-updates` 和 `rollback` 兼容别名。
 - Rust CLI 有 `remote-source-candidates`、`remote-source-preview`、`bind-remote-source`、`remote-versions`、`remote-preview-change`、`remote-apply-change`、`usage-record`、`usage-rankings`、`usage-audit`、各 provider history backfill、`usage-hook`、`usage-hook-status`、`usage-hook-install`、`doctor` 和 `operations`。

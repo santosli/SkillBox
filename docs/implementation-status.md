@@ -22,6 +22,7 @@
 - Implemented a first CLI surface for the planned commands.
 - Added a Tauri + React desktop shell with scan and path bridge commands.
 - Implemented Rust/Tauri user-skills Git sync for the shared `~/.skillbox/user-skills` repository, including Settings-managed remote configuration, per-skill dirty status, desktop commit review with diff preview, generated Conventional Commit messages, and selected-file commits.
+- Added a Settings-configured local commit summary CLI for user-skills Generate: validated absolute executable path, Cursor Agent auto-detect in read-only ask mode with `--model cursor-grok-4.6-high-fast`, stdin contract for custom CLIs, and heuristic fallback. Generic `add X skill` CLI output is rewritten from the skill description.
 - Implemented explicit inbound user-skills Git synchronization on `main` through
   Check remote -> Review incoming changes -> Apply fast-forward, with separate
   worktree/relation state, stale-preview rejection, untrusted-tree validation,

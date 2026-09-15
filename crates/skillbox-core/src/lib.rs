@@ -70,6 +70,7 @@ const USAGE_METADATA_CONTENT_KEYS: &[&str] = &[
 ];
 
 mod collections;
+mod commit_summary;
 mod compatibility;
 mod db;
 mod doctor;
@@ -98,6 +99,7 @@ mod usage_backfill_cursor_transcripts;
 mod workspaces;
 
 pub use collections::*;
+pub use commit_summary::*;
 pub use compatibility::*;
 pub(crate) use db::*;
 pub use doctor::*;

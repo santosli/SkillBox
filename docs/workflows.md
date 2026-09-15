@@ -583,7 +583,8 @@ scripts、custom helpers 或 arbitrary shell。
 
 - Rust CLI 入口：`skillbox sync-user-skills [--remote <git-url>] [--message <msg>] [--no-push]`。
 - Rust CLI 状态入口：`skillbox user-skills-status`。
-- Tauri command：`user_skills_git_status`、`user_skills_git_changes`、`set_user_skills_git_remote` 和 `sync_user_skills_git`。
+- Rust CLI 生成入口：`skillbox suggest-user-skills-commit [--select <path,path>]`、`skillbox set-commit-summary-cli --path <executable> | --clear`。
+- Tauri command：`user_skills_git_status`、`user_skills_git_changes`、`suggest_user_skills_commit_message`、`set_user_skills_git_remote`、`set_commit_summary_cli` 和 `sync_user_skills_git`。
 
 步骤：
 
@@ -593,8 +594,10 @@ scripts、custom helpers 或 arbitrary shell。
 - Settings 中配置 shared `origin` remote；commit review dialog 只读展示当前 remote，不直接修改 remote。
 - 桌面 UI 的 sync action 必须先打开 commit review dialog：展示 changed files、当前 diff、可编辑 commit message、只读 remote URL、push 选项，并允许用户选择本次提交的文件。
 - commit review dialog 默认根据选中文件生成 Conventional Commit message；用户手动编辑后不再因勾选变化覆盖，除非主动重新生成。
+- Generate 由 Rust core 执行：Settings 的 `Commit summary CLI` 必须是校验后的绝对可执行文件路径，不能是 shell 字符串。空路径时，若本机存在 Cursor Agent（`~/.local/bin/agent`、`~/.cursor/bin/agent` 或 `/usr/local/bin/agent`），则以 `--print --mode ask --model cursor-grok-4.6-high-fast` 只读调用；否则回退到按 skill 名生成的 heuristic。自定义 CLI 从 stdin 读取 prompt，stdout 输出一行 commit message。调用通常需要 10–20 秒；对话框会显示 Generating 状态和生成来源。prompt 会带上 SKILL.md description，并禁止重复 generic `add X skill`；若 CLI 仍返回该套话，core 会用 description 重写成具体 subject。
+- Generate 只发送当前选中文件的截断 diff；失败时保留现有 message 并展示错误，不静默覆盖。
 - 没有 changed files 或没有选中文件时，commit action 必须禁用；提交过程中必须展示 loading/progress 状态，避免用户误以为界面卡住。
-- Rust core 通过 `user_skills_git_changes` 返回结构化 changed files 和 diff；React 只展示和收集选择，不直接读取文件系统或执行 Git。
+- Rust core 通过 `user_skills_git_changes` 返回结构化 changed files 和 diff；React 只展示和收集选择，不直接读取文件系统、执行 Git 或调用 summary CLI。
 - Rust core 通过 `user_skills_git_status.changed_paths` 返回 dirty 文件路径；Dashboard 行状态必须按 skill 目录细分，只有包含 changed path 的 user skill 显示 `Needs sync`，其他 user skill 保持 `Synced` 或对应全局配置状态。
 - CLI 或未提供文件选择时执行 `git add .`；桌面 UI 提供 `selected_paths` 时只 add 这些经过校验的相对路径。
 - 如果有 staged 变更，使用提供的 commit message 创建 commit；message 为空时默认 `Sync user skills`。
@@ -616,15 +619,17 @@ scripts、custom helpers 或 arbitrary shell。
 - 没有 configured remote 且要求 push 时拒绝同步。
 - 选择文件为空且存在 changed files 时拒绝提交。
 - push 失败不应修改本地提交历史；本地 commit 保留，返回 `push_failed` 状态。
-- 不应把 remote URL、commit message 或 selected paths 拼成 shell 字符串。
+- 不应把 remote URL、commit message、selected paths 或 commit summary CLI 拼成 shell 字符串。
 
 完成验证：
 
 - `cargo test -p skillbox-git --offline`
 - `cargo test -p skillbox-core --offline user_skills`
+- `cargo test -p skillbox-core --offline commit_summary`
+- `cargo test -p skillbox-core --offline suggest_user_skills_commit_message`
 - `cargo run -p skillbox-cli --offline -- user-skills-status --managed-root <temp-skillbox-root>`
 - `cargo run -p skillbox-cli --offline -- sync-user-skills --managed-root <temp-skillbox-root> --remote <bare-repo-path> --message "test sync"`
-- UI 路径变更时，手动验证 commit review dialog、diff preview、默认 commit message、文件选择、shared remote 提示和 push failure 状态。
+- UI 路径变更时，手动验证 commit review dialog、diff preview、默认 commit message、Generate CLI/heuristic、文件选择、shared remote 提示和 push failure 状态。
 
 ### Reviewed Inbound Fast-Forward
 

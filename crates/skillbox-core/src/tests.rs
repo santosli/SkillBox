@@ -6813,6 +6813,223 @@ fn managed_preferences_reject_invalid_remote_update_timeout() {
 }
 
 #[test]
+fn managed_preferences_persist_commit_summary_cli() {
+    let root = temp_dir("preferences-commit-summary-cli");
+    let managed_root = root.join("SkillBox");
+    let cli = root.join("summarize");
+    write_test_executable(
+        &cli,
+        "#!/bin/sh\ncat >/dev/null\necho 'feat(github): update alpha skill'\n",
+    );
+
+    let preferences =
+        set_commit_summary_cli(&managed_root, cli.to_string_lossy().as_ref()).unwrap();
+
+    assert_eq!(
+        preferences.commit_summary_cli,
+        cli.to_string_lossy().as_ref()
+    );
+    assert_eq!(
+        preferences.resolved_commit_summary_cli,
+        cli.to_string_lossy().as_ref()
+    );
+
+    let cleared = set_commit_summary_cli(&managed_root, "  ").unwrap();
+    assert_eq!(cleared.commit_summary_cli, "");
+    assert_eq!(cleared.resolved_commit_summary_cli, "");
+}
+
+#[test]
+fn set_commit_summary_cli_rejects_command_lines() {
+    let managed_root = temp_dir("preferences-commit-summary-cli-reject").join("SkillBox");
+    let error = set_commit_summary_cli(&managed_root, "agent -p --mode ask").unwrap_err();
+    assert!(error.contains("executable path only"));
+}
+
+#[test]
+fn suggest_user_skills_commit_message_uses_heuristic_without_cli() {
+    let managed_root = temp_dir("commit-summary-heuristic").join("SkillBox");
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    make_skill(
+        &paths.user_skills_root.join("alpha"),
+        "alpha",
+        "Alpha skill",
+    );
+
+    let suggested = suggest_user_skills_commit_message(
+        SuggestUserSkillsCommitRequest {
+            selected_paths: Some(vec!["alpha/SKILL.md".to_string()]),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    assert_eq!(suggested.source, "heuristic");
+    assert_eq!(suggested.message, "feat(github): add alpha skill");
+    assert!(suggested.cli_path.is_none());
+}
+
+#[test]
+fn suggest_user_skills_commit_message_runs_generic_cli_with_stdin() {
+    let root = temp_dir("commit-summary-generic-cli");
+    let managed_root = root.join("SkillBox");
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    make_skill(
+        &paths.user_skills_root.join("alpha"),
+        "alpha",
+        "Alpha skill",
+    );
+    let cli = root.join("summarize");
+    write_test_executable(
+        &cli,
+        "#!/bin/sh\ncat > \"$(dirname \"$0\")/stdin.txt\"\necho 'feat(github): refresh alpha prompts'\n",
+    );
+    set_commit_summary_cli(&managed_root, cli.to_string_lossy().as_ref()).unwrap();
+
+    let suggested = suggest_user_skills_commit_message(
+        SuggestUserSkillsCommitRequest {
+            selected_paths: Some(vec!["alpha/SKILL.md".to_string()]),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    assert_eq!(suggested.source, "cli");
+    assert_eq!(suggested.message, "feat(github): refresh alpha prompts");
+    assert_eq!(
+        suggested.cli_path.as_deref(),
+        Some(cli.to_string_lossy().as_ref())
+    );
+    let stdin = fs::read_to_string(root.join("stdin.txt")).unwrap();
+    assert!(stdin.contains("alpha/SKILL.md"));
+    assert!(stdin.contains("Conventional Commit"));
+    assert!(stdin.contains("Never write"));
+    assert!(stdin.contains("Skill purpose:"));
+}
+
+#[test]
+fn suggest_user_skills_commit_message_invokes_cursor_agent_with_read_only_flags() {
+    let root = temp_dir("commit-summary-cursor-agent");
+    let managed_root = root.join("SkillBox");
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    make_skill(
+        &paths.user_skills_root.join("alpha"),
+        "alpha",
+        "Alpha skill",
+    );
+    let cli = root.join("agent");
+    write_test_executable(
+        &cli,
+        r#"#!/bin/sh
+print=0
+mode=""
+model=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "--mode" ]; then
+    mode="$arg"
+  fi
+  if [ "$prev" = "--model" ]; then
+    model="$arg"
+  fi
+  if [ "$arg" = "--print" ] || [ "$arg" = "-p" ]; then
+    print=1
+  fi
+  prev="$arg"
+done
+printf '%s\n' "$@" > "$(dirname "$0")/args.txt"
+if [ "$print" != 1 ] || [ "$mode" != "ask" ] || [ "$model" != "cursor-grok-4.6-high-fast" ]; then
+  echo "missing read-only flags" >&2
+  exit 1
+fi
+echo 'feat(github): add alpha for local prompt fixtures'
+"#,
+    );
+    set_commit_summary_cli(&managed_root, cli.to_string_lossy().as_ref()).unwrap();
+
+    let suggested = suggest_user_skills_commit_message(
+        SuggestUserSkillsCommitRequest {
+            selected_paths: Some(vec!["alpha/SKILL.md".to_string()]),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    assert_eq!(suggested.source, "cli");
+    assert_eq!(
+        suggested.message,
+        "feat(github): add alpha for local prompt fixtures"
+    );
+    let args = fs::read_to_string(root.join("args.txt")).unwrap();
+    assert!(args.contains("--print"));
+    assert!(args.contains("--mode\nask") || args.contains("--mode"));
+    assert!(args.contains("ask"));
+    assert!(args.contains("--sandbox"));
+    assert!(args.contains("enabled"));
+    assert!(args.contains("--model"));
+    assert!(args.contains("cursor-grok-4.6-high-fast"));
+    assert!(!args.contains("--force"));
+    assert!(!args.contains("--yolo"));
+}
+
+#[test]
+fn suggest_user_skills_commit_message_replaces_generic_cli_output() {
+    let root = temp_dir("commit-summary-generic-rewrite");
+    let managed_root = root.join("SkillBox");
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    make_skill(
+        &paths.user_skills_root.join("content-title-optimizer"),
+        "content-title-optimizer",
+        "Generate, compare, and revise evidence-grounded titles from a topic",
+    );
+    let cli = root.join("summarize");
+    write_test_executable(
+        &cli,
+        "#!/bin/sh\necho 'feat(github): add content-title-optimizer skill'\n",
+    );
+    set_commit_summary_cli(&managed_root, cli.to_string_lossy().as_ref()).unwrap();
+
+    let suggested = suggest_user_skills_commit_message(
+        SuggestUserSkillsCommitRequest {
+            selected_paths: Some(vec!["content-title-optimizer/SKILL.md".to_string()]),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    assert_eq!(suggested.source, "cli");
+    assert_eq!(
+        suggested.message,
+        "feat(github): add content-title-optimizer to generate, compare, and revise evidence-grounded titles from a topic"
+    );
+}
+
+#[test]
+fn suggest_user_skills_commit_message_times_out_slow_cli() {
+    let root = temp_dir("commit-summary-timeout");
+    let managed_root = root.join("SkillBox");
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    make_skill(
+        &paths.user_skills_root.join("alpha"),
+        "alpha",
+        "Alpha skill",
+    );
+    let cli = root.join("slow");
+    write_test_executable(&cli, "#!/bin/sh\nsleep 8\n");
+    set_commit_summary_cli(&managed_root, cli.to_string_lossy().as_ref()).unwrap();
+
+    let error = suggest_user_skills_commit_message(
+        SuggestUserSkillsCommitRequest {
+            selected_paths: Some(vec!["alpha/SKILL.md".to_string()]),
+        },
+        &managed_root,
+    )
+    .unwrap_err();
+
+    assert!(error.contains("timed out"));
+}
+
+#[test]
 fn app_update_check_cache_round_trips_through_preferences() {
     let root = temp_dir("app-update-cache");
     let managed_root = root.join("SkillBox");
@@ -12728,6 +12945,13 @@ fn temp_dir(label: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("skillbox-{label}-{nanos}"));
     fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+fn write_test_executable(path: &Path, body: &str) {
+    fs::write(path, body).unwrap();
+    let mut permissions = fs::metadata(path).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions).unwrap();
 }
 
 fn make_skill(path: &std::path::Path, name: &str, description: &str) {

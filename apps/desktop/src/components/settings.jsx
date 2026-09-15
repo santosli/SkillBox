@@ -46,6 +46,7 @@ export function SettingsPage({
   onSaveRemoteUpdateTimeout,
   onSaveStatusRefreshInterval,
   onSaveUserSkillsRemote,
+  onSaveCommitSummaryCli = async () => {},
   onDismissUserSkillsInboundWarnings,
   onReviewUserSkillsInbound
 }) {
@@ -81,6 +82,7 @@ export function SettingsPage({
             onSaveRemoteUpdateTimeout={onSaveRemoteUpdateTimeout}
             onSaveStatusRefreshInterval={onSaveStatusRefreshInterval}
             onSaveUserSkillsRemote={onSaveUserSkillsRemote}
+            onSaveCommitSummaryCli={onSaveCommitSummaryCli}
             onReviewUserSkillsInbound={onReviewUserSkillsInbound}
           />
           <AppUpdateSettingsPanel
@@ -318,6 +320,7 @@ function SyncRefreshSettingsPanel({
   onSaveRemoteUpdateTimeout,
   onSaveStatusRefreshInterval,
   onSaveUserSkillsRemote,
+  onSaveCommitSummaryCli,
   onReviewUserSkillsInbound
 }) {
   return (
@@ -339,6 +342,11 @@ function SyncRefreshSettingsPanel({
           onSave={onSaveUserSkillsRemote}
           onReviewInbound={onReviewUserSkillsInbound}
         />
+        <CommitSummaryCliSettingsForm
+          preferences={preferences}
+          status={status}
+          onSave={onSaveCommitSummaryCli}
+        />
         <StatusRefreshSettingsForm
           preferences={preferences}
           status={status}
@@ -347,6 +355,64 @@ function SyncRefreshSettingsPanel({
         />
       </div>
     </aside>
+  );
+}
+
+function CommitSummaryCliSettingsForm({ preferences, status, onSave }) {
+  const [cliPath, setCliPath] = useState(preferences.commitSummaryCli || '');
+  const [saveStatus, setSaveStatus] = useState('idle');
+  const [message, setMessage] = useState('');
+  const placeholder = preferences.resolvedCommitSummaryCli || '~/.local/bin/agent';
+
+  useEffect(() => {
+    setCliPath(preferences.commitSummaryCli || '');
+  }, [preferences.commitSummaryCli]);
+
+  async function submit(event) {
+    event.preventDefault();
+    setSaveStatus('saving');
+    setMessage('');
+
+    try {
+      await onSave(cliPath);
+      setSaveStatus('saved');
+      setMessage('Saved.');
+    } catch (error) {
+      setSaveStatus('error');
+      setMessage(error.message || String(error) || 'Unable to save commit summary CLI.');
+    }
+  }
+
+  return (
+    <form className="settingsForm settingsSubform" onSubmit={submit}>
+      <div className="settingsSubformHeader">
+        <h3>Commit summary CLI</h3>
+        <p>Generate in the commit review dialog can call a local CLI with the selected diff.</p>
+      </div>
+      <label className="remoteImportField">
+        <span>Executable path</span>
+        <input
+          placeholder={placeholder}
+          value={cliPath}
+          onChange={(event) => {
+            setCliPath(event.target.value);
+            setMessage('');
+          }}
+        />
+      </label>
+      <small className="remoteImportHint">
+        Absolute path only, no arguments. Empty uses Cursor Agent at <code>~/.local/bin/agent</code> if
+        installed; otherwise SkillBox keeps the name-based message. Generate sends the selected diff
+        to this program and often takes 10–20 seconds. Cursor Agent uses your Cursor account, Grok
+        4.6 Fast, and stays in read-only ask mode.
+      </small>
+      <div className="settingsActions">
+        {message ? <span className={saveStatus === 'error' ? 'settingsError' : 'settingsSaved'}>{message}</span> : <span />}
+        <button className="button primary" disabled={status === 'checking' || saveStatus === 'saving'} type="submit">
+          {saveStatus === 'saving' ? 'Saving...' : 'Save commit CLI'}
+        </button>
+      </div>
+    </form>
   );
 }
 

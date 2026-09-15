@@ -24,8 +24,11 @@ SkillBox may write:
 ## Network Access
 
 Network access is limited to workflows that require it, such as installing or
-checking remote skills from GitHub or pushing a user-skills Git repository. Those
-operations use the remotes and URLs you configure.
+checking remote skills from GitHub, pushing a user-skills Git repository, or
+generating a commit message with Cursor Agent / another networked CLI you
+configure. Those operations use the remotes, URLs, and local programs you
+configure. SkillBox does not send diffs to a third-party API unless you click
+Generate and a summary CLI is available.
 
 ## Usage Hooks
 

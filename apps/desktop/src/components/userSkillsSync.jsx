@@ -23,10 +23,11 @@ export function UserSkillsSyncDialog({
     null;
   const allSelected =
     dialog.changes.files.length > 0 && dialog.selectedPaths.length === dialog.changes.files.length;
-  const isBusy = status === 'syncing' || dialog.loading;
+  const isBusy = status === 'syncing' || dialog.loading || dialog.generating;
   const canSubmit = canCommitUserSkillsChanges({
     files: dialog.changes.files,
     loading: dialog.loading,
+    generating: dialog.generating,
     push: dialog.push,
     remoteUrl: dialog.remoteUrl,
     selectedPaths: dialog.selectedPaths,
@@ -61,9 +62,14 @@ export function UserSkillsSyncDialog({
             <label className="remoteImportField">
               <span className="fieldLabelRow">
                 <span>Commit message</span>
-                <button className="inlineActionButton" disabled={isBusy} type="button" onClick={onGenerateMessage}>
+                <button
+                  className={dialog.generating ? 'inlineActionButton generating' : 'inlineActionButton'}
+                  disabled={isBusy || dialog.selectedPaths.length === 0}
+                  type="button"
+                  onClick={onGenerateMessage}
+                >
                   <RefreshCw aria-hidden="true" size={14} />
-                  Generate
+                  {dialog.generating ? 'Generating...' : 'Generate'}
                 </button>
               </span>
               <input
@@ -73,6 +79,19 @@ export function UserSkillsSyncDialog({
                 value={dialog.commitMessage}
                 onChange={(event) => onUpdate({ commitMessage: event.target.value })}
               />
+              {dialog.generating ? (
+                <small className="commitGenerateStatus" aria-live="polite">
+                  Asking Cursor Agent… this often takes 10–20 seconds.
+                </small>
+              ) : dialog.generateSource === 'cli' ? (
+                <small className="commitGenerateStatus" aria-live="polite">
+                  Generated with Cursor Agent.
+                </small>
+              ) : dialog.generateSource === 'heuristic' ? (
+                <small className="commitGenerateStatus" aria-live="polite">
+                  Used the name-based message.
+                </small>
+              ) : null}
             </label>
             <label className="remoteImportField">
               <span className="fieldLabelRow">

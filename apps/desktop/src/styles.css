@@ -5412,9 +5412,21 @@ dd {
   opacity: 0.58;
 }
 
+.inlineActionButton.generating svg {
+  animation: syncSpin 0.8s linear infinite;
+}
+
 .skillDeleteCopyButton svg {
   width: 14px;
   height: 14px;
+}
+
+.commitGenerateStatus {
+  margin: 6px 0 0;
+  color: var(--skillbox-text-muted);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.4;
 }
 
 .remoteImportField input {

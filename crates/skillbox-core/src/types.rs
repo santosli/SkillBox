@@ -153,6 +153,8 @@ pub struct ManagedPreferences {
     pub skip_local_import_confirmation: bool,
     pub status_refresh_interval_minutes: u32,
     pub remote_update_timeout_seconds: u32,
+    pub commit_summary_cli: String,
+    pub resolved_commit_summary_cli: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -618,6 +620,18 @@ pub struct UserSkillsSyncRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UserSkillsGitRemoteRequest {
     pub remote_url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SuggestUserSkillsCommitRequest {
+    pub selected_paths: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SuggestedUserSkillsCommit {
+    pub message: String,
+    pub source: String,
+    pub cli_path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
