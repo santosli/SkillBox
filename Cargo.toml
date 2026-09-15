@@ -8,3 +8,19 @@ members = [
 ]
 resolver = "2"
 
+# Full DWARF plus macOS unpacked split-debuginfo leaves hundreds of thousands of
+# .o files and stale incremental sessions under target/debug.
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "off"
+
+[profile.dev.build-override]
+debug = false
+
+[profile.test]
+debug = "line-tables-only"
+split-debuginfo = "off"
+
+[profile.test.build-override]
+debug = false
+
