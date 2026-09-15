@@ -35,6 +35,28 @@ development app is named `SkillBox Dev` and uses its own bundle identifier.
 Production builds retain the `SkillBox` name and launch-focus behavior from
 `tauri.conf.json`.
 
+### Local Cargo Artifacts
+
+`target/` is gitignored. Debug builds write to `target/debug/` and can grow to
+tens of gigabytes if they keep full DWARF, macOS unpacked split-debuginfo
+object files, and leftover incremental sessions from `tauri:dev`, Clippy, and
+toolchain upgrades.
+
+Workspace `dev` and `test` profiles keep line-table debug info
+(`debug = "line-tables-only"`) and disable split debuginfo so backtraces still
+work without embedding full DWARF for every crate. After a clean, a fresh
+debug tree should stay much smaller than a full-debug unpacked build.
+
+If `target/debug` grows again, reclaim the space without deleting release
+artifacts:
+
+```sh
+cargo clean --profile dev
+```
+
+`cargo clean` with no profile also removes `target/release`. Do not commit
+anything under `target/`.
+
 ## Branch And Agent Workflow
 
 Create complex changes on a `codex/<short-slug>` branch before editing files.
