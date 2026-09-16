@@ -1,0 +1,982 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import test from 'node:test';
+
+const css = await readFile(new URL('./styles.css', import.meta.url), 'utf8');
+const colorsCss = await readFile(new URL('./colors.css', import.meta.url), 'utf8');
+const appSourcePaths = [
+  './App.jsx',
+  './components/dashboard.jsx',
+  './components/common.jsx',
+  './components/workspaces.jsx',
+  './components/history.jsx',
+  './components/rankings.jsx',
+  './components/settings.jsx',
+  './components/importReview.jsx',
+  './components/skillDetail.jsx',
+  './components/remoteSkills.jsx',
+  './components/userSkillsSync.jsx',
+  './skills.js',
+  './historyEntries.js',
+  './usageRankings.js',
+  './usageHooks.js',
+  './workspaces.js',
+  './appUpdates.js',
+  './preferences.js',
+  './previewData.js',
+  './importFlow.js',
+  './workspaceDirectoryPicker.js',
+  './appActionsA.js',
+  './appActionsB.js'
+];
+const appSource = (
+  await Promise.all(
+    appSourcePaths.map((path) => readFile(new URL(path, import.meta.url), 'utf8'))
+  )
+).join('\n');
+const appComponentSource = (
+  await Promise.all(
+    ['./App.jsx', './appActionsA.js', './appActionsB.js'].map((path) =>
+      readFile(new URL(path, import.meta.url), 'utf8')
+    )
+  )
+).join('\n');
+const mainSource = await readFile(new URL('./main.jsx', import.meta.url), 'utf8');
+const tauriSource = await readFile(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8');
+const tauriMainSource = await readFile(new URL('../src-tauri/src/main.rs', import.meta.url), 'utf8');
+const tauriCargo = await readFile(new URL('../src-tauri/Cargo.toml', import.meta.url), 'utf8');
+const tauriMainCapability = JSON.parse(
+  await readFile(new URL('../src-tauri/capabilities/main.json', import.meta.url), 'utf8')
+);
+const desktopPackage = JSON.parse(
+  await readFile(new URL('../package.json', import.meta.url), 'utf8')
+);
+
+test('dashboard and workspace cards fill the available row width while auto-wrapping', () => {
+  const sharedGridRule = css.match(/\.skillCardGrid,\s*\.workspaceCardGrid\s*\{(?<body>[^}]*)\}/s)
+    ?.groups.body || '';
+
+  assert.match(css, /--dashboard-card-width:\s*360px;/);
+  assert.match(css, /--dashboard-card-track:\s*minmax\(min\(100%,\s*var\(--dashboard-card-width\)\),\s*1fr\);/);
+  assert.match(
+    sharedGridRule,
+    /grid-template-columns:\s*repeat\(auto-fill,\s*var\(--dashboard-card-track\)\);/
+  );
+  assert.match(sharedGridRule, /justify-content:\s*stretch;/);
+  assert.doesNotMatch(sharedGridRule, /justify-content:\s*start;/);
+  assert.doesNotMatch(sharedGridRule, /repeat\([234],\s*minmax\(0,\s*1fr\)\)/);
+  assert.doesNotMatch(css, /\.skillCardGrid,\s*\.workspaceCardGrid\s*\{[^}]*repeat\([234],\s*minmax\(0,\s*1fr\)\)/s);
+});
+
+test('sidebar brand does not render a subtitle', () => {
+  const brandRule = css.match(/\.brand\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const brandTextRule = css.match(/\.brandName\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const brandTitleRule = css.match(/\.brand strong\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(
+    appSource,
+    /const APP_DISPLAY_NAME = import\.meta\.env\.DEV && !publicPreview \? 'SkillBox Dev' : 'SkillBox';/
+  );
+  assert.match(appSource, /<strong>\{APP_DISPLAY_NAME\}<\/strong>/);
+  assert.doesNotMatch(appSource, /Local skill manager/);
+  assert.doesNotMatch(css, /\.brand span/);
+  assert.match(brandRule, /gap:\s*9px;/);
+  assert.match(brandTextRule, /min-height:\s*36px;/);
+  assert.match(brandTextRule, /align-items:\s*center;/);
+  assert.match(brandTitleRule, /font-size:\s*21px;/);
+  assert.match(brandTitleRule, /line-height:\s*36px;/);
+});
+
+test('sidebar exposes a disabled-while-installing update action only when an update is available', () => {
+  const buttonSource =
+    appComponentSource.match(
+      /\{appUpdate\.available \? \([\s\S]*?className="sidebarUpdateButton"[\s\S]*?\) : null\}/
+    )?.[0] || '';
+  const buttonRule =
+    css.match(/\.sidebarUpdateButton\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(buttonSource, /Update SkillBox to version/);
+  assert.match(buttonSource, /Install SkillBox v/);
+  assert.match(buttonSource, /appUpdate\.state === 'installing'/);
+  assert.match(buttonSource, /appUpdateInstallBlocked/);
+  assert.match(buttonSource, /Updating…/);
+  assert.match(buttonSource, /onClick=\{requestAppUpdateInstall\}/);
+  assert.doesNotMatch(buttonSource, /onClick=\{installAppUpdate\}/);
+  assert.match(buttonRule, /height:\s*24px;/);
+  assert.match(buttonRule, /padding:\s*0 6px;/);
+  assert.match(buttonRule, /background:\s*var\(--skillbox-blue\);/);
+  assert.match(buttonRule, /color:\s*var\(--skillbox-surface\);/);
+  assert.doesNotMatch(buttonRule, /margin-left:\s*auto;/);
+  assert.match(appComponentSource, /if \(appUpdateInstallBlocked\)/);
+  assert.match(appComponentSource, /Development preview only\. Packaged release builds/);
+  assert.match(appComponentSource, /appUpdateDialog\.open/);
+  assert.match(appComponentSource, /onConfirm=\{installAppUpdate\}/);
+  assert.match(appSource, /export function AppUpdateConfirmDialog/);
+  assert.match(appSource, /Install SkillBox update\?/);
+  assert.match(appSource, /isDisabled \|\| installBlocked/);
+  assert.match(appComponentSource, /import\.meta\.env\.DEV[\s\S]*previewAppUpdateStatus/);
+});
+
+test('dashboard and settings use the shared page title row template', () => {
+  const dashboardSource = appSource.match(/export function Dashboard[\s\S]*?function DashboardActionGroup/)?.[0] || '';
+  const settingsPageSource = appSource.match(/export function SettingsPage[\s\S]*?function SettingsRail/)?.[0] || '';
+  const commonSource = appSource.match(/export function PageTitleRow[\s\S]*?export function NavButton/)?.[0] || '';
+  const pageRule = css.match(/\.settingsPage\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const pageTitleRowRule = css.match(/\.pageTitleRow\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const pageTitleGroupRule = css.match(/\.pageTitleGroup\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const pageTitleHeadingRule = css.match(/\.pageTitleGroup h1\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const pageTitlePillRule = css.match(/\.pageTitlePill\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const workbenchRule = css.match(/\.settingsWorkbench\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(commonSource, /export function PageTitleRow\(\{ actions, count, subtitle, title \}\)/);
+  assert.match(commonSource, /className=\{frameClassName\}/);
+  assert.match(commonSource, /aria-label=\{ariaLabel\}/);
+  assert.match(dashboardSource, /<PageFrame ariaLabel="Skills dashboard">/);
+  assert.match(workspacePageSource, /<PageFrame ariaLabel="Workspace registry">/);
+  assert.match(historyPageSource, /<PageFrame ariaLabel="History">/);
+  assert.match(rankingsPageSource, /<PageFrame ariaLabel="Rankings">/);
+  assert.match(pageFrameRule, /display:\s*grid;/);
+  assert.match(pageFrameRule, /width:\s*100%;/);
+  assert.match(pageFrameRule, /min-width:\s*0;/);
+  assert.match(pageFrameRule, /gap:\s*18px;/);
+  assert.doesNotMatch(pageFrameRule, /max-width:/);
+  assert.doesNotMatch(css, /\.historyFrame\s*\{[^}]*max-width:\s*1040px;/s);
+  assert.doesNotMatch(css, /\.dashboardFrame\s*\{/);
+  assert.match(settingsPageRule, /max-width:\s*1220px;/);
+});
+
+test('commit review generate uses the configured local summary CLI through Rust', () => {
+  assert.match(appSource, /suggest_user_skills_commit_message/);
+  assert.match(appSource, /selected_paths:\s*selectedPaths/);
+  assert.match(appSource, /set_commit_summary_cli/);
+  assert.match(appSource, /Generating\.\.\./);
+  assert.match(appSource, /Asking Cursor Agent/);
+  assert.match(appSource, /Generated with Cursor Agent/);
+  assert.match(appSource, /Absolute path only, no arguments/);
+});
+
+test('settings sections are anchored and sync controls are grouped together', () => {
+  assert.match(appSource, /id="settings-storage"/);
+  assert.match(appSource, /id="settings-sync"/);
+  assert.match(appSource, /id="settings-updates"/);
+  assert.match(appSource, /id="settings-hooks"/);
+  assert.match(appSource, /function SyncRefreshSettingsPanel/);
+  assert.match(appSource, /<h2>Sync & refresh<\/h2>/);
+  assert.match(appSource, /<UserSkillsGitSettingsForm/);
+  assert.match(appSource, /<CommitSummaryCliSettingsForm/);
+  assert.match(appSource, /<StatusRefreshSettingsForm/);
+  assert.match(appSource, /onSaveUserSkillsRemote/);
+  assert.match(appSource, /onSaveCommitSummaryCli/);
+  assert.match(appSource, /onSaveStatusRefreshInterval/);
+  assert.match(appSource, /onSaveRemoteUpdateTimeout/);
+  assert.match(appSource, /<h3>Commit summary CLI<\/h3>/);
+});
+
+test('settings workbench CSS defines a desktop rail and responsive fallback', () => {
+  const workbenchRule = css.match(/\.settingsWorkbench\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const railRule = css.match(/\.settingsRail\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const syncRule = css.match(/\.syncRefreshGrid\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const subformRule = css.match(/\.settingsSubform \+ \.settingsSubform\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const responsiveRule = css.match(/@media \(max-width: 1180px\)\s*\{(?<body>[\s\S]*?)@media \(max-width: 1360px\)/)
+    ?.groups.body || '';
+
+  assert.match(workbenchRule, /grid-template-columns:\s*minmax\(220px,\s*240px\)\s+minmax\(0,\s*960px\);/);
+  assert.match(workbenchRule, /max-width:\s*1220px;/);
+  assert.match(railRule, /position:\s*sticky;/);
+  assert.match(railRule, /top:\s*24px;/);
+  assert.doesNotMatch(css, /\.settingsRailSummary/);
+  assert.doesNotMatch(css, /\.settingsStatusRow/);
+  assert.doesNotMatch(css, /\.settingsStoreHint/);
+  assert.match(syncRule, /grid-template-columns:\s*1fr;/);
+  assert.match(subformRule, /border-top:\s*1px solid var\(--skillbox-slate-bg\);/);
+  assert.doesNotMatch(subformRule, /border-left:/);
+  assert.match(responsiveRule, /\.settingsWorkbench\s*\{[^}]*grid-template-columns:\s*1fr;/s);
+  assert.match(responsiveRule, /\.settingsRail\s*\{[^}]*position:\s*static;/s);
+  assert.match(responsiveRule, /\.settingsRailNav\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\);/s);
+});
+
+test('dashboard filters share one continuous control surface', () => {
+  const contentRule = css.match(/\.content\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const filterBarRule = css.match(/\.dashboardFilterBar\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const filterPrimaryRule = css.match(/\.dashboardFilterPrimary\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const typeTabsRule = css.match(/\.dashboardTypeTabs\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const activeTypeTabsRule = css.match(
+    /\.dashboardTypeTabs button\.active,\s*\.viewSwitch button\.active\s*\{(?<body>[^}]*)\}/s
+  )?.groups.body || '';
+  const actionGroupRule = css.match(/\.dashboardActionGroup\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const indicatorRule = css.match(/\.dashboardActionIndicator\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(contentRule, /overflow-y:\s*auto;/);
+  assert.match(contentRule, /scrollbar-gutter:\s*stable;/);
+  assert.match(appSource, /className="dashboardFilterBar" aria-label="Dashboard filters"[\s\S]*className="searchField dashboardSearch"[\s\S]*className="dashboardTypeTabs"[\s\S]*favoriteFilterButton[\s\S]*<DashboardChipGroup/);
+  assert.match(filterBarRule, /border:\s*1px solid var\(--skillbox-border-control\);/);
+  assert.match(filterBarRule, /background:\s*var\(--skillbox-surface\);/);
+  assert.match(filterPrimaryRule, /grid-template-columns:\s*minmax\(220px,\s*1fr\) minmax\(320px,\s*380px\) max-content;/);
+  assert.match(typeTabsRule, /width:\s*100%;/);
+  assert.match(typeTabsRule, /grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\);/);
+  assert.match(activeTypeTabsRule, /background:\s*var\(--skillbox-blue-bg\);/);
+  assert.match(activeTypeTabsRule, /color:\s*var\(--skillbox-blue-text\);/);
+  assert.match(actionGroupRule, /width:\s*330px;/);
+  assert.match(actionGroupRule, /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);/);
+  assert.match(css, /\.dashboardActionGroup\.previewing \.dashboardActionIndicator\s*\{[^}]*opacity:\s*1;/s);
+  assert.match(indicatorRule, /opacity:\s*0;/);
+  assert.match(indicatorRule, /transform:\s*translateX\(calc\(var\(--dashboard-action-index,\s*0\) \* 100%\)\);/);
+  assert.match(indicatorRule, /transform 280ms cubic-bezier\(0\.2,\s*0\.8,\s*0\.2,\s*1\);/);
+  assert.match(appSource, /label:\s*isChecking \? 'Refreshing' : 'Refresh'/);
+  assert.match(appSource, /label:\s*'Import'/);
+  assert.match(appSource, /label:\s*'Install'/);
+  assert.match(appSource, /onMouseEnter=\{\(\) => setPreviewAction\(action\.id\)\}/);
+  assert.match(appSource, /onBlur=\{\(event\) =>/);
+  assert.match(appSource, /setPreviewAction\(null\);/);
+});
+
+test('dashboard content keeps a compact title offset from the window top', () => {
+  const contentRule = css.match(/\.content\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(contentRule, /padding:\s*24px 48px 48px;/);
+});
+
+test('workspace type tabs use three columns without an empty slot', () => {
+  const workspacePageSource = appSource.match(/export function WorkspacePage[\s\S]*?function WorkspaceCard/)?.[0] || '';
+  const workspaceTypeTabsRule = css.match(/\.workspaceTypeTabs\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const pageTypeFilterRule = css.match(/\.pageTypeFilterBar\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const workspaceFilterRule = css.match(/\.workspaceFilterBar\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const workspaceFilterPrimaryRule = css.match(/\.workspaceFilterPrimary\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(workspacePageSource, /<PageTitleRow[\s\S]*actions=\{\([\s\S]*className="workspaceHeaderActions"/);
+  assert.match(workspacePageSource, /className="dashboardFilterBar pageTypeFilterBar workspaceFilterBar" aria-label="Workspace filters"[\s\S]*aria-label="Search workspaces"[\s\S]*placeholder="Search workspaces\.\.\."[\s\S]*className="dashboardTypeTabs workspaceTypeTabs"/);
+  assert.doesNotMatch(workspacePageSource, /dashboardControlRow workspaceControlRow/);
+  assert.match(pageTypeFilterRule, /width:\s*max-content;/);
+  assert.match(pageTypeFilterRule, /max-width:\s*100%;/);
+  assert.match(workspaceFilterRule, /width:\s*min\(780px,\s*100%\);/);
+  assert.match(workspaceFilterPrimaryRule, /grid-template-columns:\s*minmax\(240px,\s*1fr\) max-content;/);
+  assert.match(workspaceTypeTabsRule, /width:\s*max-content;/);
+  assert.match(workspaceTypeTabsRule, /grid-template-columns:\s*repeat\(3,\s*minmax\(112px,\s*max-content\)\);/);
+  assert.doesNotMatch(workspaceTypeTabsRule, /repeat\(4,/);
+});
+
+test('import review uses the shared searchable candidate list template', () => {
+  const importReviewSource = appSource.match(
+    /export function ImportReview\(\{(?<body>[\s\S]*?)function CandidateReviewList/
+  )?.groups.body || '';
+  const candidateReviewListSource = appSource.match(
+    /function CandidateReviewList\(\{(?<body>[\s\S]*?)function WorkspaceSkillTabs/
+  )?.groups.body || '';
+  const searchRule = css.match(/\.candidateSearchField\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(importReviewSource, /<CandidateReviewList/);
+  assert.doesNotMatch(importReviewSource, /<CollapsedCandidateGroup/);
+  assert.match(candidateReviewListSource, /className="searchField candidateSearchField"/);
+  assert.match(candidateReviewListSource, /placeholder="Search review skills\.\.\."/);
+  assert.match(candidateReviewListSource, /autoComplete="off"/);
+  assert.match(candidateReviewListSource, /autoCorrect="off"/);
+  assert.match(candidateReviewListSource, /autoCapitalize="none"/);
+  assert.match(candidateReviewListSource, /spellCheck=\{false\}/);
+  assert.match(candidateReviewListSource, /role="searchbox"/);
+  assert.match(candidateReviewListSource, /type="text"/);
+  assert.doesNotMatch(candidateReviewListSource, /type="search"/);
+  assert.match(candidateReviewListSource, /importCandidateGroupTabs\(searchedGroups\)/);
+  assert.match(candidateReviewListSource, /filterImportCollectionsByQuery\(collections, searchQuery\)/);
+  assert.match(candidateReviewListSource, /<CollectionReviewCard/);
+  assert.match(candidateReviewListSource, /collectionGroupIds/);
+  assert.match(appSource, /apply_import_collection/);
+  assert.match(appSource, /preview_id: request.previewId/);
+  assert.match(searchRule, /width:\s*100%;/);
+});
+
+test('import review opens before scanning and exposes staged accessible progress', () => {
+  const scanSource = appSource.match(
+    /async function scanForImportCandidates\(\)\s*\{(?<body>[\s\S]*?)\n  \}\n\n  function /
+  )?.groups.body || '';
+  const importReviewSource = appSource.match(
+    /export function ImportReview\(\{(?<body>[\s\S]*?)function ImportScanProgress/
+  )?.groups.body || '';
+  const progressSource = appSource.match(
+    /function ImportScanProgress\(\{(?<body>[\s\S]*?)function CandidateReviewList/
+  )?.groups.body || '';
+
+  assert.match(appSource, /listen\('skillbox:\/\/import-scan-progress'/);
+  assert.match(tauriSource, /async fn scan_import_candidates\(app: tauri::AppHandle, scan_id: u64\)/);
+  assert.match(tauriSource, /scan_import_candidates_with_progress/);
+  assert.match(tauriSource, /app\.emit\(\s*"skillbox:\/\/import-scan-progress"/);
+  assert.match(scanSource, /open: true/);
+  assert.match(scanSource, /loading: true/);
+  assert.match(scanSource, /createImportScanRequestController/);
+  assert.match(scanSource, /const scanId = scanController\.begin\(\)/);
+  assert.match(scanSource, /if \(scanId == null\)/);
+  assert.match(scanSource, /await waitForNextPaint\(\)/);
+  assert.match(appSource, /importScanCommandArgs/);
+  assert.match(scanSource, /invoke\('scan_import_candidates', importScanCommandArgs\(scanId\)\)/);
+  assert.doesNotMatch(scanSource, /scan_id:\s*scanId/);
+  assert.match(appSource, /importScanControllerRef\.current\?\.invalidate\(\)/);
+  assert.match(scanSource, /scanController\.finish\(scanId\)/);
+  assert.match(importReviewSource, /loading = false/);
+  assert.match(importReviewSource, /scanError = ''/);
+  assert.match(importReviewSource, /onRetry/);
+  assert.match(progressSource, /role="status" aria-live="polite" aria-atomic="true"/);
+  assert.match(progressSource, /importScanProgressLabel/);
+  assert.match(progressSource, /importScanProgressDetail/);
+});
+
+test('local import confirmation lets users choose User or Remote', () => {
+  const dialogSource = appSource.match(
+    /export function LocalImportConfirmationDialog\(\{(?<body>[\s\S]*?)export function ImportReview/
+  )?.groups.body || '';
+  const pathRule = css.match(/\.localImportPaths li\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(dialogSource, /onTypeChange/);
+  assert.match(dialogSource, /className="candidateTypeSwitch"/);
+  assert.match(dialogSource, /onClick=\{\(\) => onTypeChange\(candidate, 'user'\)\}/);
+  assert.match(dialogSource, /onClick=\{\(\) => onTypeChange\(candidate, 'remote'\)\}/);
+  assert.match(dialogSource, /Choose User or Remote/);
+  assert.doesNotMatch(dialogSource, /Don't show this again/);
+  assert.doesNotMatch(dialogSource, /localImportPreference/);
+  assert.match(appSource, /onTypeChange=\{\(candidate, skillType\) =>/);
+  assert.match(pathRule, /grid-template-columns:\s*minmax\(0,\s*1fr\) auto;/);
+});
+
+test('remote source binding dialog keeps long candidate lists inside the viewport', () => {
+  const dialogRule = css.match(/\.remoteImportDialog\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const formRule = css.match(/\.remoteImportForm\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const candidateListRule = css.match(/\.remoteSourceCandidateList\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(dialogRule, /max-height:\s*min\(760px,\s*calc\(100vh - 64px\)\);/);
+  assert.match(dialogRule, /grid-template-rows:\s*auto minmax\(0,\s*1fr\);/);
+  assert.match(formRule, /min-height:\s*0;/);
+  assert.match(formRule, /overflow-y:\s*auto;/);
+  assert.match(candidateListRule, /max-height:\s*min\(420px,\s*42vh\);/);
+  assert.match(candidateListRule, /overflow-y:\s*auto;/);
+});
+
+test('import review uses all candidate groups by default in the shared review list', () => {
+  assert.match(
+    appSource,
+    /const \[activeTab,\s*setActiveTab\]\s*=\s*useState\('all'\);/
+  );
+  assert.match(appSource, /const filteredGroups = filterImportCandidateGroups\(searchedGroups,\s*activeTab\);/);
+});
+
+test('workspace cards show the shared workspace icon beside the workspace name', () => {
+  const workspaceCard = appSource.match(
+    /function WorkspaceCard\(\{ isBusy, workspace, onForget, onOpenSkills \}\)\s*\{(?<body>[\s\S]*?)\n\}/
+  )?.groups.body || '';
+
+  assert.match(workspaceCard, /<strong>\{workspace\.displayName\}<\/strong>/);
+  assert.match(workspaceCard, /<AgentIconBadge agent=\{workspace\.agentIcon\}/);
+  assert.match(css, /\.workspaceCardTitleRow > \.skillAgentIcon\s*\{[^}]*flex:\s*0 0 24px;/s);
+});
+
+test('workspace card icon tooltips can overflow card bounds', () => {
+  const workspaceCardRule = css.match(/\.workspaceCard\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const workspaceHoverRule = css.match(
+    /\.workspaceCard:hover,\s*\.workspaceCard:focus-within\s*\{(?<body>[^}]*)\}/s
+  )?.groups.body || '';
+
+  assert.match(workspaceCardRule, /overflow:\s*visible;/);
+  assert.doesNotMatch(workspaceCardRule, /overflow:\s*hidden;/);
+  assert.match(workspaceHoverRule, /z-index:\s*2;/);
+});
+
+test('remote source search starts after the binding dialog has painted', () => {
+  const openSourceDialog = appSource.match(
+    /async function openRemoteSourceDialog\(skill\)\s*\{(?<body>[\s\S]*?)\n  \}/
+  )?.groups.body || '';
+
+  assert.match(openSourceDialog, /setRemoteSourceDialog\(/);
+  assert.match(openSourceDialog, /await waitForNextPaint\(\);/);
+  assert.match(openSourceDialog, /void searchRemoteSourceCandidates\(skill\.name\);/);
+  assert.ok(
+    openSourceDialog.indexOf('await waitForNextPaint();') <
+      openSourceDialog.indexOf('void searchRemoteSourceCandidates(skill.name);')
+  );
+});
+
+test('remote source search is presented as a non-blocking background task', () => {
+  const openSourceDialog = appSource.match(
+    /async function openRemoteSourceDialog\(skill\)\s*\{(?<body>[\s\S]*?)\n  \}/
+  )?.groups.body || '';
+
+  assert.match(openSourceDialog, /searching:\s*true/);
+  assert.match(appSource, /Searching Claude Marketplace in the background\./);
+  assert.match(appSource, /You can paste a GitHub URL or close this dialog while\s+results load\./);
+  assert.match(appSource, /className="iconButton" disabled=\{dialog\.loading\}/);
+  assert.match(appSource, /disabled=\{dialog\.loading\}\s+placeholder=/);
+  assert.doesNotMatch(appSource, /disabled=\{dialog\.loading \|\| dialog\.searching\}/);
+});
+
+test('remote source search command runs marketplace lookup off the command handler', () => {
+  assert.match(tauriSource, /async fn find_remote_source_candidates/);
+  assert.match(tauriSource, /tauri::async_runtime::spawn_blocking/);
+});
+
+test('remote update status command runs off the command handler', () => {
+  const checkCommandStart = tauriSource.indexOf('async fn check_remote_skill_updates');
+  const nextCommandStart = tauriSource.indexOf('#[tauri::command]', checkCommandStart + 1);
+  const checkCommand = tauriSource.slice(checkCommandStart, nextCommandStart);
+
+  assert.ok(checkCommandStart > 0);
+  assert.match(checkCommand, /tauri::async_runtime::spawn_blocking/);
+});
+
+test('remote source bind validation commands run off the command handler', () => {
+  for (const commandName of ['preview_remote_source_binding', 'bind_remote_source']) {
+    const commandStart = tauriSource.indexOf(`async fn ${commandName}`);
+    const nextCommandStart = tauriSource.indexOf('#[tauri::command]', commandStart + 1);
+    const command = tauriSource.slice(commandStart, nextCommandStart);
+
+    assert.ok(commandStart > 0, `${commandName} should be async`);
+    assert.match(command, /tauri::async_runtime::spawn_blocking/, `${commandName} should spawn blocking work`);
+  }
+});
+
+test('remote install review displays Rust compatibility and confirms warning targets', () => {
+  assert.match(appSource, /remoteCompatibilitySummary/);
+  assert.match(appSource, /preview\.compatibility\.profileName/);
+  assert.match(appSource, /issue\.suggestedAction/);
+  assert.match(appSource, /Confirm compatibility warnings before installing/);
+  assert.match(appSource, /onConfirmWarningsChange/);
+  assert.match(appSource, /confirmWarnings:\s*dialog\.confirmWarnings/);
+  assert.match(css, /\.remoteCompatibilitySummary\.blocked/);
+  assert.match(css, /\.remoteCompatibilityConfirm/);
+});
+
+test('remote skill URL import restores ready state when install fails', () => {
+  const submitRemoteImport = appSource.match(
+    /async function submitRemoteImport\(event\)\s*\{(?<body>[\s\S]*?)\n  \}/
+  )?.groups.body || '';
+  const catchBlock = submitRemoteImport.match(/catch \(submitError\) \{(?<body>[\s\S]*?)\n    \}/)
+    ?.groups.body || '';
+
+  assert.match(catchBlock, /setStatus\('ready'\);/);
+});
+
+test('GitHub collection URL import routes already-imported collections through update preview', () => {
+  const submitRemoteImport = appSource.match(
+    /async function submitRemoteImport\(event\)\s*\{(?<body>[\s\S]*?)\n  \}/
+  )?.groups.body || '';
+
+  assert.match(submitRemoteImport, /invoke\('preview_github_skill_collection_update'/);
+  assert.match(appSource, /Collection update review/);
+  assert.match(appSource, /Check collection update/);
+  assert.match(appSource, /Roll back collection/);
+  assert.match(appSource, /apply_github_skill_collection_update/);
+});
+
+test('remote GitHub install confirmation passes the preview id', () => {
+  const applyRemoteInstall = appSource.match(
+    /async function applyRemoteInstall\(\)\s*\{(?<body>[\s\S]*?)\n  \}/
+  )?.groups.body || '';
+
+  assert.match(applyRemoteInstall, /invoke\('install_github_remote_skill'/);
+  assert.match(applyRemoteInstall, /source_url:\s*preview\.sourceUrl/);
+  assert.match(applyRemoteInstall, /preview_id:\s*preview\.previewId \|\| null/);
+  assert.match(
+    applyRemoteInstall,
+    /confirm_warnings:\s*Boolean\(remoteInstallDialog\.confirmWarnings\)/
+  );
+  assert.match(applyRemoteInstall, /actor:\s*'desktop'/);
+});
+
+test('dashboard status refresh paints loading state before checking remotes', () => {
+  const refreshStatuses = appSource.match(
+    /async function refreshSkillStatuses\(\{ automatic = false, skillName = '' \} = \{\}\)\s*\{(?<body>[\s\S]*?)\n  \}/
+  )?.groups.body || '';
+
+  assert.match(refreshStatuses, /setStatus\('checking'\);/);
+  assert.match(refreshStatuses, /await waitForNextPaint\(\);/);
+  assert.match(refreshStatuses, /invoke\('check_remote_skill_updates'/);
+  assert.ok(
+    refreshStatuses.indexOf('await waitForNextPaint();') <
+      refreshStatuses.indexOf("invoke('check_remote_skill_updates'")
+  );
+});
+
+test('single skill status refresh skips full managed state refresh', () => {
+  const refreshStatuses = appSource.match(
+    /async function refreshSkillStatuses\(\{ automatic = false, skillName = '' \} = \{\}\)\s*\{(?<body>[\s\S]*?)\n  \}/
+  )?.groups.body || '';
+  const targetedStart = refreshStatuses.indexOf('if (skillName) {');
+  const fullRefreshStart = refreshStatuses.indexOf("invoke('managed_state')");
+  const targetedRefresh = refreshStatuses.slice(targetedStart, fullRefreshStart);
+
+  assert.ok(targetedStart >= 0);
+  assert.ok(fullRefreshStart > targetedStart);
+  assert.match(targetedRefresh, /invoke\('check_remote_skill_update'/);
+  assert.doesNotMatch(targetedRefresh, /invoke\('check_remote_skill_updates'/);
+  assert.doesNotMatch(targetedRefresh, /invoke\('managed_state'/);
+  assert.doesNotMatch(targetedRefresh, /invoke\('user_skills_git_status'/);
+});
+
+test('remote update checks pass the configured git timeout', () => {
+  assert.match(appSource, /remoteUpdateTimeoutSeconds:\s*30/);
+  assert.match(appSource, /remoteUpdateTimeoutSeconds: normalizeRemoteUpdateTimeoutSeconds/);
+  assert.match(appSource, /timeoutSeconds:\s*preferences\.remoteUpdateTimeoutSeconds/);
+  assert.match(tauriSource, /fn set_remote_update_timeout_seconds\(seconds: u32\)/);
+  assert.match(tauriSource, /async fn check_remote_skill_update/);
+});
+
+test('remote update review starts after the loading dialog has painted', () => {
+  const reviewDialog = appSource.match(
+    /async function openRemoteVersionReview\(skill, action, targetVersion = ''\)\s*\{(?<body>[\s\S]*?)\n  \}/
+  )?.groups.body || '';
+
+  assert.match(reviewDialog, /setRemoteVersionDialog\(/);
+  assert.match(reviewDialog, /await waitForNextPaint\(\);/);
+  assert.match(reviewDialog, /invoke\('preview_remote_version_change'/);
+  assert.ok(
+    reviewDialog.indexOf('await waitForNextPaint();') <
+      reviewDialog.indexOf("invoke('preview_remote_version_change'")
+  );
+});
+
+test('remote diff review footer separates actions from the diff pane edge', () => {
+  const footerRule = css.match(/\.remoteDialogFooter\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(footerRule, /padding:\s*18px 24px 20px;/);
+  assert.match(footerRule, /border-top:\s*1px solid #e5edf6;/);
+  assert.match(footerRule, /background:\s*var\(--skillbox-surface\);/);
+});
+
+test('remote update preview command runs off the command handler', () => {
+  const previewCommandStart = tauriSource.indexOf('async fn preview_remote_version_change');
+  const nextCommandStart = tauriSource.indexOf('#[tauri::command]', previewCommandStart + 1);
+  const previewCommand = tauriSource.slice(previewCommandStart, nextCommandStart);
+
+  assert.ok(previewCommandStart > 0);
+  assert.match(previewCommand, /tauri::async_runtime::spawn_blocking/);
+});
+
+test('blocking desktop commands run off the command handler', () => {
+  for (const commandName of [
+    'sync_user_skills_git',
+    'suggest_user_skills_commit_message',
+    'import_candidates',
+    'list_import_records',
+    'revert_import',
+    'apply_remote_version_change',
+    'scan_workspaces',
+    'record_skill_usage',
+    'install_usage_hook',
+    'list_history'
+  ]) {
+    const commandStart = tauriSource.indexOf(`async fn ${commandName}`);
+    const nextCommandStart = tauriSource.indexOf('#[tauri::command]', commandStart + 1);
+    const command = tauriSource.slice(commandStart, nextCommandStart);
+
+    assert.ok(commandStart > 0, `${commandName} should be async`);
+    assert.match(command, /tauri::async_runtime::spawn_blocking/, `${commandName} should spawn blocking work`);
+  }
+});
+
+test('import revert UI exposes warning entry and danger confirmation', () => {
+  const confirmStart = appSource.indexOf('async function confirmImportRevert()');
+  const confirmEnd = appSource.indexOf('function openSkillTypeChangeDialog', confirmStart);
+  const confirmSource = appSource.slice(confirmStart, confirmEnd);
+
+  assert.match(appSource, /invoke\('list_import_records'/);
+  assert.match(appSource, /invoke\('revert_import'/);
+  assert.match(appSource, /className="button warning"/);
+  assert.match(appSource, /confirmClassName="button danger"/);
+  assert.match(appSource, /revertBlockReason/);
+  assert.match(confirmSource, /setSelectedName\(''\);/);
+  assert.match(css, /\.button\.warning\s*\{/);
+  assert.match(css, /\.button\.danger\s*\{/);
+});
+
+test('history page combines skill usage and operation logs', () => {
+  const historyPageSource = appSource.match(/export function HistoryPage[\s\S]*?function HistoryRow/)?.[0] || '';
+
+  assert.match(appSource, /function HistoryPage/);
+  assert.match(historyPageSource, /<PageTitleRow[\s\S]*actions=\{\([\s\S]*onClick=\{onRefresh\}/);
+  assert.match(historyPageSource, /className="dashboardFilterBar pageTypeFilterBar" aria-label="History filters"[\s\S]*className="dashboardTypeTabs historyTypeTabs"/);
+  assert.doesNotMatch(historyPageSource, /dashboardControlRow historyControlRow/);
+  assert.match(appSource, /historyRequestForFilter\(nextFilter\)/);
+  assert.match(appSource, /request: historyRequestForFilter\(nextFilter\)/);
+  assert.match(appSource, /const historyRequestRef = useRef\(0\);/);
+  assert.match(
+    appSource,
+    /const requestId = historyRequestRef\.current \+ 1;[\s\S]*historyRequestRef\.current = requestId;/
+  );
+  assert.match(appSource, /isHistoryRequestCurrent\(historyRequestRef\.current, requestId\)/);
+  assert.match(appSource, /onFilter=\{loadHistory\}/);
+  assert.match(appSource, /onRefresh=\{loadHistory\}/);
+  assert.match(appSource, /page === 'history'/);
+  assert.match(appSource, /function normalizeHistory/);
+  assert.match(appSource, /skillUsageCount/);
+  assert.match(appSource, /skillReferenceCount/);
+  assert.match(appSource, /operationCount/);
+  assert.match(appSource, /entry\.kind === 'skill_usage'/);
+  assert.match(appSource, /entry\.kind === 'usage_reference'/);
+  assert.match(appSource, /const rowSubtitle = historyRowSubtitle\(entry, isUsage \|\| isReference\);/);
+  assert.match(appSource, /function historyRowSubtitle\(entry, isUsage\)/);
+  assert.match(appSource, /const defaultOperationSubtitle = entry\.operationType && entry\.actor/);
+  assert.match(appSource, /const groupedEntries = groupHistoryEntriesByDay\(entries\)/);
+  assert.doesNotMatch(historyPageSource, /entries\.filter\(\(entry\) => entry\.kind === filter\)/);
+  assert.match(historyPageSource, /Loading history\.\.\./);
+  assert.match(historyPageSource, /role="status" aria-live="polite"/);
+  assert.match(appSource, /function groupHistoryEntriesByDay/);
+  assert.match(appSource, /className="historyDayBlock"/);
+  assert.match(appSource, /function HistoryRow/);
+  assert.match(appSource, /className="historyRowTimestamp"/);
+  assert.match(appSource, /className="historyRowTimeRail"/);
+  assert.match(
+    appSource,
+    /<div className="historyRowTimeRail">[\s\S]*?<\/div>\s*<div className="historyRowTitle">/
+  );
+  assert.doesNotMatch(appSource, /timestampDate/);
+  assert.doesNotMatch(appSource, /className="historyRowMarker"/);
+  assert.match(appSource, /className="historyRowPrompt"/);
+  assert.match(appSource, /rowSubtitle \? <p>\{rowSubtitle\}<\/p> : null/);
+  assert.match(appSource, /entry\.promptExcerpt/);
+  assert.match(tauriSource, /async fn list_history/);
+  assert.match(tauriSource, /skillbox_core::list_history/);
+  assert.match(css, /\.historyTimeline\s*\{/);
+  assert.match(css, /\.historyDayBlock\s*\{/);
+  assert.match(css, /\.historyRow\s*\{/);
+  assert.match(css, /\.historyRow\s*\{[^}]*row-gap:\s*7px;/s);
+  assert.match(css, /\.historyRowPrompt\s*\{/);
+  assert.match(mainSource, /import '\.\/colors\.css';\s*import '\.\/styles\.css';/);
+  assert.match(colorsCss, /--skillbox-prompt-bg:\s*#ecfdf5;/);
+  assert.match(css, /\.historyRowPrompt\s*\{[^}]*background:\s*var\(--skillbox-prompt-bg\);/s);
+  assert.match(css, /\.historyRowTimeRail\s*\{[^}]*grid-row:\s*1;/s);
+  assert.match(css, /\.historyRowTitle\s*\{[^}]*grid-row:\s*1;/s);
+  assert.match(css, /\.historyRowMain\s*\{[^}]*grid-column:\s*2;/s);
+  assert.match(css, /\.historyRowTimestamp\s*\{[^}]*padding:\s*0 0 0 8px;/s);
+  assert.match(css, /\.historyRowTimestamp strong\s*\{[^}]*line-height:\s*1\.25;/s);
+  assert.doesNotMatch(css, /\.historyRowTimestamp span\s*\{/);
+  assert.doesNotMatch(css, /\.historyRowMarker\s*\{/);
+});
+
+test('desktop startup reports run errors without expect panic', () => {
+  assert.doesNotMatch(tauriSource, /\.expect\("failed to run SkillBox"\)/);
+  assert.match(tauriSource, /eprintln!\("failed to run SkillBox: \{error\}"\)/);
+});
+
+test('remote skill async operations show loading and no-change states', () => {
+  assert.match(appSource, /remoteContextLoading/);
+  assert.match(appSource, /Loading remote details/);
+  assert.match(appSource, /Loading diff/);
+  assert.match(appSource, /No file changes in this skill/);
+  assert.match(appSource, /inlineSpinner/);
+});
+
+test('skill detail modal uses a two-column workbench layout', () => {
+  assert.match(appSource, /className="skillDetailBodyGrid"/);
+  assert.match(appSource, /className="skillDetailMetaColumn"/);
+  assert.match(appSource, /className="skillDetailControlRail"/);
+  assert.match(appSource, /className="skillDetailVersionHistory"/);
+  assert.match(css, /\.skillDetailDialog\s*\{[^}]*width:\s*min\(920px,\s*calc\(100vw - 48px\)\);/s);
+  assert.match(css, /\.skillDetailBodyGrid\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(280px,\s*320px\);/s);
+  assert.match(css, /\.skillDetailBodyGrid\s*\{[^}]*align-items:\s*start;/s);
+  assert.match(css, /\.skillDetailBodyGrid\s*\{[^}]*overflow-x:\s*hidden;/s);
+  assert.match(css, /\.skillDetailBodyGrid\s*\{[^}]*overflow-y:\s*auto;/s);
+  assert.match(css, /\.skillDetailControlRail\s*\{[^}]*min-width:\s*0;/s);
+  assert.match(css, /\.skillDetailControlRail\s*\{[^}]*align-self:\s*stretch;/s);
+  assert.match(css, /\.skillDetailControlRail\s*\{[^}]*border-left:\s*1px solid var\(--skillbox-border-soft\);/s);
+  assert.match(css, /\.skillDetailControlRail\s*\{[^}]*position:\s*sticky;/s);
+  assert.match(css, /\.remoteVersionSummary span\s*\{[^}]*white-space:\s*nowrap;/s);
+  assert.match(css, /\.remoteVersionSummary span\s*\{[^}]*text-overflow:\s*ellipsis;/s);
+  assert.match(css, /\.remoteVersionRow small\s*\{[^}]*white-space:\s*nowrap;/s);
+  assert.match(css, /\.remoteVersionRow small\s*\{[^}]*text-overflow:\s*ellipsis;/s);
+});
+
+test('desktop preview defaults to hidden skillbox managed root', () => {
+  assert.match(appSource, /root:\s*'~\/\.skillbox'/);
+  assert.match(appSource, /userSkillsRoot:\s*'~\/\.skillbox\/user-skills'/);
+  assert.match(appSource, /remoteSkillsRoot:\s*'~\/\.skillbox\/remote-skills'/);
+  assert.match(appSource, /databasePath:\s*'~\/\.skillbox\/skillbox\.sqlite'/);
+  assert.match(appSource, /userSkillsGit\.repoPath \|\| '~\/\.skillbox\/user-skills'/);
+});
+
+test('skill detail metadata starts with deploy workspace', () => {
+  assert.match(appSource, /className="skillDetailMetaColumn"[\s\S]*aria-label="Deploy workspace"[\s\S]*<RemoteVersionHistoryPanel/);
+  assert.match(appSource, /<span>Workspace deployment<\/span>[\s\S]*<button className="button secondary compactAction" type="button" onClick=\{onOpenDeployDialog\}/);
+  assert.match(appSource, /className="skillDetailDeployMetric"[\s\S]*\{skill\.installedAgents\.length \|\| 0\}/);
+  assert.match(appSource, /<strong>Active workspaces<\/strong>/);
+  assert.match(appSource, /className="skillDetailUsageSummary"[\s\S]*\{skill\.usageCount \|\| 0\}[\s\S]*<strong>Usage<\/strong>/);
+  assert.match(appSource, /title="Calls combine locally confirmed executions and high-confidence inferred invocations\. They are not Codex or Claude account analytics\."[\s\S]*Calls/);
+  assert.match(appSource, /<strong>History references<\/strong>[\s\S]*Mentions only/);
+  assert.match(appSource, /labelPrefix="Deploy workspaces"/);
+  assert.match(css, /\.skillDetailDeploySurface\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
+  assert.match(css, /\.skillDetailDeployMetric\s*\{/);
+});
+
+test('active workspace icons sit beside the active workspaces label', () => {
+  const deploySummary = appSource.match(
+    /<div className="skillDetailDeploySummary">(?<body>[\s\S]*?)<\/div>\s*<\/div>/
+  )?.groups.body || '';
+
+  assert.match(deploySummary, /<div className="skillDetailDeployLabelRow">[\s\S]*<strong>Active workspaces<\/strong>[\s\S]*<AgentIconStack/);
+  assert.doesNotMatch(appSource, /<div className="skillDetailDeploySurface">[\s\S]*<\/div>\s*<AgentIconStack/);
+  assert.match(css, /\.skillDetailDeployLabelRow\s*\{[^}]*display:\s*inline-flex;/s);
+  assert.match(css, /\.skillDetailDeployLabelRow\s*\{[^}]*align-items:\s*center;/s);
+  assert.match(css, /\.skillDetailDeployLabelRow\s*\{[^}]*gap:\s*10px;/s);
+  assert.match(css, /\.skillDetailDeployLabelRow \.skillAgentIcons\s*\{[^}]*flex:\s*0 0 auto;/s);
+  assert.doesNotMatch(css, /\.skillDetailDeploySurface\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto;/s);
+});
+
+test('skill cards use compact call counts and hide zero calls', () => {
+  const skillCardStart = appSource.indexOf('function SkillCard');
+  const skillCardEnd = appSource.indexOf('function AgentIconStack', skillCardStart);
+  const skillCardSource = appSource.slice(skillCardStart, skillCardEnd);
+
+  assert.ok(skillCardStart > 0);
+  assert.ok(skillCardEnd > skillCardStart);
+  assert.match(skillCardSource, /className="skillCardMetaDetails"[\s\S]*\{skill\.usageCount > 0 \? \([\s\S]*className="skillCardUsage"[\s\S]*\{skill\.usageCount\} calls/);
+  assert.doesNotMatch(skillCardSource, /locally observed calls/);
+  assert.doesNotMatch(skillCardSource, /\{skill\.usageCount \|\| 0\} calls/);
+  assert.match(css, /\.skillCardTitleText\s*\{/);
+  assert.match(css, /\.skillCardUsage\s*\{/);
+});
+
+test('skill cards reserve color for attention states', () => {
+  const skillCardStart = appSource.indexOf('function SkillCard');
+  const skillCardEnd = appSource.indexOf('function SkillTypeBadge', skillCardStart);
+  const skillCardSource = appSource.slice(skillCardStart, skillCardEnd);
+  const defaultStripeRule = css.match(/\.skillCard::before\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(skillCardSource, /`status-\$\{skill\.statusTone\}`/);
+  assert.match(defaultStripeRule, /background:\s*transparent;/);
+  assert.match(css, /\.skillCard\.status-amber::before\s*\{[^}]*background:\s*var\(--skillbox-amber\);/s);
+  assert.match(css, /\.skillCard\.status-red::before\s*\{[^}]*background:\s*var\(--skillbox-red\);/s);
+  assert.doesNotMatch(css, /\.skillCard\.favorite::before/);
+});
+
+test('skill card type badges and tags are neutral classifications', () => {
+  const typeBadgeStart = appSource.indexOf('function SkillTypeBadge');
+  const typeBadgeSource = appSource.slice(typeBadgeStart, typeBadgeStart + 420);
+  const tagRule = css.match(/\.tagPill\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const editableTagRule = css.match(/\.editableTagPill\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(typeBadgeSource, /<Badge tone="slate">/);
+  assert.match(typeBadgeSource, /type === 'user' \? UserRound : Cloud/);
+  assert.match(tagRule, /background:\s*var\(--skillbox-slate-bg\);/);
+  assert.match(tagRule, /color:\s*var\(--skillbox-slate-text\);/);
+  assert.match(editableTagRule, /background:\s*var\(--skillbox-slate-bg\);/);
+  assert.match(editableTagRule, /color:\s*var\(--skillbox-slate-text\);/);
+  assert.doesNotMatch(css, /\.tagPill:nth-child/);
+  assert.doesNotMatch(css, /\.editableTagPill:nth-child/);
+});
+
+test('skill card names wrap to two lines while descriptions use one', () => {
+  const titleRule = css.match(/\.skillCardTitleText strong\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const descriptionRule = css.match(/\.skillCardDescription\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const titleRowRule = css.match(/\.skillCardTitleRow\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(titleRule, /-webkit-line-clamp:\s*2;/);
+  assert.match(titleRule, /overflow-wrap:\s*anywhere;/);
+  assert.doesNotMatch(titleRule, /white-space:\s*nowrap;/);
+  assert.match(descriptionRule, /-webkit-line-clamp:\s*1;/);
+  assert.match(titleRowRule, /padding-right:\s*44px;/);
+});
+
+test('skill names share one restrained monospace identity', () => {
+  const cardTitleRule = css.match(/\.skillCardTitleText strong\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const listTitleRule = css.match(/\.skillNameCell strong\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const detailTitleRule = css.match(/\.skillDetailTitleBlock h2\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(colorsCss, /--skillbox-font-skill:\s*ui-monospace,/);
+  for (const rule of [cardTitleRule, listTitleRule, detailTitleRule]) {
+    assert.match(rule, /font-family:\s*var\(--skillbox-font-skill\);/);
+    assert.match(rule, /font-weight:\s*600;/);
+  }
+  assert.match(listTitleRule, /-webkit-line-clamp:\s*2;/);
+  assert.match(listTitleRule, /overflow-wrap:\s*anywhere;/);
+  assert.doesNotMatch(listTitleRule, /white-space:\s*nowrap;/);
+});
+
+test('desktop colors converge on tokens and one primary blue', () => {
+  const remainingHexColors = css.match(/#[0-9a-f]{6}/gi) || [];
+
+  assert.ok(remainingHexColors.length <= 60, `expected at most 60 CSS hex exceptions, found ${remainingHexColors.length}`);
+  assert.match(colorsCss, /--skillbox-blue:\s*#2563eb;/);
+  assert.doesNotMatch(colorsCss, /--skillbox-blue-strong:/);
+  assert.doesNotMatch(css, /#0a84ff|#2563eb/i);
+  assert.doesNotMatch(css, /rgba\(10,\s*132,\s*255|#0a63d8/i);
+  assert.match(css, /rgba\(var\(--skillbox-blue-rgb\),\s*0\.22\)/);
+  assert.doesNotMatch(appSource, /type === 'user' \? 'green' : 'blue'/);
+  assert.doesNotMatch(appSource, /skillType === 'user' \? 'green' : 'blue'/);
+});
+
+test('skill cards use an adaptive compact rhythm with aligned metadata rows', () => {
+  const cardRule = css.match(/\.skillCard\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const hitAreaRule = css.match(/\.skillCardHitArea\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+  const tagRule = css.match(/\.skillCardTags\s*\{(?<body>[^}]*)\}/s)?.groups.body || '';
+
+  assert.match(cardRule, /min-height:\s*194px;/);
+  assert.doesNotMatch(cardRule, /height:\s*216px;/);
+  assert.match(hitAreaRule, /height:\s*100%;/);
+  assert.match(hitAreaRule, /min-height:\s*194px;/);
+  assert.match(hitAreaRule, /grid-template-rows:\s*auto 20px minmax\(26px,\s*auto\) auto;/);
+  assert.match(tagRule, /min-height:\s*26px;/);
+  assert.match(tagRule, /max-height:\s*26px;/);
+});
+
+test('deploy workspace dialog includes checked rows and removal confirmation warning', () => {
+  assert.match(appSource, /function DeployWorkspaceDialog/);
+  assert.match(appSource, /workspaceDeployRequiresConfirmation\(changes\)/);
+  assert.match(appSource, /confirmUndeploy/);
+  assert.match(appSource, /Unchecked skills will be removed from these workspaces/);
+  assert.match(appSource, /aria-label=\{`Deploy \$\{skill\.name\} to workspace/);
+  assert.match(css, /\.deployWorkspaceDialog\s*\{/);
+  assert.match(css, /\.deployWorkspaceWarning\s*\{[^}]*background:\s*var\(--skillbox-surface-orange\);/s);
+});
+
+test('desktop deployment uses Rust runtime profiles and preview-confirmed compatibility', () => {
+  assert.match(tauriSource, /fn list_runtime_profiles\(\)/);
+  assert.match(tauriSource, /async fn preview_skill_deployment\(/);
+  assert.match(tauriSource, /async fn apply_skill_deployment\(/);
+  assert.match(tauriSource, /list_runtime_profiles,/);
+  assert.match(tauriSource, /preview_skill_deployment,/);
+  assert.match(tauriSource, /apply_skill_deployment,/);
+  assert.doesNotMatch(tauriSource, /async fn deploy_skill\(/);
+  assert.match(appSource, /invoke\('preview_skill_deployment'/);
+  assert.match(appSource, /invoke\('apply_skill_deployment'/);
+  assert.match(appSource, /preview_id:\s*workspace\.compatibility\?\.preview_id/);
+  assert.match(appSource, /confirm_warnings:\s*Boolean\(workspace\.confirmWarnings\)/);
+});
+
+test('skill detail tags live inside controls rail', () => {
+  assert.match(appSource, /<aside className="skillDetailControlRail" aria-label="Skill controls">[\s\S]*aria-label="Skill tags"[\s\S]*<RemoteSkillControlPanel/);
+  assert.match(appSource, /<div className="skillDetailRailHeader">[\s\S]*<span>Controls<\/span>[\s\S]*<section className="skillDetailControlSection skillDetailTagsControl"/);
+  assert.match(css, /\.skillDetailTagsControl \+ \.remoteSkillPanel,\s*\.skillDetailTagsControl \+ \.userSkillPanel\s*\{[^}]*border-top:\s*1px solid var\(--skillbox-slate-bg\);/s);
+});
+
+test('remote update actions live in the detail control rail', () => {
+  assert.match(appSource, /<RemoteSkillControlPanel[\s\S]*onCheckUpdates=\{onCheckUpdates\}/);
+  assert.match(appSource, /className="skillDetailControlRail"[\s\S]*<RemoteSkillControlPanel/);
+  assert.match(appSource, /const sourceLinked = Boolean\(remoteUpdate && remoteUpdate\.state !== 'no_source'\);/);
+  assert.match(appSource, /const showReviewUpdate = remoteUpdate\?\.updateAvailable === true;/);
+  assert.match(appSource, /const updateSectionLabel = showReviewUpdate \? 'Ready to review' : updateLabel;/);
+  assert.match(appSource, /showReviewUpdate\s*\?\s*'Version change'/);
+  assert.match(appSource, /showReviewUpdate && \/update available\/i\.test\(remoteUpdate\?\.message \|\| ''\)/);
+  assert.match(appSource, /\{updateMessage \? <small>\{updateMessage\}<\/small> : null\}/);
+  assert.match(appSource, /\{showReviewUpdate \? \(\s*<button\s+className="button primary"[\s\S]*Review update/);
+  assert.match(appSource, /\{sourceLinked \? 'Rebind source' : 'Bind source'\}/);
+  assert.doesNotMatch(appSource, /disabled=\{!remoteUpdate\?\.updateAvailable\}[\s\S]*Review update/);
+  assert.doesNotMatch(appSource, /<footer className="skillDetailActions">[\s\S]*Check update/);
+  assert.doesNotMatch(appSource, /<footer className="skillDetailActions">[\s\S]*onCheckUpdates/);
+});
+
+test('skill detail title exposes current remote source as a left-side action', () => {
+  assert.match(appSource, /ExternalLink,/);
+  assert.match(appSource, /sourceUrl=\{selectedRemoteUpdate\?\.sourceUrl \|\| ''\}/);
+  assert.match(appSource, /onOpenSourceUrl=\{openRemoteSourceUrl\}/);
+  assert.match(appSource, /async function openRemoteSourceUrl\(sourceUrl\)/);
+  assert.match(appSource, /invoke\('open_external_url',\s*\{ url \}\)/);
+  assert.match(appSource, /window\.open\(url,\s*'_blank',\s*'noopener,noreferrer'\)/);
+  assert.match(appSource, /<div className="skillDetailTitleRow">[\s\S]*<h2 id="skill-detail-title">\{skill\.name\}<\/h2>[\s\S]*\{sourceUrl \? \(/);
+  assert.match(appSource, /aria-label=\{`Open \$\{skill\.name\} source`\}/);
+  assert.match(css, /\.skillDetailTitleRow\s*\{[^}]*display:\s*flex;/s);
+  assert.doesNotMatch(css, /\.skillDetailSourceButton\s*\{[^}]*height:\s*32px;/s);
+  assert.doesNotMatch(appSource, /<div className="skillDetailHeaderActions">[\s\S]*skillDetailSourceButton/);
+});
+
+test('skill detail title exposes local folder before remote source', () => {
+  assert.match(appSource, /FolderOpen,/);
+  assert.match(appSource, /onOpenLocalFolder=\{openLocalSkillFolder\}/);
+  assert.match(appSource, /async function openLocalSkillFolder\(skill\)/);
+  assert.match(appSource, /invoke\('open_local_path',\s*\{ path: folderPath \}\)/);
+  assert.match(appSource, /aria-label=\{`Open \$\{skill\.name\} local folder`\}/);
+  assert.match(
+    appSource,
+    /<div className="skillDetailTitleRow">[\s\S]*<h2 id="skill-detail-title">\{skill\.name\}<\/h2>[\s\S]*Folder[\s\S]*\{sourceUrl \? \(/
+  );
+});
+
+test('button heights use shared global sizing tokens', () => {
+  assert.match(css, /--button-height:\s*38px;/);
+  assert.match(css, /\.button\s*\{[^}]*height:\s*var\(--button-height\);/s);
+  assert.match(css, /\.iconButton\s*\{[^}]*width:\s*var\(--button-height\);[^}]*height:\s*var\(--button-height\);/s);
+  assert.match(css, /\.detailFavoriteButton\s*\{[^}]*height:\s*var\(--button-height\);/s);
+  assert.doesNotMatch(css, /\.skillDetailSourceButton\s*\{[^}]*height:\s*32px;/s);
+  assert.doesNotMatch(css, /\.compactAction\s*\{[^}]*height:\s*32px;/s);
+});
+
+test('version history shows the latest three rows before expanding older versions', () => {
+  assert.match(appSource, /const VERSION_HISTORY_PREVIEW_COUNT = 3;/);
+  assert.match(appSource, /const visibleVersions = expanded \|\| !hasHiddenVersions\s*\?\s*versionRows\s*:\s*versionRows\.slice\(0,\s*VERSION_HISTORY_PREVIEW_COUNT\);/);
+  assert.match(appSource, /hiddenVersionCount = Math\.max\(0,\s*versionRows\.length - VERSION_HISTORY_PREVIEW_COUNT\)/);
+  assert.match(appSource, /setExpanded\(\(current\) => !current\)/);
+  assert.match(appSource, /Show \$\{hiddenVersionCount\} more/);
+  assert.match(css, /\.remoteVersionToggle\s*\{/);
+});
+
+test('skill detail layout keeps deployment metadata before controls on narrow screens', () => {
+  assert.match(css, /@media \(max-width:\s*920px\)\s*\{[\s\S]*\.skillDetailBodyGrid\s*\{[^}]*grid-template-columns:\s*1fr;/s);
+  assert.match(css, /@media \(max-width:\s*920px\)\s*\{[\s\S]*\.skillDetailMetaColumn\s*\{[^}]*order:\s*1;/s);
+  assert.match(css, /@media \(max-width:\s*920px\)\s*\{[\s\S]*\.skillDetailControlRail\s*\{[^}]*order:\s*2;/s);
+});
+
+test('remote version history stays in the metadata column before the log', () => {
+  const versionHistoryRules = [...css.matchAll(/\.skillDetailVersionHistory\s*\{(?<body>[^}]*)\}/gs)]
+    .map((match) => match.groups.body)
+    .join('\n');
+
+  assert.match(appSource, /className="skillDetailMetaColumn"[\s\S]*<RemoteVersionHistoryPanel[\s\S]*<OperationHistoryPanel operations=\{operations\} \/>[\s\S]*<\/div>\s*<aside className="skillDetailControlRail"/);
+  assert.doesNotMatch(css, /\.skillDetailVersionHistory\s*\{[^}]*grid-column:\s*1 \/ -1;/s);
+  assert.doesNotMatch(versionHistoryRules, /(^|[;\s])order\s*:/);
+});
+
+test('remote operation history is collapsed by default', () => {
+  assert.match(appSource, /<details className="operationHistoryPanel" aria-label="Operation history">/);
+  assert.match(appSource, /<summary className="operationHistorySummary">/);
+  assert.match(appSource, /\{operations\.length\} events/);
+  assert.doesNotMatch(appSource, /<div className="operationHistoryPanel" aria-label="Operation history">/);
+});
+
+test('remote source candidates use view and bind actions instead of inline preview', () => {
+  assert.match(appSource, /onViewCandidate\(candidate\)/);
+  assert.match(appSource, /onBindCandidate\(candidate\)/);
+  assert.match(appSource, /Suggested Claude Marketplace matches/);
+  assert.match(appSource, />\s*View\s*<\/button>/);
+  assert.match(appSource, />\s*Bind\s*<\/button>/);
+  assert.doesNotMatch(appSource, /onPreviewCandidate\(candidate\)/);
+});
+
+test('remote source candidate bind confirmation checks before final binding', () => {
+  assert.match(appSource, /function RemoteSourceCandidateBindDialog/);
+  assert.match(appSource, /Checking source/);
+  assert.match(appSource, /Confirm bind/);
+  assert.match(appSource, /Binding\.\.\./);
+  assert.match(appSource, /disabled=\{!canConfirm\}/);
+});
+
+test('skill deletion uses a reviewed danger confirmation and blocking desktop commands', () => {
+  assert.match(appSource, /aria-label="Danger zone"/);
+  assert.match(appSource, /Delete from SkillBox/);
+  assert.match(appSource, /function SkillDeleteDialog/);
+  assert.match(appSource, /confirmClassName="button danger"/);
+  assert.match(appSource, /confirmationMatches/);
+  assert.match(appSource, /navigator\.clipboard\.writeText\(dialog\.skillName\)/);
+  assert.match(appSource, /Copy \$\{dialog\.skillName\} confirmation text/);
+  assert.match(appSource, /\{copied \? 'Copied' : 'Copy'\}/);
+  assert.match(appSource, /invoke\('preview_delete_skill'/);
+  assert.match(appSource, /invoke\('delete_skill'/);
+  assert.match(appSource, /const metadataState = normalizeSkillUserMetadata\(metadataRows \|\| \[\]\);/);
+  assert.match(appSource, /setFavoriteNames\(metadataState\.favoriteNames\);/);
+  assert.doesNotMatch(appSource, /setFavoriteNames\([^;]*new Set/s);
+  assert.match(tauriSource, /async fn preview_delete_skill\(skill_name: String\)/);
+  assert.match(tauriSource, /async fn delete_skill\(request: skillbox_core::DeleteSkillRequest\)/);
+  assert.match(tauriSource, /spawn_blocking\(move \|\|/);
+});
+
+test('workspace setup exposes a native single-directory picker without removing manual input', () => {
+  assert.match(appSource, /import \{ open as openDialog \} from '@tauri-apps\/plugin-dialog'/);
+  assert.match(appSource, /directory:\s*true/);
+  assert.match(appSource, /multiple:\s*false/);
+  assert.match(appSource, /async function chooseWorkspaceDialogFolder\(\)/);
+  assert.match(appSource, /await chooseWorkspaceDirectory\(openDialog\)/);
+  assert.match(appSource, /selectedPath === null[\s\S]*setStatus\('ready'\);[\s\S]*return;/);
+  assert.match(appSource, /path:\s*selectedPath,[\s\S]*preview:\s*null,[\s\S]*selectedRoot:\s*''/);
+  assert.match(appSource, /await previewWorkspaceDialog\(kind, selectedPath\)/);
+  assert.match(appSource, /Unable to choose a local folder\./);
+  assert.match(appSource, /onChooseFolder=\{window\.__TAURI_INTERNALS__ \? chooseWorkspaceDialogFolder : null\}/);
+  assert.match(appSource, /aria-label=\{onChooseFolder \? 'Choose local project or skills folder'/);
+  assert.match(appSource, /disabled=\{isBusy \|\| !onChooseFolder\}/);
+  assert.match(appSource, /<FolderOpen aria-hidden="true" \/>/);
+  assert.match(appSource, /Choose folder/);
+  assert.match(appSource, /onChange=\{\(event\) => onUpdate\(\{ path: event\.target\.value \}\)\}/);
+  assert.match(css, /\.workspacePathPickerRow\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto;/s);
+  assert.match(css, /@media \(max-width:\s*640px\)[\s\S]*\.workspacePathPickerRow\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
+});
