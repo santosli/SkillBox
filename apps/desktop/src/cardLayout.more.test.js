@@ -909,4 +909,3 @@ test('workspace setup previews project roots before creating or registering one 
   assert.doesNotMatch(appSource, /invoke\('add_workspace'[\s\S]*submitWorkspaceDialog/);
   assert.match(css, /\.workspaceSetupRoots\s*\{[^}]*display:\s*grid;/s);
 });
-
