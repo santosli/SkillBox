@@ -27,7 +27,9 @@ const appSourcePaths = [
   './importFlow.js',
   './workspaceDirectoryPicker.js',
   './appActionsA.js',
-  './appActionsB.js'
+  './appActionsB.js',
+  './appActionsC.js',
+  './appActionsD.js'
 ];
 const appSource = (
   await Promise.all(
@@ -36,7 +38,7 @@ const appSource = (
 ).join('\n');
 const appComponentSource = (
   await Promise.all(
-    ['./App.jsx', './appActionsA.js', './appActionsB.js'].map((path) =>
+    ['./App.jsx', './appActionsA.js', './appActionsB.js', './appActionsC.js', './appActionsD.js'].map((path) =>
       readFile(new URL(path, import.meta.url), 'utf8')
     )
   )
