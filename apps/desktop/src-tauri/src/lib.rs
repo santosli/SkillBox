@@ -170,7 +170,7 @@ fn validate_external_github_url(url: &str) -> Result<&str, String> {
     let trimmed = url.trim();
     let Some(rest) = trimmed.strip_prefix("https://github.com/") else {
         return Err("Only GitHub HTTPS URLs can be opened.".to_string());
-    }
+    };
 
     if rest.is_empty()
         || trimmed.chars().any(char::is_whitespace)
