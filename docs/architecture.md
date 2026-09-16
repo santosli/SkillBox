@@ -143,7 +143,7 @@ cargo run -p skillbox-cli --offline -- <command>
 `skillbox-core` 负责：
 
 - skill 根目录扫描和 `SKILL.md` 读取。
-- managed store 路径计算、初始化。
+- managed store 路径计算和初始化。
 - workspace registry 的发现、手动添加、扫描统计和 forget 操作。
 - runtime profile registry、structured frontmatter preservation 和部署 compatibility 判定。
 - user/remote skill 导入。
@@ -153,7 +153,7 @@ cargo run -p skillbox-cli --offline -- <command>
 - import backup 与 source 替换为 symlink。
 - GitHub install preview/apply, GitHub-only remote source search, manual binding, update check, version listing, diff preview, update/rollback apply, and operation logging.
 - SQLite schema migration、升级前备份、完整性校验、基础表和索引写入。
-- 用户 favorites/tags 的 SQLite 持久化和桌面 legacy local-storage metadata 迁移。
+- 用户 favorites/tags 的 SQLite 持久化和桌面 legacy local-storage 迁移。
 - 共享 user-skills repository 的 outbound commit/push、可选本地 CLI 生成 commit message，以及显式
   Check remote -> Review incoming changes -> Apply fast-forward 入站编排。
 - managed store、deployment、workspace、import backup 和 metadata 的只读 Doctor 检查。
