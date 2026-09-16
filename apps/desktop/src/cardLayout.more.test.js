@@ -284,7 +284,7 @@ test('import candidate groups disclose locations and use radio variant selection
   assert.match(groupSource, /onSelectVariant\(group, variant\)/);
   assert.match(groupSource, /Source: \{compactPath\(location\.symlinkTargetPath \|\| location\.realPath\)\}/);
   assert.match(groupSource, /Mixed type suggestions/);
-  assert.match(groupSource, /id=\{typeLabelId\}>Skill type/);
+  assert.match(groupSource, /id=\{typeLabelId\}>Skill type</);
   assert.match(groupSource, /<strong>Required<\/strong>/);
   assert.match(groupSource, /Choose where SkillBox should manage this skill/);
   assert.match(groupSource, /aria-describedby=\{needsTypeChoice \? typeHelpId : undefined\}/);
@@ -624,9 +624,9 @@ test('rankings is an accessible top-level page separate from history', () => {
   assert.match(appSource, /<option value="">All agents<\/option>/);
   assert.match(appSource, /<option value="">All types<\/option>/);
   assert.match(appSource, /<option value="">All workspaces<\/option>/);
-  assert.match(rankingsPageSource, /className="usageRankingSelectLabel">Skill type/);
-  assert.match(rankingsPageSource, /className="usageRankingSelectLabel">Agent/);
-  assert.match(rankingsPageSource, /className="usageRankingSelectLabel">Workspace/);
+  assert.match(rankingsPageSource, /className="usageRankingSelectLabel">Skill type</);
+  assert.match(rankingsPageSource, /className="usageRankingSelectLabel">Agent</);
+  assert.match(rankingsPageSource, /className="usageRankingSelectLabel">Workspace</);
   assert.match(css, /\.usageRankingControls\s*\{[^}]*align-items:\s*center;/s);
   assert.match(css, /\.usageRankingRangeField,\s*\.usageRankingSelect\s*\{[^}]*display:\s*grid;[^}]*gap:\s*4px;/s);
   assert.match(css, /\.usageRankingRanges\s*\{[^}]*border-radius:\s*10px;/s);
