@@ -130,4 +130,18 @@ pub(crate) use usage_backfill_cursor_transcripts::*;
 pub use workspaces::*;
 
 #[cfg(test)]
+mod test_support;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_part1;
+#[cfg(test)]
+mod tests_part2;
+#[cfg(test)]
+mod tests_part3;
+#[cfg(test)]
+mod tests_part4;
+#[cfg(test)]
+mod tests_part5;
+#[cfg(test)]
+mod tests_part6;
