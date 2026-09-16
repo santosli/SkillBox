@@ -156,9 +156,9 @@ test('rankings is an accessible top-level page separate from history', () => {
   assert.match(appSource, /<option value="">All agents<\/option>/);
   assert.match(appSource, /<option value="">All types<\/option>/);
   assert.match(appSource, /<option value="">All workspaces<\/option>/);
-  assert.match(rankingsPageSource, /className="usageRankingSelectLabel">Skill type/);
-  assert.match(rankingsPageSource, /className="usageRankingSelectLabel">Agent/);
-  assert.match(rankingsPageSource, /className="usageRankingSelectLabel">Workspace/);
+  assert.match(rankingsPageSource, /className="usageRankingSelectLabel">Skill type</);
+  assert.match(rankingsPageSource, /className="usageRankingSelectLabel">Agent</);
+  assert.match(rankingsPageSource, /className="usageRankingSelectLabel">Workspace</);
   assert.match(css, /\.usageRankingControls\s*\{[^}]*align-items:\s*center;/s);
   assert.match(css, /\.usageRankingRangeField,\s*\.usageRankingSelect\s*\{[^}]*display:\s*grid;[^}]*gap:\s*4px;/s);
   assert.match(css, /\.usageRankingRanges\s*\{[^}]*border-radius:\s*10px;/s);
