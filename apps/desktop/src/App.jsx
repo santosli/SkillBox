@@ -176,6 +176,8 @@ import {
 } from './userSkillsInbound.js';
 import { createAppActions as createAppActionsA } from './appActionsA.js';
 import { createAppActions as createAppActionsB } from './appActionsB.js';
+import { createAppActions as createAppActionsC } from './appActionsC.js';
+import { createAppActions as createAppActionsD } from './appActionsD.js';
 import {
   normalizeWorkspace,
   normalizeWorkspaceSetupPreview,
@@ -725,6 +727,8 @@ export default function App() {
   const getCtx = () => apiRef.current;
   const actionsA = createAppActionsA(getCtx);
   const actionsB = createAppActionsB(getCtx);
+  const actionsC = createAppActionsC(getCtx);
+  const actionsD = createAppActionsD(getCtx);
   const {
     refresh,
     refreshSkillStatuses,
@@ -836,7 +840,7 @@ export default function App() {
     scanWorkspaceSkills,
     chooseWorkspaceDialogFolder,
     submitWorkspaceDialog
-  } = { ...actionsA, ...actionsB };
+  } = { ...actionsA, ...actionsB, ...actionsC, ...actionsD };
 
   Object.assign(apiRef.current, {
     appUpdate,
