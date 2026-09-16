@@ -1460,7 +1460,7 @@ impl ImportRecordStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ImportRecordFilter {
     pub skill_name: Option<String>,
-    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ImportRecord {
