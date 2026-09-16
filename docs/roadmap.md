@@ -6,7 +6,7 @@ more real-world use.
 
 ## Current Focus: 0.9.x
 
-SkillBox `v0.9.0` is shipped. The 0.6 line made `SKILL.md` deployment targets
+SkillBox `v0.9.4` is the current shipped release. The 0.6 line made `SKILL.md` deployment targets
 explicit and portable without moving runtime knowledge into React:
 
 - a versioned Rust runtime-profile registry for Agents, Codex, Claude Code,
@@ -24,8 +24,9 @@ distribution invariants remain documented in `docs/release.md`.
 Copy-snapshot deployment and broader recovery hardening remain planned product
 work. Git-backed Skill Collections are the active `v0.9.x` hardening track;
 Phase A+B shipped in `v0.8.0` and one-fetch Phase C shipped in `v0.9.0`.
-Collection-level update/rollback remains planned Phase D work for a later
-`v0.9.x` release.
+GitHub collection-level update and one-step rollback landed in Unreleased as
+the first Phase D slice. Local worktree update, installed-source update, an
+arbitrary SHA picker, and a dedicated Collections page remain later work.
 
 ## Near-Term Priorities
 
@@ -35,8 +36,8 @@ These are the next areas where focused contributions are most useful:
   canonical Git repository/worktree and reviewed SHA as a local collection
   source while keeping child `SKILL.md` directories independently selectable
   and deployable. Phase C's one-fetch GitHub preview/apply shipped in
-  `v0.9.0`; collection update/rollback remains open as Phase D. Track
-  the remaining scope in [GitHub issue #46](https://github.com/santosli/SkillBox/issues/46).
+  `v0.9.0`. GitHub collection update/rollback is implemented in Unreleased;
+  remaining Phase D items are tracked in [GitHub issue #46](https://github.com/santosli/SkillBox/issues/46).
 - **Deployment portability.** Add copy-snapshot deployment as an explicit
   alternative to the current compatibility-checked symlink path.
 - **Recovery workflows.** Strengthen restore previews, backup inspection, and
@@ -67,7 +68,7 @@ verified; completing a feature list alone does not qualify a release.
 | **0.6 — Runtime profiles and portability** | Rust-owned runtime profiles model roots, precedence, frontmatter capabilities, and compatibility without hard-coding agent behavior in React. | Each supported profile has fixtures and compatibility tests; unsupported fields are reported before deployment; runtime-specific behavior remains behind an adapter boundary. |
 | **0.7 — Safe sync, deployment, and recovery** | Reviewed inbound user-skills Git updates are shipped; copy-snapshot deployment and broader restore/audit hardening remain planned follow-ups to the existing symlink path. | Worktree and branch-relation states are explicit; conflicts are never auto-merged; incoming trees, stale previews, deployed deletion/rename blockers, backup refs, index reconciliation, overwrite protection, and recovery paths have automated coverage. |
 | **0.8 — Skill Collections foundation and product hardening** | Git-backed Skill Collections add repository-level discovery, persisted reviewed provenance, installed-source display grouping, and large-library import-review performance. | Collections use one canonical local repository/worktree identity, preserve per-skill selection/deploy/Calls independence, and pass local grouping, migration, recovery, and untrusted-input tests with CLI/Tauri parity. |
-| **0.9 — Reviewed GitHub Skill Collection install** | Phase C adds one-fetch GitHub multi-skill preview/apply with explicit child selection and one reviewed commit SHA. Collection-level update/rollback remains later Phase D work. | Remote trees are bounded and fail closed before checkout; source/ref/tree/selection/managed state are stale-checked; selected children apply transactionally/compensatably; CLI/Tauri parity, recovery, and desktop review gates pass. |
+| **0.9 — Reviewed GitHub Skill Collection install** | Phase C adds one-fetch GitHub multi-skill preview/apply with explicit child selection and one reviewed commit SHA. Phase D GitHub update/rollback is Unreleased. | Remote trees are bounded and fail closed before checkout; source/ref/tree/selection/managed state are stale-checked; selected children apply transactionally/compensatably; CLI/Tauri parity, recovery, and desktop review gates pass. |
 | **1.0 — Stable local skill management** | SkillBox offers a documented, supportable contract for discovering, importing, managing, deploying, updating, synchronizing, diagnosing, and recovering supported skills. | Core workflows meet their definitions of done; supported runtimes and limitations are explicit; migrations and recovery are proven; release artifacts and docs match; no open blocker or known data-loss issue remains. |
 
 ### 0.5 Usage Evidence And Ranking Boundaries
@@ -161,24 +162,26 @@ contract.
 
 A remote repository URL will use one bounded fetch/check to preview all valid
 children. Preview reports eligible/invalid children, duplicate-name and managed
-conflict diagnostics, plus bounded path/name conflicts; it does not claim a
-removed-child diff because collection updates are Phase D. Apply installs only
+conflict diagnostics, plus bounded path/name conflicts. Same-SHA incremental
+install stays on the Phase C apply command. Apply installs only
 explicitly selected child snapshots while retaining collection provenance.
-Runtime deployment, Calls, and History remain per-skill; collection-level
-update/rollback remains Phase D.
+Runtime deployment, Calls, and History remain per-skill. GitHub collection
+update/rollback is the Phase D slice in Unreleased.
 
-Delivery was phased across the `v0.8.0` and `v0.9.0` releases; Phase D remains
-planned for later `v0.9.x` hardening:
+Delivery was phased across the `v0.8.0` and `v0.9.0` releases; later `v0.9.x`
+hardening continues:
 
 1. **Implemented:** Repository detection and local Import Review grouping.
 2. **Implemented:** Collection/source persistence and child relationships.
 3. **Shipped in `v0.9.0`:** GitHub multi-skill install preview/apply with one
    repository fetch, explicit child selection, stale source/tree checks, and
    compensatable recovery evidence.
-4. Collection-level update/rollback and deeper collection UI detail remain
-   planned Phase D work.
+4. **Unreleased:** GitHub collection update preview/apply and one-step rollback
+   to the previous reviewed SHA (schema v10). Deferred: local worktree update,
+   installed-source update, SHA picker, Collections page, dashboard auto-check.
 
-Phase 4 is not implemented and must not be described as shipped.
+The GitHub update/rollback slice is Unreleased and must not be described as a
+tagged release. Deferred Phase D items remain unimplemented.
 
 All scans are read-only. Apply must recheck canonical Git root, HEAD/ref, and
 tree snapshot and reject stale previews. Collection operations must never run

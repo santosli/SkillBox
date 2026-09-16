@@ -41,7 +41,8 @@
 - Implemented import records and import revert in Rust core, Rust CLI, Tauri commands, and Skill Detail UI, including backup restoration, conservative legacy reconciliation, multi-workspace blocking, and warning/danger confirmation states.
 - Implemented Rust-owned Import Review groups with stable content/status variant identities, full-snapshot-equivalent locations, location-level User/Remote advice with explicit mixed-suggestion confirmation, explicit selection for materially different same-name variants, group-level Calls/search/tab counts, and one-primary-only import enforcement that preserves existing revert guarantees.
 - Implemented v0.8.0 Skill Collections Phase A+B: Rust discovers the nearest safe Git worktree for local Import Review, groups repository children with canonical worktree/HEAD identity, keeps external copies unlinked, and persists reviewed collection/member provenance after a stale-checked child import.
-- Shipped GitHub Skill Collections Phase C in v0.9.0: one bounded fetch/check previews a complete repository/tree ref, exposes eligible and blocked children with one reviewed resolved SHA, and applies only explicitly selected children with stale and recovery protections. Collection-level update/rollback remains planned Phase D work for a later v0.9.x release.
+- Shipped GitHub Skill Collections Phase C in v0.9.0: one bounded fetch/check previews a complete repository/tree ref, exposes eligible and blocked children with one reviewed resolved SHA, and applies only explicitly selected children with stale and recovery protections.
+- Implemented GitHub Skill Collections Phase D in Unreleased: collection update preview/apply moves a GitHub collection to one new reviewed SHA, schema v10 stores revision backups, and one-step rollback restores the previous SHA. Children stay independently tracked; nothing auto-deploys. Local worktree update, installed-source update, an arbitrary SHA picker, and a dedicated Collections page remain deferred.
 - Current Import Review uses one collection-header User/Remote decision to resolve all actionable pending children, and one collection checkbox to select or clear the complete eligible set. Unresolved or mixed type state remains ineligible until explicitly resolved.
 - Added a bounded installer-lockfile fallback for copied skills: valid v3 GitHub provenance or strictly matched HTTPS `well-known` provenance can form a display-only `installed_source` collection after filesystem scanning, while live Git identity wins and selected children retain the ordinary per-skill import/apply contract.
 - Added signed macOS app update checks and user-confirmed install/restart through the Tauri updater plugin, plus release workflow assets for updater archives, signatures, and `latest.json`.
@@ -58,11 +59,13 @@
 ## Next Implementation Targets
 
 The `0.6` implementation and release qualification are complete. SkillBox
-`v0.9.0` is the current shipped release, including reviewed inbound sync,
+`v0.9.4` is the current shipped release, including reviewed inbound sync,
 History query/layout fixes, Skill Collections Phase A+B, and the one-fetch
-GitHub collection preview/apply workflow. The remaining scope in [issue #46](https://github.com/santosli/SkillBox/issues/46)
-is Phase D: collection-level update/rollback, planned for a later `v0.9.x`
-release.
+GitHub collection preview/apply workflow. GitHub collection update/rollback
+(Phase D first slice) is implemented in Unreleased and is not a tagged
+release. Remaining scope in [issue #46](https://github.com/santosli/SkillBox/issues/46)
+includes local worktree collection update, installed-source update, a SHA
+picker, and a dedicated Collections page.
 The next milestones follow [the versioned evolution path](roadmap.md#versioned-evolution-path):
 
 ### 0.7 — Safe Sync, Deployment, And Recovery
@@ -98,8 +101,9 @@ The next milestones follow [the versioned evolution path](roadmap.md#versioned-e
   worktree/repository identity, reviewed HEAD/SHA, and child-relative
   provenance; child skills remain independent for selection, import, deployment,
   Calls, and history.
-- Phase D, commit-consistent collection update/rollback, remains planned for a
-  later v0.9.x release and is not shipped.
+- Phase D GitHub collection update/rollback landed in Unreleased. Remaining
+  later v0.9.x work includes local worktree collection update, installed-source
+  updates, an arbitrary SHA picker, and a dedicated Collections page.
 - Collection scans must remain read-only. Apply must revalidate repository
   identity, HEAD/ref, and tree snapshot; execute no hooks, submodules, filters,
   scripts, or arbitrary shell; and preserve existing path, overwrite,
