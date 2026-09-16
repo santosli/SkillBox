@@ -76,6 +76,7 @@ mod db;
 mod doctor;
 mod fsutil;
 mod git_sync;
+mod github_collection_updates;
 mod github_collections;
 mod hooks;
 mod import;
@@ -105,6 +106,7 @@ pub(crate) use db::*;
 pub use doctor::*;
 pub(crate) use fsutil::*;
 pub use git_sync::*;
+pub use github_collection_updates::*;
 pub use github_collections::*;
 pub use hooks::*;
 pub use import::*;
@@ -128,4 +130,22 @@ pub(crate) use usage_backfill_cursor_transcripts::*;
 pub use workspaces::*;
 
 #[cfg(test)]
+mod test_support;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_part1;
+#[cfg(test)]
+mod tests_part2;
+#[cfg(test)]
+mod tests_part3;
+#[cfg(test)]
+mod tests_part4;
+#[cfg(test)]
+mod tests_part5;
+#[cfg(test)]
+mod tests_part6;
+#[cfg(test)]
+mod tests_part7;
+#[cfg(test)]
+mod tests_part8;

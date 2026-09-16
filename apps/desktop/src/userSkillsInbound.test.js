@@ -32,7 +32,13 @@ import {
   previewUserSkillsInboundStatus
 } from './previewData.js';
 
-const appSource = fs.readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+const appSource = [
+  './App.jsx',
+  './appActionsA.js',
+  './appActionsB.js',
+  './appActionsC.js',
+  './appActionsD.js'
+].map((path) => fs.readFileSync(new URL(path, import.meta.url), 'utf8')).join('\n');
 const settingsSource = fs.readFileSync(
   new URL('./components/settings.jsx', import.meta.url),
   'utf8'

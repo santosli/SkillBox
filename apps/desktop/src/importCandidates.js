@@ -122,6 +122,9 @@ export function normalizeImportCollections(collections = []) {
     branch: collection.branch || '',
     detached: Boolean(collection.detached),
     reviewedHeadSha: collection.reviewedHeadSha || collection.reviewed_head_sha || '',
+    fromSha: collection.fromSha || collection.from_sha || '',
+    toSha: collection.toSha || collection.to_sha || '',
+    previousReviewedHeadSha: collection.previousReviewedHeadSha || collection.previous_reviewed_head_sha || '',
     children: (collection.children || []).map((child) => ({
       ...child,
       id: child.id,
@@ -141,6 +144,9 @@ export function normalizeImportCollections(collections = []) {
         && Boolean(child.requiresTypeReview ?? child.requires_type_review),
       selectedType: child.selectedType ?? child.selected_type ?? null,
       isSelected: Boolean(child.isSelected ?? child.is_selected),
+      collectionChange: child.collectionChange || child.collection_change || null,
+      typeLocked: Boolean(child.typeLocked ?? child.type_locked),
+      selectionLocked: Boolean(child.selectionLocked ?? child.selection_locked),
       locations: (child.locations || []).map(normalizeImportCandidateLocation),
       unlinkedLocations: (child.unlinkedLocations || child.unlinked_locations || [])
         .map(normalizeImportCandidateLocation)
@@ -160,6 +166,99 @@ export function normalizeGithubSkillCollectionPreviewResult(result = {}) {
     };
   }
   throw new Error('GitHub collection preview returned an invalid result.');
+}
+
+export function normalizeGithubSkillCollectionUpdatePreviewResult(result = {}) {
+  if (result.kind === 'update' && result.preview) {
+    return { kind: 'update', preview: result.preview };
+  }
+  if (result.kind === 'up_to_date' && result.preview) {
+    return {
+      kind: 'up_to_date',
+      preview: result.preview,
+      message: result.message || 'Collection is already at this reviewed SHA.'
+    };
+  }
+  if (
+    result.kind === 'not_imported'
+    || result.kind === 'single_skill'
+    || result.kind === 'explicit_reference_required'
+  ) {
+    return {
+      kind: result.kind,
+      message: result.message || 'GitHub collection update preview could not continue.'
+    };
+  }
+  throw new Error('GitHub collection update preview returned an invalid result.');
+}
+
+export function collectionChangeLabel(change) {
+  switch (change) {
+    case 'updated':
+      return 'Updated';
+    case 'added':
+      return 'Added';
+    case 'removed':
+      return 'Removed';
+    case 'unchanged':
+      return 'Unchanged';
+    case 'blocked':
+      return 'Blocked';
+    default:
+      return '';
+  }
+}
+
+export function attachGithubCollectionChanges(collection = {}, changes = []) {
+  const byPath = new Map(
+    changes.map((change) => [change.relativePath || change.relative_path, change])
+  );
+  return {
+    ...collection,
+    children: (collection.children || []).map((child) => {
+      const change = byPath.get(child.relativePath);
+      if (!change) return child;
+      const kind = change.change;
+      return {
+        ...child,
+        collectionChange: kind,
+        typeLocked: kind === 'updated',
+        selectionLocked: kind === 'updated'
+      };
+    })
+  };
+}
+
+export function applyGithubCollectionChangeLocks(groups = [], collections = []) {
+  const lockedGroupIds = new Set(
+    collections.flatMap((collection) =>
+      (collection.children || [])
+        .filter((child) => child.selectionLocked || child.typeLocked)
+        .map((child) => child.groupId)
+    )
+  );
+  return groups.map((group) => {
+    if (!lockedGroupIds.has(group.id)) return group;
+    return {
+      ...group,
+      selectionLocked: true,
+      typeLocked: true,
+      isSelected: true
+    };
+  });
+}
+
+export function githubCollectionForSkill(collections = [], skillName = '') {
+  if (!skillName) return null;
+  return collections.find((collection) => {
+    const sourceKind = collection.sourceKind || collection.source_kind;
+    if (sourceKind !== 'github_remote') return false;
+    return (collection.members || []).some((member) => {
+      const managedName = member.managedSkillName || member.managed_skill_name || '';
+      const memberName = member.skillName || member.skill_name || '';
+      return managedName === skillName || memberName === skillName;
+    });
+  }) || null;
 }
 
 export function importCollectionGroupIds(collections = [], { liveOnly = false } = {}) {
@@ -297,6 +396,10 @@ function collectionActionableGroups(groups = [], collection = {}) {
       || group.selectedVariantId !== child.variantId
       || child.importStatus !== 'importable'
       || child.conflict
+      || child.typeLocked
+      || child.selectionLocked
+      || group.typeLocked
+      || (child.collectionChange === 'added' && !group.isSelected)
       || !canClassifyImportCandidateGroup(group)
     ) {
       continue;
@@ -366,14 +469,18 @@ export function collectionSkillCountLabel(count) {
 }
 
 export function isSelectableImportCandidateGroup(group) {
+  if (group.selectionLocked) return false;
   const variant = selectedImportCandidateVariant(group);
   return Boolean(canClassifyImportCandidateGroup(group) && variant.selectedType);
 }
 
 export function toggleImportCandidateGroup(groups, groupId) {
-  return groups.map((group) => group.id === groupId && isSelectableImportCandidateGroup(group)
-    ? { ...group, isSelected: !group.isSelected }
-    : group);
+  return groups.map((group) => {
+    if (group.id !== groupId || group.selectionLocked) return group;
+    return isSelectableImportCandidateGroup(group)
+      ? { ...group, isSelected: !group.isSelected }
+      : group;
+  });
 }
 
 export function selectImportCandidateVariant(groups, groupId, variantId) {
@@ -411,9 +518,12 @@ export function toggleImportCandidateGroupSelection(groups, targetGroups = group
   const targetIds = new Set(targetGroups.map((group) => group.id));
   const selectable = targetGroups.filter(isSelectableImportCandidateGroup);
   const shouldSelectAll = selectable.some((group) => !group.isSelected);
-  return groups.map((group) => targetIds.has(group.id) && isSelectableImportCandidateGroup(group)
-    ? { ...group, isSelected: shouldSelectAll }
-    : group);
+  return groups.map((group) => {
+    if (group.selectionLocked) return { ...group, isSelected: true };
+    return targetIds.has(group.id) && isSelectableImportCandidateGroup(group)
+      ? { ...group, isSelected: shouldSelectAll }
+      : group;
+  });
 }
 
 export function collectionEligibleGroupIds(groups = [], collection = {}) {
@@ -428,6 +538,7 @@ export function collectionEligibleGroupIds(groups = [], collection = {}) {
       || group.selectedVariantId !== child.variantId
       || child.importStatus !== 'importable'
       || child.conflict
+      || child.selectionLocked
       || !isSelectableImportCandidateGroup(group)
     ) {
       continue;

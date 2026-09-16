@@ -4,8 +4,9 @@
 
 Accepted for the v0.8.0/v0.9.x collection milestone. Phase A+B shipped in
 v0.8.0. The one-fetch GitHub multi-skill preview/apply boundary shipped in
-v0.9.0. Collection-level update/rollback remains planned Phase D work for a
-later v0.9.x release.
+v0.9.0. Phase D GitHub collection update and one-step rollback landed in
+Unreleased; local worktree update, installed-source update, and an arbitrary
+SHA picker remain out of this slice.
 
 ## Context
 
@@ -75,4 +76,6 @@ preserved and the failure explains the recovery boundary.
   ref; bare URLs return a structured explicit-ref-required result rather than
   assuming `main`. Root-only skills are accepted only when no nested skill root
   overlaps them, and fetched Git trees reject symlinks and gitlinks before
-  checkout materialization. Phase D remains outside the current contract.
+  checkout materialization. Phase D adds GitHub collection update preview/apply
+  and one-step rollback from schema-v10 revision backups, still without
+  auto-deploy or treating the collection as one deployable unit.

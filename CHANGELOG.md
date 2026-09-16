@@ -7,7 +7,7 @@ version tags such as `v0.3.0`.
 
 ## Unreleased
 
-- No unreleased changes.
+- Add GitHub collection-level update preview/apply and one-step rollback to the previous reviewed SHA, with schema v10 revision backups, CLI/Tauri/desktop review, and no auto-deploy.
 
 ## 0.9.4
 

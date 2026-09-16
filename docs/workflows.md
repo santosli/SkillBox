@@ -177,7 +177,7 @@ GitHub repository/root URL 的多 skill workflow 由 Rust core 承载：
 - Apply 重新 fetch 一次并重新校验 URL/ref/SHA、collection/preview identity、relative
   path、full snapshot/content hash、duplicate name 和 managed target，然后才进行选中
   child 的普通 per-skill import。所有成功 child 绑定同一个 reviewed SHA；每个 child
-  仍独立 deploy、Calls、History；collection-level update/rollback 属于 Phase D。
+  仍独立 deploy、Calls、History；collection-level update/rollback 见 §2.3。
 - Repository-root URL（root `SKILL.md` 或多个 child）进入 collection review；指向
   单一子目录的 URL 继续走既有 single-skill GitHub install。空仓库或没有有效 child
   返回 actionable error；无效 child 不会隐藏其它安全有效 child，除非触发全局安全上限。
@@ -198,7 +198,7 @@ GitHub repository/root URL 的多 skill workflow 由 Rust core 承载：
 
 Phase C 已随 v0.9.0 发布：GitHub multi-skill collection preview/apply 使用一次有界
 fetch/check、显式 child 选择和一个 reviewed resolved SHA。Phase D 的
-collection-level update/rollback 仍未实现。Collection operations 不运行 hooks、filters、submodules、repository
+GitHub collection update/rollback 见 §2.3。Collection operations 不运行 hooks、filters、submodules、repository
 scripts、custom helpers 或 arbitrary shell。
 
 完成验证：
@@ -212,6 +212,45 @@ scripts、custom helpers 或 arbitrary shell。
 - `cargo test -p skillbox-core --offline collection_batch_failure_rolls_back_remote_current_index_and_audits_one_operation`
 - `cargo run -p skillbox-cli --offline -- github-collection-preview <github-url> --managed-root <temp-skillbox-root>`
 - `npm test` 和桌面 Import Review 的 collection collapsed/expanded/narrow visual QA。
+
+### 2.3 GitHub Skill Collection Update/Rollback (Phase D)
+
+GitHub `github_remote` collection 可以在 **一次 reviewed SHA** 上前进或回退一步。
+children 仍独立 import/deploy/usage-track，不会自动部署。
+
+- CLI：`github-collection-update-preview <github-url>`，然后
+  `github-collection-update-apply <github-url> --collection-id <id> --preview-id <id>
+  --select <path|group|variant|type,...>`。回滚：
+  `github-collection-rollback-preview --collection-id <id>` 与
+  `github-collection-rollback-apply --collection-id <id> --preview-id <id>`。
+- Tauri：`preview_github_skill_collection_update`、
+  `apply_github_skill_collection_update`、
+  `preview_github_skill_collection_rollback`、
+  `apply_github_skill_collection_rollback`。Desktop 对已导入且 SHA 不同的
+  GitHub Install 打开 Collection update review；Skill Detail 提供 Check collection
+  update 以及在存在 previous revision 时的 Roll back collection。
+- Update preview 对 persisted source URL/ref 做一次 bounded fetch，把 child 分成
+  unchanged / updated / added / removed / blocked。Apply 要求选中每一个 updated
+  member，unchanged 只提升 member SHA，added 仍需显式选择，removed 只丢掉 membership
+  且 **不删除 skill**。Managed copy 若已偏离 last reviewed snapshot，该 child 被 blocked。
+- Apply 先把当前 SHA 的 member 快照与文件 backup 写入 schema v10
+  `skill_collection_revisions`，再把 collection 推进到新 SHA。User skill 用 sibling
+  directory swap 替换；Remote skill 写入新的 `versions/manual-<hash>` 并 retarget
+  `current`。失败时只补偿本次写入。
+- Rollback 只恢复 `previous_reviewed_head_sha` 这一步，不是任意 SHA picker。成功后
+  清空 previous pointer。从未做过 Phase D update 的 collection 返回 actionable error。
+- 同 SHA 的 Phase C incremental install 仍走 `github-collection-apply`；该命令继续拒绝
+  不同 SHA。本地 `git_worktree` 与 `installed_source` collection 不在此 workflow。
+
+完成验证：
+
+- `cargo test -p skillbox-core --offline schema_v10_collection_revision_migration_is_idempotent_for_existing_database`
+- `cargo test -p skillbox-core --offline github_collection_update_preview_classifies_unchanged_updated_added_and_removed`
+- `cargo test -p skillbox-core --offline github_collection_update_apply_advances_sha_and_rollback_restores_previous`
+- `cargo test -p skillbox-core --offline github_collection_update_rejects_dirty_member_and_missing_previous_revision`
+- `cargo test -p skillbox-core --offline github_collection_update_compensates_user_write_when_later_child_fails`
+- `cargo test -p skillbox-cli --offline github_collection_update_preview_command_uses_structured_core_result`
+- `npm test`
 
 ## 3. Revert Local Import
 
@@ -901,7 +940,7 @@ Apply fast-forward:
 - Codex App / Codex CLI 的非 managed command hook 写入后仍需用户在 Codex `/hooks` 中 review/trust；Settings 显示 `Needs trust` 时表示文件已注入但自动统计尚不会执行。
 - 注入命令必须指向 `~/.skillbox/bin/skillbox-usage-hook <agent>`；SkillBox 安装或重新注入时写入同目录 `skillbox-usage-hook-runner`，并替换旧的裸 `skillbox usage-hook ...` 或开发态绝对路径配置，避免命中 legacy Node CLI、找不到命令，或依赖 `target/debug`。
 - 注入命令挂在 `Stop` 事件上。hook 命令读取 agent 提供的 `transcript_path`，只提取本 turn 中 Skill 块的 `name`、`path` 和触发用户 prompt 的受限 excerpt；不保存完整 prompt、聊天正文、文件内容或 transcript。
-- `usage-hook` 命令必须 fail-open：解析或写入失败时不应让 agent hook 返回失败，从而不影响 agent 会话结束。
+- `usage-hook` 命令必须 fail-open；解析或写入失败时不应让 agent hook 返回失败，从而不影响 agent 会话结束。
 - Rust core 写入 `skill_usage_events`，允许 `skill_name` 尚未导入 SkillBox；每条 row
   持有当前最强 `confirmed/inferred/reference` class 和有界 provenance sources。
 - `Calls = confirmed + inferred`。`reference` 单独作为 History references，不进入 Calls。
@@ -1171,7 +1210,8 @@ returns structured JSON while the desktop provides interactive review.
 | User-skills Git status and outbound commit/push | Full | Full | Desktop adds selected-file diff review. Existing push defaults and `push_failed` semantics remain unchanged. |
 | Reviewed inbound user-skills fast-forward (v0.7 shipped) | Full | Full | Both use Check -> Preview -> Apply with the same Rust validation and stale-preview contract. Desktop adds visual repository/skill/deployment review and conflict diagnostics. Neither interface auto-merges, rebases, resets, stashes, or resolves divergence. |
 | Local Git Skill Collections Phase A+B | Full | Full | `collection-preview`/`collection-apply` and `collections` expose Rust-owned local worktree discovery, selected-child apply, and persisted provenance; shipped in v0.8.0. |
-| GitHub Skill Collection Phase C | Full | Full | The shipped `v0.9.0` `github-collection-preview`/`github-collection-apply` performs one fetch per preview/apply, explicit child selection, stale SHA/tree checks, and per-skill import. Collection-level update/rollback remains unsupported Phase D work. |
+| GitHub Skill Collection Phase C | Full | Full | The shipped `v0.9.0` `github-collection-preview`/`github-collection-apply` performs one fetch per preview/apply, explicit child selection, stale SHA/tree checks, and per-skill import. Same-SHA incremental install remains on this command. |
+| GitHub Skill Collection Phase D update/rollback | Full | Full | Unreleased `github-collection-update-*` and `github-collection-rollback-*` move a GitHub collection to one new reviewed SHA or restore the previous SHA from schema v10 revision backups. Children stay independently tracked; nothing auto-deploys. Local worktree and installed-source collections are out of scope. |
 | Workspaces | Partial | Full | CLI lists/scans/adds/forgets exact roots. Desktop also previews a project directory, initializes one selected supported root, and offers the native folder picker. |
 | Usage rankings and local history sync | Full | Full | Both use the same confirmed/inferred/reference evidence model and provider backfills. |
 | Aggregate usage diagnostics | Full | Limited | CLI `usage-audit` is the automation-oriented aggregate report. Desktop exposes the relevant coverage summary and disclosure, not the complete diagnostic JSON. |
@@ -1195,7 +1235,7 @@ Maintenance check:
 
 ```sh
 cargo run -p skillbox-cli --offline -- --help
-rg -n "#\\[tauri::command\\]|invoke_handler|invoke\\(" \
+rg -n "#\\[tauri::command\\]|invoke_handler|invoke\\(" \\
   apps/desktop/src-tauri/src apps/desktop/src/App.jsx
 ```
 
