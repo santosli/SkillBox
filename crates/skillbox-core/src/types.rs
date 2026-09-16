@@ -1270,6 +1270,7 @@ pub struct SkillCollection {
     pub branch: Option<String>,
     pub detached: bool,
     pub reviewed_head_sha: Option<String>,
+    pub previous_reviewed_head_sha: Option<String>,
     pub source_kind: ImportCandidateCollectionSourceKind,
     pub source_url: Option<String>,
     pub requested_reference: Option<String>,
@@ -1335,6 +1336,111 @@ pub enum GithubSkillCollectionPreviewResult {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum GithubCollectionChildChangeKind {
+    Unchanged,
+    Updated,
+    Added,
+    Removed,
+    Blocked,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GithubCollectionChildChange {
+    pub relative_path: String,
+    pub name: String,
+    pub change: GithubCollectionChildChangeKind,
+    pub from_snapshot_hash: Option<String>,
+    pub to_snapshot_hash: Option<String>,
+    pub managed_skill_name: Option<String>,
+    pub skill_kind: Option<SkillKind>,
+    pub group_id: String,
+    pub variant_id: String,
+    pub conflict: Option<String>,
+    pub eligible: bool,
+    pub required: bool,
+    pub default_selected: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GithubCollectionUpdatePreview {
+    pub preview_id: String,
+    pub collection_id: String,
+    pub source_url: String,
+    pub requested_reference: String,
+    pub from_sha: String,
+    pub to_sha: String,
+    pub collection: ImportCandidateCollection,
+    pub groups: Vec<ImportCandidateGroup>,
+    pub changes: Vec<GithubCollectionChildChange>,
+    pub errors: Vec<ImportCandidateError>,
+    pub diagnostics: GithubSkillCollectionDiagnostics,
+    pub affected_deployments: Vec<AffectedDeployment>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum GithubCollectionUpdatePreviewResult {
+    Update {
+        preview: Box<GithubCollectionUpdatePreview>,
+    },
+    UpToDate {
+        preview: Box<GithubSkillCollectionPreview>,
+        message: String,
+    },
+    NotImported {
+        message: String,
+    },
+    SingleSkill {
+        message: String,
+    },
+    ExplicitReferenceRequired {
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GithubCollectionRollbackRequest {
+    pub collection_id: String,
+    pub preview_id: String,
+    pub actor: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GithubCollectionRollbackMember {
+    pub relative_path: String,
+    pub skill_name: String,
+    pub managed_skill_name: String,
+    pub skill_kind: SkillKind,
+    pub restorable: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GithubCollectionRollbackPreview {
+    pub preview_id: String,
+    pub collection_id: String,
+    pub display_name: String,
+    pub source_url: String,
+    pub from_sha: String,
+    pub to_sha: String,
+    pub members: Vec<GithubCollectionRollbackMember>,
+    pub leaving_skill_names: Vec<String>,
+    pub affected_deployments: Vec<AffectedDeployment>,
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GithubCollectionRollbackResult {
+    pub collection: SkillCollection,
+    pub restored: Vec<String>,
+    pub leaving_skill_names: Vec<String>,
+    pub errors: Vec<String>,
+    #[serde(default)]
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ImportRecordStatus {
     Active,
     Reverted,
@@ -1354,7 +1460,7 @@ impl ImportRecordStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ImportRecordFilter {
     pub skill_name: Option<String>,
-}
+    }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ImportRecord {
