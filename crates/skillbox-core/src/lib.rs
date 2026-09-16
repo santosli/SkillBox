@@ -145,3 +145,7 @@ mod tests_part4;
 mod tests_part5;
 #[cfg(test)]
 mod tests_part6;
+#[cfg(test)]
+mod tests_part7;
+#[cfg(test)]
+mod tests_part8;
