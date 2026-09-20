@@ -1,8 +1,10 @@
 use crate::*;
+use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader};
 
 const MAX_BACKFILL_ERRORS: usize = 20;
 const MAX_PARENT_DEPTH: usize = 64;
+const MAX_CLAUDE_JSONL_LINE_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 struct ClaudeTranscriptNode {
@@ -16,9 +18,12 @@ struct ClaudeSkillSignal {
     name: String,
     report_unresolved: bool,
     runtime_context: Option<PathBuf>,
-    turn_key: String,
     used_at: Option<String>,
     evidence_signal: &'static str,
+    prompt_id: Option<String>,
+    parent_uuid: Option<String>,
+    uuid: Option<String>,
+    fallback_index: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -43,14 +48,43 @@ pub fn backfill_claude_code_session_usage(
     request: BackfillClaudeCodeSessionUsageRequest,
     managed_root: impl AsRef<Path>,
 ) -> Result<BackfillCodexSessionUsageResult> {
-    backfill_claude_code_session_usage_for_home(request, home_dir(), managed_root)
+    backfill_claude_code_session_usage_with_progress(request, managed_root, |_| {})
 }
 
+pub fn backfill_claude_code_session_usage_with_progress<F>(
+    request: BackfillClaudeCodeSessionUsageRequest,
+    managed_root: impl AsRef<Path>,
+    progress: F,
+) -> Result<BackfillCodexSessionUsageResult>
+where
+    F: FnMut(UsageBackfillProgress),
+{
+    backfill_claude_code_session_usage_for_home_with_progress(
+        request,
+        home_dir(),
+        managed_root,
+        progress,
+    )
+}
+
+#[cfg(test)]
 pub(crate) fn backfill_claude_code_session_usage_for_home(
     request: BackfillClaudeCodeSessionUsageRequest,
     home: impl AsRef<Path>,
     managed_root: impl AsRef<Path>,
 ) -> Result<BackfillCodexSessionUsageResult> {
+    backfill_claude_code_session_usage_for_home_with_progress(request, home, managed_root, |_| {})
+}
+
+pub(crate) fn backfill_claude_code_session_usage_for_home_with_progress<F>(
+    request: BackfillClaudeCodeSessionUsageRequest,
+    home: impl AsRef<Path>,
+    managed_root: impl AsRef<Path>,
+    mut progress: F,
+) -> Result<BackfillCodexSessionUsageResult>
+where
+    F: FnMut(UsageBackfillProgress),
+{
     let home = home.as_ref();
     let managed_root = managed_root.as_ref();
     let paths = ensure_managed_layout(managed_root.to_path_buf())?;
@@ -65,14 +99,27 @@ pub(crate) fn backfill_claude_code_session_usage_for_home(
         return Err("Claude Code projects root must be an absolute path.".to_string());
     }
 
+    progress(UsageBackfillProgress::new(
+        "claude-code",
+        "collecting",
+        0,
+        None,
+    ));
     let mut result = BackfillCodexSessionUsageResult::default();
     let mut files = Vec::new();
     if projects_root.is_dir() {
         collect_claude_jsonl_files(&projects_root, &mut files)?;
     }
     files.sort();
+    let total = files.len();
+    progress(UsageBackfillProgress::new(
+        "claude-code",
+        "scanning",
+        0,
+        Some(total),
+    ));
 
-    for path in files {
+    for (index, path) in files.into_iter().enumerate() {
         result.scanned_files = result.scanned_files.saturating_add(1);
         match extract_claude_session_skill_candidates(&path, &runtime_roots, home) {
             Ok(extraction) => {
@@ -111,7 +158,19 @@ pub(crate) fn backfill_claude_code_session_usage_for_home(
                 push_backfill_error(&mut result.errors, format!("{}: {error}", path.display()));
             }
         }
+        progress(UsageBackfillProgress::new(
+            "claude-code",
+            "scanning",
+            index + 1,
+            Some(total),
+        ));
     }
+    progress(UsageBackfillProgress::new(
+        "claude-code",
+        "complete",
+        result.scanned_files,
+        Some(total),
+    ));
 
     let scanned_files = u32::try_from(result.scanned_files).unwrap_or(u32::MAX);
     if let Err(error) = write_u32_preference(
@@ -199,76 +258,110 @@ fn extract_claude_session_skill_candidates(
 ) -> Result<ClaudeSessionExtraction> {
     let file = fs::File::open(path).map_err(|error| format!("Unable to read session: {error}"))?;
     let reader = BufReader::new(file);
-    let mut values = Vec::new();
     let mut extraction = ClaudeSessionExtraction::default();
+    let mut nodes = HashMap::new();
+    let mut pending_signals = Vec::new();
+    let mut session_id = None;
+    let mut fallback_cwd = None;
+    let mut index = 0usize;
 
     for line in reader.lines() {
         let line = line.map_err(|error| format!("Unable to read session line: {error}"))?;
         if line.trim().is_empty() {
             continue;
         }
-        match serde_json::from_str::<serde_json::Value>(&line) {
-            Ok(value) if value.is_object() => values.push(value),
+        if line.len() > MAX_CLAUDE_JSONL_LINE_BYTES {
+            extraction.skipped = extraction.skipped.saturating_add(1);
+            push_backfill_error(
+                &mut extraction.errors,
+                format!("skipped oversized JSON line over {MAX_CLAUDE_JSONL_LINE_BYTES} bytes"),
+            );
+            continue;
+        }
+        let value = match serde_json::from_str::<serde_json::Value>(&line) {
+            Ok(value) if value.is_object() => value,
             _ => {
                 extraction.skipped = extraction.skipped.saturating_add(1);
                 push_backfill_error(
                     &mut extraction.errors,
                     "skipped invalid JSON line".to_string(),
                 );
+                continue;
             }
+        };
+        if let Some(node) = claude_transcript_node(&value) {
+            nodes.insert(node.uuid.clone(), node);
         }
-    }
-
-    let nodes = claude_transcript_nodes(&values);
-    let session_id = claude_session_id(&values, path);
-    let sidechain_id = claude_sidechain_id(path);
-    let fallback_cwd = values.iter().find_map(claude_record_cwd);
-    let mut signals = Vec::new();
-
-    for (index, value) in values.iter().enumerate() {
-        let record_type = value.get("type").and_then(|value| value.as_str());
-        let turn_key = claude_turn_key(value, &nodes, index);
+        if session_id.is_none() {
+            session_id = value
+                .get("sessionId")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+        }
+        if fallback_cwd.is_none() {
+            fallback_cwd = claude_record_cwd(&value);
+        }
         let used_at = value
             .get("timestamp")
             .and_then(|value| value.as_str())
             .map(str::to_string);
-        let runtime_context = claude_record_cwd(value).or_else(|| fallback_cwd.clone());
-
-        match record_type {
+        let runtime_context = claude_record_cwd(&value).or_else(|| fallback_cwd.clone());
+        let prompt_id = optional_trimmed_string(&value, "promptId");
+        let parent_uuid = optional_trimmed_string(&value, "parentUuid");
+        let uuid = optional_trimmed_string(&value, "uuid");
+        match value.get("type").and_then(|value| value.as_str()) {
             Some("user") => {
-                if let Some(text) = claude_user_record_text(value) {
+                if let Some(text) = claude_user_record_text(&value) {
                     for (name, report_unresolved) in claude_command_skill_names(&text) {
-                        signals.push(ClaudeSkillSignal {
+                        pending_signals.push(ClaudeSkillSignal {
                             name,
                             report_unresolved,
                             runtime_context: runtime_context.clone(),
-                            turn_key: turn_key.clone(),
                             used_at: used_at.clone(),
                             evidence_signal: "native_skill_command",
+                            prompt_id: prompt_id.clone(),
+                            parent_uuid: parent_uuid.clone(),
+                            uuid: uuid.clone(),
+                            fallback_index: index,
                         });
                     }
                 }
             }
             Some("assistant") => {
-                for name in claude_skill_tool_names(value) {
-                    signals.push(ClaudeSkillSignal {
+                for name in claude_skill_tool_names(&value) {
+                    pending_signals.push(ClaudeSkillSignal {
                         name,
                         report_unresolved: true,
                         runtime_context: runtime_context.clone(),
-                        turn_key: turn_key.clone(),
                         used_at: used_at.clone(),
                         evidence_signal: "native_skill_tool",
+                        prompt_id: prompt_id.clone(),
+                        parent_uuid: parent_uuid.clone(),
+                        uuid: uuid.clone(),
+                        fallback_index: index,
                     });
                 }
             }
             _ => {}
         }
+        index = index.saturating_add(1);
     }
 
+    let session_id = session_id.unwrap_or_else(|| claude_session_id_from_path(path));
+    let sidechain_id = claude_sidechain_id(path);
     let mut seen_signals = HashSet::new();
     let mut seen = HashSet::new();
-    for signal in signals {
-        if !seen_signals.insert(format!("{}\n{}", signal.turn_key, signal.name)) {
+    for signal in pending_signals {
+        let turn_key = claude_turn_key_from_parts(
+            signal.prompt_id.as_deref(),
+            signal.parent_uuid.as_deref(),
+            signal.uuid.as_deref(),
+            &nodes,
+            signal.fallback_index,
+        );
+        if !seen_signals.insert(format!("{turn_key}\n{}", signal.name)) {
             continue;
         }
         let Some(skill_path) = resolve_claude_skill_path(
@@ -287,13 +380,13 @@ fn extract_claude_session_skill_candidates(
             continue;
         };
         let skill_key = canonical_usage_skill_key(&skill_path);
-        if !seen.insert(format!("{}\n{skill_key}", signal.turn_key)) {
+        if !seen.insert(format!("{turn_key}\n{skill_key}")) {
             continue;
         }
         extraction.candidates.push(ClaudeSessionSkillCandidate {
             session_id: session_id.clone(),
             sidechain_id: sidechain_id.clone(),
-            turn_key: signal.turn_key,
+            turn_key,
             used_at: signal.used_at,
             runtime_context: signal.runtime_context,
             skill: HookSkillRef {
@@ -314,70 +407,47 @@ fn extract_claude_session_skill_candidates(
     Ok(extraction)
 }
 
-fn claude_transcript_nodes(values: &[serde_json::Value]) -> HashMap<String, ClaudeTranscriptNode> {
-    values
-        .iter()
-        .filter_map(|value| {
-            let uuid = value
-                .get("uuid")
-                .and_then(|value| value.as_str())
-                .map(str::trim)
-                .filter(|value| !value.is_empty())?
-                .to_string();
-            Some((
-                uuid.clone(),
-                ClaudeTranscriptNode {
-                    parent_uuid: value
-                        .get("parentUuid")
-                        .and_then(|value| value.as_str())
-                        .map(str::trim)
-                        .filter(|value| !value.is_empty())
-                        .map(str::to_string),
-                    prompt_id: value
-                        .get("promptId")
-                        .and_then(|value| value.as_str())
-                        .map(str::trim)
-                        .filter(|value| !value.is_empty())
-                        .map(str::to_string),
-                    uuid,
-                },
-            ))
-        })
-        .collect()
-}
-
-fn claude_turn_key(
-    value: &serde_json::Value,
-    nodes: &HashMap<String, ClaudeTranscriptNode>,
-    fallback_index: usize,
-) -> String {
-    if let Some(prompt_id) = value
-        .get("promptId")
+fn optional_trimmed_string(value: &serde_json::Value, key: &str) -> Option<String> {
+    value
+        .get(key)
         .and_then(|value| value.as_str())
         .map(str::trim)
         .filter(|value| !value.is_empty())
-    {
+        .map(str::to_string)
+}
+
+fn claude_transcript_node(value: &serde_json::Value) -> Option<ClaudeTranscriptNode> {
+    let uuid = optional_trimmed_string(value, "uuid")?;
+    Some(ClaudeTranscriptNode {
+        parent_uuid: optional_trimmed_string(value, "parentUuid"),
+        prompt_id: optional_trimmed_string(value, "promptId"),
+        uuid,
+    })
+}
+
+fn claude_turn_key_from_parts(
+    prompt_id: Option<&str>,
+    parent_uuid: Option<&str>,
+    uuid: Option<&str>,
+    nodes: &HashMap<String, ClaudeTranscriptNode>,
+    fallback_index: usize,
+) -> String {
+    if let Some(prompt_id) = prompt_id.filter(|value| !value.is_empty()) {
         return format!("prompt:{prompt_id}");
     }
 
-    let mut current = value
-        .get("parentUuid")
-        .and_then(|value| value.as_str())
-        .map(str::to_string);
-    let mut root_uuid = value
-        .get("uuid")
-        .and_then(|value| value.as_str())
-        .map(str::to_string);
+    let mut current = parent_uuid.map(str::to_string);
+    let mut root_uuid = uuid.map(str::to_string);
     let mut visited = HashSet::new();
     for _ in 0..MAX_PARENT_DEPTH {
-        let Some(uuid) = current else {
+        let Some(next_uuid) = current else {
             break;
         };
-        if !visited.insert(uuid.clone()) {
+        if !visited.insert(next_uuid.clone()) {
             break;
         }
-        let Some(node) = nodes.get(&uuid) else {
-            root_uuid = Some(uuid);
+        let Some(node) = nodes.get(&next_uuid) else {
+            root_uuid = Some(next_uuid);
             break;
         };
         if let Some(prompt_id) = node.prompt_id.as_deref() {
@@ -450,12 +520,17 @@ fn claude_skill_tool_names(value: &serde_json::Value) -> Vec<String> {
         .flatten()
         .filter(|block| {
             block.get("type").and_then(|value| value.as_str()) == Some("tool_use")
-                && block.get("name").and_then(|value| value.as_str()) == Some("Skill")
+                && block
+                    .get("name")
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|name| name.eq_ignore_ascii_case("skill"))
         })
         .filter_map(|block| {
-            block
-                .get("input")
-                .and_then(|input| input.get("skill"))
+            let input = block.get("input")?;
+            input
+                .get("skill")
+                .or_else(|| input.get("skill_name"))
+                .or_else(|| input.get("name"))
                 .and_then(|value| value.as_str())
                 .and_then(normalized_claude_skill_name)
         })
@@ -481,22 +556,22 @@ fn resolve_claude_skill_path(
     runtime_roots: &[PathBuf],
     home: &Path,
 ) -> Option<PathBuf> {
+    let context = runtime_context.map(|path| expand_home(path.to_path_buf()));
     let mut preferred_roots = Vec::new();
-    if let Some(context) = runtime_context {
-        preferred_roots.push(expand_home(context.to_path_buf()).join(".claude/skills"));
+    if let Some(context) = &context {
+        preferred_roots.extend(claude_context_skill_roots(context));
     }
-    preferred_roots.push(home.join(".claude/skills"));
+    preferred_roots.extend(claude_home_skill_roots(home));
 
-    for root in preferred_roots {
-        if let Some(path) = existing_claude_skill_path(&root, skill_name) {
+    for root in &preferred_roots {
+        if let Some(path) = existing_skill_md_path(root, skill_name) {
             return Some(path);
         }
     }
 
     let mut candidates = runtime_roots
         .iter()
-        .filter(|root| is_claude_runtime_root(root))
-        .filter_map(|root| existing_claude_skill_path(root, skill_name))
+        .filter_map(|root| existing_skill_md_path(root, skill_name))
         .collect::<Vec<_>>();
     candidates.sort();
     candidates.dedup_by(|left, right| {
@@ -505,10 +580,27 @@ fn resolve_claude_skill_path(
     (candidates.len() == 1).then(|| candidates.remove(0))
 }
 
-fn existing_claude_skill_path(root: &Path, skill_name: &str) -> Option<PathBuf> {
-    if !is_claude_runtime_root(root) {
-        return None;
-    }
+fn claude_context_skill_roots(context: &Path) -> Vec<PathBuf> {
+    vec![
+        context.join(".claude/skills"),
+        context.join(".agents/skills"),
+        context.join(".codex/skills"),
+        context.join(".cursor/skills"),
+    ]
+}
+
+fn claude_home_skill_roots(home: &Path) -> Vec<PathBuf> {
+    vec![
+        home.join(".claude/skills"),
+        home.join(".agents/skills"),
+        home.join(".codex/skills"),
+        home.join(".cursor/skills"),
+        home.join(".skillbox/user-skills"),
+        home.join(".skillbox/remote-skills"),
+    ]
+}
+
+fn existing_skill_md_path(root: &Path, skill_name: &str) -> Option<PathBuf> {
     let path = root.join(skill_name).join("SKILL.md");
     path.is_file()
         .then(|| fs::canonicalize(&path).unwrap_or(path))
@@ -546,37 +638,25 @@ fn claude_record_cwd(value: &serde_json::Value) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-fn claude_session_id(values: &[serde_json::Value], path: &Path) -> String {
-    values
-        .iter()
-        .find_map(|value| {
-            value
-                .get("sessionId")
-                .and_then(|value| value.as_str())
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string)
-        })
-        .unwrap_or_else(|| {
-            if path
-                .parent()
-                .and_then(|parent| parent.file_name())
-                .and_then(|value| value.to_str())
-                == Some("subagents")
-            {
-                return path
-                    .parent()
-                    .and_then(Path::parent)
-                    .and_then(|parent| parent.file_name())
-                    .and_then(|value| value.to_str())
-                    .unwrap_or("unknown-session")
-                    .to_string();
-            }
-            path.file_stem()
-                .and_then(|value| value.to_str())
-                .unwrap_or("unknown-session")
-                .to_string()
-        })
+fn claude_session_id_from_path(path: &Path) -> String {
+    if path
+        .parent()
+        .and_then(|parent| parent.file_name())
+        .and_then(|value| value.to_str())
+        == Some("subagents")
+    {
+        return path
+            .parent()
+            .and_then(Path::parent)
+            .and_then(|parent| parent.file_name())
+            .and_then(|value| value.to_str())
+            .unwrap_or("unknown-session")
+            .to_string();
+    }
+    path.file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("unknown-session")
+        .to_string()
 }
 
 fn claude_sidechain_id(path: &Path) -> String {
@@ -810,6 +890,58 @@ mod tests {
         assert_eq!(rankings.coverage.claude_code_session_backfill_calls, 3);
         assert_eq!(rankings.coverage.cursor_session_backfill_calls, 0);
         assert_eq!(rankings.coverage.scanned_claude_code_session_files, 2);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn claude_backfill_resolves_skills_from_agents_runtime_when_claude_root_is_empty() {
+        let root = std::env::temp_dir().join(format!(
+            "skillbox-claude-agents-resolve-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO)
+                .as_nanos()
+        ));
+        let home = root.join("home");
+        let managed_root = root.join("SkillBox");
+        let project = root.join("project");
+        let projects_root = home.join(".claude/projects");
+        write_skill(&home.join(".agents/skills"), "nightwatch-video");
+        fs::create_dir_all(home.join(".claude/skills")).unwrap();
+        fs::create_dir_all(&project).unwrap();
+        write_jsonl(
+            &projects_root.join("-project/session-agents.jsonl"),
+            &[serde_json::json!({
+                "type": "assistant",
+                "uuid": "assistant-1",
+                "parentUuid": null,
+                "promptId": "prompt-1",
+                "sessionId": "session-agents",
+                "timestamp": "2026-09-19T10:00:00Z",
+                "cwd": project,
+                "message": {
+                    "role": "assistant",
+                    "content": [{
+                        "type": "tool_use",
+                        "name": "skill",
+                        "input": { "skill": "nightwatch-video" }
+                    }]
+                }
+            })],
+        );
+
+        let result = backfill_claude_code_session_usage_for_home(
+            BackfillClaudeCodeSessionUsageRequest {
+                projects_root: Some(projects_root),
+            },
+            &home,
+            &managed_root,
+        )
+        .unwrap();
+        assert_eq!(result.discovered, 1, "{:?}", result.errors);
+        assert_eq!(result.recorded, 1);
+        assert_eq!(result.skipped, 0);
 
         let _ = fs::remove_dir_all(root);
     }

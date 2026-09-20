@@ -1,4 +1,5 @@
 use crate::*;
+use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Read};
 
 const MAX_CURSOR_TRANSCRIPT_ERRORS: usize = 20;
@@ -55,12 +56,32 @@ enum BoundedLine {
     Oversized,
 }
 
+#[cfg(test)]
 pub(crate) fn backfill_cursor_agent_transcript_usage(
     projects_root: &Path,
     allowed_skill_root: &Path,
     runtime_roots: &[PathBuf],
     managed_database: &mut Connection,
 ) -> Result<BackfillCodexSessionUsageResult> {
+    backfill_cursor_agent_transcript_usage_with_progress(
+        projects_root,
+        allowed_skill_root,
+        runtime_roots,
+        managed_database,
+        |_| {},
+    )
+}
+
+pub(crate) fn backfill_cursor_agent_transcript_usage_with_progress<F>(
+    projects_root: &Path,
+    allowed_skill_root: &Path,
+    runtime_roots: &[PathBuf],
+    managed_database: &mut Connection,
+    mut progress: F,
+) -> Result<BackfillCodexSessionUsageResult>
+where
+    F: FnMut(UsageBackfillProgress),
+{
     let projects_root = canonical_directory(projects_root, "Cursor projects root")?;
     let allowed_skill_root_lexical =
         normalize_lexical_path(&expand_home(allowed_skill_root.to_path_buf()));
@@ -69,13 +90,26 @@ pub(crate) fn backfill_cursor_agent_transcript_usage(
     let mut files = Vec::new();
     collect_cursor_transcript_files(&projects_root, &mut files, &mut result)?;
     files.sort_by(|left, right| left.path.cmp(&right.path));
+    let total = files.len();
+    progress(UsageBackfillProgress::new(
+        "cursor",
+        "scanning-transcripts",
+        0,
+        Some(total),
+    ));
 
     let mut seen_transcript_hashes = HashSet::new();
     let mut seen_event_ids = HashSet::new();
-    for transcript in files {
+    for (index, transcript) in files.into_iter().enumerate() {
         result.scanned_files = result.scanned_files.saturating_add(1);
         result.scanned_cursor_transcript_files =
             result.scanned_cursor_transcript_files.saturating_add(1);
+        progress(UsageBackfillProgress::new(
+            "cursor",
+            "scanning-transcripts",
+            index + 1,
+            Some(total),
+        ));
         let extraction = match extract_cursor_transcript_read_candidates(&transcript) {
             Ok(extraction) => extraction,
             Err(error) => {
@@ -497,19 +531,24 @@ fn collect_cursor_transcript_candidates_from_value(
     state: &mut CursorTranscriptParseState,
 ) -> Result<()> {
     let role = value.get("role").and_then(|value| value.as_str());
+    let content = value
+        .get("message")
+        .and_then(|message| message.get("content"))
+        .and_then(|content| content.as_array());
     if role == Some("user") {
         state.current_user_turn = Some(state.next_user_turn);
         state.next_user_turn = state.next_user_turn.saturating_add(1);
+        if let Some(content) = content {
+            collect_cursor_manually_attached_skills(
+                content, transcript, line_index, used_at, state,
+            )?;
+        }
         return Ok(());
     }
     if role != Some("assistant") {
         return Ok(());
     }
-    let Some(content) = value
-        .get("message")
-        .and_then(|message| message.get("content"))
-        .and_then(|content| content.as_array())
-    else {
+    let Some(content) = content else {
         return Ok(());
     };
     for block in content {
@@ -529,35 +568,110 @@ fn collect_cursor_transcript_candidates_from_value(
         else {
             continue;
         };
-        if raw_path.len() > MAX_CURSOR_TOOL_PATH_BYTES {
-            return Err(format!(
-                "Transcript line {} contains an oversized tool path.",
-                line_index.saturating_add(1)
-            ));
-        }
-        if Path::new(raw_path)
-            .file_name()
-            .and_then(|value| value.to_str())
-            != Some("SKILL.md")
-        {
-            continue;
-        }
-        if tool_name == "ReadFile" {
-            state.read_file_candidates = state.read_file_candidates.saturating_add(1);
-            continue;
-        }
-        state.read_candidates = state.read_candidates.saturating_add(1);
-        state.candidates.push(CursorTranscriptReadCandidate {
-            transcript_id: transcript.transcript_id.clone(),
-            line_index,
-            turn_key: state
-                .current_user_turn
-                .map(|turn| format!("user-{turn}"))
-                .unwrap_or_else(|| "unattributed".to_string()),
-            raw_path: raw_path.to_string(),
-            used_at: used_at.to_string(),
-        });
+        push_cursor_transcript_skill_path(
+            raw_path, tool_name, transcript, line_index, used_at, state,
+        )?;
     }
+    Ok(())
+}
+
+fn collect_cursor_manually_attached_skills(
+    content: &[serde_json::Value],
+    transcript: &CursorTranscriptFile,
+    line_index: usize,
+    used_at: &str,
+    state: &mut CursorTranscriptParseState,
+) -> Result<()> {
+    for block in content {
+        if block.get("type").and_then(|value| value.as_str()) != Some("text") {
+            continue;
+        }
+        let Some(text) = block.get("text").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        for (name, raw_path) in parse_cursor_manually_attached_skills(text) {
+            let _ = name;
+            push_cursor_transcript_skill_path(
+                &raw_path, "Read", transcript, line_index, used_at, state,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn parse_cursor_manually_attached_skills(text: &str) -> Vec<(String, String)> {
+    let Some(block_start) = text.find("<manually_attached_skills>") else {
+        return Vec::new();
+    };
+    let block = &text[block_start..];
+    let block = block
+        .split_once("</manually_attached_skills>")
+        .map(|(value, _)| value)
+        .unwrap_or(block);
+    let mut skills = Vec::new();
+    let mut pending_name: Option<String> = None;
+    for line in block.lines() {
+        let line = line.trim();
+        if let Some(name) = line.strip_prefix("Skill Name:") {
+            pending_name = Some(name.trim().to_string());
+            continue;
+        }
+        if let Some(path) = line.strip_prefix("Path:") {
+            let path = path.trim().to_string();
+            let name = pending_name
+                .take()
+                .or_else(|| {
+                    Path::new(&path)
+                        .parent()
+                        .and_then(Path::file_name)
+                        .and_then(|value| value.to_str())
+                        .map(str::to_string)
+                })
+                .unwrap_or_default();
+            if !name.is_empty() && !path.is_empty() {
+                skills.push((name, path));
+            }
+        }
+    }
+    skills
+}
+
+fn push_cursor_transcript_skill_path(
+    raw_path: &str,
+    tool_name: &str,
+    transcript: &CursorTranscriptFile,
+    line_index: usize,
+    used_at: &str,
+    state: &mut CursorTranscriptParseState,
+) -> Result<()> {
+    if raw_path.len() > MAX_CURSOR_TOOL_PATH_BYTES {
+        return Err(format!(
+            "Transcript line {} contains an oversized tool path.",
+            line_index.saturating_add(1)
+        ));
+    }
+    if Path::new(raw_path)
+        .file_name()
+        .and_then(|value| value.to_str())
+        != Some("SKILL.md")
+    {
+        return Ok(());
+    }
+    if tool_name == "ReadFile" {
+        state.read_file_candidates = state.read_file_candidates.saturating_add(1);
+    } else {
+        state.read_candidates = state.read_candidates.saturating_add(1);
+    }
+    state.candidates.push(CursorTranscriptReadCandidate {
+        transcript_id: transcript.transcript_id.clone(),
+        line_index,
+        turn_key: state
+            .current_user_turn
+            .map(|turn| format!("user-{turn}"))
+            .unwrap_or_else(|| "unattributed".to_string()),
+        raw_path: raw_path.to_string(),
+        used_at: used_at.to_string(),
+    });
     Ok(())
 }
 
@@ -834,7 +948,7 @@ mod tests {
     }
 
     #[test]
-    fn cursor_transcripts_record_read_as_inferred_exclude_read_file_and_use_mtime() {
+    fn cursor_transcripts_record_read_and_read_file_as_inferred_and_use_mtime() {
         let root = transcript_temp_dir("reads");
         let projects = root.join(".cursor/projects");
         fs::create_dir_all(&projects).unwrap();
@@ -866,11 +980,11 @@ mod tests {
         assert_eq!(result.cursor_transcript_read_candidates, 1);
         assert_eq!(result.cursor_transcript_read_file_candidates, 1);
         assert_eq!(
-            result.inferred_cursor_transcript_calls, 1,
+            result.inferred_cursor_transcript_calls, 2,
             "{:?}",
             result.errors
         );
-        assert_eq!(result.recorded, 1);
+        assert_eq!(result.recorded, 2);
         assert!(result.errors.is_empty(), "{:?}", result.errors);
 
         let connection = open_database(&paths.database_path).unwrap();
@@ -892,7 +1006,7 @@ mod tests {
                 .collect::<std::result::Result<Vec<_>, _>>()
                 .unwrap()
         };
-        assert_eq!(rows.len(), 1);
+        assert_eq!(rows.len(), 2);
         assert!(rows.iter().all(|row| row.0 == "inferred"));
         assert!(rows.iter().all(|row| row.1 == expected_used_at));
         assert!(rows.iter().all(|row| row
@@ -949,6 +1063,48 @@ mod tests {
         assert_eq!(result.discovered, 0);
         assert_eq!(result.recorded, 0);
         assert!(result.errors.is_empty(), "{:?}", result.errors);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn cursor_transcripts_record_manually_attached_skills_as_inferred() {
+        let root = transcript_temp_dir("attached");
+        let projects = root.join(".cursor/projects");
+        fs::create_dir_all(&projects).unwrap();
+        let skill = root.join("skills-cursor/merge/SKILL.md");
+        write_skill(&skill, "merge");
+        write_transcript(
+            &transcript_path(
+                &projects,
+                "project-one",
+                "23232323-2323-2323-2323-232323232323",
+            ),
+            &[
+                transcript_row(
+                    "user",
+                    vec![serde_json::json!({
+                        "type": "text",
+                        "text": format!(
+                            "<manually_attached_skills>\nSkill Name: merge\nPath: {}\nSKILL.md content:\n# Merge\n</manually_attached_skills>",
+                            skill.display()
+                        )
+                    })],
+                ),
+                transcript_row("assistant", vec![tool("Read", &skill)]),
+            ],
+        );
+
+        let (result, paths) = run_provider(&root, &projects);
+        assert_eq!(result.discovered, 1, "{:?}", result.errors);
+        assert_eq!(result.recorded, 1);
+        assert_eq!(result.inferred_cursor_transcript_calls, 1);
+        let connection = open_database(&paths.database_path).unwrap();
+        let count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM skill_usage_events", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 1);
         fs::remove_dir_all(root).unwrap();
     }
 

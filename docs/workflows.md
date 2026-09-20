@@ -920,8 +920,8 @@ Apply fast-forward:
   等内容型字段。公开 `usage-record` 不能设置
   `agent_hook|codex_session_backfill|claude_code_session_backfill|cursor_session_backfill|cursor_agent_transcript_read`
   等保留 source。
-- 桌面 skill 详情页按 `skill_name` 汇总 Calls 与次级 History references；Workspace card
-  按 runtime root 显示 Calls，workspace skill/import 行使用同一 Calls 口径。
+- 桌面 skill 详情页、skill card 和 Workspace Calls 按 `skill_name` / runtime root 从 `skill_usage_events` 汇总 `confirmed + inferred`，与 Usage all-time 同一口径；次级 History references 仍从 `reference` events 聚合。`skill_usage_stats` 只在写入时维护，不作为展示真源。
+- 打开 Usage、点击 Refresh 或 `Sync histories` 完成后会刷新 managed state，避免详情页继续显示同步前的 Calls。
 - 桌面 skill card 在 skill name 下方直接显示全局 Calls。
 
 失败与回滚：
@@ -947,7 +947,7 @@ Apply fast-forward:
 - 使用相同 `--event-id` 重复上报，确认第二次返回 deduplicated 且计数不增加。
 - `npm test`
 
-### 14.1 Evidence-aware Skill Usage Rankings
+### 14.1 Evidence-aware Skill Usage
 
 触发条件：
 
@@ -959,16 +959,16 @@ Apply fast-forward:
   `usage-backfill-claude-code [--projects-root <path>]`、
   `usage-backfill-cursor [--database-path <path>]`。
 - Tauri command：`list_skill_usage_rankings`、`usage_audit` 和三个 provider backfill。
-- 桌面左侧一级导航进入 Rankings 页面，或修改时间、skill type（User/Remote/System）、Agent、Workspace 过滤器；也可点击 `Sync histories`。
+- 桌面左侧一级导航进入 Usage 页面，或修改时间、skill type（User/Remote/System）、Agent、Workspace 过滤器；也可点击 `Sync histories`。
 
 步骤：
 
-- 默认查询最近 30 天，用户可切换最近 7 天或全部历史；时间窗按 `used_at` 计算，并排除晚于本次查询时间的未来事件。
-- skill type 过滤只接受 User、Remote、System：User/Remote 按当前 managed store 中的类型分类，System 按事件的可信 source identity 分类；`Not imported`、`Deleted`、`Unknown source` 是管理或来源状态，不属于 skill type。筛选在 coverage 累计前执行，因此 rows、rank、total 和 coverage 使用同一快照口径。
+- 默认查询全部历史，用户可切换最近 7 天或 30 天；时间窗按 `used_at` 计算，并排除晚于本次查询时间的未来事件。
+- skill type 过滤只接受 User、Remote、System：User/Remote 按当前 managed store 中的类型分类，System 按事件的可信 source identity 分类；`Not imported`、`Deleted`、`Unknown source` 是管理或来源状态，不属于 skill type。筛选在 coverage 累计前执行，因此 rows、rank、total 和 coverage 使用同一时间窗快照；`daily` 固定最近 365 个本机日历日，并套用相同的 skill type/Agent/Workspace 过滤。
 - Agent 使用与 usage event 相同的 normalized `agent_id`（写入时把路径型 `agents`/`claude` 规范为 `codex`/`claude-code`；过滤同时兼容历史遗留 id）；Workspace 表示事件写入时的 canonical runtime root。实时 hook 优先使用结构化 `runtime_root` 或 `cwd` 在同一 managed skill 的多个 deployment 中定位 workspace，session 回填使用 session metadata 的 `cwd`，无上下文时才使用确定性 fallback。
 - 默认结果包含当前 managed store 中的 User/Remote skills（无 Calls evidence 时为
   `0 calls`），以及时间窗内有 Calls 或 reference evidence、但尚未导入 SkillBox 的
-  unmanaged skills；CLI 可用 `--include-unmanaged` 显式打开同一范围，桌面 Rankings
+  unmanaged skills；CLI 可用 `--include-unmanaged` 显式打开同一范围，桌面 Usage
   默认开启。reference-only skill 的 Calls 必须为 0，只能显示次级 History references。
   现有 `Not imported`、`Deleted`、`System`、`Unknown source` 与 Import 限制保持不变，
   且不因其它 Workspace 同名目录串号。
@@ -977,54 +977,57 @@ Apply fast-forward:
   跨 Agent/Workspace 的同类 evidence 在未过滤时相加。
 - 排序固定为 Calls 降序、last used time 降序、skill name 升序、source identity 升序，
   随后分配连续 ordinal rank；reference 数量不能提升默认排名。
-- 桌面以可访问的数据表展示精确名次、skill 名称、Calls、last used time、次级
-  History references 和 Actions；History 把 Call、History reference 和管理操作作为
-  不同 kind/filter 展示。
-- Rankings 页提供 `Sync histories`，顺序运行三个互相独立的本地 provider 并在完成后刷新一次 ranking；单个 provider 失败时继续运行其余 provider，notice 明确成功/失败来源，已成功写入的幂等事件不回滚：
+- 桌面 Call activity 用最近一年的紧凑热力图显示每日 Calls 强度；点击某一天会更新下方 Usage 统计表，而不是另开明细。7/30/all-time 过滤器继续作用于未选中日期时的 Usage 统计与 coverage，不缩小热力图窗口。精确名次、skill 名称、Calls、last used time 和 Actions 仍用同一张可访问的 Usage 统计表。History 把 Call、History reference 和管理操作作为不同 kind/filter 展示。
+- Usage 页提供 `Sync histories`，顺序运行三个互相独立的本地 provider 并在完成后刷新一次 ranking；扫描中桌面显示当前 provider 和已处理/总文件数（Cursor 再拆 sessions / transcripts），进度由 Rust backfill callback 经 Tauri event `skillbox://usage-backfill-progress` 推送；离开页面或完成后忽略迟到进度。单个 provider 失败时继续运行其余 provider，notice 明确成功/失败来源，已成功写入的幂等事件不回滚：
   - Codex 流式扫描本机 `~/.codex/sessions`（可选 `archived_sessions`）中的
-    `rollout-*.jsonl`（不跟随 symlink），只从 user turn 的完整
-    `<skill><name>/<path>` block 或 `[$skill](.../SKILL.md)` link 提取绝对、可解析的
-    `SKILL.md`。这是逐回合 `inferred` invocation，计入 Calls，但不是
-    provider-native execution。catalog、普通 prose、相对路径、代码模板、
-    `exec_command`、custom/dynamic tool payload、assistant/tool/shell output 均排除。
+    `rollout-*.jsonl`（不跟随 symlink），从 user turn 的完整
+    `<skill><name>/<path>` block、`[$skill](.../SKILL.md)` link，以及
+    `exec`/`exec_command` 中专用的 `SKILL.md` 文件读取（`cat`/`sed`/`head` 等）
+    提取绝对或 workdir 解析后的 `SKILL.md`。这是逐回合 `inferred` invocation，计入
+    Calls，但不是 provider-native execution。catalog、普通 prose、search/find、
+    代码模板、混杂 tool payload、assistant/tool/shell output 均排除。
   - Claude Code 扫描 `~/.claude/projects/**/*.jsonl`（不跟随 symlink），只接受
     assistant record 中原生 Skill tool use 或 Skill command attribution，并解析到可读
-    `SKILL.md`；这类 evidence 是 `confirmed`，自由文本 mention 不记录。
+    `SKILL.md`（优先 `.claude/skills`，也可使用其它本机 runtime 或 managed store）；
+    这类 evidence 是 `confirmed`，自由文本 mention 不记录。
   - Cursor 以 read-only、`query_only` 和 bounded busy timeout 打开本机
     `state.vscdb` 并验证 private schema。non-subagent human bubble 中
     `addedWithoutMention=false context.cursorRules[].filename` 只证明上下文附加，记录为
     `reference`。此外有界扫描 Cursor agent transcripts；assistant `tool_use` 的
-    `Read` 输入为绝对本机 `SKILL.md` 路径时，按 transcript user turn + skill 记录
+    `Read`/`ReadFile` 输入为绝对本机 `SKILL.md` 路径时，以及用户
+    `manually_attached_skills` 附加，按 transcript user turn + skill 记录
     `cursor_agent_transcript_read=inferred`。现存文件必须通过 traversal、symlink、
     allowed-root、regular-file、大小和 frontmatter 检查；后来已移动/删除的文件只在
     lexical path 与最近现存 ancestor 都未逃逸 allowed root、parent skill name 合法时
     保留 historical evidence，并且该 path 不得用于 filesystem/deploy authority。
-    `ReadFile` candidates 只进入 aggregate diagnostics，不计 Calls。
   - provider 使用稳定 provider/session/turn/path identity。Cursor 同一 user turn
-    对同一 skill 的重复 Read 只计一次；缺少 preceding user record 时使用每个 transcript
+    对同一 skill 的重复 Read/ReadFile/附加只计一次；缺少 preceding user record 时使用每个 transcript
     唯一的 `unattributed` fallback turn，因此仍然保守去重。重复 sync 不递增；新强证据
     可以升级旧 event 并保留 provenance。非法或不支持记录计入 skipped/errors。
-- 桌面 Full ranking 表格包含 Actions 列：已导入 skill 显示 `Detail` 并打开既有 skill 详情弹窗；未导入 skill 显示 `Import`，通过 row 的 `source_id + source_kind + source_runtime_roots`，以及生成该行的 ranking filters 和 `generated_at` 调用 source-aware `preview_usage_skill_import`。core 必须用同一查询快照重建完整 row identity，拒绝缺失 identity、任意 roots 子集、被篡改或已过期的请求；只在重建出的全部 roots 中选择 Importable candidate，某个 root 已失效时可继续检查同一 source 的其他 root，但不得回退到任意全局 runtime 或删除备份。旧的 name-only Rust API 保留原有本地恢复搜索，但 Tauri Rankings command 始终要求完整 identity。候选确认后用户可选择导入为 User 或 Remote，确认后写入 managed store 并刷新 Rankings。同名普通 skill 与 System/Unknown source 即使共享 runtime root 或普通副本已 managed 也拆成独立行；System 与 Unknown source 均不可 Import。
-- Rankings 页面宽度与 Dashboard 一致，不再单独收窄。
+- 桌面 Usage 统计表格包含 Actions 列：已导入 skill 显示 `Detail` 并打开既有 skill 详情弹窗；未导入 skill 显示 `Import`，通过 row 的 `source_id + source_kind + source_runtime_roots`，以及生成该行的 ranking filters 和 `generated_at` 调用 source-aware `preview_usage_skill_import`。core 必须用同一查询快照重建完整 row identity，拒绝缺失 identity、任意 roots 子集、被篡改或已过期的请求；只在重建出的全部 roots 中选择 Importable candidate，某个 root 已失效时可继续检查同一 source 的其他 root，但不得回退到任意全局 runtime 或删除备份。旧的 name-only Rust API 保留原有本地恢复搜索，但 Tauri Usage command 始终要求完整 identity。候选确认后用户可选择导入为 User 或 Remote，确认后写入 managed store 并刷新 Usage。同名普通 skill 与 System/Unknown source 即使共享 runtime root 或普通副本已 managed 也拆成独立行；System 与 Unknown source 均不可 Import。
+- Usage 页面宽度与 Dashboard 一致，不再单独收窄。
 - 紧凑 UI 使用 `Calls` / `<n> calls`。详情/help 必须解释 Calls 是本机
   `confirmed + defensible inferred`，History references 是显式 mention/context，
   两者都不是 Codex/Claude account analytics。`0 calls` 只表示 SkillBox 当前没有 Calls
   evidence，不表示从未使用；usage frequency 不改变 source trust、安全性或质量判断。
 - 每个 ranking 查询返回同一过滤快照的 `total_calls`、confirmed/inferred/reference
-  totals 和各自最早/最新时间。evidence-class totals 按 event 当前最强 class 互斥，且
-  `confirmed + inferred = total_calls`；reference 单列。
+  totals 和各自最早/最新时间，以及按本机日历日分桶的 `daily` Calls（不含
+  reference；最近 365 个本机日历日零值补齐）。7/30 查询会把 event 扫描窗口扩展到热力图起点，但 rows/coverage 仍按所选 range 过滤。evidence-class
+  totals 按 event 当前最强 class 互斥，且 `confirmed + inferred = total_calls`；
+  reference 单列。
 - coverage `source_counts` 从 `evidence_sources_json` 统计 provenance。一个被 hook
   confirmed 的 Codex inferred event 会保留两个 source，因此 source counts 可以重叠，
   不要求其总和等于 Calls 或 event total。provider 最近一次扫描的文件/session/turn 和
   backfill discovered/recorded/deduplicated/upgraded/skipped/errors 是独立操作覆盖。
 - Codex 本地 stores 没有稳定 provider-native skill-run total。当前 Codex Calls 是
   confirmed hook 加结构化 per-turn inferred invocation 的已知下界，仍可能 undercount；
-  SkillBox 不从 prose、catalog、shell/tool payload 或 output 补数。
+  SkillBox 不从 prose、catalog、search/find 或任意 shell payload 补数。专用
+  `SKILL.md` 文件读取可以计入 inferred。
 - `usage-audit` 只返回上述 aggregate counts、时间覆盖、scan/backfill totals 和已知限制，
   不返回 prompt、chat body、tool payload/output、credentials 或完整 metadata。
 - 未来若接入 Codex reported runs，必须按 provider、subject kind、time window、scope 和 provenance 独立存储与展示；不得写入 `skill_usage_events`，不得参与本地 ranking、total 或 delta。
 - 查询只读取 `metadata_json.skill_source_kind` 这一受限身份字段，响应不返回 `prompt_excerpt` 或完整 `metadata_json`；usage 数据不上传、不跨设备合并，也不作为社区排行榜。
-- 导入预览或 backfill 进行中切换离开 Rankings 时，迟到响应不得再打开确认框或把错误写到其它页面；loading 标记仍须清理，避免返回后按钮永久禁用。
+- 导入预览或 backfill 进行中切换离开 Usage 时，迟到响应不得再打开确认框或把错误写到其它页面；loading 标记仍须清理，避免返回后按钮永久禁用。
 
 失败与回滚：
 
@@ -1035,7 +1038,7 @@ Apply fast-forward:
   `confirmed + inferred` events 幂等重建 stats。已有数据库升级前按通用规则备份，失败
   transaction 回滚；migration 不扫描 agent history，不要求 rescan，显式
   `Sync histories` 才会恢复或升级 evidence。
-- 快速连续切换过滤器时，桌面只应用最后一个请求的结果，避免旧响应覆盖新条件。
+- 快速连续切换过滤器时，桌面只应用最后一个请求的结果，避免旧响应覆盖新条件。已有 ranking snapshot 时，时间范围和其它过滤器只替换 coverage / trend / table 数据，不卸掉页面骨架；仅首次进入且尚无 snapshot 时显示整页 Updating usage。
 
 完成验证：
 
@@ -1053,7 +1056,7 @@ Apply fast-forward:
 - `cargo run -p skillbox-cli --offline -- usage-audit --managed-root <temp-skillbox-root>`
 - `node --test apps/desktop/src/usageRankings.test.js apps/desktop/src/cardLayout.test.js`
 - `npm test`
-- 桌面手动验证 Rankings 的 7/30/all、User/Remote/System、Agent/Workspace 组合过滤、Sync histories（含单 provider 失败）、空状态、键盘 focus、最后请求获胜和 managed skill detail 跳转。
+- 桌面手动验证 Usage 的 7/30/all、User/Remote/System、Agent/Workspace 组合过滤、Sync histories（含单 provider 失败）、空状态、键盘 focus、最后请求获胜和 managed skill detail 跳转。
 
 ## 15. App Updates
 

@@ -151,6 +151,9 @@ import {
   usageHistorySyncProviders
 } from './usageRankings.js';
 import {
+  normalizeUsageBackfillProgress
+} from './usageBackfillProgress.js';
+import {
   defaultSyncCommitMessage,
   normalizeSuggestedUserSkillsCommit,
   normalizeUserSkillsGitChanges,
@@ -462,6 +465,7 @@ export default function App() {
   const [usageRankings, setUsageRankings] = useState(normalizeUsageRankings(null));
   const [usageRankingLoading, setUsageRankingLoading] = useState(false);
   const [usageBackfillLoading, setUsageBackfillLoading] = useState(false);
+  const [usageBackfillProgress, setUsageBackfillProgress] = useState(null);
   const [usageBackfillNotice, setUsageBackfillNotice] = useState('');
   const [rankingImportSkillName, setRankingImportSkillName] = useState('');
   const [remoteContextLoading, setRemoteContextLoading] = useState({});
@@ -481,6 +485,8 @@ export default function App() {
   const refreshSkillStatusesRef = useRef(null);
   const appUpdateAutoCheckedRef = useRef(false);
   const usageRankingRequestRef = useRef(0);
+  const usageBackfillSyncIdRef = useRef(0);
+  const usageBackfillActiveRef = useRef(false);
   const rankingImportRequestRef = useRef(0);
   const historyRequestRef = useRef(0);
   const importScanControllerRef = useRef(null);
@@ -518,6 +524,37 @@ export default function App() {
       setImportReview((current) => current.open && current.loading
         ? { ...current, scanProgress: progress }
         : current);
+    }).then((removeListener) => {
+      unlisten = removeListener;
+    }).catch(() => {});
+
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!window.__TAURI_INTERNALS__) {
+      return undefined;
+    }
+
+    let active = true;
+    let unlisten;
+    listen('skillbox://usage-backfill-progress', (event) => {
+      const progress = event.payload || {};
+      if (
+        !active
+        || !usageBackfillActiveRef.current
+        || progress.syncId !== usageBackfillSyncIdRef.current
+      ) {
+        return;
+      }
+      setUsageBackfillProgress((current) => ({
+        ...normalizeUsageBackfillProgress(progress),
+        providerIndex: current?.providerIndex || 0,
+        providerCount: current?.providerCount || usageHistorySyncProviders.length
+      }));
     }).then((removeListener) => {
       unlisten = removeListener;
     }).catch(() => {});
@@ -1599,7 +1636,7 @@ export default function App() {
       if (!isCurrentRemoteRequest()) {
         return;
       }
-      if (page === 'rankings') {
+      if (page === 'usage') {
         await loadUsageRankings(usageRankingFilters);
         if (!isCurrentRemoteRequest()) {
           return;
@@ -2370,7 +2407,7 @@ export default function App() {
 
   function navigateToPage(nextPage) {
     pageRef.current = nextPage;
-    if (nextPage !== 'rankings') {
+    if (nextPage !== 'usage') {
       cancelUsageRankingRequest();
     }
     if (nextPage !== 'history') {
@@ -2427,10 +2464,10 @@ export default function App() {
     }
   }
 
-  function openRankings() {
+  function openUsage() {
     setSelectedName('');
-    navigateToPage('rankings');
-    void loadUsageRankings(usageRankingFilters);
+    navigateToPage('usage');
+    void loadUsageRankings(usageRankingFilters, { refreshSkills: true });
   }
 
   function cancelUsageRankingRequest() {
@@ -2443,7 +2480,7 @@ export default function App() {
 
   async function loadUsageRankings(
     nextFilters,
-    { clearError = true, reportError = true } = {}
+    { clearError = true, reportError = true, refreshSkills = false } = {}
   ) {
     const requestId = usageRankingRequestRef.current + 1;
     usageRankingRequestRef.current = requestId;
@@ -2459,17 +2496,33 @@ export default function App() {
             request: usageRankingRequest(nextFilters)
           })
         : previewUsageRankings(nextFilters);
-      if (usageRankingRequestRef.current === requestId && pageRef.current === 'rankings') {
+      if (usageRankingRequestRef.current === requestId && pageRef.current === 'usage') {
         setUsageRankings(normalizeUsageRankings(result));
+      }
+      if (
+        refreshSkills
+        && window.__TAURI_INTERNALS__
+        && usageRankingRequestRef.current === requestId
+      ) {
+        try {
+          const state = await invoke('managed_state');
+          if (usageRankingRequestRef.current === requestId) {
+            setSkills(state.skills?.map(normalizeSkill) || []);
+            setPaths(normalizePaths(state.paths));
+            setIsFirstUse(Boolean(state.isFirstUse ?? state.is_first_use));
+          }
+        } catch {
+          // Ranking still updated; skill-card Calls recover on the next managed-state load.
+        }
       }
       return '';
     } catch (rankingError) {
       const rankingErrorMessage =
-        rankingError.message || String(rankingError) || 'Unable to load skill usage rankings.';
+        rankingError.message || String(rankingError) || 'Unable to load skill usage.';
       if (
         reportError
         && usageRankingRequestRef.current === requestId
-        && pageRef.current === 'rankings'
+        && pageRef.current === 'usage'
       ) {
         setError(rankingErrorMessage);
       }
@@ -2482,17 +2535,37 @@ export default function App() {
   }
 
   async function syncLocalUsageHistories() {
-    if (pageRef.current !== 'rankings') return;
+    if (pageRef.current !== 'usage') return;
+    const syncId = usageBackfillSyncIdRef.current + 1;
+    usageBackfillSyncIdRef.current = syncId;
+    usageBackfillActiveRef.current = true;
+    const providerCount = usageHistorySyncProviders.length;
     setUsageBackfillLoading(true);
+    setUsageBackfillProgress({
+      provider: usageHistorySyncProviders[0]?.id || '',
+      phase: 'starting',
+      processed: 0,
+      total: null,
+      providerIndex: 1,
+      providerCount
+    });
     setError('');
     setUsageBackfillNotice('');
     try {
       const providerResults = [];
-      for (const provider of usageHistorySyncProviders) {
-        if (pageRef.current !== 'rankings') return;
+      for (const [index, provider] of usageHistorySyncProviders.entries()) {
+        if (pageRef.current !== 'usage' || usageBackfillSyncIdRef.current !== syncId) return;
+        setUsageBackfillProgress({
+          provider: provider.id,
+          phase: 'scanning',
+          processed: 0,
+          total: null,
+          providerIndex: index + 1,
+          providerCount
+        });
         try {
           const result = window.__TAURI_INTERNALS__
-            ? await invoke(provider.command, { request: provider.request })
+            ? await invoke(provider.command, { request: provider.request, syncId })
             : {
                 scanned_files: provider.id === 'cursor' ? 4 : 2,
                 discovered: provider.id === 'codex' ? 3 : 1,
@@ -2513,7 +2586,7 @@ export default function App() {
           });
         }
       }
-      if (pageRef.current !== 'rankings') return;
+      if (pageRef.current !== 'usage') return;
       const normalizedResults = providerResults.map((result) => ({
         provider: result.provider,
         ...normalizeCodexUsageBackfill(result)
@@ -2535,38 +2608,43 @@ export default function App() {
       }
       const rankingRefreshError = await loadUsageRankings(usageRankingFilters, {
         clearError: !partialWarning,
-        reportError: !partialWarning
+        reportError: !partialWarning,
+        refreshSkills: true
       });
-      if (partialWarning && pageRef.current === 'rankings') {
+      if (partialWarning && pageRef.current === 'usage') {
         setError(
           rankingRefreshError
-            ? `${partialWarning} Rankings refresh failed: ${rankingRefreshError}`
+            ? `${partialWarning} Usage refresh failed: ${rankingRefreshError}`
             : partialWarning
         );
       }
     } catch (backfillError) {
-      if (pageRef.current !== 'rankings') return;
+      if (pageRef.current !== 'usage') return;
       setError(
         backfillError.message
           || String(backfillError)
           || 'Unable to import local agent usage history.'
       );
     } finally {
+      if (usageBackfillSyncIdRef.current === syncId) {
+        usageBackfillActiveRef.current = false;
+      }
       setUsageBackfillLoading(false);
+      setUsageBackfillProgress(null);
     }
   }
 
   function openRankedSkill(skillName) {
     const skill = skills.find((candidate) => candidate.name === skillName);
     if (!skill) {
-      setError(`Managed skill ${skillName} was not found. Refresh Rankings and try again.`);
+      setError(`Managed skill ${skillName} was not found. Refresh Usage and try again.`);
       return;
     }
     openSkill(skill);
   }
 
   async function importRankedSkill(row) {
-    if (pageRef.current !== 'rankings') return;
+    if (pageRef.current !== 'usage') return;
     const skillName = row.skillName;
     const sourceId = row.sourceId || skillName;
     const requestId = rankingImportRequestRef.current + 1;
@@ -2598,7 +2676,7 @@ export default function App() {
             isSymlink: false,
             contentHash: `preview-${skillName}`,
             suggestedType: 'user',
-            suggestionReason: 'Observed in Rankings',
+            suggestionReason: 'Observed in Usage',
             importStatus: 'importable',
             isSelected: true,
             usageCount: 1
@@ -2613,17 +2691,17 @@ export default function App() {
 
       if (
         rankingImportRequestRef.current !== requestId
-        || pageRef.current !== 'rankings'
+        || pageRef.current !== 'usage'
       ) return;
       setLocalImportConfirmation({
         open: true,
         candidates: [candidate],
-        noticePrefix: 'Imported from Rankings.'
+        noticePrefix: 'Imported from Usage.'
       });
     } catch (importError) {
       if (
         rankingImportRequestRef.current !== requestId
-        || pageRef.current !== 'rankings'
+        || pageRef.current !== 'usage'
       ) return;
       setError(
         importError.message
@@ -4435,8 +4513,8 @@ export default function App() {
               onClick={() => {
                 if (item.id === 'dashboard') {
                   openDashboard('all');
-                } else if (item.id === 'rankings') {
-                  openRankings();
+                } else if (item.id === 'usage') {
+                  openUsage();
                 } else if (item.id === 'history') {
                   openHistory();
                 } else {
@@ -4521,9 +4599,10 @@ export default function App() {
             onFilter={loadHistory}
             onRefresh={loadHistory}
           />
-        ) : page === 'rankings' ? (
+        ) : page === 'usage' ? (
           <UsageRankingsPage
             backfilling={usageBackfillLoading}
+            backfillProgress={usageBackfillProgress}
             error={error}
             filters={usageRankingFilters}
             importingSkillName={rankingImportSkillName}
@@ -4543,7 +4622,7 @@ export default function App() {
               navigateToPage('settings');
             }}
             onOpenSkill={openRankedSkill}
-            onRefresh={() => loadUsageRankings(usageRankingFilters)}
+            onRefresh={() => loadUsageRankings(usageRankingFilters, { refreshSkills: true })}
           />
         ) : (
           <Dashboard
@@ -4576,7 +4655,7 @@ export default function App() {
         )}
       </section>
 
-      {(page === 'dashboard' || page === 'rankings') && selectedSkill ? (
+      {(page === 'dashboard' || page === 'usage') && selectedSkill ? (
         <SkillDetailDialog
           skill={selectedSkill}
           status={status}

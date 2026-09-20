@@ -767,6 +767,59 @@ export function previewHistory(filter = 'all') {
   };
 }
 
+function previewUsageDaily(rows, rangeEnd) {
+  const callsByDate = new Map();
+  const addCalls = (date, skill) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || skill.calls <= 0) return;
+    const skills = callsByDate.get(date) || [];
+    const existing = skills.find((item) => (
+      item.skill_name === skill.skill_name && item.source_kind === skill.source_kind
+    ));
+    if (existing) {
+      existing.calls += skill.calls;
+    } else {
+      skills.push({ ...skill });
+    }
+    callsByDate.set(date, skills);
+  };
+
+  for (const row of rows) {
+    const calls = Number(row.usage_count) || 0;
+    const lastDate = String(row.last_used_at || '').slice(0, 10);
+    if (!calls || !/^\d{4}-\d{2}-\d{2}$/.test(lastDate)) continue;
+    const sourceKind = row.source_kind || (row.system ? 'system' : 'regular');
+    const offsets = [0, 5, 18, 42, 90].slice(0, calls);
+    offsets.forEach((offset, index) => {
+      const cursor = new Date(`${lastDate}T00:00:00Z`);
+      cursor.setUTCDate(cursor.getUTCDate() - offset);
+      addCalls(cursor.toISOString().slice(0, 10), {
+        skill_name: row.skill_name,
+        source_kind: sourceKind,
+        calls: index === offsets.length - 1 ? calls - index : 1
+      });
+    });
+  }
+
+  const endDate = String(rangeEnd || '').slice(0, 10);
+  const last = /^\d{4}-\d{2}-\d{2}$/.test(endDate)
+    ? new Date(`${endDate}T00:00:00Z`)
+    : new Date('2026-07-22T00:00:00Z');
+  const cursor = new Date(last.getTime());
+  cursor.setUTCDate(cursor.getUTCDate() - 364);
+  const daily = [];
+  while (cursor.getTime() <= last.getTime()) {
+    const date = cursor.toISOString().slice(0, 10);
+    const skills = callsByDate.get(date) || [];
+    daily.push({
+      date,
+      total_calls: skills.reduce((total, skill) => total + skill.calls, 0),
+      skills
+    });
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return daily;
+}
+
 export function previewUsageRankings(filters = {}) {
   const rows = [
     {
@@ -874,7 +927,7 @@ export function previewUsageRankings(filters = {}) {
 
   return {
     generated_at: '2026-07-22T10:00:00Z',
-    range: filters.range || 'last_30_days',
+    range: filters.range || 'all_time',
     range_start: '2026-06-22T10:00:00Z',
     range_end: '2026-07-22T10:00:00Z',
     agent_id: filters.agentId || null,
@@ -932,7 +985,8 @@ export function previewUsageRankings(filters = {}) {
       scanned_cursor_sessions: 6,
       scanned_cursor_transcript_files: 12
     },
-    rows: filteredRows
+    rows: filteredRows,
+    daily: previewUsageDaily(filteredRows, '2026-07-22T10:00:00Z')
   };
 }
 

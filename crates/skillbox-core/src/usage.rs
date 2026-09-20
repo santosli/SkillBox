@@ -1,6 +1,11 @@
 use crate::*;
+use chrono::{DateTime, Local, NaiveDate};
+use std::collections::{BTreeMap, HashMap};
 
 type UsageRankingRootAggregates = HashMap<(String, String, SkillUsageSourceKind), UsageSummary>;
+type UsageRankingDailyCounts = BTreeMap<NaiveDate, HashMap<(String, SkillUsageSourceKind), usize>>;
+
+const USAGE_HEATMAP_DAYS: i64 = 365;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct UsageEvidenceSource {
@@ -399,7 +404,7 @@ fn preview_usage_skill_import_impl(
     }
     if source_kind == SkillUsageSourceKind::Unknown {
         return Err(format!(
-            "Skill `{skill_name}` has an unknown historical source and cannot be imported from Rankings."
+            "Skill `{skill_name}` has an unknown historical source and cannot be imported from Usage."
         ));
     }
     let paths = ensure_managed_layout(managed_root.as_ref().to_path_buf())?;
@@ -420,16 +425,16 @@ fn preview_usage_skill_import_impl(
     preferred_roots = sorted_usage_roots(preferred_roots);
     if require_source_identity {
         let source_id = request.source_id.as_deref().ok_or_else(|| {
-            "Ranking source identity is required. Refresh Rankings and try again.".to_string()
+            "Usage source identity is required. Refresh Usage and try again.".to_string()
         })?;
         let ranking_request = request.ranking_request.ok_or_else(|| {
-            "Ranking query identity is required. Refresh Rankings and try again.".to_string()
+            "Usage query identity is required. Refresh Usage and try again.".to_string()
         })?;
         let ranking_generated_at = request.ranking_generated_at.as_deref().ok_or_else(|| {
-            "Ranking snapshot time is required. Refresh Rankings and try again.".to_string()
+            "Usage snapshot time is required. Refresh Usage and try again.".to_string()
         })?;
         let ranking_as_of = DateTime::parse_from_rfc3339(ranking_generated_at)
-            .map_err(|_| "Ranking snapshot time is invalid. Refresh Rankings and try again.")?
+            .map_err(|_| "Usage snapshot time is invalid. Refresh Usage and try again.")?
             .with_timezone(&Utc);
         let ranking = list_skill_usage_rankings_at(ranking_request, &paths.root, ranking_as_of)?;
         let source_row = ranking
@@ -442,7 +447,7 @@ fn preview_usage_skill_import_impl(
                     && !row.managed
             })
             .ok_or_else(|| {
-                format!("Ranking source `{source_id}` is stale. Refresh Rankings and try again.")
+                format!("Usage source `{source_id}` is stale. Refresh Usage and try again.")
             })?;
         let source_roots = sorted_usage_roots(source_row.source_runtime_roots);
         if source_roots.is_empty()
@@ -452,7 +457,7 @@ fn preview_usage_skill_import_impl(
                 .ne(source_roots.iter().map(|root| usage_runtime_key(root)))
         {
             return Err(format!(
-                "Ranking source `{source_id}` no longer matches the displayed row. Refresh Rankings and try again."
+                "Usage source `{source_id}` no longer matches the displayed row. Refresh Usage and try again."
             ));
         }
         preferred_roots = source_roots;
@@ -659,16 +664,29 @@ pub(crate) fn list_skill_usage_rankings_at(
         .map(|path| path.to_string_lossy().to_string());
     let range_end = as_of.to_rfc3339_opts(SecondsFormat::Secs, false);
     let range_start = usage_ranking_range_start(request.range, as_of);
-    let query_start = range_start
-        .as_deref()
-        .unwrap_or("0001-01-01T00:00:00+00:00");
+    let heatmap_end =
+        usage_event_local_date(&range_end).unwrap_or_else(|| Local::now().date_naive());
+    let heatmap_start = heatmap_end
+        .checked_sub_signed(chrono::Duration::days(USAGE_HEATMAP_DAYS.saturating_sub(1)))
+        .unwrap_or(heatmap_end);
+    let heatmap_query_start = (as_of
+        - chrono::Duration::days(USAGE_HEATMAP_DAYS.saturating_sub(1)))
+    .to_rfc3339_opts(SecondsFormat::Secs, false);
+    let query_start = match range_start.as_deref() {
+        Some(start) if start < heatmap_query_start.as_str() => start.to_string(),
+        Some(_) => heatmap_query_start,
+        None => "0001-01-01T00:00:00+00:00".to_string(),
+    };
     let connection = open_database(&paths.database_path).map_err(|error| error.to_string())?;
     let managed = load_managed_skill_kinds(&paths)?;
-    let (root_aggregates, mut coverage) = load_usage_ranking_root_aggregates(
+    let (root_aggregates, mut coverage, daily_counts) = load_usage_ranking_root_aggregates(
         &connection,
         RankingFilterBounds {
-            range_start: query_start,
+            range_start: &query_start,
             range_end: &range_end,
+            aggregate_start: range_start.as_deref(),
+            heatmap_start,
+            heatmap_end,
             agent_ids: &agent_filter_ids,
             workspace_root: workspace_key.as_deref(),
         },
@@ -841,6 +859,7 @@ pub(crate) fn list_skill_usage_rankings_at(
     let total_confirmed_calls = rows.iter().map(|row| row.confirmed_count).sum();
     let total_inferred_calls = rows.iter().map(|row| row.inferred_count).sum();
     let total_history_references = rows.iter().map(|row| row.reference_count).sum();
+    let daily = usage_ranking_daily_points(&daily_counts, heatmap_start, heatmap_end);
 
     Ok(SkillUsageRankingResult {
         generated_at: range_end.clone(),
@@ -857,6 +876,7 @@ pub(crate) fn list_skill_usage_rankings_at(
         total_history_references,
         coverage,
         rows,
+        daily,
     })
 }
 
@@ -1093,7 +1113,14 @@ fn load_usage_ranking_root_aggregates(
     managed: &HashMap<String, SkillKind>,
     include_unmanaged: bool,
     skill_type: Option<SkillUsageRankingSkillType>,
-) -> Result<(UsageRankingRootAggregates, SkillUsageCoverage)> {
+) -> Result<(
+    UsageRankingRootAggregates,
+    SkillUsageCoverage,
+    UsageRankingDailyCounts,
+)> {
+    let aggregate_start = bounds.aggregate_start;
+    let heatmap_start = bounds.heatmap_start;
+    let heatmap_end = bounds.heatmap_end;
     let (sql, values) = ranking_filter_sql(
         RankingFilterSqlTemplates {
             no_filter: "
@@ -1165,6 +1192,7 @@ fn load_usage_ranking_root_aggregates(
     let mut usage = HashMap::new();
     let mut coverage = SkillUsageCoverage::default();
     let mut source_counts: HashMap<(String, SkillUsageEvidenceClass), usize> = HashMap::new();
+    let mut daily: UsageRankingDailyCounts = BTreeMap::new();
     for row in rows {
         let (
             skill_name,
@@ -1181,6 +1209,20 @@ fn load_usage_ranking_root_aggregates(
         if (!include_unmanaged && !is_managed_regular)
             || !usage_ranking_matches_skill_type(&skill_name, source_kind, managed, skill_type)
         {
+            continue;
+        }
+        if usage_evidence_counts_toward_calls(evidence_class) {
+            if let Some(date) = usage_event_local_date(&used_at) {
+                if date >= heatmap_start && date <= heatmap_end {
+                    *daily
+                        .entry(date)
+                        .or_default()
+                        .entry((skill_name.clone(), source_kind))
+                        .or_default() += 1;
+                }
+            }
+        }
+        if aggregate_start.is_some_and(|start| used_at.as_str() < start) {
             continue;
         }
         if coverage
@@ -1315,7 +1357,75 @@ fn load_usage_ranking_root_aggregates(
                 .cmp(right.evidence_class.as_str())
         })
     });
-    Ok((usage, coverage))
+    Ok((usage, coverage, daily))
+}
+
+fn usage_event_local_date(used_at: &str) -> Option<NaiveDate> {
+    DateTime::parse_from_rfc3339(used_at)
+        .ok()
+        .map(|value| value.with_timezone(&Local).date_naive())
+}
+
+fn usage_ranking_daily_points(
+    counts: &UsageRankingDailyCounts,
+    start: NaiveDate,
+    end: NaiveDate,
+) -> Vec<SkillUsageDailyPoint> {
+    if start > end {
+        return Vec::new();
+    }
+
+    let mut points = Vec::new();
+    let mut day = start;
+    loop {
+        let mut skills = counts
+            .get(&day)
+            .map(|by_skill| {
+                by_skill
+                    .iter()
+                    .map(
+                        |((skill_name, source_kind), calls)| SkillUsageDailySkillCount {
+                            skill_name: skill_name.clone(),
+                            source_kind: *source_kind,
+                            calls: *calls,
+                        },
+                    )
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        skills.sort_by(|left, right| {
+            right
+                .calls
+                .cmp(&left.calls)
+                .then_with(|| left.skill_name.cmp(&right.skill_name))
+                .then_with(|| {
+                    usage_source_kind_sort_key(left.source_kind)
+                        .cmp(&usage_source_kind_sort_key(right.source_kind))
+                })
+        });
+        let total_calls = skills.iter().map(|skill| skill.calls).sum();
+        points.push(SkillUsageDailyPoint {
+            date: day.to_string(),
+            total_calls,
+            skills,
+        });
+        if day == end {
+            break;
+        }
+        let Some(next) = day.succ_opt() else {
+            break;
+        };
+        day = next;
+    }
+    points
+}
+
+fn usage_source_kind_sort_key(kind: SkillUsageSourceKind) -> u8 {
+    match kind {
+        SkillUsageSourceKind::Regular => 0,
+        SkillUsageSourceKind::System => 1,
+        SkillUsageSourceKind::Unknown => 2,
+    }
 }
 
 fn update_coverage_timestamp(
@@ -1454,6 +1564,9 @@ struct RankingFilterSqlTemplates<'a> {
 struct RankingFilterBounds<'a> {
     range_start: &'a str,
     range_end: &'a str,
+    aggregate_start: Option<&'a str>,
+    heatmap_start: NaiveDate,
+    heatmap_end: NaiveDate,
     agent_ids: &'a [String],
     workspace_root: Option<&'a str>,
 }
@@ -1886,33 +1999,7 @@ pub(crate) fn push_unique_usage_runtime_key(keys: &mut Vec<String>, root: &Path)
 
 pub(crate) fn load_usage_by_skill(database_path: &Path) -> Result<HashMap<String, UsageSummary>> {
     let connection = open_database(database_path).map_err(|error| error.to_string())?;
-    let mut statement = connection
-        .prepare(
-            "
-            SELECT skill_name, SUM(usage_count), MAX(last_used_at)
-            FROM skill_usage_stats
-            GROUP BY skill_name
-            ",
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = statement
-        .query_map([], |row| {
-            let usage_count: i64 = row.get(1)?;
-            Ok((
-                row.get::<_, String>(0)?,
-                UsageSummary {
-                    usage_count: usize::try_from(usage_count.max(0)).unwrap_or_default(),
-                    last_used_at: row.get(2)?,
-                    ..UsageSummary::default()
-                },
-            ))
-        })
-        .map_err(|error| error.to_string())?;
     let mut usage = HashMap::new();
-    for row in rows {
-        let (skill_name, summary) = row.map_err(|error| error.to_string())?;
-        usage.insert(skill_name, summary);
-    }
     enrich_call_evidence_by_skill(&connection, &mut usage)?;
     enrich_reference_usage_by_skill(&connection, &mut usage)?;
     Ok(usage)
@@ -1920,33 +2007,7 @@ pub(crate) fn load_usage_by_skill(database_path: &Path) -> Result<HashMap<String
 
 pub(crate) fn load_usage_by_runtime(database_path: &Path) -> Result<HashMap<String, UsageSummary>> {
     let connection = open_database(database_path).map_err(|error| error.to_string())?;
-    let mut statement = connection
-        .prepare(
-            "
-            SELECT runtime_root, SUM(usage_count), MAX(last_used_at)
-            FROM skill_usage_stats
-            GROUP BY runtime_root
-            ",
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = statement
-        .query_map([], |row| {
-            let usage_count: i64 = row.get(1)?;
-            Ok((
-                row.get::<_, String>(0)?,
-                UsageSummary {
-                    usage_count: usize::try_from(usage_count.max(0)).unwrap_or_default(),
-                    last_used_at: row.get(2)?,
-                    ..UsageSummary::default()
-                },
-            ))
-        })
-        .map_err(|error| error.to_string())?;
     let mut usage = HashMap::new();
-    for row in rows {
-        let (runtime_root, summary) = row.map_err(|error| error.to_string())?;
-        usage.insert(runtime_root, summary);
-    }
     enrich_call_evidence_by_runtime(&connection, &mut usage)?;
     enrich_reference_usage_by_runtime(&connection, &mut usage)?;
     Ok(usage)
@@ -1956,32 +2017,7 @@ pub(crate) fn load_usage_by_skill_runtime(
     database_path: &Path,
 ) -> Result<HashMap<(String, String), UsageSummary>> {
     let connection = open_database(database_path).map_err(|error| error.to_string())?;
-    let mut statement = connection
-        .prepare(
-            "
-            SELECT skill_name, runtime_root, usage_count, last_used_at
-            FROM skill_usage_stats
-            ",
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = statement
-        .query_map([], |row| {
-            let usage_count: i64 = row.get(2)?;
-            Ok((
-                (row.get::<_, String>(0)?, row.get::<_, String>(1)?),
-                UsageSummary {
-                    usage_count: usize::try_from(usage_count.max(0)).unwrap_or_default(),
-                    last_used_at: row.get(3)?,
-                    ..UsageSummary::default()
-                },
-            ))
-        })
-        .map_err(|error| error.to_string())?;
     let mut usage = HashMap::new();
-    for row in rows {
-        let (key, summary) = row.map_err(|error| error.to_string())?;
-        usage.insert(key, summary);
-    }
     enrich_call_evidence_by_skill_runtime(&connection, &mut usage)?;
     enrich_reference_usage_by_skill_runtime(&connection, &mut usage)?;
     Ok(usage)
@@ -1994,7 +2030,7 @@ fn enrich_call_evidence_by_skill(
     let mut statement = connection
         .prepare(
             "
-            SELECT skill_name, evidence_class, COUNT(*)
+            SELECT skill_name, evidence_class, COUNT(*), MAX(used_at)
             FROM skill_usage_events
             WHERE evidence_class IN ('confirmed', 'inferred')
             GROUP BY skill_name, evidence_class
@@ -2007,12 +2043,18 @@ fn enrich_call_evidence_by_skill(
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 usize::try_from(row.get::<_, i64>(2)?.max(0)).unwrap_or_default(),
+                row.get::<_, Option<String>>(3)?,
             ))
         })
         .map_err(|error| error.to_string())?;
     for row in rows {
-        let (key, evidence_class, count) = row.map_err(|error| error.to_string())?;
-        apply_call_evidence_count(usage.entry(key).or_default(), &evidence_class, count)?;
+        let (key, evidence_class, count, last_used_at) = row.map_err(|error| error.to_string())?;
+        add_call_usage_counts(
+            usage.entry(key).or_default(),
+            &evidence_class,
+            count,
+            last_used_at,
+        )?;
     }
     Ok(())
 }
@@ -2024,7 +2066,7 @@ fn enrich_call_evidence_by_runtime(
     let mut statement = connection
         .prepare(
             "
-            SELECT runtime_root, evidence_class, COUNT(*)
+            SELECT runtime_root, evidence_class, COUNT(*), MAX(used_at)
             FROM skill_usage_events
             WHERE evidence_class IN ('confirmed', 'inferred')
             GROUP BY runtime_root, evidence_class
@@ -2037,12 +2079,18 @@ fn enrich_call_evidence_by_runtime(
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 usize::try_from(row.get::<_, i64>(2)?.max(0)).unwrap_or_default(),
+                row.get::<_, Option<String>>(3)?,
             ))
         })
         .map_err(|error| error.to_string())?;
     for row in rows {
-        let (key, evidence_class, count) = row.map_err(|error| error.to_string())?;
-        apply_call_evidence_count(usage.entry(key).or_default(), &evidence_class, count)?;
+        let (key, evidence_class, count, last_used_at) = row.map_err(|error| error.to_string())?;
+        add_call_usage_counts(
+            usage.entry(key).or_default(),
+            &evidence_class,
+            count,
+            last_used_at,
+        )?;
     }
     Ok(())
 }
@@ -2054,7 +2102,7 @@ fn enrich_call_evidence_by_skill_runtime(
     let mut statement = connection
         .prepare(
             "
-            SELECT skill_name, runtime_root, evidence_class, COUNT(*)
+            SELECT skill_name, runtime_root, evidence_class, COUNT(*), MAX(used_at)
             FROM skill_usage_events
             WHERE evidence_class IN ('confirmed', 'inferred')
             GROUP BY skill_name, runtime_root, evidence_class
@@ -2067,14 +2115,39 @@ fn enrich_call_evidence_by_skill_runtime(
                 (row.get::<_, String>(0)?, row.get::<_, String>(1)?),
                 row.get::<_, String>(2)?,
                 usize::try_from(row.get::<_, i64>(3)?.max(0)).unwrap_or_default(),
+                row.get::<_, Option<String>>(4)?,
             ))
         })
         .map_err(|error| error.to_string())?;
     for row in rows {
-        let (key, evidence_class, count) = row.map_err(|error| error.to_string())?;
-        apply_call_evidence_count(usage.entry(key).or_default(), &evidence_class, count)?;
+        let (key, evidence_class, count, last_used_at) = row.map_err(|error| error.to_string())?;
+        add_call_usage_counts(
+            usage.entry(key).or_default(),
+            &evidence_class,
+            count,
+            last_used_at,
+        )?;
     }
     Ok(())
+}
+
+fn add_call_usage_counts(
+    summary: &mut UsageSummary,
+    evidence_class: &str,
+    count: usize,
+    last_used_at: Option<String>,
+) -> Result<()> {
+    summary.usage_count = summary.usage_count.saturating_add(count);
+    if let Some(used_at) = last_used_at {
+        if summary
+            .last_used_at
+            .as_ref()
+            .is_none_or(|current| used_at.as_str() > current.as_str())
+        {
+            summary.last_used_at = Some(used_at);
+        }
+    }
+    apply_call_evidence_count(summary, evidence_class, count)
 }
 
 fn apply_call_evidence_count(

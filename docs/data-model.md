@@ -368,7 +368,7 @@ version 不匹配时必须忽略并重新通过 Tauri updater plugin 检查；�
 plugin 校验 updater asset 签名。usage coverage keys 保存最近一次 Codex、Claude Code 和
 Cursor history sync 扫描的 rollout/project JSONL 文件数、Codex turn 数、Cursor composer
 session 数或 Cursor agent transcript 文件数；backfill audit 仅保存 aggregate
-discovered/recorded/deduplicated/upgraded/skipped/errors。它们不随 Rankings 的时间、
+discovered/recorded/deduplicated/upgraded/skipped/errors。它们不随 Usage 的时间、
 skill type、Agent 或 Workspace 过滤器变化，也不包含聊天正文。
 
 `workspaces.profile_id/root_key/format` 是 deployment target identity。registry v1
@@ -400,21 +400,21 @@ compatibility preview 是派生的只读结果，不另建持久表；其 `previ
 来源证据按 [ADR 0005](decisions/0005-usage-evidence-classification.md) 分类：
 
 - Stop hook `agent_hook` 是 `confirmed`。
-- Codex `rollout-*.jsonl` 中完整 user-turn `<skill><name>/<path>` block 或 `[$skill](.../SKILL.md)` link，在绝对 `SKILL.md` 路径校验后是 `inferred`。它证明 per-turn invocation intent，但不是 provider-native execution result。
-- Claude Code project JSONL 中原生 Skill tool use / Skill command attribution，在真实 `SKILL.md` 校验后是 `confirmed`。
+- Codex `rollout-*.jsonl` 中完整 user-turn `<skill><name>/<path>` block、`[$skill](.../SKILL.md)` link，以及 `exec`/`exec_command` 中专用的 `SKILL.md` 文件读取，在绝对（或 workdir 解析后的）`SKILL.md` 路径校验后是 `inferred`。它证明 per-turn invocation intent，但不是 provider-native execution result。
+- Claude Code project JSONL 中原生 Skill tool use / Skill command attribution，在真实 `SKILL.md` 校验后是 `confirmed`。解析优先 `.claude/skills`，也可使用其它本机 runtime 或 managed store 中的唯一/优先匹配。
 - Cursor history SQLite 中 non-subagent human bubble 的 `addedWithoutMention=false context.cursorRules[].filename` 是 `reference`；它只证明 skill 被附加为上下文。
-- Cursor agent transcript 中 assistant `tool_use` 的 `Read` 是 `inferred`，按稳定 transcript identity + user turn + skill/path identity 去重；同一 user turn 对同一 skill 的重复 Read 只算一次。现存文件必须通过 traversal、symlink、allowed-root、regular-file、大小和 `SKILL.md` frontmatter 检查。文件后来移动或删除时，只允许位于安全本机边界内、basename 精确为 `SKILL.md`、parent skill name 合法且最近现存 ancestor 未逃逸的 lexical historical path；该 evidence 不能用于任何文件系统或 deploy 决策。`ReadFile` candidates 单独进入 aggregate diagnostics，qualification 前不写 Calls。
-- catalog、普通 user/assistant prose、裸 `SKILL.md` mention、`exec_command`、custom/dynamic tool payload、tool/shell output 均不进入 Calls。
+- Cursor agent transcript 中 assistant `tool_use` 的 `Read`/`ReadFile`，以及用户 `manually_attached_skills` 附加，是 `inferred`，按稳定 transcript identity + user turn + skill/path identity 去重；同一 user turn 对同一 skill 的重复读取或附加只算一次。现存文件必须通过 traversal、symlink、allowed-root、regular-file、大小和 `SKILL.md` frontmatter 检查。文件后来移动或删除时，只允许位于安全本机边界内、basename 精确为 `SKILL.md`、parent skill name 合法且最近现存 ancestor 未逃逸的 lexical historical path；该 evidence 不能用于任何文件系统或 deploy 决策。
+- catalog、普通 user/assistant prose、裸 `SKILL.md` mention、search/find/`git diff`、非文件读取的 `exec_command`/custom tool payload、tool/shell output 均不进入 Calls。
 
 所有 history provider 都不保存聊天或 rule 正文，并用稳定 provider/session/turn/path identity 幂等去重。Codex session metadata 的 `cwd`、Claude project path 和 Cursor workspace 用于恢复 workspace identity。`prompt_excerpt` 仅供可信实时 hook 或明确允许的 Codex user prompt 摘要使用，必须剥离 skill carrier、压缩空白并限制长度；Claude Code/Cursor 回填不写 prompt excerpt。`metadata_json` 只接受小型 JSON object，不保存 prompt、聊天正文、文件内容或 diff。Cursor private SQLite 使用 `query_only` 和短 busy timeout，不兼容 schema fail closed；Cursor transcript reader 还有目录深度、文件/行大小、候选数和 allowed-root 上限。
 
 schema v4 增加 ranking 查询索引；schema v5 规范 legacy usage agent ids 并删除相同 event identity 的重复 row；schema v7 在 migration transaction 中保守回填 `evidence_class/evidence_sources_json`、增加 evidence indexes，并从 `confirmed + inferred` events 幂等重建 `skill_usage_stats`。迁移沿用升级前 backup 和 integrity check，不扫描 agent history，也不要求 rescan；用户之后显式运行 `Sync histories` 时，可按稳定 identity 恢复新 evidence 或升级旧 event。
 
-`skill_usage_stats` 按 `skill_name + agent_id + runtime_root` 保存 all-time Calls 聚合，只包含 `confirmed + inferred`，继续服务详情页、skill card 和 workspace Calls。History references 直接从 reference events 聚合，不进入 stats。7 天、30 天和带 skill type/Agent/Workspace 过滤的 Rankings 必须从 `skill_usage_events` 聚合；同一过滤快照返回 `total_calls`、confirmed/inferred/reference totals 和各自时间覆盖。skill type 只包含 User、Remote、System，且必须在 coverage 累计前过滤。排名不返回 `prompt_excerpt` 或完整 `metadata_json`。
+`skill_usage_stats` 按 `skill_name + agent_id + runtime_root` 保存 all-time Calls 聚合，只包含 `confirmed + inferred`，并在每次写入或 evidence 升级时更新。展示层不再读这张缓存表：详情页、skill card、workspace Calls 和 Usage 都从 `skill_usage_events` 聚合同一套 `confirmed + inferred` Calls。Usage 可再叠加 7 天、30 天、all-time 以及 skill type/Agent/Workspace 过滤；详情页和 skill card 使用 all-time。History references 直接从 reference events 聚合，不进入 Calls。同一过滤快照返回 `total_calls`、confirmed/inferred/reference totals、各自时间覆盖，以及按本机日历日分桶的 `daily` Calls（不含 reference；最近 365 个本机日历日零值补齐）。7/30 查询会把 event 扫描扩展到热力图窗口，但 rows/coverage 仍按所选 range 过滤。skill type 只包含 User、Remote、System，且必须在 coverage 累计前过滤。排名不返回 `prompt_excerpt` 或完整 `metadata_json`。
 
 coverage 的 evidence-class totals 按 event 当前最强 class 互斥：`confirmed + inferred = Calls`，reference 单列。`source_counts` 按 `evidence_sources_json` 统计 provenance，因此同一升级事件可同时出现在 Codex inferred 与 hook confirmed source 下；source counts 不是互斥 Calls 分解。最近一次 provider scan 文件/session/turn 数是独立操作覆盖，不随 ranking filters 改变。Ranking row 继续携带稳定 `source_id`、`source_kind` 和排序后的 `source_runtime_roots` 供 source-aware Import；同名普通/System/unknown source 和 deleted source 的现有隔离规则不变。
 
-Codex 当前本地 stores 不提供稳定、专用的 provider-native skill-run total。因此 Codex Calls 是 hook-confirmed 加结构化 per-turn inferred invocation 的本机下界，已知可能 undercount；SkillBox 不从 catalog、prose、shell/tool payload 或 output 补数。未来若接入 Codex reported runs，必须使用独立于 `skill_usage_events` / `skill_usage_stats` 的存储和读取模型，并保存 provider、subject kind、time window、scope 与 provenance；不得写入本地 ranking、total 或 delta，也不能与 Calls 换算、补差或去重。
+Codex 当前本地 stores 不提供稳定、专用的 provider-native skill-run total。因此 Codex Calls 是 hook-confirmed 加结构化 per-turn inferred invocation 的本机下界，已知可能 undercount；SkillBox 不从 catalog、prose、search/find 或任意 shell payload 补数。专用 `SKILL.md` 文件读取可以计入 inferred。未来若接入 Codex reported runs，必须使用独立于 `skill_usage_events` / `skill_usage_stats` 的存储和读取模型，并保存 provider、subject kind、time window、scope 与 provenance；不得写入本地 ranking、total 或 delta，也不能与 Calls 换算、补差或去重。
 
 History 是只读聚合视图，不新增表。Rust core 从 `operations` 和 `skill_usage_events` 读取最近记录，按事件时间合并为桌面时间线；Calls 和 History references 使用独立 count/filter/kind，reference 不得显示为 Call。History 只展示摘要字段，不向 React 暴露 operation payload、usage metadata 或 evidence provenance body。
 

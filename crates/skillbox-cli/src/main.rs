@@ -633,9 +633,9 @@ fn usage_ranking_request(
     args: &[String],
 ) -> Result<skillbox_core::SkillUsageRankingRequest, String> {
     let range = match option(args, "--range").as_deref() {
-        None | Some("30d") => skillbox_core::SkillUsageRankingRange::Last30Days,
+        None | Some("all") => skillbox_core::SkillUsageRankingRange::AllTime,
         Some("7d") => skillbox_core::SkillUsageRankingRange::Last7Days,
-        Some("all") => skillbox_core::SkillUsageRankingRange::AllTime,
+        Some("30d") => skillbox_core::SkillUsageRankingRange::Last30Days,
         Some(other) => {
             return Err(format!(
                 "Invalid usage ranking range: {other}. Use 7d, 30d, or all."
@@ -837,12 +837,12 @@ mod tests {
     }
 
     #[test]
-    fn usage_ranking_request_defaults_to_managed_last_thirty_days() {
+    fn usage_ranking_request_defaults_to_managed_all_time() {
         let request = usage_ranking_request(&[]).unwrap();
 
         assert_eq!(
             request.range,
-            skillbox_core::SkillUsageRankingRange::Last30Days
+            skillbox_core::SkillUsageRankingRange::AllTime
         );
         assert_eq!(request.skill_type, None);
         assert_eq!(request.agent_id, None);

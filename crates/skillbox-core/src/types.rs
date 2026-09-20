@@ -1202,6 +1202,31 @@ pub struct ImportScanProgress {
     pub unique_repositories: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageBackfillProgress {
+    pub provider: String,
+    pub phase: String,
+    pub processed: usize,
+    pub total: Option<usize>,
+}
+
+impl UsageBackfillProgress {
+    pub fn new(
+        provider: impl Into<String>,
+        phase: impl Into<String>,
+        processed: usize,
+        total: Option<usize>,
+    ) -> Self {
+        Self {
+            provider: provider.into(),
+            phase: phase.into(),
+            processed,
+            total,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImportRequestItem {
     pub source_path: PathBuf,
@@ -1446,9 +1471,9 @@ impl SkillUsageEvidenceClass {
 pub enum SkillUsageRankingRange {
     #[serde(rename = "last_7_days")]
     Last7Days,
-    #[default]
     #[serde(rename = "last_30_days")]
     Last30Days,
+    #[default]
     AllTime,
 }
 
@@ -1539,6 +1564,22 @@ pub struct SkillUsageRankingResult {
     pub total_history_references: usize,
     pub coverage: SkillUsageCoverage,
     pub rows: Vec<SkillUsageRankingRow>,
+    #[serde(default)]
+    pub daily: Vec<SkillUsageDailyPoint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct SkillUsageDailySkillCount {
+    pub skill_name: String,
+    pub source_kind: SkillUsageSourceKind,
+    pub calls: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct SkillUsageDailyPoint {
+    pub date: String,
+    pub total_calls: usize,
+    pub skills: Vec<SkillUsageDailySkillCount>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]

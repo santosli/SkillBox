@@ -19,6 +19,7 @@ const appSourcePaths = [
   './skills.js',
   './historyEntries.js',
   './usageRankings.js',
+  './usageBackfillProgress.js',
   './usageHooks.js',
   './workspaces.js',
   './appUpdates.js',
@@ -229,7 +230,7 @@ test('standard top-level pages share a full-width page frame by default', () => 
   assert.match(dashboardSource, /<PageFrame ariaLabel="Skills dashboard">/);
   assert.match(workspacePageSource, /<PageFrame ariaLabel="Workspace registry">/);
   assert.match(historyPageSource, /<PageFrame ariaLabel="History">/);
-  assert.match(rankingsPageSource, /<PageFrame ariaLabel="Rankings">/);
+  assert.match(rankingsPageSource, /<PageFrame ariaLabel="Usage">/);
   assert.match(pageFrameRule, /display:\s*grid;/);
   assert.match(pageFrameRule, /width:\s*100%;/);
   assert.match(pageFrameRule, /min-width:\s*0;/);
@@ -1132,7 +1133,8 @@ test('compact call labels stay short while usage explanations retain local scope
   assert.match(appSource, /className="candidateUsage">[\s\S]*Calls \{group\.usageCount \|\| 0\}/);
   assert.match(appSource, /Calls:\s*<strong>\{workspace\.usageCount\}<\/strong>/);
   assert.match(appSource, /<strong>No calls in this range<\/strong>/);
-  assert.match(appSource, /<caption className="srOnly">Skills ranked by calls<\/caption>/);
+  assert.match(appSource, /Skills ranked by calls/);
+  assert.match(appSource, /Skill calls on \$\{formatUsageTrendDate\(selectedDay\.date, \{ includeYear: true \}\)\}/);
   assert.match(
     appSource,
     /Calls combine locally confirmed executions with high-confidence inferred invocations[\s\S]*not Codex or Claude[\s\S]*account analytics/
@@ -1145,7 +1147,7 @@ test('compact call labels stay short while usage explanations retain local scope
   assert.match(appSource, /Record locally observed agent skill calls from runtime hooks\./);
 });
 
-test('rankings is an accessible top-level page separate from history', () => {
+test('usage is an accessible top-level page separate from history', () => {
   const historyPageSource = appSource.match(/export function HistoryPage[\s\S]*?function HistoryRow/)?.[0] || '';
   const rankingsPageSource = appSource.match(/export function UsageRankingsPage[\s\S]*$/)?.[0] || '';
   const rankingRangeSource = rankingsPageSource.match(
@@ -1153,24 +1155,33 @@ test('rankings is an accessible top-level page separate from history', () => {
   )?.[0] || '';
 
   assert.doesNotMatch(historyPageSource, /Rankings|usageRanking/);
-  assert.match(appSource, /\{ id: 'rankings', label: 'Rankings', icon: 'chart-no-axes-column-increasing' \}/);
-  assert.match(appSource, /item\.id === 'rankings'/);
-  assert.match(appSource, /function openRankings\(\)/);
-  assert.match(appSource, /page === 'rankings'/);
-  assert.match(rankingsPageSource, /<PageTitleRow[\s\S]*title="Rankings"/);
+  assert.match(appSource, /\{ id: 'usage', label: 'Usage', icon: 'chart-no-axes-column-increasing' \}/);
+  assert.match(appSource, /item\.id === 'usage'/);
+  assert.match(appSource, /function openUsage\(\)/);
+  assert.match(appSource, /page === 'usage'/);
+  assert.match(rankingsPageSource, /<PageTitleRow[\s\S]*title="Usage"/);
+  assert.doesNotMatch(rankingsPageSource, /count=\{rows\.length\}/);
   assert.doesNotMatch(rankingsPageSource, /subtitle=/);
+  assert.match(appSource, /range: 'all_time'/);
   assert.match(rankingsPageSource, /onClick=\{onRefresh\}/);
   assert.match(rankingsPageSource, /panelNotice notice/);
   assert.match(rankingsPageSource, /DashboardStatusNotice/);
   assert.match(
     rankingsPageSource,
-    /usageRankingControls[\s\S]*UsageCoverageDisclosure[\s\S]*Top skills by calls[\s\S]*Full ranking/
+    /usageRankingControls[\s\S]*UsageCoverageDisclosure[\s\S]*Call activity[\s\S]*Usage 统计/
   );
   assert.doesNotMatch(
     rankingsPageSource,
-    /aria-label="Rankings">\s*\{error \? <div className="notice"/
+    /aria-label="Usage">\s*\{error \? <div className="notice"/
   );
-  assert.match(appSource, /aria-label="Local skill usage rankings"/);
+  assert.match(appSource, /aria-label="Local skill usage"/);
+  assert.match(rankingsPageSource, /usageRankingBodyMode\(ranking, \{ loading, backfilling \}\)/);
+  assert.match(rankingsPageSource, /usageRankingFiltersLocked/);
+  assert.match(rankingsPageSource, /bodyMode === 'loading'/);
+  assert.match(rankingsPageSource, /className="usageRankingSnapshot"/);
+  assert.match(rankingsPageSource, /aria-busy=\{loading \? 'true' : undefined\}/);
+  assert.match(rankingsPageSource, /disabled=\{filtersLocked\}/);
+  assert.doesNotMatch(rankingsPageSource, /\} : loading \? \(/);
   assert.match(rankingsPageSource, /className="usageRankingSelectLabel" id="usage-ranking-range-label">[\s\S]*Time range/);
   assert.match(appSource, /className="dashboardTypeTabs usageRankingRanges"/);
   assert.match(appSource, /role="group"[\s\S]*aria-labelledby="usage-ranking-range-label"/);
@@ -1191,14 +1202,26 @@ test('rankings is an accessible top-level page separate from history', () => {
   assert.doesNotMatch(css, /\.usageRankingRanges\s*\{[^}]*min-width:\s*280px;/s);
   assert.match(css, /\.usageRankingSelect select\s*\{[^}]*border-radius:\s*10px;/s);
   assert.match(css, /\.usageRankingSelect select\s*\{[^}]*height:\s*46px;/s);
-  assert.match(appSource, /Top skills by calls/);
-  assert.match(appSource, /Full ranking/);
-  assert.match(appSource, /Includes skills not imported into SkillBox/);
+  assert.match(appSource, /Call activity/);
+  assert.match(appSource, /Past year/);
+  assert.match(appSource, /Usage 统计/);
+  assert.doesNotMatch(appSource, />Full ranking</);
+  assert.doesNotMatch(appSource, />Usage stats</);
+  assert.doesNotMatch(appSource, /Includes skills not imported into SkillBox/);
+  assert.match(appSource, /statsCallLabel/);
+  assert.match(appSource, /ranking\.totalCalls/);
   assert.match(appSource, /Not imported/);
-  assert.match(appSource, /usageRankingTopCard/);
-  assert.match(appSource, /<strong>\{row\.usageCount\} calls<\/strong>/);
+  assert.match(appSource, /usageHeatmap/);
+  assert.match(appSource, /UsageCallHeatmap/);
+  assert.match(appSource, /usageStatsTableRows/);
+  assert.match(appSource, /onSelectDate/);
+  assert.doesNotMatch(appSource, /Select a day to see skill calls/);
+  assert.doesNotMatch(appSource, /usageHeatmapDetail/);
+  assert.doesNotMatch(appSource, /Top skills by calls/);
+  assert.doesNotMatch(appSource, /usageRankingTopCard/);
   assert.doesNotMatch(appSource, /<strong>\{row\.usageCount\} locally observed calls<\/strong>/);
   assert.match(appSource, /<table className="usageRankingTable">/);
+  assert.match(css, /\.usageRankingSnapshot\s*\{[^}]*display:\s*grid;/s);
   assert.match(css, /\.usageRankingTableWrap\s*\{[^}]*overflow-x:\s*auto;/s);
   assert.match(css, /\.usageRankingTable\s*\{[^}]*min-width:\s*720px;/s);
   assert.match(
@@ -1244,25 +1267,49 @@ test('rankings is an accessible top-level page separate from history', () => {
   assert.match(appSource, /<th scope="col">Last observed<\/th>/);
   assert.match(rankingsPageSource, /Sync histories/);
   assert.match(rankingsPageSource, /onSyncHistories/);
+  assert.match(rankingsPageSource, /UsageHistoryScanProgress/);
+  assert.match(rankingsPageSource, /usageBackfillProgressLabel/);
+  assert.match(rankingsPageSource, /role="progressbar"/);
+  assert.match(css, /\.usageRankingProgressTrack\s*\{[^}]*height:\s*6px;/s);
   assert.match(appSource, /usageHistorySyncProviders/);
   assert.match(appSource, /await invoke\(provider\.command/);
+  assert.match(appSource, /syncId/);
+  assert.match(appSource, /refreshSkills = false/);
+  assert.match(appSource, /void loadUsageRankings\(usageRankingFilters, \{ refreshSkills: true \}\)/);
+  assert.match(
+    appSource,
+    /loadUsageRankings\(usageRankingFilters, \{[\s\S]*refreshSkills: true[\s\S]*\}\)/
+  );
+  assert.match(
+    appSource,
+    /onRefresh=\{\(\) => loadUsageRankings\(usageRankingFilters, \{ refreshSkills: true \}\)\}/
+  );
+  const loadUsageRankingsSource = appSource.match(
+    /async function loadUsageRankings\([\s\S]*?async function syncLocalUsageHistories/
+  )?.[0] || '';
+  assert.match(loadUsageRankingsSource, /if \(\s*refreshSkills/);
+  assert.match(loadUsageRankingsSource, /invoke\('managed_state'\)/);
+  assert.match(appSource, /listen\('skillbox:\/\/usage-backfill-progress'/);
   assert.match(appSource, /backfill_claude_code_session_usage/);
   assert.match(appSource, /backfill_cursor_session_usage/);
   assert.match(tauriSource, /async fn backfill_codex_session_usage/);
-  assert.match(tauriSource, /skillbox_core::backfill_codex_session_usage/);
+  assert.match(tauriSource, /skillbox_core::backfill_codex_session_usage_with_progress/);
+  assert.match(tauriSource, /skillbox:\/\/usage-backfill-progress/);
   assert.match(tauriSource, /async fn backfill_claude_code_session_usage/);
+  assert.match(tauriSource, /skillbox_core::backfill_claude_code_session_usage_with_progress/);
   assert.match(tauriSource, /async fn backfill_cursor_session_usage/);
+  assert.match(tauriSource, /skillbox_core::backfill_cursor_session_usage_with_progress/);
   assert.match(tauriSource, /async fn usage_audit/);
   assert.match(tauriSource, /skillbox_core::usage_audit/);
   assert.match(appSource, /includeArchived:\s*true/);
   assert.match(appSource, /Open usage hook settings/);
   assert.match(appSource, /<th scope="col">Actions<\/th>/);
   assert.match(appSource, /Detail/);
-  assert.match(appSource, /\(page === 'dashboard' \|\| page === 'rankings'\) && selectedSkill/);
+  assert.match(appSource, /\(page === 'dashboard' \|\| page === 'usage'\) && selectedSkill/);
   assert.match(appSource, /row\.system/);
   assert.match(
     appSource,
-    /row\.system \|\| row\.sourceKind === 'unknown' \|\| row\.sourceMissing \? null/
+    /row\.system \|\| row\.sourceKind === 'unknown' \|\| row\.sourceMissing \|\| !row\.sourceId \? null/
   );
   assert.match(appSource, /button primary compactAction/);
   assert.doesNotMatch(appSource, /usageRankingActionNote/);
@@ -1279,13 +1326,13 @@ test('rankings is an accessible top-level page separate from history', () => {
   assert.match(tauriSource, /async fn preview_usage_skill_import/);
   assert.match(tauriSource, /PreviewUsageSkillImportRequest/);
   assert.match(tauriSource, /preview_usage_skill_import_for_source/);
-  assert.match(rankingsPageSource, /<PageFrame ariaLabel="Rankings">/);
+  assert.match(rankingsPageSource, /<PageFrame ariaLabel="Usage">/);
   assert.match(css, /\.usageRankingActions\s*\{/);
   assert.match(appSource, /invoke\('list_skill_usage_rankings'/);
   assert.match(appSource, /function navigateToPage\(nextPage\)/);
   assert.match(appSource, /pageRef\.current = nextPage/);
   assert.match(appSource, /rankingImportRequestRef\.current \+= 1/);
-  assert.match(appSource, /finally \{\s*setUsageBackfillLoading\(false\);/s);
+  assert.match(appSource, /finally \{[\s\S]*setUsageBackfillLoading\(false\);[\s\S]*setUsageBackfillProgress\(null\);/s);
   assert.match(
     appSource,
     /if \(rankingImportRequestRef\.current === requestId\) \{\s*setRankingImportSkillName\(''\);/s
@@ -1297,8 +1344,7 @@ test('rankings is an accessible top-level page separate from history', () => {
   assert.match(appSource, /usageRankingRequest\(nextFilters\)/);
   assert.match(appSource, /includeUnmanaged: true/);
   assert.match(appSource, /Not imported/);
-  assert.match(appSource, /Includes skills not imported into SkillBox/);
-  const loadHistorySource = appComponentSource.match(/async function loadHistory\(nextFilter = historyFilter\)[\s\S]*?function openRankings/)?.[0] || '';
+  const loadHistorySource = appComponentSource.match(/async function loadHistory\(nextFilter = historyFilter\)[\s\S]*?function openUsage/)?.[0] || '';
   assert.match(loadHistorySource, /invoke\('list_history'/);
   assert.doesNotMatch(loadHistorySource, /list_skill_usage_rankings|Promise\.all/);
   assert.match(tauriSource, /async fn list_skill_usage_rankings/);
@@ -1314,8 +1360,29 @@ test('rankings is an accessible top-level page separate from history', () => {
   );
   assert.doesNotMatch(css, /\.historyTypeTabs\s*\{[^}]*repeat\(3,/s);
   assert.match(css, /\.usageRankingTable\s*\{/);
-  assert.match(css, /\.usageRankingTopGrid\s*\{/);
-  assert.match(css, /\.usageRankingTopCard\.leader\s*\{/);
+  assert.match(css, /\.usageHeatmapSection\s*\{[^}]*width:\s*max-content;/s);
+  assert.match(css, /\.usageHeatmap\s*\{[^}]*width:\s*max-content;/s);
+  assert.match(css, /\.usageHeatmapGrid\s*\{/);
+  assert.match(css, /\.usageHeatmapCell\s*\{[^}]*aspect-ratio:\s*1;/s);
+  assert.match(css, /\.usageHeatmapCell\s*\{[^}]*height:\s*var\(--usage-heatmap-cell/s);
+  assert.match(css, /\.usageHeatmapCell\.isSelected\s*\{/);
+  assert.match(css, /\.usageHeatmapWeekday\s*\{/);
+  assert.match(appSource, /usageHeatmapCellSize = 18/);
+  assert.match(appSource, /usageHeatmapWeekdayRows/);
+  assert.match(appSource, /usageHeatmapSection/);
+  assert.match(appSource, /buildUsageHeatmap/);
+  assert.match(appSource, /usageHeatmapLayout/);
+  assert.match(appSource, /visibleUsageHeatmapMonths/);
+  assert.match(css, /\.usageHeatmapCanvas\s*\{[^}]*min-width:\s*max-content;/s);
+  assert.match(css, /\.usageHeatmapWeek\s*\{[^}]*flex:\s*0 0 auto;/s);
+  assert.match(appSource, /onMouseEnter=\{\(event\) => showDayTooltip\(event, label\)\}/);
+  assert.match(css, /\.usageHeatmapTooltip\s*\{[^}]*position:\s*fixed;/s);
+  assert.doesNotMatch(appSource, /usageHeatmapCell[\s\S]*title=\{label\}/);
+  assert.match(css, /\.usageHeatmapMonth\s*\{[^}]*white-space:\s*nowrap;/s);
+  assert.match(appSource, /usageHeatmapLevelColors = \[[\s\S]*skillbox-blue[\s\S]*\]/);
+  assert.doesNotMatch(appSource, /usageHeatmapLevelColors = \[[\s\S]*skillbox-text-nav/);
+  assert.doesNotMatch(css, /\.usageRankingTopGrid\s*\{/);
+  assert.doesNotMatch(css, /\.usageRankingTopCard\.leader\s*\{/);
   assert.match(css, /\.usageRankingRanges\s*\{/);
   assert.match(css, /\.dashboardTypeTabs button\.active/);
   assert.match(css, /font-variant-numeric:\s*tabular-nums/);

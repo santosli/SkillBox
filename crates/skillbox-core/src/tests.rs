@@ -2624,6 +2624,77 @@ fn managed_state_includes_skill_usage_summary() {
 }
 
 #[test]
+fn managed_state_call_counts_follow_usage_events_not_stale_stats() {
+    let root = temp_dir("usage-managed-state-stale-stats");
+    let managed_root = root.join("SkillBox");
+    let source = root.join("runtime").join("alpha");
+    let runtime = root.join(".codex").join("skills");
+    make_skill(&source, "alpha", "Alpha skill");
+    import_skill(&source, SkillKind::User, &managed_root).unwrap();
+
+    for used_at in [
+        "2026-06-02T09:00:00Z",
+        "2026-06-02T10:00:00Z",
+        "2026-06-02T11:00:00Z",
+    ] {
+        record_test_call(
+            RecordSkillUsageRequest {
+                skill_name: "alpha".to_string(),
+                agent_id: "codex".to_string(),
+                runtime_root: runtime.clone(),
+                event_id: None,
+                used_at: Some(used_at.to_string()),
+                prompt_excerpt: None,
+                metadata: None,
+            },
+            &managed_root,
+        )
+        .unwrap();
+    }
+
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    let connection = rusqlite::Connection::open(&paths.database_path).unwrap();
+    connection
+        .execute("UPDATE skill_usage_stats SET usage_count = 1", [])
+        .unwrap();
+    let stale: i64 = connection
+        .query_row(
+            "SELECT SUM(usage_count) FROM skill_usage_stats",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(stale, 1);
+
+    let state = managed_state(&managed_root).unwrap();
+    assert_eq!(state.skills[0].usage_count, 3);
+    assert_eq!(
+        state.skills[0]
+            .confirmed_count
+            .saturating_add(state.skills[0].inferred_count),
+        3
+    );
+
+    let ranking = list_skill_usage_rankings_at(
+        SkillUsageRankingRequest {
+            range: SkillUsageRankingRange::AllTime,
+            ..SkillUsageRankingRequest::default()
+        },
+        &managed_root,
+        DateTime::parse_from_rfc3339("2026-06-03T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc),
+    )
+    .unwrap();
+    let row = ranking
+        .rows
+        .iter()
+        .find(|row| row.skill_name == "alpha")
+        .expect("alpha ranking row");
+    assert_eq!(row.usage_count, state.skills[0].usage_count);
+}
+
+#[test]
 fn usage_rankings_include_managed_zero_rows_and_apply_time_range_ordering() {
     let root = temp_dir("usage-rankings-range");
     let managed_root = root.join("SkillBox");
@@ -2701,6 +2772,42 @@ fn usage_rankings_include_managed_zero_rows_and_apply_time_range_ordering() {
         vec![(1, "alpha", 2), (2, "beta", 1), (3, "gamma", 0)]
     );
     assert!(last_seven.rows.iter().all(|row| row.managed));
+    let heatmap_end = as_of.with_timezone(&chrono::Local).date_naive();
+    let heatmap_start = heatmap_end
+        .checked_sub_signed(chrono::Duration::days(364))
+        .expect("heatmap start");
+    assert_eq!(last_seven.daily.len(), 365);
+    assert_eq!(last_seven.daily[0].date, heatmap_start.to_string());
+    assert_eq!(last_seven.daily[364].date, heatmap_end.to_string());
+    assert_eq!(
+        last_seven
+            .daily
+            .iter()
+            .filter(|point| point.date.as_str() >= "2026-06-23")
+            .map(|point| point.total_calls)
+            .sum::<usize>(),
+        3
+    );
+    assert_eq!(
+        last_seven
+            .daily
+            .iter()
+            .map(|point| point.total_calls)
+            .sum::<usize>(),
+        4
+    );
+    assert!(last_seven
+        .daily
+        .windows(2)
+        .all(|pair| pair[0].date < pair[1].date));
+    assert!(last_seven.daily.iter().any(|point| point
+        .skills
+        .iter()
+        .any(|skill| skill.skill_name == "alpha" && skill.calls >= 1)));
+    assert!(last_seven.daily.iter().any(|point| point
+        .skills
+        .iter()
+        .any(|skill| skill.skill_name == "beta" && skill.calls == 1)));
     assert!(last_seven
         .rows
         .iter()
@@ -2717,6 +2824,14 @@ fn usage_rankings_include_managed_zero_rows_and_apply_time_range_ordering() {
         last_thirty.rows[0].last_used_at.as_deref(),
         Some("2026-06-29T12:00:00+00:00")
     );
+    assert_eq!(
+        last_thirty
+            .daily
+            .iter()
+            .map(|point| point.total_calls)
+            .sum::<usize>(),
+        last_thirty.total_observed_calls
+    );
 
     let all_time = list_skill_usage_rankings_at(
         SkillUsageRankingRequest {
@@ -2730,6 +2845,14 @@ fn usage_rankings_include_managed_zero_rows_and_apply_time_range_ordering() {
     assert_eq!(all_time.range_start, None);
     assert_eq!(all_time.total_observed_calls, 4);
     assert_eq!(all_time.rows[0].usage_count, 2);
+    assert_eq!(
+        all_time
+            .daily
+            .iter()
+            .map(|point| point.total_calls)
+            .sum::<usize>(),
+        all_time.total_observed_calls
+    );
 }
 
 #[test]
@@ -4837,6 +4960,163 @@ fn usage_backfill_imports_codex_session_skills_with_dedupe() {
 }
 
 #[test]
+fn usage_backfill_counts_codex_skill_md_file_reads_and_ignores_search_payloads() {
+    let root = temp_dir("usage-backfill-codex-skill-md-reads");
+    let home = root.join("home");
+    let managed_root = root.join("SkillBox");
+    let runtime_root = home.join(".codex").join("skills");
+    let skill_root = runtime_root.join("probe");
+    fs::create_dir_all(&skill_root).unwrap();
+    fs::write(
+        skill_root.join("SKILL.md"),
+        "---\nname: probe\ndescription: Probe\n---\n",
+    )
+    .unwrap();
+    let relative_root = home
+        .join("Projects")
+        .join("notes")
+        .join(".agents")
+        .join("skills")
+        .join("journal");
+    fs::create_dir_all(&relative_root).unwrap();
+    fs::write(
+        relative_root.join("SKILL.md"),
+        "---\nname: journal\ndescription: Journal\n---\n",
+    )
+    .unwrap();
+
+    let sessions_root = home.join(".codex").join("sessions");
+    fs::create_dir_all(&sessions_root).unwrap();
+    let session_path = sessions_root.join("rollout-skill-md-reads.jsonl");
+    let skill_path = skill_root.join("SKILL.md");
+    let relative_skill = PathBuf::from(".agents/skills/journal/SKILL.md");
+    fs::write(
+        &session_path,
+        format!(
+            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n",
+            serde_json::json!({
+                "timestamp": "2026-09-19T10:00:00.000Z",
+                "type": "session_meta",
+                "payload": {
+                    "id": "session-reads",
+                    "cwd": home.join("Projects").join("notes")
+                }
+            }),
+            serde_json::json!({
+                "timestamp": "2026-09-19T10:00:01.000Z",
+                "type": "turn_context",
+                "payload": {
+                    "turn_id": "turn-cat",
+                    "cwd": home.join("Projects").join("notes")
+                }
+            }),
+            serde_json::json!({
+                "timestamp": "2026-09-19T10:00:02.000Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "custom_tool_call",
+                    "name": "exec",
+                    "input": format!(
+                        "text(await tools.exec_command({{cmd:\"pwd && cat {} && git status --short\"}}));",
+                        skill_path.display()
+                    )
+                }
+            }),
+            serde_json::json!({
+                "timestamp": "2026-09-19T10:00:03.000Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "custom_tool_call_output",
+                    "output": format!("ignore this catalog <skill><name>probe</name><path>{}</path></skill>", skill_path.display())
+                }
+            }),
+            serde_json::json!({
+                "timestamp": "2026-09-19T10:10:00.000Z",
+                "type": "turn_context",
+                "payload": { "turn_id": "turn-sed" }
+            }),
+            serde_json::json!({
+                "timestamp": "2026-09-19T10:10:01.000Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call",
+                    "name": "exec_command",
+                    "arguments": serde_json::json!({
+                        "cmd": format!("sed -n '1,80p' {}", relative_skill.display()),
+                        "workdir": home.join("Projects").join("notes")
+                    }).to_string()
+                }
+            }),
+            serde_json::json!({
+                "timestamp": "2026-09-19T10:20:00.000Z",
+                "type": "turn_context",
+                "payload": { "turn_id": "turn-search" }
+            }),
+            serde_json::json!({
+                "timestamp": "2026-09-19T10:20:01.000Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call",
+                    "name": "exec_command",
+                    "arguments": serde_json::json!({
+                        "cmd": format!("rg --files {} && find . -name SKILL.md", skill_path.display())
+                    }).to_string()
+                }
+            }),
+            serde_json::json!({
+                "timestamp": "2026-09-19T10:20:02.000Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{
+                        "type": "output_text",
+                        "text": format!("I read {}", skill_path.display())
+                    }]
+                }
+            })
+        ),
+    )
+    .unwrap();
+
+    let result = backfill_codex_session_usage_for_home(
+        BackfillCodexSessionUsageRequest {
+            include_archived: false,
+            sessions_root: Some(sessions_root),
+            archived_sessions_root: None,
+        },
+        &home,
+        &managed_root,
+    )
+    .unwrap();
+    assert_eq!(result.discovered, 2, "{:?}", result.errors);
+    assert_eq!(result.recorded, 2);
+    assert_eq!(result.skipped, 0);
+
+    let rankings = list_skill_usage_rankings_at(
+        SkillUsageRankingRequest {
+            range: SkillUsageRankingRange::AllTime,
+            include_unmanaged: true,
+            ..SkillUsageRankingRequest::default()
+        },
+        &managed_root,
+        DateTime::parse_from_rfc3339("2026-09-20T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc),
+    )
+    .unwrap();
+    let names = rankings
+        .rows
+        .iter()
+        .filter(|row| row.usage_count > 0)
+        .map(|row| row.skill_name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(names, vec!["journal", "probe"]);
+    assert_eq!(rankings.total_inferred_calls, 2);
+    assert_eq!(rankings.coverage.codex_session_backfill_calls, 2);
+}
+
+#[test]
 fn usage_backfill_uses_session_cwd_for_managed_workspace_identity() {
     let root = temp_dir("usage-backfill-managed-workspace");
     let home = root.join("home");
@@ -5071,6 +5351,48 @@ fn usage_backfill_ignores_non_rollouts_and_symlinked_entries() {
     assert_eq!(result.scanned_files, 1);
     assert_eq!(result.discovered, 0);
     assert_eq!(result.recorded, 0);
+}
+
+#[test]
+fn usage_backfill_reports_codex_file_progress() {
+    let root = temp_dir("usage-backfill-codex-progress");
+    let home = root.join("home");
+    let managed_root = root.join("SkillBox");
+    let sessions_root = home.join(".codex").join("sessions");
+    fs::create_dir_all(&sessions_root).unwrap();
+    fs::write(sessions_root.join("rollout-one.jsonl"), "{}\n").unwrap();
+    fs::write(sessions_root.join("rollout-two.jsonl"), "{}\n").unwrap();
+
+    let mut events = Vec::new();
+    let result = backfill_codex_session_usage_for_home_with_progress(
+        BackfillCodexSessionUsageRequest {
+            include_archived: false,
+            sessions_root: Some(sessions_root),
+            archived_sessions_root: None,
+        },
+        &home,
+        &managed_root,
+        |progress| events.push(progress),
+    )
+    .unwrap();
+
+    assert_eq!(result.scanned_files, 2);
+    assert_eq!(events[0].provider, "codex");
+    assert_eq!(events[0].phase, "collecting");
+    assert_eq!(events[0].processed, 0);
+    assert_eq!(events[0].total, None);
+    let scanning: Vec<_> = events
+        .iter()
+        .filter(|event| event.phase == "scanning")
+        .collect();
+    assert_eq!(scanning.first().map(|event| event.processed), Some(0));
+    assert_eq!(scanning.first().and_then(|event| event.total), Some(2));
+    assert_eq!(scanning.last().map(|event| event.processed), Some(2));
+    assert_eq!(scanning.last().and_then(|event| event.total), Some(2));
+    let complete = events.last().expect("complete progress");
+    assert_eq!(complete.phase, "complete");
+    assert_eq!(complete.processed, 2);
+    assert_eq!(complete.total, Some(2));
 }
 
 #[test]

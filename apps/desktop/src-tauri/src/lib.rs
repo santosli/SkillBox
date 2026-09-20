@@ -909,14 +909,36 @@ async fn preview_usage_skill_import(
     .map_err(|error| format!("Usage skill import preview task failed: {error}"))?
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UsageBackfillProgressEvent {
+    sync_id: u64,
+    #[serde(flatten)]
+    progress: skillbox_core::UsageBackfillProgress,
+}
+
+fn emit_usage_backfill_progress(
+    app: &tauri::AppHandle,
+    sync_id: u64,
+    progress: skillbox_core::UsageBackfillProgress,
+) {
+    let _ = app.emit(
+        "skillbox://usage-backfill-progress",
+        UsageBackfillProgressEvent { sync_id, progress },
+    );
+}
+
 #[tauri::command]
 async fn backfill_codex_session_usage(
+    app: tauri::AppHandle,
     request: skillbox_core::BackfillCodexSessionUsageRequest,
+    sync_id: u64,
 ) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let result = skillbox_core::backfill_codex_session_usage(
+        let result = skillbox_core::backfill_codex_session_usage_with_progress(
             request,
             skillbox_core::default_managed_root(),
+            |progress| emit_usage_backfill_progress(&app, sync_id, progress),
         )?;
         serde_json::to_value(result).map_err(|error| error.to_string())
     })
@@ -926,12 +948,15 @@ async fn backfill_codex_session_usage(
 
 #[tauri::command]
 async fn backfill_claude_code_session_usage(
+    app: tauri::AppHandle,
     request: skillbox_core::BackfillClaudeCodeSessionUsageRequest,
+    sync_id: u64,
 ) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let result = skillbox_core::backfill_claude_code_session_usage(
+        let result = skillbox_core::backfill_claude_code_session_usage_with_progress(
             request,
             skillbox_core::default_managed_root(),
+            |progress| emit_usage_backfill_progress(&app, sync_id, progress),
         )?;
         serde_json::to_value(result).map_err(|error| error.to_string())
     })
@@ -941,12 +966,15 @@ async fn backfill_claude_code_session_usage(
 
 #[tauri::command]
 async fn backfill_cursor_session_usage(
+    app: tauri::AppHandle,
     request: skillbox_core::BackfillCursorSessionUsageRequest,
+    sync_id: u64,
 ) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let result = skillbox_core::backfill_cursor_session_usage(
+        let result = skillbox_core::backfill_cursor_session_usage_with_progress(
             request,
             skillbox_core::default_managed_root(),
+            |progress| emit_usage_backfill_progress(&app, sync_id, progress),
         )?;
         serde_json::to_value(result).map_err(|error| error.to_string())
     })

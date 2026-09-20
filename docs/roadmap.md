@@ -81,13 +81,15 @@ analytics. A zero count means SkillBox currently has no Calls evidence; disabled
 hooks and unsupported provider events can make it incomplete.
 
 `Sync histories` is explicit and read-only toward provider stores. Codex accepts
-complete per-turn `<skill>` blocks or `[$skill](.../SKILL.md)` links with an
-absolute path as inferred invocation, while catalog/prose, shell/tool payloads,
-and outputs are excluded. Claude Code native Skill tool/command attribution is
-confirmed. Cursor state `context.cursorRules` is a reference; a bounded agent
-transcript assistant `Read` of an absolute, allowed `SKILL.md` is inferred and
-deduplicated once per transcript user turn and skill. Safe historical-missing
-paths remain evidence-only, and `ReadFile` stays diagnostic-only until qualified.
+complete per-turn `<skill>` blocks, `[$skill](.../SKILL.md)` links with an
+absolute path, and dedicated `SKILL.md` file reads as inferred invocation, while
+catalog/prose, search/find, mixed payloads, and outputs are excluded. Claude
+Code native Skill tool/command attribution is confirmed. Cursor state
+`context.cursorRules` is a reference; a bounded agent transcript assistant
+`Read`/`ReadFile` of an absolute, allowed `SKILL.md`, and a user
+`manually_attached_skills` attachment, are inferred and deduplicated once per
+transcript user turn and skill. Safe historical-missing
+paths remain evidence-only.
 Repeated scans deduplicate stable event identities;
 stronger evidence upgrades the existing event without dropping provenance.
 
@@ -113,7 +115,8 @@ prompt, chat, tool payload/output, or complete metadata.
 
 Codex local stores do not expose a stable provider-native skill-run total.
 Codex Calls are therefore a known local undercount rather than an estimate to be
-filled from prose or shell/tool traces. Future provider-reported runs remain a
+filled from prose or generic shell/tool traces. Dedicated `SKILL.md` file reads
+may count as inferred. Future provider-reported runs remain a
 separate storage/display boundary and never enter local ranking, total, or
 delta values.
 

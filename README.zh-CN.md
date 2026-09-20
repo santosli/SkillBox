@@ -47,17 +47,17 @@ Dashboard 支持本地搜索、类型/更新/tag/favorite 过滤以及 grid/list
 
 Workspaces 视图会按 profile 跟踪 Agents、Codex、Claude Code、Cursor 和 exact custom folder 的全局/项目局部 `SKILL.md` roots。可以按 workspace 名称、路径或 profile 搜索，并与 Global/Project 类型筛选组合使用。
 
-![SkillBox rankings](docs/screenshots/skillbox-rankings.png)
+![SkillBox usage](docs/screenshots/skillbox-rankings.png)
 
-Rankings 优先展示 Top skills 与完整排名。可展开的 coverage disclosure 会把 confirmed / 可辩护 inferred Calls 与低信号 History references 分开，并说明本机 provider scan 的统计边界，不把它包装成账户 analytics。
+Usage 优先展示最近一年的紧凑 Calls 热力图与 Usage 统计表。点击某一天会更新这张表，而不是另开明细。可展开的 coverage disclosure 会把 confirmed / 可辩护 inferred Calls 与低信号 History references 分开，并说明本机 provider scan 的统计边界，不把它包装成账户 analytics。
 
 ![SkillBox ranking coverage](docs/screenshots/skillbox-rankings-coverage.png)
 
 ![SkillBox history](docs/screenshots/skillbox-history.png)
 
-History 会分开展示 Calls、History references 和管理操作。独立的一级 Rankings 页面可查看 7 天、30 天或全部 **Calls**，并按 skill type（User、Remote、System）、Agent 或 Workspace 过滤。Calls 由本机 confirmed execution 与可辩护的 structured per-turn invocation 组成；reference 不增加 Calls，也不提升默认排名。同名普通/System skill 会保持独立，并在准备导入时使用该行实际观测到的来源。覆盖范围会展示 confirmed、inferred、reference totals、各自时间范围、保留的 provenance sources，以及最近一次 provider scan totals。
+History 会分开展示 Calls、History references 和管理操作。独立的一级 Usage 页面默认显示全部 **Calls**，也可切换 7 天或 30 天，并按 skill type（User、Remote、System）、Agent 或 Workspace 过滤。年维度热力图显示每日 Calls 强度，点击某一天会更新下方 Usage 统计表。Calls 由本机 confirmed execution 与可辩护的 structured per-turn invocation 组成；reference 不增加 Calls，也不提升默认排名。同名普通/System skill 会保持独立，并在准备导入时使用该行实际观测到的来源。覆盖范围会展示 confirmed、inferred、reference totals、各自时间范围、保留的 provenance sources，以及最近一次 provider scan totals。
 
-`Sync histories` 会从 Codex、Claude Code 和 Cursor 导入可审计的 usage evidence，但不复制聊天正文。Codex user turn 中含绝对路径的 `<skill>` 块或 `[$skill](.../SKILL.md)` 属于 inferred Calls，而不是 provider-confirmed run；catalog、普通 prose、shell/tool payload 和 output 都会排除。Claude Code 原生 Skill tool/command attribution 在解析到真实 `SKILL.md` 后属于 confirmed。Cursor state 的 `context.cursorRules` 只是 reference。有界 Cursor agent transcript 中 assistant 对绝对本机 `SKILL.md` 的结构化 `Read` 属于 inferred Call，并按 transcript user turn + skill 去重。文件后来移动或删除时，经过安全词法边界校验的历史路径仍可作为审计 evidence，但绝不成为文件系统或部署权限；`ReadFile` 仅进入诊断，在语义完成 qualification 前不计 Calls。重复扫描保持幂等，更强 evidence 会升级同一 event 并保留 provenance。Codex 本地 stores 没有稳定的 provider-native run total，因此 Calls 是已知可能 undercount 的本机下界，不是账户 analytics。migration 不会自动重扫 history；用户显式 sync 时可以恢复或升级 evidence。
+`Sync histories` 会从 Codex、Claude Code 和 Cursor 导入可审计的 usage evidence，但不复制聊天正文。Codex user turn 中含绝对路径的 `<skill>` 块、`[$skill](.../SKILL.md)`，以及专用的 `SKILL.md` 文件读取（`cat` / `sed` / `head` 等）属于 inferred Calls，而不是 provider-confirmed run；catalog、普通 prose、search/find、混杂 tool payload 和 output 都会排除。Claude Code 原生 Skill tool/command attribution 在解析到真实 `SKILL.md` 后属于 confirmed，解析范围包括其它本机 runtime 和 managed store。Cursor state 的 `context.cursorRules` 只是 reference。有界 Cursor agent transcript 中 assistant 对绝对本机 `SKILL.md` 的结构化 `Read` / `ReadFile`，以及用户 `manually_attached_skills` 附加，属于 inferred Call，并按 transcript user turn + skill 去重。文件后来移动或删除时，经过安全词法边界校验的历史路径仍可作为审计 evidence，但绝不成为文件系统或部署权限。重复扫描保持幂等，更强 evidence 会升级同一 event 并保留 provenance。Codex 本地 stores 没有稳定的 provider-native run total，因此 Calls 是已知可能 undercount 的本机下界，不是账户 analytics。migration 不会自动重扫 history；用户显式 sync 时可以恢复或升级 evidence。
 
 ![SkillBox collection import review：统一选择 Remote、选中三个 eligible children，并保留一个 blocked conflict](docs/screenshots/skillbox-collection-import-review.png)
 
@@ -107,7 +107,7 @@ Runtime 目录只是部署目标：
 - Review user-skill Git diff、为选中文件创建 Conventional Commit，并可选推送。v0.7 对 `origin/main` 入站更新使用独立的 preview-confirmed fast-forward 流程；SkillBox 不会自动 merge、rebase、reset、stash 或解决冲突。
 - 本地 Import Review 由 Rust 找到最近的安全 Git worktree，并把其中的 `SKILL.md` children 展示为一个 collection。collection scan 只读；应用选中的 children 前会重新校验 worktree/HEAD，成功导入后才保存 collection provenance。
 - 按类型、更新状态、tag 或 favorite 搜索过滤 Dashboard，在 grid/list 间切换，并把 favorites 与 tags 持久化到 SQLite。
-- 记录受支持的 hooks 与 structured local-history evidence；分开展示 Calls 和 History references，按 confirmed 加可辩护 inferred Calls 排名，并提供不含正文的 aggregate-only coverage。
+- 记录受支持的 hooks 与 structured local-history evidence；分开展示 Calls 和 History references，用年维度热力图查看每日 Calls，按 confirmed 加可辩护 inferred Calls 排名，并提供不含正文的 aggregate-only coverage。
 - 执行顺序 SQLite migrations、迁移前备份和完整性检查；运行 Doctor 诊断并显式清理 stale deployment records。
 - 后台每天至多检查一次已签名的 GitHub Releases；发现新版时显示 Update 操作，并且只在用户点击后安装 macOS app 更新。
 
