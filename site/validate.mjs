@@ -21,6 +21,8 @@ const requiredFiles = [
   ".github/workflows/pages.yml",
   "docs/promo/skillbox-intro/skillbox-promo.mp4",
   "docs/promo/skillbox-intro/skillbox-promo-poster.jpg",
+  "docs/promo/skillbox-product-v0.9.5/skillbox-product-promo.mp4",
+  "docs/promo/skillbox-product-v0.9.5/skillbox-product-promo-poster.jpg",
   "docs/promo/skillbox-intro/assets/skillbox-dashboard.png",
   "docs/promo/skillbox-intro/assets/skillbox-workspaces.png",
   "docs/promo/skillbox-intro/assets/skillbox-rankings.png",
@@ -172,7 +174,7 @@ expect(
 );
 expect("homepage has no stale versioned visual references", !/v0?41|v041|skillbox-import-review-crop/.test(html));
 expect("video embed uses controls and metadata preload", /<video controls preload="metadata" poster="assets\/skillbox-promo-poster\.jpg"/.test(html));
-expect("promo is labeled as a v0.9.0 release artifact", /v0\.9\.0 · 30-second overview/.test(html) && /This v0\.9\.0 promo/.test(html));
+expect("promo is labeled as a v0.9.5 release artifact", /v0\.9\.5 · 75-second overview/.test(html) && /This v0\.9\.5 promo/.test(html));
 expect("download CTA uses latest release", /https:\/\/github\.com\/santosli\/SkillBox\/releases\/latest/.test(html));
 expect("Homebrew command present", /brew install --cask skillbox/.test(html));
 expect("Google verification source contains expected token", googleVerificationSource.trim() === googleVerificationToken);

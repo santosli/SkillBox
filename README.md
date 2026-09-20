@@ -20,9 +20,11 @@ Current release: `v0.9.5`. SkillBox is useful today for local skill management, 
 
 ## Promo Video
 
-[![Watch the SkillBox promo video](docs/promo/skillbox-intro/skillbox-promo-poster.jpg)](docs/promo/skillbox-intro/skillbox-promo.mp4)
+[![Watch the SkillBox promo video](docs/promo/skillbox-product-v0.9.5/skillbox-product-promo-poster.jpg)](docs/promo/skillbox-product-v0.9.5/skillbox-product-promo.mp4)
 
-A 30-second v0.9.0 overview of SkillBox: runtime-aware workspaces, review-before-write safety, evidence-aware Calls, transparent coverage, and local-first deployment. The promo remains a v0.9.0 release artifact; the current collection-header workflow is shown in the product screenshot below.
+A 75-second v0.9.5 overview built around one line: every scattered skill, collected into one library. It walks the Dashboard that manages every managed skill in one screen, the skill detail where one edit reaches every connected runtime, runtime-aware workspaces, review-before-write imports, and evidence-aware Calls with transparent coverage. Feature shots mount the real components from `apps/desktop/src` rather than screenshots; the usage data and deployment targets shown are demo fixtures.
+
+The earlier [30-second v0.9.0 promo](docs/promo/skillbox-intro/skillbox-promo.mp4) stays in the repository as that release's artifact.
 
 ## Why
 

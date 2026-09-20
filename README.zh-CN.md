@@ -20,9 +20,11 @@ SkillBox 是一个 local-first 的 macOS 桌面应用，带 Rust core/CLI，用�
 
 ## 宣传视频
 
-[![观看 SkillBox 宣传视频](docs/promo/skillbox-intro/skillbox-promo-poster.jpg)](docs/promo/skillbox-intro/skillbox-promo.mp4)
+[![观看 SkillBox 宣传视频](docs/promo/skillbox-product-v0.9.5/skillbox-product-promo-poster.jpg)](docs/promo/skillbox-product-v0.9.5/skillbox-product-promo.mp4)
 
-这段 30 秒视频展示 v0.9.0 的 SkillBox：runtime-aware workspaces、写入前 review、按证据分类的 Calls、透明 coverage 和 local-first 部署。Promo 保持为 v0.9.0 发布素材；当前 collection header workflow 见下方产品截图。
+这段 75 秒视频展示 v0.9.5 的 SkillBox，主线是「散在各处的技能，收进一个库」：Dashboard 一屏管完全部受管 skill、skill 详情里一处管理多处生效、runtime-aware workspaces、写入前 review，以及按证据分类的 Calls 与透明 coverage。功能镜头挂载的是 `apps/desktop/src` 的真实组件，不是截图；片中的使用数据与部署目标为演示数据。
+
+更早的 [v0.9.0 30 秒宣传片](docs/promo/skillbox-intro/skillbox-promo.mp4) 作为该版本的发布素材保留在仓库里。
 
 ## 为什么
 

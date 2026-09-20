@@ -6,6 +6,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dist = path.join(root, "site-dist");
 const site = path.join(root, "site");
 const promo = path.join(root, "docs", "promo", "skillbox-intro");
+// 首页播放当前宣传片；产品截图与字体仍沿用 v0.9.0 promo 目录里的素材。
+const productPromo = path.join(root, "docs", "promo", "skillbox-product-v0.9.5");
 const screenshots = path.join(root, "docs", "screenshots");
 const assets = path.join(dist, "assets");
 
@@ -17,8 +19,13 @@ for (const file of ["index.html", "privacy.html", "telemetry.js", "styles.css", 
 }
 
 for (const [from, to] of [
-  ["skillbox-promo.mp4", "skillbox-promo.mp4"],
-  ["skillbox-promo-poster.jpg", "skillbox-promo-poster.jpg"],
+  ["skillbox-product-promo.mp4", "skillbox-promo.mp4"],
+  ["skillbox-product-promo-poster.jpg", "skillbox-promo-poster.jpg"]
+]) {
+  await cp(path.join(productPromo, from), path.join(assets, to));
+}
+
+for (const [from, to] of [
   ["assets/skillbox-dashboard.png", "skillbox-dashboard.png"],
   ["assets/skillbox-workspaces.png", "skillbox-workspaces.png"],
   ["assets/skillbox-rankings.png", "skillbox-rankings.png"],

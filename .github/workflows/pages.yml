@@ -7,6 +7,7 @@ on:
     paths:
       - site/**
       - docs/promo/skillbox-intro/**
+      - docs/promo/skillbox-product-v0.9.5/**
       - .github/workflows/pages.yml
   workflow_dispatch:
 
