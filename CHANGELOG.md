@@ -7,16 +7,7 @@ version tags such as `v0.3.0`.
 
 ## Unreleased
 
-- Show the date and call count when hovering a Usage heatmap day.
-- Default the Usage time range to All time, and remove the skill-count pill beside the Usage title.
-- Rename the Rankings page to Usage.
-- Replace Usage Top skill cards with a compact year heatmap of daily Calls; clicking a day updates the Usage 统计 table.
-- Count skill detail, dashboard, and workspace Calls from the same confirmed+inferred usage events as Usage.
-- Keep the Usage page visible while time-range and filter changes reload the ranking snapshot.
-- Show file-level progress while Sync histories scans Codex, Claude Code, and Cursor.
-- Count Codex dedicated `SKILL.md` file reads (`cat`/`sed`/`head` and similar) from session history as inferred Calls, while still excluding search, find, catalog, and tool output.
-- Count Cursor `ReadFile` of `SKILL.md` and user `manually_attached_skills` attachments as inferred Calls.
-- Resolve Claude Code Skill tool invocations from `.agents`/`.codex`/`.cursor` runtimes and the managed store when `~/.claude/skills` does not contain the skill.
+- No unreleased changes.
 
 ## 0.9.4
 
