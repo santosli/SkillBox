@@ -42,6 +42,11 @@ await cp(
   path.join(assets, "skillbox-collection-import-review.png")
 );
 
-await cp(path.join(promo, "assets", "fonts"), path.join(assets, "fonts"), { recursive: true });
+// 正文用系统字体栈（与桌面端一致），只有英文标题需要 Space Grotesk。
+// v0.9.0 promo 目录里的 IBM Plex 子集留给那支片子自己的 index.html，不再进站点产物。
+await mkdir(path.join(assets, "fonts"), { recursive: true });
+for (const font of ["space-grotesk-400.woff2", "space-grotesk-700.woff2"]) {
+  await cp(path.join(promo, "assets", "fonts", font), path.join(assets, "fonts", font));
+}
 
 console.log(`Built ${path.relative(root, dist)}`);
