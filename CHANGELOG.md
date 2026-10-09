@@ -8,6 +8,7 @@ version tags such as `v0.3.0`.
 ## Unreleased
 
 - Add GitHub collection-level update preview/apply and one-step rollback to the previous reviewed SHA, with schema v10 revision backups, CLI/Tauri/desktop review, and no auto-deploy.
+- Update source-map-js to 1.2.2 to clear the high-severity npm audit finding.
 
 ## 0.9.5
 
