@@ -429,8 +429,8 @@ pub fn list_skill_collections(managed_root: impl AsRef<Path>) -> Result<Vec<Skil
     let mut statement = connection
         .prepare(
             "SELECT id, display_name, canonical_worktree_root, canonical_repository_id,
-                    origin_url, branch, detached, reviewed_head_sha, source_kind, source_url,
-                    requested_reference, available
+                    origin_url, branch, detached, reviewed_head_sha, previous_reviewed_head_sha,
+                    source_kind, source_url, requested_reference, available
                FROM skill_collections
               ORDER BY display_name COLLATE NOCASE, id",
         )
@@ -446,10 +446,11 @@ pub fn list_skill_collections(managed_root: impl AsRef<Path>) -> Result<Vec<Skil
                 branch: row.get(5)?,
                 detached: row.get::<_, i64>(6)? != 0,
                 reviewed_head_sha: row.get(7)?,
-                source_kind: parse_collection_source_kind(&row.get::<_, String>(8)?)?,
-                source_url: row.get(9)?,
-                requested_reference: row.get(10)?,
-                available: row.get::<_, i64>(11)? != 0,
+                previous_reviewed_head_sha: row.get(8)?,
+                source_kind: parse_collection_source_kind(&row.get::<_, String>(9)?)?,
+                source_url: row.get(10)?,
+                requested_reference: row.get(11)?,
+                available: row.get::<_, i64>(12)? != 0,
                 members: Vec::new(),
             })
         })
@@ -589,7 +590,7 @@ pub fn apply_import_collection(
     {
         if existing_reviewed_sha.as_ref() != collection.reviewed_head_sha.as_ref() {
             return Err(
-                "Collection already has a different reviewed SHA; collection updates are not available until Phase D."
+                "Collection already has a different reviewed SHA. Use github-collection-update-preview to review a collection-level update."
                     .to_string(),
             );
         }
@@ -649,7 +650,7 @@ pub(crate) fn collection_import_target(
     }
 }
 
-fn collection_import_targets_from_imported(
+pub(crate) fn collection_import_targets_from_imported(
     imported: &[ImportedCandidate],
 ) -> (Vec<CollectionImportTarget>, Vec<String>) {
     let mut targets = Vec::new();
@@ -803,6 +804,301 @@ pub(crate) fn persisted_collection_reviewed_sha(
             |row| row.get(0),
         )
         .optional()
+        .map_err(|error| error.to_string())
+}
+
+pub(crate) fn skill_kind_from_index(
+    database_path: &Path,
+    skill_name: &str,
+) -> Result<Option<SkillKind>> {
+    if !database_path.is_file() {
+        return Ok(None);
+    }
+    let connection = rusqlite::Connection::open_with_flags(
+        database_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .map_err(|error| error.to_string())?;
+    let kind: Option<String> = connection
+        .query_row(
+            "SELECT type FROM skills WHERE name = ?1",
+            rusqlite::params![skill_name],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    Ok(match kind.as_deref() {
+        Some("user") => Some(SkillKind::User),
+        Some("remote") => Some(SkillKind::Remote),
+        _ => None,
+    })
+}
+
+pub(crate) struct CollectionMemberWrite {
+    pub relative_path: String,
+    pub skill_name: String,
+    pub snapshot_hash: String,
+    pub content_hash: String,
+    pub managed_skill_name: String,
+    pub reviewed_head_sha: Option<String>,
+}
+
+pub(crate) fn persist_github_collection_update(
+    database_path: &Path,
+    preview: &ImportCandidateCollection,
+    previous_sha: Option<&str>,
+    members: &[CollectionMemberWrite],
+    drop_relative_paths: &[String],
+) -> Result<SkillCollection> {
+    let mut connection = open_database(database_path)?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            "INSERT INTO skill_collections (
+                id, display_name, canonical_worktree_root, canonical_repository_id,
+                origin_url, branch, detached, reviewed_head_sha, previous_reviewed_head_sha,
+                source_kind, source_url, requested_reference, available, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 1, ?13)
+             ON CONFLICT(id) DO UPDATE SET
+                display_name = excluded.display_name,
+                canonical_worktree_root = excluded.canonical_worktree_root,
+                canonical_repository_id = excluded.canonical_repository_id,
+                origin_url = excluded.origin_url,
+                branch = excluded.branch,
+                detached = excluded.detached,
+                reviewed_head_sha = excluded.reviewed_head_sha,
+                previous_reviewed_head_sha = excluded.previous_reviewed_head_sha,
+                source_kind = excluded.source_kind,
+                source_url = excluded.source_url,
+                requested_reference = excluded.requested_reference,
+                available = 1,
+                updated_at = excluded.updated_at",
+            rusqlite::params![
+                preview.id,
+                preview.display_name,
+                preview.canonical_worktree_root.to_string_lossy(),
+                preview.canonical_repository_id.to_string_lossy(),
+                preview.origin_url,
+                preview.branch,
+                i64::from(preview.detached),
+                preview.reviewed_head_sha,
+                previous_sha,
+                collection_source_kind_string(preview.source_kind),
+                preview.source_url,
+                preview.requested_reference,
+                current_rfc3339_timestamp(),
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    for relative_path in drop_relative_paths {
+        transaction
+            .execute(
+                "DELETE FROM skill_collection_members
+                  WHERE collection_id = ?1 AND relative_path = ?2",
+                rusqlite::params![preview.id, relative_path],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    for member in members {
+        transaction
+            .execute(
+                "INSERT INTO skill_collection_members (
+                    collection_id, skill_name, relative_path, reviewed_head_sha,
+                    snapshot_hash, content_hash, managed_skill_name
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(collection_id, relative_path) DO UPDATE SET
+                    skill_name = excluded.skill_name,
+                    reviewed_head_sha = excluded.reviewed_head_sha,
+                    snapshot_hash = excluded.snapshot_hash,
+                    content_hash = excluded.content_hash,
+                    managed_skill_name = excluded.managed_skill_name",
+                rusqlite::params![
+                    preview.id,
+                    member.skill_name,
+                    member.relative_path,
+                    member.reviewed_head_sha,
+                    member.snapshot_hash,
+                    member.content_hash,
+                    member.managed_skill_name,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    let stored_members = transaction
+        .prepare(
+            "SELECT collection_id, skill_name, relative_path, reviewed_head_sha,
+                    snapshot_hash, content_hash, managed_skill_name
+               FROM skill_collection_members
+              WHERE collection_id = ?1
+              ORDER BY relative_path",
+        )
+        .map_err(|error| error.to_string())?
+        .query_map(rusqlite::params![preview.id], |row| {
+            Ok(SkillCollectionMember {
+                collection_id: row.get(0)?,
+                skill_name: row.get(1)?,
+                relative_path: row.get(2)?,
+                reviewed_head_sha: row.get(3)?,
+                snapshot_hash: row.get(4)?,
+                content_hash: row.get(5)?,
+                managed_skill_name: row.get(6)?,
+            })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(SkillCollection {
+        id: preview.id.clone(),
+        display_name: preview.display_name.clone(),
+        canonical_worktree_root: preview.canonical_worktree_root.clone(),
+        canonical_repository_id: preview.canonical_repository_id.clone(),
+        origin_url: preview.origin_url.clone(),
+        branch: preview.branch.clone(),
+        detached: preview.detached,
+        reviewed_head_sha: preview.reviewed_head_sha.clone(),
+        previous_reviewed_head_sha: previous_sha.map(str::to_string),
+        source_kind: preview.source_kind,
+        source_url: preview.source_url.clone(),
+        requested_reference: preview.requested_reference.clone(),
+        available: true,
+        members: stored_members,
+    })
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CollectionRevisionMemberRecord {
+    pub relative_path: String,
+    pub skill_name: String,
+    pub snapshot_hash: String,
+    pub content_hash: String,
+    pub managed_skill_name: String,
+    pub skill_kind: SkillKind,
+    pub backup_path: Option<PathBuf>,
+}
+
+pub(crate) fn collection_revision_exists(
+    database_path: &Path,
+    collection_id: &str,
+    reviewed_head_sha: &str,
+) -> Result<bool> {
+    if !database_path.is_file() {
+        return Ok(false);
+    }
+    let connection = rusqlite::Connection::open_with_flags(
+        database_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .map_err(|error| error.to_string())?;
+    connection
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM skill_collection_revisions
+                 WHERE collection_id = ?1 AND reviewed_head_sha = ?2
+             )",
+            rusqlite::params![collection_id, reviewed_head_sha],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())
+}
+
+pub(crate) fn record_collection_revision(
+    database_path: &Path,
+    collection: &SkillCollection,
+    reviewed_head_sha: &str,
+    members: &[CollectionRevisionMemberRecord],
+) -> Result<()> {
+    if collection_revision_exists(database_path, &collection.id, reviewed_head_sha)? {
+        return Ok(());
+    }
+    let mut connection = open_database(database_path)?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            "INSERT INTO skill_collection_revisions (
+                collection_id, reviewed_head_sha, source_url, requested_reference, recorded_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                collection.id,
+                reviewed_head_sha,
+                collection.source_url,
+                collection.requested_reference,
+                current_rfc3339_timestamp(),
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    for member in members {
+        transaction
+            .execute(
+                "INSERT INTO skill_collection_revision_members (
+                    collection_id, reviewed_head_sha, relative_path, skill_name,
+                    snapshot_hash, content_hash, managed_skill_name, skill_kind, backup_path
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                rusqlite::params![
+                    collection.id,
+                    reviewed_head_sha,
+                    member.relative_path,
+                    member.skill_name,
+                    member.snapshot_hash,
+                    member.content_hash,
+                    member.managed_skill_name,
+                    member.skill_kind.as_str(),
+                    member
+                        .backup_path
+                        .as_ref()
+                        .map(|path| path.to_string_lossy().into_owned()),
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    transaction.commit().map_err(|error| error.to_string())
+}
+
+pub(crate) fn load_collection_revision_members(
+    database_path: &Path,
+    collection_id: &str,
+    reviewed_head_sha: &str,
+) -> Result<Vec<CollectionRevisionMemberRecord>> {
+    if !database_path.is_file() {
+        return Ok(Vec::new());
+    }
+    let connection = rusqlite::Connection::open_with_flags(
+        database_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .map_err(|error| error.to_string())?;
+    let mut statement = connection
+        .prepare(
+            "SELECT relative_path, skill_name, snapshot_hash, content_hash,
+                    managed_skill_name, skill_kind, backup_path
+               FROM skill_collection_revision_members
+              WHERE collection_id = ?1 AND reviewed_head_sha = ?2
+              ORDER BY relative_path",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(rusqlite::params![collection_id, reviewed_head_sha], |row| {
+            let kind: String = row.get(5)?;
+            let backup: Option<String> = row.get(6)?;
+            Ok(CollectionRevisionMemberRecord {
+                relative_path: row.get(0)?,
+                skill_name: row.get(1)?,
+                snapshot_hash: row.get(2)?,
+                content_hash: row.get(3)?,
+                managed_skill_name: row.get(4)?,
+                skill_kind: match kind.as_str() {
+                    "remote" => SkillKind::Remote,
+                    _ => SkillKind::User,
+                },
+                backup_path: backup.map(PathBuf::from),
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    rows.collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())
 }
 
@@ -1150,7 +1446,7 @@ pub(crate) fn persist_collection(
     if let Some(existing_reviewed_sha) = existing_reviewed_sha {
         if existing_reviewed_sha.as_ref() != preview.reviewed_head_sha.as_ref() {
             return Err(
-                "Collection already has a different reviewed SHA; collection updates are not available until Phase D."
+                "Collection already has a different reviewed SHA. Use github-collection-update-preview to review a collection-level update."
                     .to_string(),
             );
         }
@@ -1249,6 +1545,7 @@ pub(crate) fn persist_collection(
         branch: preview.branch.clone(),
         detached: preview.detached,
         reviewed_head_sha: preview.reviewed_head_sha.clone(),
+        previous_reviewed_head_sha: None,
         source_kind: preview.source_kind,
         source_url: preview.source_url.clone(),
         requested_reference: preview.requested_reference.clone(),

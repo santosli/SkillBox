@@ -2,7 +2,7 @@ use crate::*;
 use fs2::FileExt;
 use std::fs::{File, OpenOptions};
 
-pub(crate) const LATEST_DATABASE_SCHEMA_VERSION: i64 = 9;
+pub(crate) const LATEST_DATABASE_SCHEMA_VERSION: i64 = 10;
 
 pub(crate) fn open_database(database_path: &Path) -> Result<Connection> {
     let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
@@ -97,6 +97,7 @@ pub(crate) fn run_database_migrations(connection: &mut Connection) -> Result<()>
         (7_i64, "usage_evidence_classification"),
         (8_i64, "skill_collections"),
         (9_i64, "github_skill_collections"),
+        (10_i64, "skill_collection_revisions"),
     ] {
         let applied: bool = connection
             .query_row(
@@ -122,6 +123,7 @@ pub(crate) fn run_database_migrations(connection: &mut Connection) -> Result<()>
             7 => apply_usage_evidence_classification_migration(&transaction)?,
             8 => apply_skill_collections_migration(&transaction)?,
             9 => apply_github_skill_collections_migration(&transaction)?,
+            10 => apply_skill_collection_revisions_migration(&transaction)?,
             _ => return Err(format!("Unknown database migration version: {version}")),
         }
         transaction
@@ -444,6 +446,45 @@ fn apply_github_skill_collections_migration(connection: &Connection) -> Result<(
         "requested_reference",
         "TEXT",
     )
+}
+
+fn apply_skill_collection_revisions_migration(connection: &Connection) -> Result<()> {
+    ensure_database_column(
+        connection,
+        "skill_collections",
+        "previous_reviewed_head_sha",
+        "TEXT",
+    )?;
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS skill_collection_revisions (
+              collection_id TEXT NOT NULL,
+              reviewed_head_sha TEXT NOT NULL,
+              source_url TEXT,
+              requested_reference TEXT,
+              recorded_at TEXT NOT NULL,
+              PRIMARY KEY (collection_id, reviewed_head_sha),
+              FOREIGN KEY (collection_id) REFERENCES skill_collections(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS skill_collection_revision_members (
+              collection_id TEXT NOT NULL,
+              reviewed_head_sha TEXT NOT NULL,
+              relative_path TEXT NOT NULL,
+              skill_name TEXT NOT NULL,
+              snapshot_hash TEXT NOT NULL,
+              content_hash TEXT NOT NULL,
+              managed_skill_name TEXT NOT NULL,
+              skill_kind TEXT NOT NULL,
+              backup_path TEXT,
+              PRIMARY KEY (collection_id, reviewed_head_sha, relative_path),
+              FOREIGN KEY (collection_id, reviewed_head_sha)
+                REFERENCES skill_collection_revisions(collection_id, reviewed_head_sha)
+            );
+            ",
+        )
+        .map_err(|error| error.to_string())
 }
 
 fn usage_evidence_repair_required(connection: &Connection) -> Result<bool> {

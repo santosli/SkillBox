@@ -87,6 +87,58 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 managed_root(command_args),
             )?)
         }
+        "github-collection-update-preview" => {
+            let source_url = positional(command_args).into_iter().next().ok_or_else(|| {
+                "Usage: skillbox github-collection-update-preview <github-url> [--managed-root <path>]"
+                    .to_string()
+            })?;
+            print_json(&skillbox_core::preview_github_skill_collection_update(
+                skillbox_core::PreviewGithubSkillCollectionRequest { source_url },
+                managed_root(command_args),
+            )?)
+        }
+        "github-collection-update-apply" => {
+            let source_url = positional(command_args).into_iter().next().ok_or_else(|| {
+                "Usage: skillbox github-collection-update-apply <github-url> --collection-id <id> --preview-id <id> --select <path|group|variant|type,...>"
+                    .to_string()
+            })?;
+            let collection_id = required_option_value(command_args, "--collection-id")?;
+            let preview_id = required_option_value(command_args, "--preview-id")?;
+            let selections = collection_selections(command_args)?;
+            print_json(&skillbox_core::apply_github_skill_collection_update(
+                skillbox_core::GithubSkillCollectionApplyRequest {
+                    source_url,
+                    collection_id,
+                    preview_id,
+                    selections,
+                    actor: "cli".to_string(),
+                },
+                managed_root(command_args),
+            )?)
+        }
+        "github-collection-rollback-preview" => {
+            let collection_id = required_option_value(command_args, "--collection-id")?;
+            print_json(&skillbox_core::preview_github_skill_collection_rollback(
+                skillbox_core::GithubCollectionRollbackRequest {
+                    collection_id,
+                    preview_id: String::new(),
+                    actor: "cli".to_string(),
+                },
+                managed_root(command_args),
+            )?)
+        }
+        "github-collection-rollback-apply" => {
+            let collection_id = required_option_value(command_args, "--collection-id")?;
+            let preview_id = required_option_value(command_args, "--preview-id")?;
+            print_json(&skillbox_core::apply_github_skill_collection_rollback(
+                skillbox_core::GithubCollectionRollbackRequest {
+                    collection_id,
+                    preview_id,
+                    actor: "cli".to_string(),
+                },
+                managed_root(command_args),
+            )?)
+        }
         "collection-apply" => {
             let root = positional(command_args).into_iter().next().ok_or_else(|| {
                 "Usage: skillbox collection-apply <repository-root> --collection-id <id> --preview-id <id> --select <path|group|variant|type,...>"
@@ -730,6 +782,10 @@ Commands:
   skillbox collection-apply <repository-root> --collection-id <id> --preview-id <id> --select <path|group|variant|type,...> [--managed-root <path>]
   skillbox github-collection-preview <github-url> [--managed-root <path>]
   skillbox github-collection-apply <github-url> --collection-id <id> --preview-id <id> --select <path|group|variant|type,...> [--managed-root <path>]
+  skillbox github-collection-update-preview <github-url> [--managed-root <path>]
+  skillbox github-collection-update-apply <github-url> --collection-id <id> --preview-id <id> --select <path|group|variant|type,...> [--managed-root <path>]
+  skillbox github-collection-rollback-preview --collection-id <id> [--managed-root <path>]
+  skillbox github-collection-rollback-apply --collection-id <id> --preview-id <id> [--managed-root <path>]
   skillbox install-preview <github-url> [--target <path>] [--managed-root <path>]
   skillbox install <github-url> --preview-id <id> [--target <path>] [--confirm-warnings] [--managed-root <path>]
   skillbox import <source-dir> --type user|remote [--managed-root <path>]
@@ -990,6 +1046,10 @@ mod tests {
         assert!(help.contains("skillbox collection-apply <repository-root>"));
         assert!(help.contains("skillbox github-collection-preview <github-url>"));
         assert!(help.contains("skillbox github-collection-apply <github-url>"));
+        assert!(help.contains("skillbox github-collection-update-preview <github-url>"));
+        assert!(help.contains("skillbox github-collection-update-apply <github-url>"));
+        assert!(help.contains("skillbox github-collection-rollback-preview --collection-id <id>"));
+        assert!(help.contains("skillbox github-collection-rollback-apply --collection-id <id>"));
 
         let selections = collection_selections(&[
             "--select".to_string(),
@@ -1019,6 +1079,18 @@ mod tests {
 
         assert!(!root.join("user-skills").exists());
         assert!(!root.join("remote-skills").exists());
+    }
+
+    #[test]
+    fn github_collection_update_preview_command_uses_structured_core_result() {
+        let root = temp_dir("cli-github-collection-update-preview").join("SkillBox");
+        run(vec![
+            "github-collection-update-preview".to_string(),
+            "https://github.com/acme/cli-github-collection-update-preview/tree/main".to_string(),
+            "--managed-root".to_string(),
+            root.to_string_lossy().to_string(),
+        ])
+        .unwrap();
     }
 
     #[test]

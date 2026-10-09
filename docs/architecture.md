@@ -6,7 +6,7 @@ SkillBox 是一个 Rust core + Tauri desktop monorepo。产品目标是管理跨
 覆盖 Claude、Codex、OpenClaw、Cursor、Claude Code、Copilot 等主流 agent。
 
 - `apps/desktop` 是 Tauri + React 桌面应用。
-  - `src/App.jsx` 保留主 App 组件、状态和事件编排。
+  - `src/App.jsx` 保留主 App 组件、状态和页面编排；GitHub collection update/rollback 等事件处理在 `src/appActionsA.js` / `src/appActionsB.js` / `src/appActionsC.js` / `src/appActionsD.js`。
   - `src/components/` 按页面/领域聚合展示组件（dashboard、workspaces、rankings、history、settings、importReview、skillDetail、remoteSkills、userSkillsSync、common）。
   - `src/*.js` 是可独立测试的纯函数模块（如 `previewData.js`、`historyEntries.js`、`usageHooks.js`、`preferences.js`、`importFlow.js`、`skills.js`）。
 - `apps/desktop/src-tauri` 是 Tauri command 层，负责把 UI 请求转发到 Rust crates。
@@ -74,6 +74,10 @@ React UI
 - `install_github_remote_skill` -> `skillbox_core::install_github_remote_skill`
 - `preview_github_skill_collection` -> `skillbox_core::preview_github_skill_collection`
 - `apply_github_skill_collection` -> `skillbox_core::apply_github_skill_collection`
+- `preview_github_skill_collection_update` -> `skillbox_core::preview_github_skill_collection_update`
+- `apply_github_skill_collection_update` -> `skillbox_core::apply_github_skill_collection_update`
+- `preview_github_skill_collection_rollback` -> `skillbox_core::preview_github_skill_collection_rollback`
+- `apply_github_skill_collection_rollback` -> `skillbox_core::apply_github_skill_collection_rollback`
 - `list_remote_skill_versions` -> `skillbox_core::list_remote_skill_versions`
 - `preview_remote_version_change` -> `skillbox_core::preview_remote_version_change`
 - `apply_remote_version_change` -> `skillbox_core::apply_remote_version_change`
@@ -111,6 +115,8 @@ cargo run -p skillbox-cli --offline -- <command>
 - `compatibility.rs` read-only frontmatter/target compatibility preview 与 stale-preview apply
 - `import.rs` import candidates 扫描、类型推断、Rust-owned skill group / variant / location 分组、冲突与备份
 - `collections.rs` local Git worktree identity、Import Review collection grouping、schema-backed child provenance 和 stale-checked selected-child apply
+- `github_collections.rs` GitHub Phase C one-fetch collection preview/apply at one reviewed SHA
+- `github_collection_updates.rs` GitHub Phase D SHA-consistent collection update and one-step rollback from schema-v10 revision backups
 - `installed_sources.rs` bounded v3 installer lockfile provenance matching for display-only installed-source collections; it never creates candidates or grants Git/update authority
 - `state.rs` managed state 聚合与用户偏好
 - `workspaces.rs` workspace registry 发现、注册与扫描
@@ -186,6 +192,7 @@ repo-local 开发脚本可以保留少量自用 Git 调用，例如 Git hooks �
   user-skills/
   remote-skills/
   backups/
+    collection-revisions/
   skillbox.sqlite
 ```
 
@@ -222,7 +229,8 @@ canonical worktree root、Git common directory、branch/detached state、HEAD
 GitHub remote collections 使用稳定的 canonical source URL + explicit requested ref
 作为 collection identity；resolved SHA、完整 child tree、selection 和 status 只进入
 每次 preview identity。因此同一 repo/ref 的新 commit 会得到新的 preview，但不会伪造
-成另一个长期 collection；Phase D 仍未提供更新/回滚语义。
+成另一个长期 collection。Phase D 用同一 collection id 做 SHA-consistent update，并把
+上一次 reviewed SHA 记入 `previous_reviewed_head_sha` 供一步 rollback。
 
 对于没有 live Git metadata 的复制安装，Import Review 可以读取配置 runtime
 root 旁边受支持的 v3 `.skill-lock.json`。Rust 只解析 bounded JSON。GitHub entry
@@ -252,7 +260,10 @@ Phase C 的 GitHub multi-skill one-fetch install 只允许显式 child selection
 前重新验证 canonical source URL、ref、resolved SHA、child snapshot 和 managed target；
 裸 repository URL 不假设 `main`，必须通过结构化结果要求显式 ref；root-only skill 也
 拒绝与 nested `SKILL.md` roots 重叠。它已随 v0.9.0 发布。
-Phase D 的 collection-level update/rollback 尚未实现。当前实现也不自动部署、不执行 hooks、filters、submodules、repository
+Phase D 为 GitHub collection 增加 reviewed update preview/apply 与一步 rollback：
+updated member 必须一起前进到同一 SHA，removed membership 不删除 skill，dirty
+managed copy fail closed，revision backup 写在 schema v10。本地 worktree 与
+installed-source update 仍未实现。当前实现也不自动部署、不执行 hooks、filters、submodules、repository
 scripts、custom helpers 或 arbitrary shell。
 
 不要在没有 adapter 语义的情况下猜测某个 agent 的目录布局。新增 agent 支持时，先定义 adapter 的发现路径、原生格式、部署方式和冲突处理。

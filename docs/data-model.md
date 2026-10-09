@@ -28,6 +28,10 @@ managed store 是跨 agent 的真相源，不绑定 Codex、Claude、Cursor、Co
       <skill-name>-<timestamp>/
     deletion-conflicts/
       <skill-name>-<timestamp>
+    collection-revisions/
+      <collection-id>/
+        <reviewed-head-sha>/
+          <skill-name>/
   adapters/
     <agent-id>/
   skillbox.sqlite
@@ -42,6 +46,7 @@ managed store 是跨 agent 的真相源，不绑定 Codex、Claude、Cursor、Co
 - `backups/imports` 保存从 runtime 目录迁移到 SkillBox 前的原始内容。
 - `backups/deletions` 保存从 managed store 删除的 user skill 目录或完整 remote skill root，供误删恢复；删除 workflow 不自动清理这些备份。
 - `backups/deletion-conflicts` 保存删除期间因并发替换而无法放回 workspace 的未知 target；SkillBox 不自动删除这些内容。若跨卷迁移失败，Doctor 会报告仍留在 workspace 的 `.delete-check-*.tmp` 路径，要求人工检查。
+- `backups/collection-revisions` 保存 GitHub collection 在 Phase D update 前的 member 文件快照，供一步 rollback 恢复；不是 runtime 权威，也不自动删除。
 - `adapters/<agent-id>` 预留给 agent-specific cache、manifest 或转换产物；当前 Rust schema 尚未实现。
 - 已存在的数据库进入新 schema migration 前，通过 SQLite 一致性快照生成一次 `pre-migration` backup；同一 schema version 不重复备份。初始化会先获取 per-database process-safe migration lock，再判断是否需要 backup/migration，确保并发 desktop/CLI caller 只生成一份 backup 并执行一次有序迁移。
 - 一个有效 skill 目录必须包含 `SKILL.md`。
@@ -240,6 +245,10 @@ skill_collections
   branch TEXT
   detached INTEGER NOT NULL DEFAULT 0
   reviewed_head_sha TEXT
+  previous_reviewed_head_sha TEXT
+  source_kind TEXT NOT NULL DEFAULT 'git_worktree'
+  source_url TEXT
+  requested_reference TEXT
   available INTEGER NOT NULL DEFAULT 1
   updated_at TEXT NOT NULL
 
@@ -253,6 +262,29 @@ skill_collection_members
   managed_skill_name TEXT NOT NULL
   PRIMARY KEY (collection_id, relative_path)
   FOREIGN KEY (collection_id) REFERENCES skill_collections(id)
+
+skill_collection_revisions
+  collection_id TEXT NOT NULL
+  reviewed_head_sha TEXT NOT NULL
+  source_url TEXT
+  requested_reference TEXT
+  recorded_at TEXT NOT NULL
+  PRIMARY KEY (collection_id, reviewed_head_sha)
+  FOREIGN KEY (collection_id) REFERENCES skill_collections(id)
+
+skill_collection_revision_members
+  collection_id TEXT NOT NULL
+  reviewed_head_sha TEXT NOT NULL
+  relative_path TEXT NOT NULL
+  skill_name TEXT NOT NULL
+  snapshot_hash TEXT NOT NULL
+  content_hash TEXT NOT NULL
+  managed_skill_name TEXT NOT NULL
+  skill_kind TEXT NOT NULL
+  backup_path TEXT
+  PRIMARY KEY (collection_id, reviewed_head_sha, relative_path)
+  FOREIGN KEY (collection_id, reviewed_head_sha)
+    REFERENCES skill_collection_revisions(collection_id, reviewed_head_sha)
 
 operations
   id TEXT PRIMARY KEY
@@ -338,8 +370,15 @@ ref；preview id 另外绑定 resolved SHA、完整 tree、child snapshot/status
 裸 repository URL 不自动声明 `main`，必须返回 explicit-ref-required 结果。远程
 collection apply 只在一次 bounded fetch 后写入选中的 child，并在 apply
 前重新验证 source URL、ref、resolved SHA、child relative path、snapshot 和
-managed target；Phase C 随 v0.9.0 发布。Phase D 的 collection-level
-update/rollback 不属于此迁移，仍是后续 v0.9.x 工作。
+managed target；Phase C 随 v0.9.0 发布。
+
+schema v10 为 `skill_collections` 增加 `previous_reviewed_head_sha`，并新增
+`skill_collection_revisions` / `skill_collection_revision_members`。第一次 Phase D
+GitHub collection update 在写入新 SHA 前快照当前 members 与
+`backups/collection-revisions/<collection-id>/<sha>/<skill-name>/` 文件 backup；
+重复记录同一 `(collection_id, sha)` 不会覆盖 backup。Rollback 只恢复
+`previous_reviewed_head_sha` 这一步。已有 skill/deployment/usage/import rows 不被改写。
+本地 `git_worktree` 与 `installed_source` 不使用这些 revision 表。
 
 Import Review 返回的 `ImportCandidateCollection` 还有一个只读的
 `source_kind`：`git_worktree` 表示可绑定 canonical worktree/HEAD 的本地 Git

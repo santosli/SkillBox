@@ -8,6 +8,7 @@ import {
   collectionSelectionState,
   collectionSkillCountLabel,
   collectionTypeChoiceState,
+  collectionChangeLabel,
   filterImportCandidateGroups,
   filterImportCandidateGroupsByQuery,
   filterImportCollectionsByQuery,
@@ -222,7 +223,9 @@ export function ImportReview({
   onTypeChange,
   status,
   subtitle = 'Confirm each skill type before SkillBox copies it into the managed store.',
-  title = 'Import Review'
+  title = 'Import Review',
+  applyLabel = 'Import selected',
+  applyingLabel = 'Importing...'
 }) {
   const selectableCount = importReviewSelectableGroups(groups, collections).length;
   const selectedCount = selectedImportCandidates(groups, collections).length
@@ -304,7 +307,7 @@ export function ImportReview({
               type="button"
               onClick={onImport}
             >
-              {status === 'importing' ? 'Importing...' : 'Import selected'}
+              {status === 'importing' ? applyingLabel : applyLabel}
             </button>
           </div>
         </div>
@@ -476,6 +479,11 @@ function CollectionReviewCard({
             </Badge>
             <Badge tone="slate">{collectionSkillCountLabel(collection.children.length)}</Badge>
           </div>
+          {collection.fromSha && collection.toSha ? (
+            <small>
+              Update {collection.fromSha.slice(0, 8)} → {collection.toSha.slice(0, 8)}. Selected skills are not auto-deployed.
+            </small>
+          ) : null}
           {isInstalledSource ? (
             <small>Source: {collection.originUrl || 'Installed source metadata'}</small>
           ) : isGithubRemote ? (
@@ -570,18 +578,19 @@ function CollectionReviewCard({
             if (!group) return null;
             const variant = group.variants.find((candidateVariant) => candidateVariant.id === child.variantId);
             const selected = !typeState.required
-              && group.isSelected
+              && (group.isSelected || child.selectionLocked)
               && group.selectedVariantId === child.variantId;
             const {
               canSelect,
               readOnlyLabel
             } = collectionChildTypeState(group, child);
+            const changeLabel = collectionChangeLabel(child.collectionChange);
             return (
               <div className={`collectionChildRow ${selected ? 'selected' : ''}`} key={child.id}>
                 <label className="candidateCheck">
                   <input
                     checked={selected}
-                    disabled={!canSelect || typeState.required || selectionDisabled}
+                    disabled={!canSelect || typeState.required || selectionDisabled || child.selectionLocked}
                     type="checkbox"
                     aria-label={`Select ${child.name} from ${collection.displayName}`}
                     onChange={() => onToggleSelected(group)}
@@ -591,6 +600,7 @@ function CollectionReviewCard({
                 <div className="collectionChildMain">
                   <div className="candidateTitle">
                     <strong>{child.name}</strong>
+                    {changeLabel ? <Badge tone={child.collectionChange === 'blocked' || child.collectionChange === 'removed' ? 'amber' : 'slate'}>{changeLabel}</Badge> : null}
                     {child.importStatus !== 'importable' ? <Badge tone="slate">{child.importStatus}</Badge> : null}
                     {child.conflict ? <Badge tone="red">Conflict</Badge> : null}
                   </div>
