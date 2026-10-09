@@ -16,13 +16,15 @@ English | [简体中文](README.zh-CN.md)
 
 SkillBox is a local-first macOS desktop app with a Rust core and CLI for managing `SKILL.md`-based skill and capability packages without treating any supported agent runtime as the source of truth.
 
-Current release: `v0.9.4`. SkillBox is useful today for local skill management, but it is still early software. Keep backups of important skills, and review each filesystem change before applying it. GitHub multi-skill collection preview/apply first shipped in v0.9.0. Collection-level update and one-step rollback are in Unreleased and are not part of the tagged v0.9.4 release.
+Current release: `v0.9.5`. SkillBox is useful today for local skill management, but it is still early software. Keep backups of important skills, and review each filesystem change before applying it. GitHub multi-skill collection preview/apply first shipped in v0.9.0. Collection-level update and one-step rollback are in Unreleased and are not part of the tagged v0.9.5 release.
 
 ## Promo Video
 
-[![Watch the SkillBox promo video](docs/promo/skillbox-intro/skillbox-promo-poster.jpg)](docs/promo/skillbox-intro/skillbox-promo.mp4)
+[![Watch the SkillBox promo video](docs/promo/skillbox-product-v0.9.5/skillbox-product-promo-poster.jpg)](docs/promo/skillbox-product-v0.9.5/skillbox-product-promo.mp4)
 
-A 30-second v0.9.0 overview of SkillBox: runtime-aware workspaces, review-before-write safety, evidence-aware Calls, transparent coverage, and local-first deployment. The promo remains a v0.9.0 release artifact; the current collection-header workflow is shown in the product screenshot below.
+A 75-second v0.9.5 overview built around one line: every scattered skill, collected into one library. It walks the Dashboard that manages every managed skill in one screen, the skill detail where one edit reaches every connected runtime, runtime-aware workspaces, review-before-write imports, and evidence-aware Calls with transparent coverage. Feature shots mount the real components from `apps/desktop/src` rather than screenshots; the usage data and deployment targets shown are demo fixtures.
+
+The earlier [30-second v0.9.0 promo](docs/promo/skillbox-intro/skillbox-promo.mp4) stays in the repository as that release's artifact.
 
 ## Why
 
@@ -47,17 +49,17 @@ The dashboard provides local search, type/update/tag/favorite filters, grid and 
 
 The Workspaces view tracks profile-aware global and project-local `SKILL.md` roots for Agents, Codex, Claude Code, Cursor, and exact custom folders. Search by workspace name, path, or profile and combine the query with the existing scope filters.
 
-![SkillBox rankings](docs/screenshots/skillbox-rankings.png)
+![SkillBox usage](docs/screenshots/skillbox-rankings.png)
 
-Rankings keeps Top skills and the full ranking primary. Its optional coverage disclosure separates confirmed and defensible inferred Calls from lower-signal History references, and reports the local provider scan boundary without presenting account analytics.
+Usage keeps a compact year heatmap of daily Calls and a Usage 统计 table. Click a day to filter that table to the day's skill totals. Its optional coverage disclosure separates confirmed and defensible inferred Calls from lower-signal History references, and reports the local provider scan boundary without presenting account analytics.
 
 ![SkillBox ranking coverage](docs/screenshots/skillbox-rankings-coverage.png)
 
 ![SkillBox history](docs/screenshots/skillbox-history.png)
 
-History separates Calls, history references, and management operations. The standalone Rankings page shows 7-day, 30-day, or all-time **Calls** filtered by skill type (User, Remote, or System), Agent, or Workspace. Calls combine locally confirmed executions with defensible structured per-turn invocations; references never increase Calls or default ranking order. Rankings keep same-name regular and System skills separate and use the observed source when preparing an import. Coverage reports confirmed, inferred, and reference totals, their time ranges, retained provenance sources, and the latest provider scan totals.
+History separates Calls, history references, and management operations. The standalone Usage page defaults to all-time **Calls**, with 7-day and 30-day filters, plus skill type (User, Remote, or System), Agent, or Workspace. A year heatmap shows daily Call intensity; clicking a day updates the Usage 统计 table. Calls combine locally confirmed executions with defensible structured per-turn invocations; references never increase Calls or default ranking order. Usage keeps same-name regular and System skills separate and uses the observed source when preparing an import. Coverage reports confirmed, inferred, and reference totals, their time ranges, retained provenance sources, and the latest provider scan totals.
 
-`Sync histories` imports auditable usage evidence from Codex, Claude Code, and Cursor without copying chat bodies. Codex per-turn `<skill>` blocks or `[$skill](.../SKILL.md)` links with an absolute path are inferred Calls, not provider-confirmed runs; catalog entries, prose, shell/tool payloads, and outputs are excluded. Claude Code native Skill tool/command attribution is confirmed after resolving a real `SKILL.md`. Cursor state `context.cursorRules` entries are references. A structured assistant `Read` of an absolute local `SKILL.md` in a bounded Cursor agent transcript is an inferred Call, deduplicated once per transcript user turn and skill. Safe historical paths remain auditable after the file is moved or deleted, but never become filesystem or deployment authority; `ReadFile` candidates are reported diagnostically and excluded from Calls until their semantics are qualified. Repeated scans are idempotent and stronger evidence upgrades an existing event without losing provenance. Codex local stores do not expose a stable provider-native run total, so local Calls remain a known undercount rather than account analytics. An explicit sync can recover or upgrade evidence; database migration itself does not rescan histories.
+`Sync histories` imports auditable usage evidence from Codex, Claude Code, and Cursor without copying chat bodies. Codex per-turn `<skill>` blocks, `[$skill](.../SKILL.md)` links with an absolute path, and dedicated `SKILL.md` file reads (`cat`, `sed`, `head`, and similar) are inferred Calls, not provider-confirmed runs; catalog entries, prose, search/find commands, mixed tool payloads, and outputs are excluded. Claude Code native Skill tool/command attribution is confirmed after resolving a real `SKILL.md`, including skills that currently live in another local runtime or the managed store. Cursor state `context.cursorRules` entries are references. A structured assistant `Read` or `ReadFile` of an absolute local `SKILL.md` in a bounded Cursor agent transcript, and a user `manually_attached_skills` attachment, are inferred Calls, deduplicated once per transcript user turn and skill. Safe historical paths remain auditable after the file is moved or deleted, but never become filesystem or deployment authority. Repeated scans are idempotent and stronger evidence upgrades an existing event without losing provenance. Codex local stores do not expose a stable provider-native run total, so local Calls remain a known undercount rather than account analytics. An explicit sync can recover or upgrade evidence; database migration itself does not rescan histories.
 
 ![SkillBox collection import review with one Remote type choice, three selected eligible children, and a blocked conflict](docs/screenshots/skillbox-collection-import-review.png)
 
@@ -107,7 +109,7 @@ Longer-term support for native Claude, OpenClaw, Cursor, Claude Code, Copilot, a
 - Review user-skill Git diffs, create selected-file Conventional Commits, and optionally push. The v0.7 flow handles incoming `origin/main` changes through separate preview-confirmed fast-forward steps; SkillBox never auto-merges, rebases, resets, stashes, or resolves conflicts.
 - During local Import Review, Rust detects the nearest safe Git worktree and presents its `SKILL.md` children as one collection. Collection scans are read-only; applying selected children rechecks the reviewed worktree/HEAD and stores collection provenance after the import succeeds.
 - Search and filter the dashboard by type, update status, tag, or favorite; switch between grid and list views, with favorites and tags persisted in SQLite.
-- Record supported hooks and structured local-history evidence; browse Calls separately from History references, rank by confirmed plus defensible inferred Calls, and inspect aggregate-only coverage without storing full transcripts.
+- Record supported hooks and structured local-history evidence; browse Calls separately from History references, inspect a year heatmap of daily Calls, rank by confirmed plus defensible inferred Calls, and inspect aggregate-only coverage without storing full transcripts.
 - Apply ordered SQLite migrations with pre-migration backups and integrity checks; run Doctor diagnostics and explicitly clean up stale deployment records.
 - Check signed GitHub Releases in the background at most once per day, show an Update action when a new macOS build is available, and install only after the user clicks it.
 
@@ -134,13 +136,13 @@ https://github.com/santosli/SkillBox/releases
 For this release, use the asset named:
 
 ```text
-SkillBox_0.9.4_universal.dmg
+SkillBox_0.9.5_universal.dmg
 ```
 
 The matching checksum is published as:
 
 ```text
-SkillBox_0.9.4_universal.dmg.sha256
+SkillBox_0.9.5_universal.dmg.sha256
 ```
 
 Open the DMG and drag `SkillBox.app` into `/Applications`.

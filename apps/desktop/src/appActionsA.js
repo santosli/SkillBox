@@ -1185,18 +1185,48 @@ export function createAppActions(getCtx) {
   }
 
   async function syncLocalUsageHistories() {
-    const { history, loadUsageRankings, pageRef, refresh, setError, setUsageBackfillLoading, setUsageBackfillNotice, usageRankingFilters } = getCtx();
-    if (pageRef.current !== 'rankings') return;
+    const {
+      loadUsageRankings,
+      pageRef,
+      setError,
+      setUsageBackfillLoading,
+      setUsageBackfillNotice,
+      setUsageBackfillProgress,
+      usageBackfillActiveRef,
+      usageBackfillSyncIdRef,
+      usageRankingFilters
+    } = getCtx();
+    if (pageRef.current !== 'usage') return;
+    const syncId = usageBackfillSyncIdRef.current + 1;
+    usageBackfillSyncIdRef.current = syncId;
+    usageBackfillActiveRef.current = true;
+    const providerCount = usageHistorySyncProviders.length;
     setUsageBackfillLoading(true);
+    setUsageBackfillProgress({
+      provider: usageHistorySyncProviders[0]?.id || '',
+      phase: 'starting',
+      processed: 0,
+      total: null,
+      providerIndex: 1,
+      providerCount
+    });
     setError('');
     setUsageBackfillNotice('');
     try {
       const providerResults = [];
-      for (const provider of usageHistorySyncProviders) {
-        if (pageRef.current !== 'rankings') return;
+      for (const [index, provider] of usageHistorySyncProviders.entries()) {
+        if (pageRef.current !== 'usage' || usageBackfillSyncIdRef.current !== syncId) return;
+        setUsageBackfillProgress({
+          provider: provider.id,
+          phase: 'scanning',
+          processed: 0,
+          total: null,
+          providerIndex: index + 1,
+          providerCount
+        });
         try {
           const result = window.__TAURI_INTERNALS__
-            ? await invoke(provider.command, { request: provider.request })
+            ? await invoke(provider.command, { request: provider.request, syncId })
             : {
                 scanned_files: provider.id === 'cursor' ? 4 : 2,
                 discovered: provider.id === 'codex' ? 3 : 1,
@@ -1217,7 +1247,7 @@ export function createAppActions(getCtx) {
           });
         }
       }
-      if (pageRef.current !== 'rankings') return;
+      if (pageRef.current !== 'usage') return;
       const normalizedResults = providerResults.map((result) => ({
         provider: result.provider,
         ...normalizeCodexUsageBackfill(result)
@@ -1239,24 +1269,29 @@ export function createAppActions(getCtx) {
       }
       const rankingRefreshError = await loadUsageRankings(usageRankingFilters, {
         clearError: !partialWarning,
-        reportError: !partialWarning
+        reportError: !partialWarning,
+        refreshSkills: true
       });
-      if (partialWarning && pageRef.current === 'rankings') {
+      if (partialWarning && pageRef.current === 'usage') {
         setError(
           rankingRefreshError
-            ? `${partialWarning} Rankings refresh failed: ${rankingRefreshError}`
+            ? `${partialWarning} Usage refresh failed: ${rankingRefreshError}`
             : partialWarning
         );
       }
     } catch (backfillError) {
-      if (pageRef.current !== 'rankings') return;
+      if (pageRef.current !== 'usage') return;
       setError(
         backfillError.message
           || String(backfillError)
           || 'Unable to import local agent usage history.'
       );
     } finally {
+      if (usageBackfillSyncIdRef.current === syncId) {
+        usageBackfillActiveRef.current = false;
+      }
       setUsageBackfillLoading(false);
+      setUsageBackfillProgress(null);
     }
   }
 

@@ -785,7 +785,7 @@ export function createAppActions(getCtx) {
       if (!isCurrentRemoteRequest()) {
         return;
       }
-      if (page === 'rankings') {
+      if (page === 'usage') {
         await loadUsageRankings(usageRankingFilters);
         if (!isCurrentRemoteRequest()) {
           return;

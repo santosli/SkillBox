@@ -443,6 +443,77 @@ fn managed_state_includes_skill_usage_summary() {
 }
 
 #[test]
+fn managed_state_call_counts_follow_usage_events_not_stale_stats() {
+    let root = temp_dir("usage-managed-state-stale-stats");
+    let managed_root = root.join("SkillBox");
+    let source = root.join("runtime").join("alpha");
+    let runtime = root.join(".codex").join("skills");
+    make_skill(&source, "alpha", "Alpha skill");
+    import_skill(&source, SkillKind::User, &managed_root).unwrap();
+
+    for used_at in [
+        "2026-06-02T09:00:00Z",
+        "2026-06-02T10:00:00Z",
+        "2026-06-02T11:00:00Z",
+    ] {
+        record_test_call(
+            RecordSkillUsageRequest {
+                skill_name: "alpha".to_string(),
+                agent_id: "codex".to_string(),
+                runtime_root: runtime.clone(),
+                event_id: None,
+                used_at: Some(used_at.to_string()),
+                prompt_excerpt: None,
+                metadata: None,
+            },
+            &managed_root,
+        )
+        .unwrap();
+    }
+
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    let connection = rusqlite::Connection::open(&paths.database_path).unwrap();
+    connection
+        .execute("UPDATE skill_usage_stats SET usage_count = 1", [])
+        .unwrap();
+    let stale: i64 = connection
+        .query_row(
+            "SELECT SUM(usage_count) FROM skill_usage_stats",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(stale, 1);
+
+    let state = managed_state(&managed_root).unwrap();
+    assert_eq!(state.skills[0].usage_count, 3);
+    assert_eq!(
+        state.skills[0]
+            .confirmed_count
+            .saturating_add(state.skills[0].inferred_count),
+        3
+    );
+
+    let ranking = list_skill_usage_rankings_at(
+        SkillUsageRankingRequest {
+            range: SkillUsageRankingRange::AllTime,
+            ..SkillUsageRankingRequest::default()
+        },
+        &managed_root,
+        DateTime::parse_from_rfc3339("2026-06-03T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc),
+    )
+    .unwrap();
+    let row = ranking
+        .rows
+        .iter()
+        .find(|row| row.skill_name == "alpha")
+        .expect("alpha ranking row");
+    assert_eq!(row.usage_count, state.skills[0].usage_count);
+}
+
+#[test]
 fn usage_rankings_include_managed_zero_rows_and_apply_time_range_ordering() {
     let root = temp_dir("usage-rankings-range");
     let managed_root = root.join("SkillBox");
@@ -520,6 +591,42 @@ fn usage_rankings_include_managed_zero_rows_and_apply_time_range_ordering() {
         vec![(1, "alpha", 2), (2, "beta", 1), (3, "gamma", 0)]
     );
     assert!(last_seven.rows.iter().all(|row| row.managed));
+    let heatmap_end = as_of.with_timezone(&chrono::Local).date_naive();
+    let heatmap_start = heatmap_end
+        .checked_sub_signed(chrono::Duration::days(364))
+        .expect("heatmap start");
+    assert_eq!(last_seven.daily.len(), 365);
+    assert_eq!(last_seven.daily[0].date, heatmap_start.to_string());
+    assert_eq!(last_seven.daily[364].date, heatmap_end.to_string());
+    assert_eq!(
+        last_seven
+            .daily
+            .iter()
+            .filter(|point| point.date.as_str() >= "2026-06-23")
+            .map(|point| point.total_calls)
+            .sum::<usize>(),
+        3
+    );
+    assert_eq!(
+        last_seven
+            .daily
+            .iter()
+            .map(|point| point.total_calls)
+            .sum::<usize>(),
+        4
+    );
+    assert!(last_seven
+        .daily
+        .windows(2)
+        .all(|pair| pair[0].date < pair[1].date));
+    assert!(last_seven.daily.iter().any(|point| point
+        .skills
+        .iter()
+        .any(|skill| skill.skill_name == "alpha" && skill.calls >= 1)));
+    assert!(last_seven.daily.iter().any(|point| point
+        .skills
+        .iter()
+        .any(|skill| skill.skill_name == "beta" && skill.calls == 1)));
     assert!(last_seven
         .rows
         .iter()
@@ -536,6 +643,14 @@ fn usage_rankings_include_managed_zero_rows_and_apply_time_range_ordering() {
         last_thirty.rows[0].last_used_at.as_deref(),
         Some("2026-06-29T12:00:00+00:00")
     );
+    assert_eq!(
+        last_thirty
+            .daily
+            .iter()
+            .map(|point| point.total_calls)
+            .sum::<usize>(),
+        last_thirty.total_observed_calls
+    );
 
     let all_time = list_skill_usage_rankings_at(
         SkillUsageRankingRequest {
@@ -549,6 +664,14 @@ fn usage_rankings_include_managed_zero_rows_and_apply_time_range_ordering() {
     assert_eq!(all_time.range_start, None);
     assert_eq!(all_time.total_observed_calls, 4);
     assert_eq!(all_time.rows[0].usage_count, 2);
+    assert_eq!(
+        all_time
+            .daily
+            .iter()
+            .map(|point| point.total_calls)
+            .sum::<usize>(),
+        all_time.total_observed_calls
+    );
 }
 
 #[test]

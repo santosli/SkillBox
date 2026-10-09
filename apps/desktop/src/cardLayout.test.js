@@ -19,6 +19,7 @@ const appSourcePaths = [
   './skills.js',
   './historyEntries.js',
   './usageRankings.js',
+  './usageBackfillProgress.js',
   './usageHooks.js',
   './workspaces.js',
   './appUpdates.js',
@@ -132,7 +133,7 @@ test('standard top-level pages share a full-width page frame by default', () => 
   assert.match(dashboardSource, /<PageFrame ariaLabel="Skills dashboard">/);
   assert.match(workspacePageSource, /<PageFrame ariaLabel="Workspace registry">/);
   assert.match(historyPageSource, /<PageFrame ariaLabel="History">/);
-  assert.match(rankingsPageSource, /<PageFrame ariaLabel="Rankings">/);
+  assert.match(rankingsPageSource, /<PageFrame ariaLabel="Usage">/);
   assert.match(pageFrameRule, /display:\s*grid;/);
   assert.match(pageFrameRule, /width:\s*100%;/);
   assert.match(pageFrameRule, /min-width:\s*0;/);

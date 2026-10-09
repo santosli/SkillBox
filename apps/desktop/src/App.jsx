@@ -156,6 +156,9 @@ import {
   usageHistorySyncProviders
 } from './usageRankings.js';
 import {
+  normalizeUsageBackfillProgress
+} from './usageBackfillProgress.js';
+import {
   defaultSyncCommitMessage,
   normalizeSuggestedUserSkillsCommit,
   normalizeUserSkillsGitChanges,
@@ -482,6 +485,7 @@ export default function App() {
   const [usageRankings, setUsageRankings] = useState(normalizeUsageRankings(null));
   const [usageRankingLoading, setUsageRankingLoading] = useState(false);
   const [usageBackfillLoading, setUsageBackfillLoading] = useState(false);
+  const [usageBackfillProgress, setUsageBackfillProgress] = useState(null);
   const [usageBackfillNotice, setUsageBackfillNotice] = useState('');
   const [rankingImportSkillName, setRankingImportSkillName] = useState('');
   const [remoteContextLoading, setRemoteContextLoading] = useState({});
@@ -501,6 +505,8 @@ export default function App() {
   const refreshSkillStatusesRef = useRef(null);
   const appUpdateAutoCheckedRef = useRef(false);
   const usageRankingRequestRef = useRef(0);
+  const usageBackfillSyncIdRef = useRef(0);
+  const usageBackfillActiveRef = useRef(false);
   const rankingImportRequestRef = useRef(0);
   const historyRequestRef = useRef(0);
   const importScanControllerRef = useRef(null);
@@ -538,6 +544,37 @@ export default function App() {
       setImportReview((current) => current.open && current.loading
         ? { ...current, scanProgress: progress }
         : current);
+    }).then((removeListener) => {
+      unlisten = removeListener;
+    }).catch(() => {});
+
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!window.__TAURI_INTERNALS__) {
+      return undefined;
+    }
+
+    let active = true;
+    let unlisten;
+    listen('skillbox://usage-backfill-progress', (event) => {
+      const progress = event.payload || {};
+      if (
+        !active
+        || !usageBackfillActiveRef.current
+        || progress.syncId !== usageBackfillSyncIdRef.current
+      ) {
+        return;
+      }
+      setUsageBackfillProgress((current) => ({
+        ...normalizeUsageBackfillProgress(progress),
+        providerIndex: current?.providerIndex || 0,
+        providerCount: current?.providerCount || usageHistorySyncProviders.length
+      }));
     }).then((removeListener) => {
       unlisten = removeListener;
     }).catch(() => {});
@@ -808,7 +845,7 @@ export default function App() {
     clearDashboardFilters,
     openHistory,
     loadHistory,
-    openRankings,
+    openUsage,
     cancelUsageRankingRequest,
     loadUsageRankings,
     openRankedSkill,
@@ -949,6 +986,7 @@ export default function App() {
     setSyncCommitMessage,
     setSyncDialog,
     setUsageBackfillLoading,
+    setUsageBackfillProgress,
     setUsageBackfillNotice,
     setUsageHooks,
     setUsageRankingFilters,
@@ -971,6 +1009,9 @@ export default function App() {
     syncCommitMessage,
     syncDialog,
     usageBackfillLoading,
+    usageBackfillProgress,
+    usageBackfillSyncIdRef,
+    usageBackfillActiveRef,
     usageBackfillNotice,
     usageHooks,
     usageRankingFilters,
@@ -1067,7 +1108,7 @@ export default function App() {
     clearDashboardFilters,
     openHistory,
     loadHistory,
-    openRankings,
+    openUsage,
     cancelUsageRankingRequest,
     loadUsageRankings,
     openRankedSkill,
@@ -1137,8 +1178,8 @@ export default function App() {
               onClick={() => {
                 if (item.id === 'dashboard') {
                   openDashboard('all');
-                } else if (item.id === 'rankings') {
-                  openRankings();
+                } else if (item.id === 'usage') {
+                  openUsage();
                 } else if (item.id === 'history') {
                   openHistory();
                 } else {
@@ -1223,9 +1264,10 @@ export default function App() {
             onFilter={loadHistory}
             onRefresh={loadHistory}
           />
-        ) : page === 'rankings' ? (
+        ) : page === 'usage' ? (
           <UsageRankingsPage
             backfilling={usageBackfillLoading}
+            backfillProgress={usageBackfillProgress}
             error={error}
             filters={usageRankingFilters}
             importingSkillName={rankingImportSkillName}
@@ -1245,7 +1287,7 @@ export default function App() {
               navigateToPage('settings');
             }}
             onOpenSkill={openRankedSkill}
-            onRefresh={() => loadUsageRankings(usageRankingFilters)}
+            onRefresh={() => loadUsageRankings(usageRankingFilters, { refreshSkills: true })}
           />
         ) : (
           <Dashboard
@@ -1278,7 +1320,7 @@ export default function App() {
         )}
       </section>
 
-      {(page === 'dashboard' || page === 'rankings') && selectedSkill ? (
+      {(page === 'dashboard' || page === 'usage') && selectedSkill ? (
         <SkillDetailDialog
           skill={selectedSkill}
           status={status}

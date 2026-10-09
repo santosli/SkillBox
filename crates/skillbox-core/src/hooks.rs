@@ -982,6 +982,326 @@ pub(crate) fn extract_explicit_skill_refs_from_text(text: &str) -> Vec<HookSkill
     skills
 }
 
+const SKILL_MD_READ_COMMANDS: &[&str] = &[
+    "bat", "batcat", "cat", "head", "less", "more", "nl", "sed", "tail",
+];
+
+pub(crate) fn extract_skill_refs_from_exec_payload(
+    value: &serde_json::Value,
+    fallback_workdir: Option<&Path>,
+) -> Vec<HookSkillRef> {
+    let payload = value.get("payload").unwrap_or(value);
+    let Some((command, workdir)) = exec_command_from_payload(payload) else {
+        return Vec::new();
+    };
+    let workdir = workdir.as_deref().or(fallback_workdir);
+    extract_skill_refs_from_exec_command(&command, workdir)
+}
+
+fn exec_command_from_payload(payload: &serde_json::Value) -> Option<(String, Option<PathBuf>)> {
+    let payload_type = payload.get("type").and_then(|value| value.as_str())?;
+    let name = payload
+        .get("name")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    match payload_type {
+        "custom_tool_call" if matches!(name, "exec" | "exec_command" | "") => {
+            let input = payload.get("input").and_then(|value| value.as_str())?;
+            Some(command_and_workdir_from_text(input))
+        }
+        "function_call" if matches!(name, "exec" | "exec_command") => {
+            command_and_workdir_from_arguments(payload.get("arguments")?)
+        }
+        _ => None,
+    }
+}
+
+fn command_and_workdir_from_arguments(
+    arguments: &serde_json::Value,
+) -> Option<(String, Option<PathBuf>)> {
+    match arguments {
+        serde_json::Value::Object(object) => {
+            let command = object
+                .get("cmd")
+                .and_then(|value| value.as_str())?
+                .to_string();
+            let workdir = object
+                .get("workdir")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from);
+            Some((command, workdir))
+        }
+        serde_json::Value::String(text) => {
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(text) {
+                if parsed.is_object() {
+                    return command_and_workdir_from_arguments(&parsed);
+                }
+            }
+            Some(command_and_workdir_from_text(text))
+        }
+        _ => None,
+    }
+}
+
+fn command_and_workdir_from_text(text: &str) -> (String, Option<PathBuf>) {
+    let command = extract_quoted_field(text, "cmd").unwrap_or_else(|| text.to_string());
+    let workdir = extract_quoted_field(text, "workdir")
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    (command, workdir)
+}
+
+fn extract_quoted_field(haystack: &str, field: &str) -> Option<String> {
+    let quoted_keys = [format!("\"{field}\""), format!("'{field}'")];
+    for key in quoted_keys {
+        let mut rest = haystack;
+        while let Some(position) = rest.find(&key) {
+            if let Some(value) = quoted_value_after_key(&rest[position + key.len()..]) {
+                return Some(value);
+            }
+            rest = &rest[position + 1..];
+        }
+    }
+    let mut rest = haystack;
+    while let Some(position) = rest.find(field) {
+        let before_ok = position == 0
+            || rest
+                .as_bytes()
+                .get(position.saturating_sub(1))
+                .is_some_and(|byte| !byte.is_ascii_alphanumeric() && *byte != b'_');
+        let after = &rest[position + field.len()..];
+        let after_ok = after
+            .chars()
+            .next()
+            .is_some_and(|character| !character.is_ascii_alphanumeric() && character != '_');
+        if before_ok && after_ok {
+            if let Some(value) = quoted_value_after_key(after) {
+                return Some(value);
+            }
+        }
+        rest = &rest[position + 1..];
+    }
+    None
+}
+
+fn quoted_value_after_key(after_key: &str) -> Option<String> {
+    let after_key = after_key.trim_start();
+    let after_colon = after_key.strip_prefix(':')?.trim_start();
+    let quote = after_colon.chars().next()?;
+    if quote != '"' && quote != '\'' {
+        return None;
+    }
+    unescape_quoted(&after_colon[quote.len_utf8()..], quote)
+}
+
+fn unescape_quoted(input: &str, quote: char) -> Option<String> {
+    let mut output = String::new();
+    let mut escaped = false;
+    for character in input.chars() {
+        if escaped {
+            output.push(match character {
+                'n' => '\n',
+                't' => '\t',
+                'r' => '\r',
+                other => other,
+            });
+            escaped = false;
+            continue;
+        }
+        if character == '\\' {
+            escaped = true;
+            continue;
+        }
+        if character == quote {
+            return Some(output);
+        }
+        output.push(character);
+    }
+    None
+}
+
+pub(crate) fn extract_skill_refs_from_exec_command(
+    command: &str,
+    workdir: Option<&Path>,
+) -> Vec<HookSkillRef> {
+    let mut skills = Vec::new();
+    for statement in split_shell_statements(command) {
+        let tokens = tokenize_shell_statement(statement);
+        let Some(command_name) = first_shell_command(&tokens) else {
+            continue;
+        };
+        if !SKILL_MD_READ_COMMANDS.contains(&command_name.as_str()) {
+            continue;
+        }
+        for token in &tokens {
+            let path = token.trim_matches(|character| matches!(character, '"' | '\''));
+            let path = path.strip_prefix('<').unwrap_or(path);
+            if let Some(skill) = skill_ref_from_skill_md_read_path(path, workdir) {
+                skills.push(skill);
+            }
+        }
+    }
+    skills
+}
+
+fn first_shell_command(tokens: &[String]) -> Option<String> {
+    tokens.iter().find_map(|token| {
+        if token.contains('=') && !token.starts_with('/') && !token.starts_with('.') {
+            return None;
+        }
+        let command = Path::new(token)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(token);
+        Some(command.to_ascii_lowercase())
+    })
+}
+
+fn split_shell_statements(input: &str) -> Vec<&str> {
+    let mut statements = Vec::new();
+    let mut start = 0usize;
+    let mut index = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    while index < input.len() {
+        let character = input[index..].chars().next().unwrap_or('\0');
+        let width = character.len_utf8();
+        if escaped {
+            escaped = false;
+            index += width;
+            continue;
+        }
+        if quote.is_some() && character == '\\' {
+            escaped = true;
+            index += width;
+            continue;
+        }
+        if let Some(current_quote) = quote {
+            if character == current_quote {
+                quote = None;
+            }
+            index += width;
+            continue;
+        }
+        if character == '\'' || character == '"' {
+            quote = Some(character);
+            index += width;
+            continue;
+        }
+        if character == '\n' || character == ';' {
+            push_shell_statement(&mut statements, input, start, index);
+            start = index + width;
+            index += width;
+            continue;
+        }
+        if character == '&' && input[index + width..].starts_with('&') {
+            push_shell_statement(&mut statements, input, start, index);
+            start = index + width + 1;
+            index = start;
+            continue;
+        }
+        if character == '|' && input[index + width..].starts_with('|') {
+            push_shell_statement(&mut statements, input, start, index);
+            start = index + width + 1;
+            index = start;
+            continue;
+        }
+        index += width;
+    }
+    push_shell_statement(&mut statements, input, start, input.len());
+    statements
+}
+
+fn push_shell_statement<'a>(
+    statements: &mut Vec<&'a str>,
+    input: &'a str,
+    start: usize,
+    end: usize,
+) {
+    let statement = input.get(start..end).unwrap_or_default().trim();
+    if !statement.is_empty() {
+        statements.push(statement);
+    }
+}
+
+fn tokenize_shell_statement(statement: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+    let flush = |tokens: &mut Vec<String>, current: &mut String| {
+        if !current.is_empty() {
+            tokens.push(std::mem::take(current));
+        }
+    };
+    for character in statement.chars() {
+        if escaped {
+            current.push(character);
+            escaped = false;
+            continue;
+        }
+        if quote.is_none() && character == '\\' {
+            escaped = true;
+            continue;
+        }
+        if let Some(current_quote) = quote {
+            if character == current_quote {
+                quote = None;
+            } else {
+                current.push(character);
+            }
+            continue;
+        }
+        if character == '\'' || character == '"' {
+            quote = Some(character);
+            continue;
+        }
+        if character.is_whitespace() {
+            flush(&mut tokens, &mut current);
+            continue;
+        }
+        current.push(character);
+    }
+    flush(&mut tokens, &mut current);
+    tokens
+}
+
+fn skill_ref_from_skill_md_read_path(raw: &str, workdir: Option<&Path>) -> Option<HookSkillRef> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.contains('\0') {
+        return None;
+    }
+    let expanded = expand_home(PathBuf::from(trimmed));
+    let resolved = if expanded.is_absolute() {
+        expanded
+    } else {
+        workdir?.join(expanded)
+    };
+    if resolved
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        return None;
+    }
+    if !resolved.is_absolute()
+        || resolved.file_name().and_then(|value| value.to_str()) != Some("SKILL.md")
+    {
+        return None;
+    }
+    let name = resolved.parent()?.file_name()?.to_str()?.trim().to_string();
+    if name.is_empty() || validate_skill_name(&name).is_err() {
+        return None;
+    }
+    Some(HookSkillRef {
+        name,
+        path: resolved,
+        prompt_excerpt: None,
+    })
+}
+
 pub(crate) fn xml_tag_text(input: &str, tag: &str) -> Option<String> {
     let open = format!("<{tag}>");
     let close = format!("</{tag}>");

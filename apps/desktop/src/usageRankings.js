@@ -1,7 +1,7 @@
 import { compactPath, numberOrZero } from './skills.js';
 
 export const defaultUsageRankingFilters = {
-  range: 'last_30_days',
+  range: 'all_time',
   skillType: '',
   agentId: '',
   workspaceRoot: ''
@@ -21,7 +21,8 @@ export const usageRankingSkillTypeOptions = [
 
 export function usageRankingRangeLabel(rangeId = defaultUsageRankingFilters.range) {
   return usageRankingRangeOptions.find((option) => option.id === rangeId)?.label
-    || usageRankingRangeOptions[1].label;
+    || usageRankingRangeOptions.find((option) => option.id === defaultUsageRankingFilters.range)?.label
+    || 'All time';
 }
 
 export function usageRankingKindTone(row = {}) {
@@ -46,17 +47,277 @@ export function formatUsageRankingRank(rank = 0) {
   return `#${String(numberOrZero(rank) || 0).padStart(2, '0')}`;
 }
 
-export function usageRankingTopRows(rows = [], limit = 3) {
-  return (rows || [])
-    .filter((row) => numberOrZero(row.usageCount) > 0)
-    .slice(0, Math.max(limit, 0));
+export const usageHeatmapDays = 365;
+export const usageHeatmapWeekStartsOn = 0;
+export const usageHeatmapLevelColors = [
+  'var(--skillbox-border-subtle)',
+  'rgba(var(--skillbox-blue-rgb), 0.22)',
+  'rgba(var(--skillbox-blue-rgb), 0.40)',
+  'rgba(var(--skillbox-blue-rgb), 0.62)',
+  'var(--skillbox-blue)'
+];
+
+export function usageTrendSeriesKey(skill = {}) {
+  return `${skill.sourceKind || skill.source_kind || 'regular'}:${skill.skillName || skill.skill_name || ''}`;
 }
 
-export function usageRankingBarPercent(usageCount = 0, maxUsageCount = 0) {
-  const count = numberOrZero(usageCount);
-  const max = numberOrZero(maxUsageCount);
-  if (count <= 0 || max <= 0) return 0;
-  return Math.max(12, Math.round((count / max) * 100));
+export function usageTrendSeriesLabel(skill = {}) {
+  const name = skill.skillName || skill.skill_name || '';
+  const sourceKind = skill.sourceKind || skill.source_kind || 'regular';
+  if (sourceKind === 'system') return `${name} · System`;
+  if (sourceKind === 'unknown') return `${name} · Unknown`;
+  return name;
+}
+
+export function formatUsageTrendDate(date, { compact = false, includeYear = false } = {}) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date || ''));
+  if (!match) return String(date || '');
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const monthLabel = months[Number(match[2]) - 1] || match[2];
+  const day = String(Number(match[3]));
+  if (compact) return `${Number(match[2])}/${day}`;
+  if (includeYear) return `${monthLabel} ${day}, ${match[1]}`;
+  return `${monthLabel} ${day}`;
+}
+
+function usageHeatmapUtcDate(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
+  if (!match) return null;
+  return new Date(`${match[1]}-${match[2]}-${match[3]}T00:00:00Z`);
+}
+
+function usageHeatmapIsoDate(value) {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) return '';
+  return value.toISOString().slice(0, 10);
+}
+
+function usageHeatmapShiftUtcDate(value, days) {
+  const next = new Date(value.getTime());
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+export function usageHeatmapLevel(calls = 0, maxCalls = 0) {
+  const value = numberOrZero(calls);
+  const max = numberOrZero(maxCalls);
+  if (value <= 0 || max <= 0) return 0;
+  if (value >= max) return 4;
+  const ratio = value / max;
+  if (ratio > 0.6) return 4;
+  if (ratio > 0.35) return 3;
+  if (ratio > 0.2) return 2;
+  return 1;
+}
+
+export function usageHeatmapLevelColor(level = 0) {
+  return usageHeatmapLevelColors[Math.max(0, Math.min(4, numberOrZero(level)))]
+    || usageHeatmapLevelColors[0];
+}
+
+export const usageHeatmapCellSize = 18;
+export const usageHeatmapGap = 2;
+export const usageHeatmapWeekdayWidth = 28;
+export const usageHeatmapWeekdayGap = 4;
+export const usageHeatmapMonthLabelMinWidth = 24;
+export const usageHeatmapWeekdayLabels = [
+  { label: 'Mon', weekday: 1 },
+  { label: 'Wed', weekday: 3 },
+  { label: 'Fri', weekday: 5 }
+];
+
+export function usageHeatmapWeekdayRows(weekStartsOn = usageHeatmapWeekStartsOn) {
+  const start = ((numberOrZero(weekStartsOn) % 7) + 7) % 7;
+  return usageHeatmapWeekdayLabels.map((item) => ({
+    label: item.label,
+    weekday: item.weekday,
+    row: (item.weekday - start + 7) % 7
+  }));
+}
+
+export function usageHeatmapLayout(weekCount = 0) {
+  const weeks = Math.max(numberOrZero(weekCount), 1);
+  const cell = usageHeatmapCellSize;
+  const gap = usageHeatmapGap;
+  const weekdayWidth = usageHeatmapWeekdayWidth;
+  const weekdayGap = usageHeatmapWeekdayGap;
+  const gridWidth = weeks * cell + (weeks - 1) * gap;
+  return {
+    cell,
+    cellHeight: cell,
+    gap,
+    weekdayWidth,
+    weekdayGap,
+    weekCount: weeks,
+    gridWidth,
+    gridHeight: 7 * cell + 6 * gap,
+    canvasWidth: weekdayWidth + weekdayGap + gridWidth
+  };
+}
+
+export function visibleUsageHeatmapMonths(months = [], layout = {}, weekCount = 0) {
+  const list = (Array.isArray(months) ? months : [])
+    .map((month) => ({
+      label: String(month.label || ''),
+      weekIndex: Math.max(numberOrZero(month.weekIndex), 0)
+    }))
+    .filter((month) => month.label)
+    .sort((left, right) => left.weekIndex - right.weekIndex);
+  if (list.length === 0) {
+    return [];
+  }
+
+  const cell = Math.max(numberOrZero(layout.cell), 1);
+  const gap = numberOrZero(layout.gap);
+  const step = cell + gap;
+  const weeks = Math.max(
+    numberOrZero(weekCount),
+    numberOrZero(layout.weekCount),
+    list[list.length - 1].weekIndex + 1
+  );
+  const minWeeks = Math.max(1, Math.ceil(usageHeatmapMonthLabelMinWidth / step));
+
+  return list.filter((month, index) => {
+    const nextIndex = list[index + 1]?.weekIndex ?? weeks;
+    return nextIndex - month.weekIndex >= minWeeks;
+  });
+}
+
+export function buildUsageHeatmap(daily = []) {
+  const points = Array.isArray(daily) ? daily : [];
+  const byDate = new Map(points.map((point) => [point.date, point]));
+  if (points.length === 0) {
+    return {
+      weeks: [],
+      months: [],
+      days: [],
+      max: 0,
+      start: '',
+      end: ''
+    };
+  }
+
+  const start = points[0].date;
+  const end = points[points.length - 1].date;
+  const startDate = usageHeatmapUtcDate(start);
+  const endDate = usageHeatmapUtcDate(end);
+  if (!startDate || !endDate || startDate > endDate) {
+    return {
+      weeks: [],
+      months: [],
+      days: [],
+      max: 0,
+      start,
+      end
+    };
+  }
+
+  const alignedStart = usageHeatmapShiftUtcDate(
+    startDate,
+    -((startDate.getUTCDay() - usageHeatmapWeekStartsOn + 7) % 7)
+  );
+  const weeks = [];
+  const days = [];
+  let cursor = alignedStart;
+  do {
+    const week = [];
+    for (let index = 0; index < 7; index += 1) {
+      const date = usageHeatmapIsoDate(cursor);
+      const inRange = date >= start && date <= end;
+      const point = byDate.get(date);
+      const cell = {
+        date,
+        inRange,
+        totalCalls: inRange ? numberOrZero(point?.totalCalls) : 0,
+        skills: inRange ? (point?.skills || []) : []
+      };
+      week.push(cell);
+      if (inRange) {
+        days.push(cell);
+      }
+      cursor = usageHeatmapShiftUtcDate(cursor, 1);
+    }
+    weeks.push(week);
+  } while (cursor <= endDate);
+
+  const max = days.reduce((highest, day) => Math.max(highest, day.totalCalls), 0);
+  for (const day of days) {
+    day.level = usageHeatmapLevel(day.totalCalls, max);
+  }
+  for (const week of weeks) {
+    for (const day of week) {
+      day.level = day.inRange ? usageHeatmapLevel(day.totalCalls, max) : 0;
+    }
+  }
+
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const months = [];
+  weeks.forEach((week, weekIndex) => {
+    const firstOfMonth = week.find((day) => day.inRange && day.date.endsWith('-01'));
+    if (firstOfMonth) {
+      months.push({
+        label: monthNames[Number(firstOfMonth.date.slice(5, 7)) - 1],
+        weekIndex
+      });
+    }
+  });
+  if (months.every((month) => month.weekIndex !== 0)) {
+    months.unshift({
+      label: monthNames[Number(start.slice(5, 7)) - 1],
+      weekIndex: 0
+    });
+  }
+
+  return { weeks, months, days, max, start, end };
+}
+
+export function usageStatsTableRows(rows = [], selectedDay = null) {
+  const rankingRows = Array.isArray(rows) ? rows : [];
+  if (!selectedDay) return rankingRows;
+  const byKey = new Map(rankingRows.map((row) => [usageTrendSeriesKey(row), row]));
+  return (selectedDay.skills || [])
+    .filter((skill) => numberOrZero(skill.calls) > 0)
+    .sort((left, right) => (
+      numberOrZero(right.calls) - numberOrZero(left.calls)
+      || String(left.skillName || left.skill_name || '').localeCompare(
+        String(right.skillName || right.skill_name || '')
+      )
+      || String(left.sourceKind || left.source_kind || '').localeCompare(
+        String(right.sourceKind || right.source_kind || '')
+      )
+    ))
+    .map((skill, index) => {
+      const matched = byKey.get(usageTrendSeriesKey(skill)) || {};
+      const date = String(selectedDay.date || '');
+      return {
+        rank: index + 1,
+        skillName: skill.skillName || skill.skill_name || matched.skillName || '',
+        kind: matched.kind || '',
+        managed: Boolean(matched.managed),
+        system: Boolean(matched.system || skill.sourceKind === 'system'),
+        sourceMissing: Boolean(matched.sourceMissing),
+        sourceKind: skill.sourceKind || skill.source_kind || matched.sourceKind || 'regular',
+        sourceId: matched.sourceId || '',
+        sourceRuntimeRoots: matched.sourceRuntimeRoots || [],
+        usageCount: numberOrZero(skill.calls),
+        lastUsedAt: /^\d{4}-\d{2}-\d{2}$/.test(date) ? `${date}T12:00:00.000Z` : (matched.lastUsedAt || ''),
+        confirmedCount: numberOrZero(matched.confirmedCount),
+        inferredCount: numberOrZero(matched.inferredCount),
+        referenceCount: numberOrZero(matched.referenceCount),
+        lastReferencedAt: matched.lastReferencedAt || ''
+      };
+    });
+}
+
+export function normalizeUsageDailyPoints(points = []) {
+  return (Array.isArray(points) ? points : []).map((point) => ({
+    date: String(point.date || ''),
+    totalCalls: numberOrZero(point.totalCalls ?? point.total_calls),
+    skills: (point.skills || []).map((skill) => ({
+      skillName: skill.skillName || skill.skill_name || '',
+      sourceKind: skill.sourceKind || skill.source_kind || 'regular',
+      calls: numberOrZero(skill.calls)
+    }))
+  }));
 }
 
 export function normalizeUsageRankings(result = {}) {
@@ -154,8 +415,26 @@ export function normalizeUsageRankings(result = {}) {
         coverage.scannedCursorTranscriptFiles ?? coverage.scanned_cursor_transcript_files
       )
     },
-    rows
+    rows,
+    daily: normalizeUsageDailyPoints(result?.daily)
   };
+}
+
+export function usageRankingHasSnapshot(ranking = {}) {
+  return Boolean(String(ranking?.generatedAt || '').trim());
+}
+
+export function usageRankingBodyMode(ranking = {}, { loading = false, backfilling = false } = {}) {
+  if (backfilling) return 'progress';
+  if (loading && !usageRankingHasSnapshot(ranking)) return 'loading';
+  return 'snapshot';
+}
+
+export function usageRankingFiltersLocked({
+  backfilling = false,
+  importingSkillName = ''
+} = {}) {
+  return Boolean(backfilling || importingSkillName);
 }
 
 export function usageRankingRequest(filters = defaultUsageRankingFilters) {
@@ -280,7 +559,7 @@ export function usageHistorySyncNotice(results = []) {
         ? ` (${result.errors.length} error${result.errors.length === 1 ? '' : 's'})`
         : '';
       const cursorDetail = result.provider === 'Cursor'
-        ? `; scanned ${result.scannedCursorTranscriptFiles} transcript files and ${result.scannedCursorStateSessions} state sessions; ${result.inferredCursorTranscriptCalls} inferred transcript calls from ${result.cursorTranscriptReadCandidates} Read candidates, ${result.cursorStateReferences} state references; ${result.cursorTranscriptTurnDuplicates} same-turn duplicates, ${result.cursorTranscriptDuplicateFiles} duplicate files, ${result.cursorTranscriptHistoricalMissing} historical missing paths accepted, ${result.cursorTranscriptReadFileCandidates} ReadFile candidates excluded, ${result.cursorTranscriptUnsafeRejected} unsafe paths rejected`
+        ? `; scanned ${result.scannedCursorTranscriptFiles} transcript files and ${result.scannedCursorStateSessions} state sessions; ${result.inferredCursorTranscriptCalls} inferred transcript calls from ${result.cursorTranscriptReadCandidates} Read candidates and ${result.cursorTranscriptReadFileCandidates} ReadFile candidates, ${result.cursorStateReferences} state references; ${result.cursorTranscriptTurnDuplicates} same-turn duplicates, ${result.cursorTranscriptDuplicateFiles} duplicate files, ${result.cursorTranscriptHistoricalMissing} historical missing paths accepted, ${result.cursorTranscriptUnsafeRejected} unsafe paths rejected`
         : '';
       return `${result.provider} ${result.recorded} new${cursorDetail}${errorLabel}`;
     })

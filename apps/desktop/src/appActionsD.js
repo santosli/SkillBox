@@ -307,7 +307,7 @@ export function createAppActions(getCtx) {
   function navigateToPage(nextPage) {
     const { cancelUsageRankingRequest, history, historyRequestRef, pageRef, setPage } = getCtx();
     pageRef.current = nextPage;
-    if (nextPage !== 'rankings') {
+    if (nextPage !== 'usage') {
       cancelUsageRankingRequest();
     }
     if (nextPage !== 'history') {
@@ -368,11 +368,11 @@ export function createAppActions(getCtx) {
     }
   }
 
-  function openRankings() {
+  function openUsage() {
     const { loadUsageRankings, navigateToPage, setSelectedName, usageRankingFilters } = getCtx();
     setSelectedName('');
-    navigateToPage('rankings');
-    void loadUsageRankings(usageRankingFilters);
+    navigateToPage('usage');
+    void loadUsageRankings(usageRankingFilters, { refreshSkills: true });
   }
 
   function cancelUsageRankingRequest() {
@@ -386,9 +386,9 @@ export function createAppActions(getCtx) {
 
   async function loadUsageRankings(
     nextFilters,
-    { clearError = true, reportError = true } = {}
+    { clearError = true, reportError = true, refreshSkills = false } = {}
   ) {
-    const { pageRef, setError, setUsageRankingFilters, setUsageRankingLoading, setUsageRankings, usageRankingRequestRef } = getCtx();
+    const { pageRef, setError, setIsFirstUse, setPaths, setSkills, setUsageRankingFilters, setUsageRankingLoading, setUsageRankings, usageRankingRequestRef } = getCtx();
     const requestId = usageRankingRequestRef.current + 1;
     usageRankingRequestRef.current = requestId;
     setUsageRankingFilters(nextFilters);
@@ -403,17 +403,33 @@ export function createAppActions(getCtx) {
             request: usageRankingRequest(nextFilters)
           })
         : previewUsageRankings(nextFilters);
-      if (usageRankingRequestRef.current === requestId && pageRef.current === 'rankings') {
+      if (usageRankingRequestRef.current === requestId && pageRef.current === 'usage') {
         setUsageRankings(normalizeUsageRankings(result));
+      }
+      if (
+        refreshSkills
+        && window.__TAURI_INTERNALS__
+        && usageRankingRequestRef.current === requestId
+      ) {
+        try {
+          const state = await invoke('managed_state');
+          if (usageRankingRequestRef.current === requestId) {
+            setSkills(state.skills?.map(normalizeSkill) || []);
+            setPaths(normalizePaths(state.paths));
+            setIsFirstUse(Boolean(state.isFirstUse ?? state.is_first_use));
+          }
+        } catch {
+          // Ranking still updated; skill-card Calls recover on the next managed-state load.
+        }
       }
       return '';
     } catch (rankingError) {
       const rankingErrorMessage =
-        rankingError.message || String(rankingError) || 'Unable to load skill usage rankings.';
+        rankingError.message || String(rankingError) || 'Unable to load skill usage.';
       if (
         reportError
         && usageRankingRequestRef.current === requestId
-        && pageRef.current === 'rankings'
+        && pageRef.current === 'usage'
       ) {
         setError(rankingErrorMessage);
       }
@@ -429,7 +445,7 @@ export function createAppActions(getCtx) {
     const { openSkill, setError, skills } = getCtx();
     const skill = skills.find((candidate) => candidate.name === skillName);
     if (!skill) {
-      setError(`Managed skill ${skillName} was not found. Refresh Rankings and try again.`);
+      setError(`Managed skill ${skillName} was not found. Refresh Usage and try again.`);
       return;
     }
     openSkill(skill);
@@ -437,7 +453,7 @@ export function createAppActions(getCtx) {
 
   async function importRankedSkill(row) {
     const { pageRef, rankingImportRequestRef, setError, setLocalImportConfirmation, setNotice, setRankingImportSkillName, skills, usageRankingFilters, usageRankings } = getCtx();
-    if (pageRef.current !== 'rankings') return;
+    if (pageRef.current !== 'usage') return;
     const skillName = row.skillName;
     const sourceId = row.sourceId || skillName;
     const requestId = rankingImportRequestRef.current + 1;
@@ -469,7 +485,7 @@ export function createAppActions(getCtx) {
             isSymlink: false,
             contentHash: `preview-${skillName}`,
             suggestedType: 'user',
-            suggestionReason: 'Observed in Rankings',
+            suggestionReason: 'Observed in Usage',
             importStatus: 'importable',
             isSelected: true,
             usageCount: 1
@@ -484,17 +500,17 @@ export function createAppActions(getCtx) {
 
       if (
         rankingImportRequestRef.current !== requestId
-        || pageRef.current !== 'rankings'
+        || pageRef.current !== 'usage'
       ) return;
       setLocalImportConfirmation({
         open: true,
         candidates: [candidate],
-        noticePrefix: 'Imported from Rankings.'
+        noticePrefix: 'Imported from Usage.'
       });
     } catch (importError) {
       if (
         rankingImportRequestRef.current !== requestId
-        || pageRef.current !== 'rankings'
+        || pageRef.current !== 'usage'
       ) return;
       setError(
         importError.message
@@ -1473,7 +1489,7 @@ export function createAppActions(getCtx) {
     clearDashboardFilters,
     openHistory,
     loadHistory,
-    openRankings,
+    openUsage,
     cancelUsageRankingRequest,
     loadUsageRankings,
     openRankedSkill,

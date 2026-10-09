@@ -1862,8 +1862,7 @@ button {
 }
 
 .usageRankingSelect select:focus-visible,
-.usageRankingSkill button:focus-visible,
-.usageRankingTopCardName:focus-visible {
+.usageRankingSkill button:focus-visible {
   outline: 3px solid rgba(var(--skillbox-blue-rgb), 0.24);
   outline-offset: 2px;
 }
@@ -1928,109 +1927,143 @@ button {
   font-weight: 560;
 }
 
-.usageRankingTopGrid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+.usageHeatmapSection {
+  box-sizing: border-box;
+  width: max-content;
+  max-width: 100%;
+  justify-self: start;
 }
 
-.usageRankingTopCard {
+.usageHeatmap {
   display: grid;
-  gap: 14px;
+  width: max-content;
+  max-width: 100%;
   min-width: 0;
+  box-sizing: border-box;
   border: 1px solid var(--skillbox-border-card);
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--skillbox-surface);
-  padding: 16px 16px 14px;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  padding: 10px 12px 10px;
 }
 
-.usageRankingTopCard.leader {
-  border-color: var(--skillbox-blue-border);
-  box-shadow: 0 8px 20px rgba(var(--skillbox-blue-rgb), 0.12);
-}
-
-.usageRankingTopCardHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.usageRankingTopCardRank {
+.usageHeatmapEmptyState {
+  margin: 0;
   color: var(--skillbox-text-muted);
-  font-family: var(--skillbox-font-skill);
   font-size: 13px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
 }
 
-.usageRankingTopCardName {
-  min-width: 0;
-  overflow: hidden;
-  border: 0;
-  background: transparent;
-  color: var(--skillbox-text-strong);
-  cursor: pointer;
-  font-family: var(--skillbox-font-skill);
-  font-size: 15px;
-  font-weight: 720;
-  line-height: 1.25;
-  padding: 0;
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.usageHeatmapScroll {
+  overflow-x: auto;
 }
 
-button.usageRankingTopCardName:hover {
-  color: var(--skillbox-blue-text);
-}
-
-strong.usageRankingTopCardName {
-  cursor: default;
-}
-
-.usageRankingTopCardMeta {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.usageRankingTopCardMeta strong {
-  color: var(--skillbox-text-strong);
-  font-size: 20px;
-  font-weight: 760;
-  font-variant-numeric: tabular-nums;
-}
-
-.usageRankingTopCardMeta time,
-.usageRankingTopCardMeta span {
-  color: var(--skillbox-text-muted);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.usageRankingTopCardBar {
+.usageHeatmapCanvas {
   position: relative;
-  height: 6px;
+  box-sizing: content-box;
+  min-width: max-content;
+  padding-top: 16px;
+}
+
+.usageHeatmapMonths {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: calc(var(--usage-heatmap-weekday, 28px) + 4px);
+  height: 14px;
   overflow: hidden;
-  border-radius: 999px;
-  background: var(--skillbox-surface-muted);
+  pointer-events: none;
 }
 
-.usageRankingTopCardBar::after {
-  content: '';
+.usageHeatmapMonth {
+  position: absolute;
+  top: 0;
+  color: var(--skillbox-text-muted);
+  font-size: 10px;
+  font-weight: 560;
+  white-space: nowrap;
+}
+
+.usageHeatmapBody {
+  display: flex;
+  align-items: flex-start;
+  width: max-content;
+  gap: var(--usage-heatmap-weekday-gap, 4px);
+}
+
+.usageHeatmapWeekdays {
+  position: relative;
+  flex: 0 0 var(--usage-heatmap-weekday, 28px);
+  width: var(--usage-heatmap-weekday, 28px);
+  height: calc((var(--usage-heatmap-cell, 18px) * 7) + (var(--usage-heatmap-gap, 2px) * 6));
+}
+
+.usageHeatmapWeekday {
+  position: absolute;
+  right: 0;
+  color: var(--skillbox-text-muted);
+  font-size: 9px;
+  font-weight: 560;
+  line-height: var(--usage-heatmap-cell, 18px);
+  text-align: right;
+}
+
+.usageHeatmapGrid {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--usage-heatmap-gap, 2px);
+}
+
+.usageHeatmapWeek {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: var(--usage-heatmap-gap, 2px);
+}
+
+.usageHeatmapCell {
   display: block;
-  width: var(--usage-bar-width, 0%);
-  height: 100%;
-  border-radius: inherit;
-  background: #cbd5e1;
+  flex: 0 0 var(--usage-heatmap-cell, 18px);
+  width: var(--usage-heatmap-cell, 18px);
+  height: var(--usage-heatmap-cell, 18px);
+  aspect-ratio: 1;
+  min-width: var(--usage-heatmap-cell, 18px);
+  min-height: var(--usage-heatmap-cell, 18px);
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  appearance: none;
+  cursor: pointer;
 }
 
-.usageRankingTopCard.leader .usageRankingTopCardBar::after {
-  background: var(--skillbox-blue);
+.usageHeatmapCell.isOutside {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.usageHeatmapCell.isSelected {
+  box-shadow: 0 0 0 1px var(--skillbox-blue);
+}
+
+.usageHeatmapTooltip {
+  position: fixed;
+  z-index: 80;
+  padding: 6px 8px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  border-radius: 7px;
+  background: var(--skillbox-text);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.22);
+  color: var(--skillbox-surface);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translate(-50%, calc(-100% - 8px));
+}
+
+.usageRankingSnapshot {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
 }
 
 .usageRankingLoading {
@@ -2038,12 +2071,48 @@ strong.usageRankingTopCardName {
   min-height: 180px;
   align-items: center;
   justify-content: center;
-  gap: 9px;
+  gap: 12px;
   border: 1px solid var(--skillbox-border-card);
   border-radius: 12px;
   background: var(--skillbox-surface);
   color: var(--skillbox-text-secondary);
   font-size: 13px;
+  text-align: left;
+}
+
+.usageRankingProgressCopy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.usageRankingProgressCopy strong {
+  color: var(--skillbox-text);
+  font-size: 15px;
+  font-weight: 680;
+}
+
+.usageRankingProgressCopy span {
+  color: var(--skillbox-text-muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.usageRankingProgressTrack {
+  display: block;
+  width: 220px;
+  height: 6px;
+  margin-top: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--skillbox-slate-bg);
+}
+
+.usageRankingProgressFill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--skillbox-blue);
 }
 
 .usageRankingTableWrap {
@@ -7263,10 +7332,6 @@ dd {
 
   .usageRankingSelect.workspace {
     grid-column: 1 / -1;
-  }
-
-  .usageRankingTopGrid {
-    grid-template-columns: 1fr;
   }
 
   .usageCoverageToggle {

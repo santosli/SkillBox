@@ -1,5 +1,6 @@
 use crate::*;
 use rusqlite::OpenFlags;
+use std::collections::{HashMap, HashSet};
 
 const MAX_CURSOR_BACKFILL_ERRORS: usize = 20;
 const MAX_CURSOR_IDENTIFIER_CHARS: usize = 256;
@@ -14,14 +15,43 @@ pub fn backfill_cursor_session_usage(
     request: BackfillCursorSessionUsageRequest,
     managed_root: impl AsRef<Path>,
 ) -> Result<BackfillCodexSessionUsageResult> {
-    backfill_cursor_session_usage_for_home(request, home_dir(), managed_root)
+    backfill_cursor_session_usage_with_progress(request, managed_root, |_| {})
 }
 
+pub fn backfill_cursor_session_usage_with_progress<F>(
+    request: BackfillCursorSessionUsageRequest,
+    managed_root: impl AsRef<Path>,
+    progress: F,
+) -> Result<BackfillCodexSessionUsageResult>
+where
+    F: FnMut(UsageBackfillProgress),
+{
+    backfill_cursor_session_usage_for_home_with_progress(
+        request,
+        home_dir(),
+        managed_root,
+        progress,
+    )
+}
+
+#[cfg(test)]
 pub(crate) fn backfill_cursor_session_usage_for_home(
     request: BackfillCursorSessionUsageRequest,
     home: impl AsRef<Path>,
     managed_root: impl AsRef<Path>,
 ) -> Result<BackfillCodexSessionUsageResult> {
+    backfill_cursor_session_usage_for_home_with_progress(request, home, managed_root, |_| {})
+}
+
+pub(crate) fn backfill_cursor_session_usage_for_home_with_progress<F>(
+    request: BackfillCursorSessionUsageRequest,
+    home: impl AsRef<Path>,
+    managed_root: impl AsRef<Path>,
+    mut progress: F,
+) -> Result<BackfillCodexSessionUsageResult>
+where
+    F: FnMut(UsageBackfillProgress),
+{
     let home = home.as_ref();
     let managed_root = managed_root.as_ref();
     let paths = ensure_managed_layout(managed_root.to_path_buf())?;
@@ -40,15 +70,28 @@ pub(crate) fn backfill_cursor_session_usage_for_home(
             .projects_root
             .unwrap_or_else(|| home.join(".cursor/projects")),
     );
+    progress(UsageBackfillProgress::new("cursor", "collecting", 0, None));
     let mut result = BackfillCodexSessionUsageResult::default();
     let mut managed_database =
         open_database(&paths.database_path).map_err(|error| error.to_string())?;
     let mut workspace_roots = Vec::new();
     let state_database_available = database_path.is_file();
     if state_database_available {
+        progress(UsageBackfillProgress::new(
+            "cursor",
+            "scanning-state",
+            0,
+            None,
+        ));
         let cursor_database = open_cursor_database_read_only(&database_path)?;
         validate_cursor_database_schema(&cursor_database)?;
         let sessions = load_cursor_composer_sessions(&cursor_database, &mut result)?;
+        progress(UsageBackfillProgress::new(
+            "cursor",
+            "scanning-state",
+            sessions.len(),
+            Some(sessions.len()),
+        ));
         let mut sessions_by_id = HashMap::new();
         for session in sessions {
             sessions_by_id.insert(session.composer_id, session.workspace);
@@ -88,11 +131,12 @@ pub(crate) fn backfill_cursor_session_usage_for_home(
     if transcript_root_available {
         let runtime_roots =
             cursor_runtime_roots(home, &paths, workspace_roots.iter().map(PathBuf::as_path));
-        let transcript_result = backfill_cursor_agent_transcript_usage(
+        let transcript_result = backfill_cursor_agent_transcript_usage_with_progress(
             &projects_root,
             home,
             &runtime_roots,
             &mut managed_database,
+            &mut progress,
         )?;
         transcript_audit_result = Some(transcript_result.clone());
         merge_cursor_agent_transcript_backfill_result(&mut result, transcript_result);
@@ -201,6 +245,18 @@ pub(crate) fn backfill_cursor_session_usage_for_home(
         }
     }
 
+    progress(UsageBackfillProgress::new(
+        "cursor",
+        "complete",
+        result
+            .scanned_cursor_state_sessions
+            .saturating_add(result.scanned_cursor_transcript_files),
+        Some(
+            result
+                .scanned_cursor_state_sessions
+                .saturating_add(result.scanned_cursor_transcript_files),
+        ),
+    ));
     Ok(result)
 }
 

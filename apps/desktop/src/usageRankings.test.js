@@ -5,11 +5,26 @@ import { previewUsageRankings } from './previewData.js';
 import {
   defaultUsageRankingFilters,
   formatUsageRankingRank,
+  formatUsageTrendDate,
+  buildUsageHeatmap,
+  usageHeatmapDays,
+  usageHeatmapLayout,
+  usageHeatmapCellSize,
+  usageHeatmapMonthLabelMinWidth,
+  usageHeatmapWeekdayRows,
+  visibleUsageHeatmapMonths,
+  usageHeatmapLevel,
+  usageHeatmapLevelColor,
+  usageHeatmapLevelColors,
+  usageStatsTableRows,
   normalizeCodexUsageBackfill,
+  normalizeUsageDailyPoints,
   codexUsageBackfillNotice,
   normalizeUsageRankings,
   usageRankingAgentOptions,
-  usageRankingBarPercent,
+  usageRankingBodyMode,
+  usageRankingFiltersLocked,
+  usageRankingHasSnapshot,
   usageRankingKindTone,
   usageRankingRangeLabel,
   usageRankingRequest,
@@ -17,9 +32,14 @@ import {
   usageHistorySyncNotice,
   usageHistorySyncProviders,
   usageRankingScopeLabel,
-  usageRankingTopRows,
   usageRankingWorkspaceOptions
 } from './usageRankings.js';
+import {
+  normalizeUsageBackfillProgress,
+  usageBackfillProgressDetail,
+  usageBackfillProgressLabel,
+  usageBackfillProgressPercent
+} from './usageBackfillProgress.js';
 
 test('normalizes ranking rows and snake case result metadata', () => {
   assert.deepEqual(
@@ -55,6 +75,15 @@ test('normalizes ranking rows and snake case result metadata', () => {
         scanned_cursor_sessions: 4,
         scanned_cursor_transcript_files: 3
       },
+      daily: [
+        {
+          date: '2026-07-21',
+          total_calls: 12,
+          skills: [
+            { skill_name: 'grill-me', source_kind: 'regular', calls: 12 }
+          ]
+        }
+      ],
       rows: [
         {
           rank: 1,
@@ -113,6 +142,15 @@ test('normalizes ranking rows and snake case result metadata', () => {
         scannedCursorSessions: 4,
         scannedCursorTranscriptFiles: 3
       },
+      daily: [
+        {
+          date: '2026-07-21',
+          totalCalls: 12,
+          skills: [
+            { skillName: 'grill-me', sourceKind: 'regular', calls: 12 }
+          ]
+        }
+      ],
       rows: [
         {
           rank: 1,
@@ -138,7 +176,7 @@ test('normalizes ranking rows and snake case result metadata', () => {
 
 test('builds local ranking requests including unmanaged observed skills', () => {
   assert.deepEqual(usageRankingRequest(defaultUsageRankingFilters), {
-    range: 'last_30_days',
+    range: 'all_time',
     skillType: null,
     agentId: null,
     workspaceRoot: null,
@@ -155,7 +193,7 @@ test('builds local ranking requests including unmanaged observed skills', () => 
       skillType: 'system'
     }),
     {
-      range: 'last_30_days',
+      range: 'all_time',
       skillType: 'system',
       agentId: null,
       workspaceRoot: null,
@@ -187,12 +225,41 @@ test('filters preview rankings by user, remote, and system skill types', () => {
   });
   assert.equal(user.rows.every((row) => row.kind === 'user'), true);
   assert.equal(user.total_observed_calls, 7);
+  assert.equal(
+    user.daily.reduce((total, point) => total + point.total_calls, 0),
+    7
+  );
+  assert.equal(
+    remote.daily.reduce((total, point) => total + point.total_calls, 0),
+    1
+  );
+  assert.equal(user.daily.length, usageHeatmapDays);
+  assert.equal(user.daily[0].date, '2025-07-23');
+  assert.equal(user.daily.at(-1).date, '2026-07-22');
 });
 
-test('formats ranking display helpers for top cards and labels', () => {
+test('keeps a loaded usage snapshot visible while filters refetch', () => {
+  const empty = normalizeUsageRankings(null);
+  const loaded = normalizeUsageRankings({
+    generatedAt: '2026-09-20T04:00:00Z',
+    totalCalls: 12,
+    rows: [{ skill_name: 'release-helper', usage_count: 12 }]
+  });
+
+  assert.equal(usageRankingHasSnapshot(empty), false);
+  assert.equal(usageRankingHasSnapshot(loaded), true);
+  assert.equal(usageRankingBodyMode(empty, { loading: true }), 'loading');
+  assert.equal(usageRankingBodyMode(loaded, { loading: true }), 'snapshot');
+  assert.equal(usageRankingBodyMode(loaded, { loading: true, backfilling: true }), 'progress');
+  assert.equal(usageRankingFiltersLocked({ backfilling: false, importingSkillName: '' }), false);
+  assert.equal(usageRankingFiltersLocked({ backfilling: true }), true);
+  assert.equal(usageRankingFiltersLocked({ importingSkillName: 'release-helper' }), true);
+});
+
+test('formats ranking labels and a year call heatmap', () => {
   assert.equal(usageRankingRangeLabel('last_7_days'), '7 days');
   assert.equal(usageRankingRangeLabel('last_30_days'), '30 days');
-  assert.equal(usageRankingRangeLabel('unknown'), '30 days');
+  assert.equal(usageRankingRangeLabel('unknown'), 'All time');
   assert.equal(usageRankingKindTone({ managed: true, kind: 'user' }), 'blue');
   assert.equal(usageRankingKindTone({ managed: true, kind: 'remote' }), 'slate');
   assert.equal(usageRankingKindTone({ managed: false }), 'amber');
@@ -210,23 +277,132 @@ test('formats ranking display helpers for top cards and labels', () => {
   assert.equal(usageRankingScopeLabel({ managed: false, sourceMissing: true }), 'Deleted');
   assert.equal(formatUsageRankingRank(1), '#01');
   assert.equal(formatUsageRankingRank(12), '#12');
-  assert.equal(usageRankingBarPercent(2, 4), 50);
-  assert.equal(usageRankingBarPercent(0, 4), 0);
-  assert.equal(usageRankingBarPercent(1, 10), 12);
+  assert.equal(formatUsageTrendDate('2026-07-22'), 'Jul 22');
+  assert.equal(formatUsageTrendDate('2026-07-22', { compact: true }), '7/22');
+  assert.equal(formatUsageTrendDate('2026-07-22', { includeYear: true }), 'Jul 22, 2026');
   assert.deepEqual(
-    usageRankingTopRows([
-      { skillName: 'a', usageCount: 4 },
-      { skillName: 'b', usageCount: 0 },
-      { skillName: 'c', usageCount: 2 },
-      { skillName: 'd', usageCount: 1 },
-      { skillName: 'e', usageCount: 9 }
+    normalizeUsageDailyPoints([
+      {
+        date: '2026-07-21',
+        total_calls: 4,
+        skills: [{ skill_name: 'alpha', source_kind: 'system', calls: 4 }]
+      }
     ]),
     [
-      { skillName: 'a', usageCount: 4 },
-      { skillName: 'c', usageCount: 2 },
-      { skillName: 'd', usageCount: 1 }
+      {
+        date: '2026-07-21',
+        totalCalls: 4,
+        skills: [{ skillName: 'alpha', sourceKind: 'system', calls: 4 }]
+      }
     ]
   );
+
+  const heatmap = buildUsageHeatmap([
+    {
+      date: '2026-07-01',
+      totalCalls: 0,
+      skills: []
+    },
+    {
+      date: '2026-07-02',
+      totalCalls: 5,
+      skills: [
+        { skillName: 'alpha', sourceKind: 'regular', calls: 3 },
+        { skillName: 'beta', sourceKind: 'regular', calls: 2 }
+      ]
+    },
+    {
+      date: '2026-07-03',
+      totalCalls: 1,
+      skills: [{ skillName: 'gamma', sourceKind: 'system', calls: 1 }]
+    }
+  ]);
+  assert.equal(heatmap.start, '2026-07-01');
+  assert.equal(heatmap.end, '2026-07-03');
+  assert.equal(heatmap.max, 5);
+  assert.equal(heatmap.days.length, 3);
+  assert.ok(heatmap.weeks.length >= 1);
+  assert.equal(heatmap.weeks[0].length, 7);
+  assert.equal(heatmap.days[1].level, 4);
+  assert.equal(heatmap.days[2].level, 1);
+  assert.deepEqual(
+    heatmap.days[1].skills.map((skill) => skill.skillName),
+    ['alpha', 'beta']
+  );
+  assert.ok(heatmap.months.some((month) => month.label === 'Jul' && month.weekIndex === 0));
+  assert.equal(usageHeatmapLevel(0, 10), 0);
+  assert.equal(usageHeatmapLevel(1, 10), 1);
+  assert.equal(usageHeatmapLevel(10, 10), 4);
+  assert.equal(
+    usageHeatmapLevelColors.every((color) => color.includes('skillbox-blue') || color.includes('skillbox-border-subtle')),
+    true
+  );
+  assert.equal(usageHeatmapLevelColor(4), 'var(--skillbox-blue)');
+  const layout = usageHeatmapLayout(53);
+  assert.equal(layout.cell, usageHeatmapCellSize);
+  assert.equal(layout.cellHeight, layout.cell);
+  assert.equal(layout.gridHeight, 7 * layout.cell + 6 * layout.gap);
+  assert.equal(layout.gridWidth, 53 * layout.cell + 52 * layout.gap);
+  assert.equal(layout.canvasWidth, layout.weekdayWidth + layout.weekdayGap + layout.gridWidth);
+  assert.deepEqual(
+    usageHeatmapWeekdayRows().map((row) => `${row.label}:${row.row}`),
+    ['Mon:1', 'Wed:3', 'Fri:5']
+  );
+
+  const overlappingMonths = [
+    { label: 'Sep', weekIndex: 0 },
+    { label: 'Oct', weekIndex: 1 },
+    { label: 'Nov', weekIndex: 5 },
+    { label: 'Dec', weekIndex: 10 }
+  ];
+  const visibleMonths = visibleUsageHeatmapMonths(overlappingMonths, layout, 53);
+  assert.equal(usageHeatmapMonthLabelMinWidth, 24);
+  assert.deepEqual(visibleMonths.map((month) => month.label), ['Oct', 'Nov', 'Dec']);
+  for (let index = 1; index < visibleMonths.length; index += 1) {
+    const px = (visibleMonths[index].weekIndex - visibleMonths[index - 1].weekIndex)
+      * (layout.cell + layout.gap);
+    assert.ok(px >= usageHeatmapMonthLabelMinWidth);
+  }
+  assert.deepEqual(
+    visibleUsageHeatmapMonths(overlappingMonths, { cell: 24, gap: 2 }, 53)
+      .map((month) => month.label),
+    ['Sep', 'Oct', 'Nov', 'Dec']
+  );
+
+  const rankingRows = [
+    {
+      rank: 1,
+      skillName: 'nightwatch-video',
+      managed: true,
+      sourceKind: 'regular',
+      sourceId: 'nightwatch',
+      usageCount: 189,
+      lastUsedAt: '2026-09-20T03:29:00Z'
+    },
+    {
+      rank: 2,
+      skillName: 'lark-wiki-obsidian-sync',
+      managed: true,
+      sourceKind: 'regular',
+      sourceId: 'lark',
+      usageCount: 12,
+      lastUsedAt: '2026-09-01T00:00:00Z'
+    }
+  ];
+  assert.equal(usageStatsTableRows(rankingRows, null), rankingRows);
+  const dayRows = usageStatsTableRows(rankingRows, {
+    date: '2026-06-01',
+    totalCalls: 2,
+    skills: [
+      { skillName: 'lark-wiki-obsidian-sync', sourceKind: 'regular', calls: 1 },
+      { skillName: 'personal-wiki-updater', sourceKind: 'regular', calls: 1 }
+    ]
+  });
+  assert.deepEqual(dayRows.map((row) => [row.rank, row.skillName, row.usageCount, row.managed, row.sourceId]), [
+    [1, 'lark-wiki-obsidian-sync', 1, true, 'lark'],
+    [2, 'personal-wiki-updater', 1, false, '']
+  ]);
+  assert.equal(dayRows[0].lastUsedAt, '2026-06-01T12:00:00.000Z');
 });
 
 test('summarizes Codex usage backfill results', () => {
@@ -314,7 +490,7 @@ test('syncs Codex, Claude Code, and Cursor histories with one provider-aware not
         errors: ['unsupported record']
       }
     ]),
-    'Scanned 11 local history sources, recorded 6 new observations, 3 already recorded, 1 evidence upgrade, by provider: Codex 3 new, Claude Code 2 new, Cursor 1 new; scanned 2 transcript files and 3 state sessions; 4 inferred transcript calls from 7 Read candidates, 2 state references; 2 same-turn duplicates, 1 duplicate files, 3 historical missing paths accepted, 1 ReadFile candidates excluded, 1 unsafe paths rejected (1 error).'
+    'Scanned 11 local history sources, recorded 6 new observations, 3 already recorded, 1 evidence upgrade, by provider: Codex 3 new, Claude Code 2 new, Cursor 1 new; scanned 2 transcript files and 3 state sessions; 4 inferred transcript calls from 7 Read candidates and 1 ReadFile candidates, 2 state references; 2 same-turn duplicates, 1 duplicate files, 3 historical missing paths accepted, 1 unsafe paths rejected (1 error).'
   );
 });
 
@@ -350,4 +526,64 @@ test('builds unique agent and workspace filter options', () => {
     { id: '/tmp/codex', label: 'Codex CLI', detail: '~/.codex/skills' },
     { id: '/tmp/project', label: 'Project', detail: '~/project/.agents/skills' }
   ]);
+});
+
+test('formats usage history scan progress for each provider', () => {
+  assert.deepEqual(
+    normalizeUsageBackfillProgress({
+      provider: 'codex',
+      phase: 'scanning',
+      processed: 42,
+      total: 466,
+      provider_index: 1,
+      provider_count: 3
+    }),
+    {
+      provider: 'codex',
+      phase: 'scanning',
+      processed: 42,
+      total: 466,
+      providerIndex: 1,
+      providerCount: 3
+    }
+  );
+  assert.equal(
+    usageBackfillProgressLabel({ provider: 'codex', phase: 'scanning' }),
+    'Scanning Codex histories'
+  );
+  assert.equal(
+    usageBackfillProgressDetail({
+      provider: 'codex',
+      phase: 'scanning',
+      processed: 42,
+      total: 466,
+      providerIndex: 1,
+      providerCount: 3
+    }),
+    '42 of 466 files · 1 of 3 agents'
+  );
+  assert.equal(
+    usageBackfillProgressPercent({ processed: 42, total: 466 }),
+    9
+  );
+  assert.equal(
+    usageBackfillProgressLabel({ provider: 'cursor', phase: 'scanning-transcripts' }),
+    'Scanning Cursor transcripts'
+  );
+  assert.equal(
+    usageBackfillProgressDetail({
+      phase: 'scanning-transcripts',
+      processed: 1,
+      total: 1,
+      providerIndex: 3,
+      providerCount: 3
+    }),
+    '1 of 1 transcript · 3 of 3 agents'
+  );
+  assert.equal(usageBackfillProgressPercent({ phase: 'collecting' }), null);
+  assert.equal(
+    usageBackfillProgressLabel({}),
+    'Scanning local agent histories'
+  );
+  assert.equal(usageBackfillProgressDetail({}), 'Working locally...');
 });

@@ -17,7 +17,18 @@ pub fn backfill_codex_session_usage(
     request: BackfillCodexSessionUsageRequest,
     managed_root: impl AsRef<Path>,
 ) -> Result<BackfillCodexSessionUsageResult> {
-    backfill_codex_session_usage_for_home(request, home_dir(), managed_root)
+    backfill_codex_session_usage_with_progress(request, managed_root, |_| {})
+}
+
+pub fn backfill_codex_session_usage_with_progress<F>(
+    request: BackfillCodexSessionUsageRequest,
+    managed_root: impl AsRef<Path>,
+    progress: F,
+) -> Result<BackfillCodexSessionUsageResult>
+where
+    F: FnMut(UsageBackfillProgress),
+{
+    backfill_codex_session_usage_for_home_with_progress(request, home_dir(), managed_root, progress)
 }
 
 pub fn backfill_codex_session_usage_for_home(
@@ -25,12 +36,25 @@ pub fn backfill_codex_session_usage_for_home(
     home: impl AsRef<Path>,
     managed_root: impl AsRef<Path>,
 ) -> Result<BackfillCodexSessionUsageResult> {
+    backfill_codex_session_usage_for_home_with_progress(request, home, managed_root, |_| {})
+}
+
+pub fn backfill_codex_session_usage_for_home_with_progress<F>(
+    request: BackfillCodexSessionUsageRequest,
+    home: impl AsRef<Path>,
+    managed_root: impl AsRef<Path>,
+    mut progress: F,
+) -> Result<BackfillCodexSessionUsageResult>
+where
+    F: FnMut(UsageBackfillProgress),
+{
     let home = home.as_ref();
     let managed_root = managed_root.as_ref();
     let paths = ensure_managed_layout(managed_root.to_path_buf())?;
     let mut connection = open_database(&paths.database_path).map_err(|error| error.to_string())?;
     let runtime_roots = runtime_roots_under(home);
 
+    progress(UsageBackfillProgress::new("codex", "collecting", 0, None));
     let mut roots = Vec::new();
     let sessions_root = request
         .sessions_root
@@ -55,8 +79,15 @@ pub fn backfill_codex_session_usage_for_home(
         collect_jsonl_files(root, &mut files)?;
     }
     files.sort();
+    let total = files.len();
+    progress(UsageBackfillProgress::new(
+        "codex",
+        "scanning",
+        0,
+        Some(total),
+    ));
 
-    for path in files {
+    for (index, path) in files.into_iter().enumerate() {
         result.scanned_files += 1;
         match extract_codex_session_skill_candidates(&path) {
             Ok((candidates, parse_errors, scanned_turns)) => {
@@ -103,7 +134,19 @@ pub fn backfill_codex_session_usage_for_home(
                 push_backfill_error(&mut result.errors, format!("{}: {error}", path.display()));
             }
         }
+        progress(UsageBackfillProgress::new(
+            "codex",
+            "scanning",
+            index + 1,
+            Some(total),
+        ));
     }
+    progress(UsageBackfillProgress::new(
+        "codex",
+        "complete",
+        result.scanned_files,
+        Some(total),
+    ));
 
     let scanned_files = u32::try_from(result.scanned_files).unwrap_or(u32::MAX);
     if let Err(error) = write_u32_preference(
@@ -178,6 +221,7 @@ fn extract_codex_session_skill_candidates(
     let mut session_runtime_context: Option<PathBuf> = None;
     let mut turn_id: Option<String> = None;
     let mut turn_used_at: Option<String> = None;
+    let mut turn_runtime_context: Option<PathBuf> = None;
     let mut turn_skills: Vec<HookSkillRef> = Vec::new();
     let mut turn_prompts: Vec<String> = Vec::new();
     let mut has_turn_context = false;
@@ -234,6 +278,14 @@ fn extract_codex_session_skill_candidates(
                     .and_then(|value| value.as_str())
                     .map(str::to_string);
                 turn_used_at = timestamp;
+                turn_runtime_context = value
+                    .get("payload")
+                    .and_then(|payload| payload.get("cwd"))
+                    .and_then(|value| value.as_str())
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(PathBuf::from)
+                    .or_else(|| session_runtime_context.clone());
                 turn_skills.clear();
                 turn_prompts.clear();
             }
@@ -242,7 +294,14 @@ fn extract_codex_session_skill_candidates(
                     if turn_used_at.is_none() {
                         turn_used_at = timestamp;
                     }
-                    collect_codex_user_input(&value, &mut turn_prompts, &mut turn_skills);
+                    collect_codex_turn_skill_signals(
+                        &value,
+                        turn_runtime_context
+                            .as_deref()
+                            .or(session_runtime_context.as_deref()),
+                        &mut turn_prompts,
+                        &mut turn_skills,
+                    );
                     continue;
                 }
 
@@ -254,7 +313,12 @@ fn extract_codex_session_skill_candidates(
                         turn_id = Some(complete_turn.to_string());
                     }
                 }
-                collect_codex_user_input(&value, &mut turn_prompts, &mut turn_skills);
+                collect_codex_turn_skill_signals(
+                    &value,
+                    session_runtime_context.as_deref(),
+                    &mut turn_prompts,
+                    &mut turn_skills,
+                );
                 if task_complete_turn_id(&value).is_some() {
                     scanned_turns = scanned_turns.saturating_add(1);
                     flush_codex_session_turn(
@@ -286,8 +350,9 @@ fn extract_codex_session_skill_candidates(
     Ok((results, parse_errors, scanned_turns))
 }
 
-fn collect_codex_user_input(
+fn collect_codex_turn_skill_signals(
     value: &serde_json::Value,
+    workdir: Option<&Path>,
     turn_prompts: &mut Vec<String>,
     turn_skills: &mut Vec<HookSkillRef>,
 ) {
@@ -305,6 +370,11 @@ fn collect_codex_user_input(
                 .filter_map(auditable_codex_backfill_skill_ref),
         );
     }
+    turn_skills.extend(
+        extract_skill_refs_from_exec_payload(value, workdir)
+            .into_iter()
+            .filter_map(auditable_codex_backfill_skill_ref),
+    );
 }
 
 fn auditable_codex_backfill_skill_ref(mut skill: HookSkillRef) -> Option<HookSkillRef> {

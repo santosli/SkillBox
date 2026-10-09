@@ -5,7 +5,7 @@
 SkillBox 从 runtime hooks 和本机会话历史恢复 skill usage。不同来源能证明的事实不同：
 Stop hook 或原生 Skill tool 可以证明本机执行，结构化的逐回合 skill attachment 可以证明
 用户发起了调用，但普通文本、catalog、shell/tool payload 或历史上下文引用不能证明执行。
-如果把这些来源全部计为 Calls，Dashboard、Workspace、History 和 Rankings 会把“提到过”
+如果把这些来源全部计为 Calls，Dashboard、Workspace、History 和 Usage 会把“提到过”
 误报为“调用过”；如果全部排除历史信号，又会系统性低估没有 hook 覆盖的 Codex 使用。
 
 Codex 当前本地 store 没有稳定、专用且可用于恢复 provider-native skill-run total 的事件。
@@ -40,18 +40,24 @@ Calls = confirmed + defensible inferred
   `[$skill](.../SKILL.md)` link 是 `inferred`。它们是逐回合、绝对路径校验后的
   invocation carrier，不是普通 catalog/prose，但也不是 provider-native execution
   result。
+- Codex `exec` / `exec_command` 中专用的 `SKILL.md` 文件读取（`cat`、`sed`、
+  `head` 等把绝对或 workdir 解析后的本机 `SKILL.md` 当作文件操作数）是
+  `inferred`，与 Cursor `Read` 同类。`rg`/`find`/`git diff`、混杂 payload 和
+  tool/shell output 仍不构成 Calls。
 - Cursor `context.cursorRules` state 只证明 skill 被附加为上下文，是 `reference`。
-- Cursor agent transcript 中 assistant `tool_use` 的 `Read` 是 execution proxy，
-  不是 provider-confirmed execution，因此是 `inferred`。调用单位是每个稳定 transcript
-  user turn、每个 skill 一次；同 turn 重复 Read 去重。现存文件执行严格
+- Cursor agent transcript 中 assistant `tool_use` 的 `Read` 和 `ReadFile` 是
+  execution proxy，不是 provider-confirmed execution，因此是 `inferred`。用户
+  `<manually_attached_skills>` 附加同样是逐回合 inferred invocation。调用单位是
+  每个稳定 transcript user turn、每个 skill 一次；同 turn 重复 Read/ReadFile/附加
+  去重。现存文件执行严格
   traversal/symlink/regular-file/size/frontmatter 校验。后来移动/删除的路径只在
   absolute/local、精确 `SKILL.md` suffix、合法 parent skill name、lexical allowed-root
   和最近现存 ancestor containment 均成立时保留 historical evidence；它永远不是
-  filesystem/deploy authority。`ReadFile` 的语义尚未完成 qualification，只报告
-  aggregate candidates，不计 Calls。
+  filesystem/deploy authority。
 - 公开 `usage-record` 没有 trusted parser 证据，默认是 `reference`。
-- catalog、普通 user/assistant prose、`SKILL.md` mention、`exec_command`、任意
-  custom/dynamic tool payload、tool output 和 shell output 均不构成 Calls。
+- catalog、普通 user/assistant prose、裸 `SKILL.md` mention、search/find/`git
+  diff`、非文件读取的 `exec_command`/custom tool payload、tool output 和 shell
+  output 均不构成 Calls。
 
 同一 canonical provider/session/turn/skill event 只保留一条 row。新证据强于旧证据时，
 `reference -> inferred -> confirmed` 单向升级；弱证据不能降级。升级不增加 event 数，
@@ -76,11 +82,12 @@ schema v7 migration 在 transaction 中保守回填 evidence、重建
 
 ## 后果
 
-- Dashboard、Workspace、History Calls、Rankings 和默认排序只读取
+- Dashboard、Workspace、History Calls、Usage 和默认排序只读取
   `confirmed + inferred`。
 - History references 是独立次级指标；reference-only skill 不显示为已调用。
 - coverage 同时返回 evidence-class totals 与 provenance source counts。前者按当前最强
   class 互斥，后者可能重叠。
 - Codex Calls 是已确认 hook 加结构化 inferred invocation 的本机下界，仍可能 undercount；
-  SkillBox 不提供、推导或补齐 Codex provider-native total。
+  SkillBox 不提供、推导或补齐 Codex provider-native total。专用 `SKILL.md` 文件读取可
+  计入 inferred，但不能从 catalog、prose 或任意 shell 痕迹补数。
 - 将来接入 provider-reported runs 时，必须继续使用独立存储和展示，不能混入本地 Calls。

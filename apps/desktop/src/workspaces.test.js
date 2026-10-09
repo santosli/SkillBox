@@ -341,7 +341,7 @@ test('sidebar keeps primary navigation entries without user or remote entries', 
     [
       ['dashboard', 'Dashboard', 'gauge'],
       ['workspaces', 'Workspaces', 'folder-code'],
-      ['rankings', 'Rankings', 'chart-no-axes-column-increasing'],
+      ['usage', 'Usage', 'chart-no-axes-column-increasing'],
       ['history', 'History', 'history']
     ]
   );
