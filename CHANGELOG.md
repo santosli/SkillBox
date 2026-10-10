@@ -9,6 +9,15 @@ version tags such as `v0.3.0`.
 
 - No unreleased changes.
 
+## 0.9.6
+
+- Allow deleting a managed skill when an indexed workspace symlink points somewhere else. Those links stay on disk; real non-symlink targets still block the delete.
+- Recognize a workspace symlink as SkillBox-owned when it reaches the managed skill through a path alias such as `~/.skillbox`, including a link to remote `current`.
+- Default local history sync to incremental file cursors, refresh it hourly in the desktop background, and keep CLI `--full` for a complete rescan.
+- Show Last sync time beside Usage page actions after each background or Sync histories scan.
+- Add GitHub collection-level update preview/apply and one-step rollback to the previous reviewed SHA, with schema v10 revision backups, CLI/Tauri/desktop review, and no auto-deploy.
+- Update source-map-js to 1.2.2 to clear the high-severity npm audit finding.
+
 ## 0.9.5
 
 - Show the date and call count when hovering a Usage heatmap day.
