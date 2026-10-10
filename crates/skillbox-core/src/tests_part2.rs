@@ -1989,10 +1989,9 @@ fn delete_skill_leaves_foreign_symlink_and_removes_owned_deployment() {
     assert!(result.backup_path.join("SKILL.md").exists());
     assert!(fs::symlink_metadata(&owned.target_path).is_err());
     assert_eq!(fs::read_link(&foreign_path).unwrap(), other);
-    assert!(load_deployments(&paths.database_path)
+    assert!(!load_deployments(&paths.database_path)
         .unwrap()
-        .get("demo")
-        .is_none());
+        .contains_key("demo"));
 }
 
 #[test]
