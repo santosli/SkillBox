@@ -967,13 +967,13 @@ fn usage_rankings_mark_codex_system_skills_as_non_importable() {
     let root = temp_dir("usage-rankings-system");
     let managed_root = root.join("SkillBox");
     let runtime_root = root.join(".codex").join("skills");
-    let system_skill = runtime_root.join(".system").join("skill-creator");
+    let system_skill = runtime_root.join(".system").join("skillbox-system-probe");
     let unmanaged_skill = runtime_root.join("draft-helper");
-    make_skill(&system_skill, "skill-creator", "System skill");
+    make_skill(&system_skill, "skillbox-system-probe", "System skill");
     make_skill(&unmanaged_skill, "draft-helper", "Draft helper");
 
     for (skill_name, used_at) in [
-        ("skill-creator", "2026-06-29T10:00:00Z"),
+        ("skillbox-system-probe", "2026-06-29T10:00:00Z"),
         ("draft-helper", "2026-06-29T09:00:00Z"),
     ] {
         record_test_call(
@@ -1008,7 +1008,7 @@ fn usage_rankings_mark_codex_system_skills_as_non_importable() {
     let system = result
         .rows
         .iter()
-        .find(|row| row.skill_name == "skill-creator")
+        .find(|row| row.skill_name == "skillbox-system-probe")
         .expect("system skill row");
     assert!(!system.managed);
     assert!(system.system);
@@ -1024,7 +1024,7 @@ fn usage_rankings_mark_codex_system_skills_as_non_importable() {
     assert!(!unmanaged.system);
     assert!(!unmanaged.source_missing);
 
-    let import_error = preview_usage_skill_import("skill-creator", &managed_root).unwrap_err();
+    let import_error = preview_usage_skill_import("skillbox-system-probe", &managed_root).unwrap_err();
     assert!(import_error.contains("not importable"));
 }
 
