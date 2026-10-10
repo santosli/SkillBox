@@ -446,6 +446,7 @@ export function createAppActions(getCtx) {
           previewId: 'browser-preview',
           canDelete: true,
           deployments: skill.deployments || [],
+          retainedDeployments: [],
           blockers: []
         }
       }));
@@ -463,6 +464,7 @@ export function createAppActions(getCtx) {
                 previewId: raw.previewId ?? raw.preview_id,
                 canDelete: Boolean(raw.canDelete ?? raw.can_delete),
                 deployments: raw.deployments || [],
+                retainedDeployments: raw.retainedDeployments || raw.retained_deployments || [],
                 blockers: raw.blockers || []
               }
             }

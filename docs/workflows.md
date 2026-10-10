@@ -396,7 +396,8 @@ children 仍独立 import/deploy/usage-track，不会自动部署。
 步骤：
 
 - 预检 managed user 目录或完整 remote skill root、所有 SQLite deployment 与已注册 workspace 中推断出的 symlink。
-- active import、非 symlink runtime target、指向其它位置的 symlink 或不安全 managed path 都会阻断整个操作，预检失败时不修改文件或数据库。
+- active import、非 symlink runtime target 或不安全 managed path 会阻断整个操作，预检失败时不修改文件或数据库。
+- 已登记但指向其它位置的 symlink 留在磁盘上，不删除，也不阻断 managed skill 删除。预览会把这些路径标成 retained；apply 只移除仍指向本次 managed skill 的 symlink，并在删除 skill 时清掉对应 deployment 索引。经 `~/.skillbox` 这类 managed root 别名、或 remote `current` 链到版本目录的链接仍算 SkillBox 所有，会一并移除。
 - apply 时重新生成并校验 preview identity；user skill 绑定完整目录快照，remote skill 绑定完整 remote root（包括全部 versions、`source.json` 和 `current` link），避免确认后状态变化。
 - 将 managed user skill 或完整 remote skill root 原子移动到 `backups/deletions`。
 - 删除所有已确认归 SkillBox 管理的 workspace symlink；workspace 注册本身及其它 skills 保持不变。

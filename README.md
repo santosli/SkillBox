@@ -105,7 +105,7 @@ Longer-term support for native Claude, OpenClaw, Cursor, Claude Code, Copilot, a
 - Install GitHub-backed skills through a preview/apply flow and bind discovered remote source candidates without replacing the active version.
 - Check remote sources, preview all-file diffs, apply updates, and roll back to immutable versions.
 - Preview runtime-profile and frontmatter compatibility before deploying to an individual workspace. Blocked targets cannot be selected, warnings require confirmation, and apply revalidates stale skill/target/profile state before creating an ownership-checked symlink.
-- Delete a skill from the managed store and all associated workspaces after a name-confirmed preview, while retaining a recovery backup and workspace registrations.
+- Delete a skill from the managed store and its SkillBox-owned workspace symlinks after a name-confirmed preview. Symlinks that point somewhere else stay on disk. A recovery backup and workspace registrations are retained, and a real non-symlink target still blocks deletion.
 - Review user-skill Git diffs, create selected-file Conventional Commits, and optionally push. The v0.7 flow handles incoming `origin/main` changes through separate preview-confirmed fast-forward steps; SkillBox never auto-merges, rebases, resets, stashes, or resolves conflicts.
 - During local Import Review, Rust detects the nearest safe Git worktree and presents its `SKILL.md` children as one collection. Collection scans are read-only; applying selected children rechecks the reviewed worktree/HEAD and stores collection provenance after the import succeeds.
 - Search and filter the dashboard by type, update status, tag, or favorite; switch between grid and list views, with favorites and tags persisted in SQLite.

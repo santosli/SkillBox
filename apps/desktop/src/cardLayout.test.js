@@ -952,6 +952,8 @@ test('skill deletion uses a reviewed danger confirmation and blocking desktop co
   assert.match(appSource, /\{copied \? 'Copied' : 'Copy'\}/);
   assert.match(appSource, /invoke\('preview_delete_skill'/);
   assert.match(appSource, /invoke\('delete_skill'/);
+  assert.match(appSource, /Leaving this symlink in place because it points somewhere else/);
+  assert.match(appSource, /retainedDeployments/);
   assert.match(appSource, /const metadataState = normalizeSkillUserMetadata\(metadataRows \|\| \[\]\);/);
   assert.match(appSource, /setFavoriteNames\(metadataState\.favoriteNames\);/);
   assert.doesNotMatch(appSource, /setFavoriteNames\([^;]*new Set/s);

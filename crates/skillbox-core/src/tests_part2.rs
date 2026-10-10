@@ -1938,30 +1938,129 @@ fn delete_skill_preview_blocks_active_import_without_mutating_files() {
 }
 
 #[test]
-fn delete_skill_preview_blocks_foreign_indexed_deployment() {
+fn delete_skill_leaves_foreign_symlink_and_removes_owned_deployment() {
     let root = temp_dir("delete-foreign-deployment");
     let source = root.join("source").join("demo");
     let other = root.join("other").join("demo");
     let managed_root = root.join("SkillBox");
-    let runtime = root.join("runtime");
+    let owned_runtime = root.join("owned-runtime");
+    let foreign_runtime = root.join("foreign-runtime");
     make_skill(&source, "demo", "Demo skill");
     make_skill(&other, "demo", "Other skill");
     let imported = import_skill(&source, SkillKind::User, &managed_root).unwrap();
-    fs::create_dir_all(&runtime).unwrap();
+    let owned = deploy_skill("demo", &managed_root, &owned_runtime).unwrap();
+    fs::create_dir_all(&foreign_runtime).unwrap();
+    let foreign_path = foreign_runtime.join("demo");
+    symlink_dir(&other, &foreign_path).unwrap();
+    let paths = ensure_managed_layout(&managed_root).unwrap();
+    index_deployment(
+        &paths.database_path,
+        "demo",
+        &foreign_runtime,
+        &foreign_path,
+    )
+    .unwrap();
+
+    let preview = preview_delete_skill("demo", &managed_root).unwrap();
+
+    assert!(
+        preview.can_delete,
+        "unexpected blockers: {:?}",
+        preview.blockers
+    );
+    assert_eq!(preview.deployments.len(), 1);
+    assert_eq!(preview.deployments[0].target_path, owned.target_path);
+    assert_eq!(preview.retained_deployments.len(), 1);
+    assert_eq!(preview.retained_deployments[0].target_path, foreign_path);
+
+    let result = delete_skill(
+        DeleteSkillRequest {
+            skill_name: "demo".to_string(),
+            preview_id: preview.preview_id,
+            confirmed_skill_name: "demo".to_string(),
+            actor: "test".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    assert_eq!(result.removed_deployments.len(), 1);
+    assert!(!imported.managed_path.exists());
+    assert!(result.backup_path.join("SKILL.md").exists());
+    assert!(fs::symlink_metadata(&owned.target_path).is_err());
+    assert_eq!(fs::read_link(&foreign_path).unwrap(), other);
+    assert!(load_deployments(&paths.database_path)
+        .unwrap()
+        .get("demo")
+        .is_none());
+}
+
+#[test]
+fn delete_skill_preview_blocks_non_symlink_indexed_deployment() {
+    let root = temp_dir("delete-non-symlink-deployment");
+    let source = root.join("source").join("demo");
+    let managed_root = root.join("SkillBox");
+    let runtime = root.join("runtime");
+    make_skill(&source, "demo", "Demo skill");
+    let imported = import_skill(&source, SkillKind::User, &managed_root).unwrap();
     let target_path = runtime.join("demo");
-    symlink_dir(&other, &target_path).unwrap();
+    fs::create_dir_all(&target_path).unwrap();
     let paths = ensure_managed_layout(&managed_root).unwrap();
     index_deployment(&paths.database_path, "demo", &runtime, &target_path).unwrap();
 
     let preview = preview_delete_skill("demo", &managed_root).unwrap();
 
     assert!(!preview.can_delete);
-    assert!(preview.blockers[0].contains("pointing elsewhere"));
+    assert!(preview.blockers[0].contains("non-symlink"));
+    assert!(preview.retained_deployments.is_empty());
     assert!(imported.managed_path.exists());
-    assert!(fs::symlink_metadata(target_path)
-        .unwrap()
-        .file_type()
-        .is_symlink());
+    assert!(target_path.is_dir());
+}
+
+#[test]
+fn delete_skill_removes_symlink_that_reaches_managed_skill_through_root_alias() {
+    let root = temp_dir("delete-managed-root-alias");
+    let source = root.join("source").join("demo");
+    let managed_root = root.join("SkillBox");
+    let alias = root.join("dot-skillbox");
+    let runtime = root.join("project").join(".agents").join("skills");
+    make_skill(&source, "demo", "Demo skill");
+    import_skill(&source, SkillKind::Remote, &managed_root).unwrap();
+    symlink_dir(&managed_root, &alias).unwrap();
+    let deployment = deploy_skill("demo", &managed_root, &runtime).unwrap();
+    fs::remove_file(&deployment.target_path).unwrap();
+    let alias_current = alias.join("remote-skills").join("demo").join("current");
+    symlink_dir(&alias_current, &deployment.target_path).unwrap();
+
+    let preview = preview_delete_skill("demo", &managed_root).unwrap();
+
+    assert!(
+        preview.can_delete,
+        "unexpected blockers: {:?}",
+        preview.blockers
+    );
+    assert!(
+        preview.retained_deployments.is_empty(),
+        "owned alias link was retained: {:?}",
+        preview.retained_deployments
+    );
+    assert_eq!(preview.deployments.len(), 1);
+    assert_eq!(preview.deployments[0].target_path, deployment.target_path);
+
+    delete_skill(
+        DeleteSkillRequest {
+            skill_name: "demo".to_string(),
+            preview_id: preview.preview_id,
+            confirmed_skill_name: "demo".to_string(),
+            actor: "test".to_string(),
+        },
+        &managed_root,
+    )
+    .unwrap();
+
+    assert!(fs::symlink_metadata(&deployment.target_path).is_err());
+    assert!(!managed_root.join("remote-skills").join("demo").exists());
+    assert!(alias_current.symlink_metadata().is_err());
 }
 
 #[test]

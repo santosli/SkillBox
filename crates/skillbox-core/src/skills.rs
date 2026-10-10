@@ -584,8 +584,19 @@ fn symlink_targets_any_path(symlink: &Path, expected_paths: &[PathBuf]) -> Resul
             .unwrap_or_else(|| Path::new(""))
             .join(target)
     };
-    let target = normalize_lexical_path(&target);
-    Ok(expected_paths.contains(&target))
+    let lexical_target = normalize_lexical_path(&target);
+    if expected_paths
+        .iter()
+        .any(|expected| normalize_lexical_path(expected) == lexical_target)
+    {
+        return Ok(true);
+    }
+    // `~/.skillbox` is an alias of the real managed root, and remote `current`
+    // is itself a symlink into `versions/`. Compare resolved locations so an
+    // owned deployment is not mistaken for a foreign link.
+    Ok(expected_paths
+        .iter()
+        .any(|expected| paths_refer_to_same_location(&target, expected)))
 }
 
 pub(crate) fn deploy_skill(
@@ -780,24 +791,8 @@ fn build_delete_skill_preview(
     }
 
     let reference_paths = delete_skill_reference_paths(paths, skill_name, &location);
-    for deployment in &deployments {
-        match fs::symlink_metadata(&deployment.target_path) {
-            Ok(metadata) if !metadata.file_type().is_symlink() => blockers.push(format!(
-                "Refusing to remove existing non-symlink target: {}",
-                deployment.target_path.display()
-            )),
-            Ok(_) => match symlink_targets_any_path(&deployment.target_path, &reference_paths) {
-                Ok(true) => {}
-                Ok(false) => blockers.push(format!(
-                    "Refusing to remove symlink pointing elsewhere: {}",
-                    deployment.target_path.display()
-                )),
-                Err(error) => blockers.push(error),
-            },
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => blockers.push(error.to_string()),
-        }
-    }
+    let (deployments, retained_deployments) =
+        classify_delete_skill_deployments(deployments, &reference_paths, &mut blockers);
 
     blockers.sort();
     blockers.dedup();
@@ -807,6 +802,7 @@ fn build_delete_skill_preview(
         "managedPath": location.storage_path,
         "managedSnapshotHash": managed_snapshot_hash,
         "deployments": deployments,
+        "retainedDeployments": retained_deployments,
         "blockers": blockers
     });
     let preview_id =
@@ -818,9 +814,38 @@ fn build_delete_skill_preview(
         kind: location.kind,
         managed_path: location.storage_path,
         deployments,
+        retained_deployments,
         can_delete: blockers.is_empty(),
         blockers,
     })
+}
+
+fn classify_delete_skill_deployments(
+    deployments: Vec<ManagedSkillDeployment>,
+    reference_paths: &[PathBuf],
+    blockers: &mut Vec<String>,
+) -> (Vec<ManagedSkillDeployment>, Vec<ManagedSkillDeployment>) {
+    let mut removable = Vec::new();
+    let mut retained = Vec::new();
+    for deployment in deployments {
+        match fs::symlink_metadata(&deployment.target_path) {
+            Ok(metadata) if !metadata.file_type().is_symlink() => blockers.push(format!(
+                "Refusing to remove existing non-symlink target: {}",
+                deployment.target_path.display()
+            )),
+            Ok(_) => match symlink_targets_any_path(&deployment.target_path, reference_paths) {
+                Ok(true) => removable.push(deployment),
+                Ok(false) => retained.push(deployment),
+                Err(error) => blockers.push(error),
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                removable.push(deployment);
+            }
+            Err(error) => blockers.push(error.to_string()),
+        }
+    }
+    retained.sort_by(|left, right| left.target_path.cmp(&right.target_path));
+    (removable, retained)
 }
 
 fn validate_delete_managed_location(

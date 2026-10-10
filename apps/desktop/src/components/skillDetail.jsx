@@ -515,8 +515,12 @@ export function SkillDeleteDialog({ dialog, onClose, onConfirm, onConfirmationCh
   const [copied, setCopied] = useState(false);
   const preview = dialog.preview || {};
   const deployments = preview.deployments || [];
+  const retainedDeployments = preview.retainedDeployments || preview.retained_deployments || [];
   const blockers = preview.blockers || [];
   const confirmationMatches = dialog.confirmation === dialog.skillName;
+  const description = deployments.length === 0
+    ? `Delete ${dialog.skillName} from the managed store.`
+    : `Delete ${dialog.skillName} from the managed store and remove it from ${deployments.length} workspace${deployments.length === 1 ? '' : 's'}.`;
 
   useEffect(() => {
     setCopied(false);
@@ -547,7 +551,7 @@ export function SkillDeleteDialog({ dialog, onClose, onConfirm, onConfirmationCh
       confirmClassName="button danger"
       confirmDisabled={!preview.canDelete || !confirmationMatches}
       confirmLabel="Delete from SkillBox"
-      description={`Delete ${dialog.skillName} from the managed store and remove it from ${deployments.length} workspace${deployments.length === 1 ? '' : 's'}.`}
+      description={description}
       error={dialog.error}
       loading={dialog.loading}
       loadingLabel="Deleting..."
@@ -560,6 +564,14 @@ export function SkillDeleteDialog({ dialog, onClose, onConfirm, onConfirmationCh
       {blockers.map((blocker) => (
         <div className="formError" key={blocker}>{blocker}</div>
       ))}
+      {retainedDeployments.map((deployment) => {
+        const targetPath = deployment.targetPath || deployment.target_path;
+        return (
+          <div className="formNotice" key={targetPath}>
+            Leaving this symlink in place because it points somewhere else: {targetPath}
+          </div>
+        );
+      })}
       <p className="confirmDialogImpact">
         Workspace registrations and unrelated skills stay unchanged. A recovery backup will be kept in SkillBox.
       </p>

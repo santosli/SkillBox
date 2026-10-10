@@ -105,7 +105,7 @@ Runtime 目录只是部署目标：
 - 通过 preview/apply 安装 GitHub-backed skill，并在不替换当前版本的情况下绑定识别到的 remote source candidate。
 - 检查 remote source、预览全文件 diff、应用更新，并回滚到不可变版本。
 - 部署前 preview runtime profile 与 frontmatter compatibility；blocked target 不可选择，warning 需要确认，apply 会重新校验 skill/target/profile 是否 stale，再创建 ownership-checked symlink。
-- 名称确认后，从 managed store 和全部关联 workspace 删除 skill，同时保留 recovery backup 和 workspace registrations。
+- 名称确认后，从 managed store 和仍指向该 skill 的 workspace symlink 删除；指向其它位置的 symlink 留在磁盘上。recovery backup 和 workspace registrations 会保留，真实的非 symlink target 仍会阻断删除。
 - Review user-skill Git diff、为选中文件创建 Conventional Commit，并可选推送。v0.7 对 `origin/main` 入站更新使用独立的 preview-confirmed fast-forward 流程；SkillBox 不会自动 merge、rebase、reset、stash 或解决冲突。
 - 本地 Import Review 由 Rust 找到最近的安全 Git worktree，并把其中的 `SKILL.md` children 展示为一个 collection。collection scan 只读；应用选中的 children 前会重新校验 worktree/HEAD，成功导入后才保存 collection provenance。
 - 按类型、更新状态、tag 或 favorite 搜索过滤 Dashboard，在 grid/list 间切换，并把 favorites 与 tags 持久化到 SQLite。

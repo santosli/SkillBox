@@ -5964,6 +5964,16 @@ dd {
   padding: 10px 12px;
 }
 
+.formNotice {
+  border: 1px solid var(--skillbox-border);
+  border-radius: 8px;
+  background: var(--skillbox-surface-muted);
+  color: var(--skillbox-text);
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 10px 12px;
+}
+
 .remoteImportFooter {
   display: flex;
   justify-content: flex-end;

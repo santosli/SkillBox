@@ -98,6 +98,7 @@ pub struct DeleteSkillPreview {
     pub kind: SkillKind,
     pub managed_path: PathBuf,
     pub deployments: Vec<ManagedSkillDeployment>,
+    pub retained_deployments: Vec<ManagedSkillDeployment>,
     pub blockers: Vec<String>,
     pub can_delete: bool,
 }
