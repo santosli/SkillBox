@@ -1024,7 +1024,8 @@ fn usage_rankings_mark_codex_system_skills_as_non_importable() {
     assert!(!unmanaged.system);
     assert!(!unmanaged.source_missing);
 
-    let import_error = preview_usage_skill_import("skillbox-system-probe", &managed_root).unwrap_err();
+    let import_error =
+        preview_usage_skill_import("skillbox-system-probe", &managed_root).unwrap_err();
     assert!(import_error.contains("not importable"));
 }
 
