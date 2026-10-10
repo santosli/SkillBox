@@ -14,6 +14,11 @@ import {
   importCandidateGroupTabs,
   importReviewSelectableGroups,
   normalizeGithubSkillCollectionPreviewResult,
+  normalizeGithubSkillCollectionUpdatePreviewResult,
+  attachGithubCollectionChanges,
+  applyGithubCollectionChangeLocks,
+  githubCollectionForSkill,
+  collectionChangeLabel,
   normalizeImportCollections,
   normalizeImportCandidateGroup,
   normalizeImportCandidateGroups,
@@ -882,6 +887,133 @@ test('routes structured GitHub collection preview outcomes without parsing human
     () => normalizeGithubSkillCollectionPreviewResult({ error: 'points to one skill' }),
     /invalid result/
   );
+});
+
+test('routes structured GitHub collection update preview outcomes', () => {
+  const preview = { preview_id: 'update-1', collection: { id: 'collection-demo' } };
+  assert.deepEqual(
+    normalizeGithubSkillCollectionUpdatePreviewResult({
+      kind: 'update',
+      preview
+    }),
+    { kind: 'update', preview }
+  );
+  assert.equal(
+    normalizeGithubSkillCollectionUpdatePreviewResult({
+      kind: 'up_to_date',
+      preview,
+      message: 'Already current.'
+    }).kind,
+    'up_to_date'
+  );
+  assert.equal(
+    normalizeGithubSkillCollectionUpdatePreviewResult({
+      kind: 'not_imported',
+      message: 'Use github-collection-preview.'
+    }).kind,
+    'not_imported'
+  );
+  assert.throws(
+    () => normalizeGithubSkillCollectionUpdatePreviewResult({ kind: 'nope' }),
+    /invalid result/
+  );
+});
+
+test('collection update review locks updated members and keeps mixed types eligible', () => {
+  const collections = attachGithubCollectionChanges(
+    normalizeImportCollections([{
+      id: 'github-collection-demo',
+      source_kind: 'github_remote',
+      preview_id: 'github-collection-update-1',
+      display_name: 'acme/skills',
+      source_url: 'https://github.com/acme/skills/tree/main',
+      from_sha: 'aaa111',
+      to_sha: 'bbb222',
+      children: [{
+        id: 'child-alpha',
+        group_id: 'skill-alpha',
+        variant_id: 'variant-alpha',
+        name: 'alpha',
+        relative_path: 'skills/alpha',
+        import_status: 'importable',
+        selected_type: 'user',
+        is_selected: true
+      }, {
+        id: 'child-beta',
+        group_id: 'skill-beta',
+        variant_id: 'variant-beta',
+        name: 'beta',
+        relative_path: 'skills/beta',
+        import_status: 'importable',
+        selected_type: 'remote',
+        is_selected: true
+      }, {
+        id: 'child-gamma',
+        group_id: 'skill-gamma',
+        variant_id: 'variant-gamma',
+        name: 'gamma',
+        relative_path: 'skills/gamma',
+        import_status: 'importable',
+        requires_type_review: true,
+        is_selected: false
+      }]
+    }])[0],
+    [
+      { relative_path: 'skills/alpha', change: 'updated' },
+      { relative_path: 'skills/beta', change: 'updated' },
+      { relative_path: 'skills/gamma', change: 'added' }
+    ]
+  );
+  const groups = applyGithubCollectionChangeLocks(
+    [
+      normalizeImportCandidateGroup({
+        id: 'skill-alpha',
+        selected_variant_id: 'variant-alpha',
+        is_selected: true,
+        variants: [{
+          id: 'variant-alpha',
+          selected_type: 'user',
+          candidate: { name: 'alpha', import_status: 'importable', is_selected: true }
+        }]
+      }),
+      normalizeImportCandidateGroup({
+        id: 'skill-beta',
+        selected_variant_id: 'variant-beta',
+        is_selected: true,
+        variants: [{
+          id: 'variant-beta',
+          selected_type: 'remote',
+          candidate: { name: 'beta', import_status: 'importable', is_selected: true }
+        }]
+      }),
+      normalizeImportCandidateGroup({
+        id: 'skill-gamma',
+        selected_variant_id: 'variant-gamma',
+        variants: [{
+          id: 'variant-gamma',
+          requires_type_review: true,
+          candidate: { name: 'gamma', import_status: 'importable', is_selected: false }
+        }]
+      })
+    ],
+    [collections]
+  );
+
+  assert.equal(collections.children[0].selectionLocked, true);
+  assert.equal(collectionChangeLabel('updated'), 'Updated');
+  assert.equal(collectionTypeChoiceState(groups, collections).required, false);
+  const toggled = toggleImportCandidateGroup(groups, 'skill-alpha');
+  assert.equal(toggled.find((group) => group.id === 'skill-alpha').isSelected, true);
+  const requests = selectedImportCollectionRequests(groups, [collections]);
+  assert.equal(requests.length, 1);
+  assert.deepEqual(
+    requests[0].selections.map((selection) => selection.relativePath).sort(),
+    ['skills/alpha', 'skills/beta']
+  );
+  assert.equal(githubCollectionForSkill([{
+    source_kind: 'github_remote',
+    members: [{ managed_skill_name: 'alpha' }]
+  }], 'alpha')?.source_kind, 'github_remote');
 });
 
 test('installed-source collections stay on per-skill apply and suppress imported type review', () => {

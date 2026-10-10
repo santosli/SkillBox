@@ -6,7 +6,7 @@ SkillBox 是一个 Rust core + Tauri desktop monorepo。产品目标是管理跨
 覆盖 Claude、Codex、OpenClaw、Cursor、Claude Code、Copilot 等主流 agent。
 
 - `apps/desktop` 是 Tauri + React 桌面应用。
-  - `src/App.jsx` 保留主 App 组件、状态和事件编排。
+  - `src/App.jsx` 保留主 App 组件、状态和页面编排；GitHub collection update/rollback 等事件处理在 `src/appActionsA.js` / `src/appActionsB.js` / `src/appActionsC.js` / `src/appActionsD.js`。
   - `src/components/` 按页面/领域聚合展示组件（dashboard、workspaces、rankings、history、settings、importReview、skillDetail、remoteSkills、userSkillsSync、common）。
   - `src/*.js` 是可独立测试的纯函数模块（如 `previewData.js`、`historyEntries.js`、`usageHooks.js`、`preferences.js`、`importFlow.js`、`skills.js`）。
 - `apps/desktop/src-tauri` 是 Tauri command 层，负责把 UI 请求转发到 Rust crates。
@@ -74,6 +74,10 @@ React UI
 - `install_github_remote_skill` -> `skillbox_core::install_github_remote_skill`
 - `preview_github_skill_collection` -> `skillbox_core::preview_github_skill_collection`
 - `apply_github_skill_collection` -> `skillbox_core::apply_github_skill_collection`
+- `preview_github_skill_collection_update` -> `skillbox_core::preview_github_skill_collection_update`
+- `apply_github_skill_collection_update` -> `skillbox_core::apply_github_skill_collection_update`
+- `preview_github_skill_collection_rollback` -> `skillbox_core::preview_github_skill_collection_rollback`
+- `apply_github_skill_collection_rollback` -> `skillbox_core::apply_github_skill_collection_rollback`
 - `list_remote_skill_versions` -> `skillbox_core::list_remote_skill_versions`
 - `preview_remote_version_change` -> `skillbox_core::preview_remote_version_change`
 - `apply_remote_version_change` -> `skillbox_core::apply_remote_version_change`
@@ -113,6 +117,8 @@ cargo run -p skillbox-cli --offline -- <command>
 - `compatibility.rs` read-only frontmatter/target compatibility preview 与 stale-preview apply
 - `import.rs` import candidates 扫描、类型推断、Rust-owned skill group / variant / location 分组、冲突与备份
 - `collections.rs` local Git worktree identity、Import Review collection grouping、schema-backed child provenance 和 stale-checked selected-child apply
+- `github_collections.rs` GitHub Phase C one-fetch collection preview/apply at one reviewed SHA
+- `github_collection_updates.rs` GitHub Phase D SHA-consistent collection update and one-step rollback from schema-v10 revision backups
 - `installed_sources.rs` bounded v3 installer lockfile provenance matching for display-only installed-source collections; it never creates candidates or grants Git/update authority
 - `state.rs` managed state 聚合与用户偏好
 - `workspaces.rs` workspace registry 发现、注册与扫描
@@ -189,6 +195,7 @@ repo-local 开发脚本可以保留少量自用 Git 调用，例如 Git hooks �
   user-skills/
   remote-skills/
   backups/
+    collection-revisions/
   skillbox.sqlite
 ```
 
@@ -225,7 +232,8 @@ canonical worktree root、Git common directory、branch/detached state、HEAD
 GitHub remote collections 使用稳定的 canonical source URL + explicit requested ref
 作为 collection identity；resolved SHA、完整 child tree、selection 和 status 只进入
 每次 preview identity。因此同一 repo/ref 的新 commit 会得到新的 preview，但不会伪造
-成另一个长期 collection；Phase D 仍未提供更新/回滚语义。
+成另一个长期 collection。Phase D 用同一 collection id 做 SHA-consistent update，并把
+上一次 reviewed SHA 记入 `previous_reviewed_head_sha` 供一步 rollback。
 
 对于没有 live Git metadata 的复制安装，Import Review 可以读取配置 runtime
 root 旁边受支持的 v3 `.skill-lock.json`。Rust 只解析 bounded JSON。GitHub entry
@@ -255,7 +263,10 @@ Phase C 的 GitHub multi-skill one-fetch install 只允许显式 child selection
 前重新验证 canonical source URL、ref、resolved SHA、child snapshot 和 managed target；
 裸 repository URL 不假设 `main`，必须通过结构化结果要求显式 ref；root-only skill 也
 拒绝与 nested `SKILL.md` roots 重叠。它已随 v0.9.0 发布。
-Phase D 的 collection-level update/rollback 尚未实现。当前实现也不自动部署、不执行 hooks、filters、submodules、repository
+Phase D 为 GitHub collection 增加 reviewed update preview/apply 与一步 rollback：
+updated member 必须一起前进到同一 SHA，removed membership 不删除 skill，dirty
+managed copy fail closed，revision backup 写在 schema v10。本地 worktree 与
+installed-source update 仍未实现。当前实现也不自动部署、不执行 hooks、filters、submodules、repository
 scripts、custom helpers 或 arbitrary shell。
 
 不要在没有 adapter 语义的情况下猜测某个 agent 的目录布局。新增 agent 支持时，先定义 adapter 的发现路径、原生格式、部署方式和冲突处理。
@@ -347,7 +358,7 @@ GitHub remote source 可以是仓库中的 skill 子目录，也可以是根目�
 - Rust core、CLI 和 Tauri 已覆盖 `~/.skillbox/user-skills` 的 outbound Git
   commit/push；reviewed inbound `origin/main` fast-forward 已随 v0.7.0 发布。
 - Rust core 已覆盖 remote skill 的 GitHub install preview/apply、GitHub update check、source binding、diff preview、update/rollback apply 和 operation log。
-- Rust core 和 Tauri 已覆盖 usage stats 显式上报，以及 Codex App、Codex CLI、Claude Code CLI 的 Stop hook 注入入口。schema v7 把本机 evidence 分为 `confirmed`、`inferred` 和 `reference`；用户可见 `Calls` 只包含前两类，History references 单独展示。Usage 支持 time range、User/Remote/System skill type、Agent 和 Workspace 的结构化过滤，并返回同一过滤快照内的 evidence totals、时间覆盖、可重叠 provenance source counts，以及按本机日历日分桶的 `daily` Calls。详情页、skill card 和 workspace Calls 与 Usage all-time 一样从 `skill_usage_events` 聚合，不再读 `skill_usage_stats` 缓存。桌面 Usage 用最近一年的紧凑热力图展示每日 Calls 强度，点击某一天会更新下方 Usage 统计表，不再使用 Top skill cards。`Sync histories` 与后台小时级刷新默认做增量扫描：schema v10 用 `usage_history_file_cursors` 跳过 size/mtime 未变的 Codex/Claude JSONL 和 Cursor state/transcript 文件，首次空 cursor 等价于全量盘点；CLI `--full` 才重扫全部文件。桌面启动约 15 秒后若已到期则自动增量同步，之后每小时再跑，离开 Usage 页也不会中断。Usage 右上角显示最近一次 history sync 完成时间（`Last sync`），启动时读取 `last_synced_at`，后台或手动同步完成后更新。顺序调用三个 provider，并通过 `skillbox://usage-backfill-progress` 显示当前 provider 和文件进度；单个 provider 失败不会撤销其他 provider 已成功写入或升级的幂等事件。
+- Rust core 和 Tauri 已覆盖 usage stats 显式上报，以及 Codex App、Codex CLI、Claude Code CLI 的 Stop hook 注入入口。schema v7 把本机 evidence 分为 `confirmed`、`inferred` 和 `reference`；用户可见 `Calls` 只包含前两类，History references 单独展示。Usage 支持 time range、User/Remote/System skill type、Agent 和 Workspace 的结构化过滤，并返回同一过滤快照内的 evidence totals、时间覆盖、可重叠 provenance source counts，以及按本机日历日分桶的 `daily` Calls。详情页、skill card 和 workspace Calls 与 Usage all-time 一样从 `skill_usage_events` 聚合，不再读 `skill_usage_stats` 缓存。桌面 Usage 用最近一年的紧凑热力图展示每日 Calls 强度，点击某一天会更新下方 Usage 统计表，不再使用 Top skill cards。`Sync histories` 与后台小时级刷新默认做增量扫描：schema v11 用 `usage_history_file_cursors` 跳过 size/mtime 未变的 Codex/Claude JSONL 和 Cursor state/transcript 文件，首次空 cursor 等价于全量盘点；CLI `--full` 才重扫全部文件。桌面启动约 15 秒后若已到期则自动增量同步，之后每小时再跑，离开 Usage 页也不会中断。Usage 右上角显示最近一次 history sync 完成时间（`Last sync`），启动时读取 `last_synced_at`，后台或手动同步完成后更新。顺序调用三个 provider，并通过 `skillbox://usage-backfill-progress` 显示当前 provider 和文件进度；单个 provider 失败不会撤销其他 provider 已成功写入或升级的幂等事件。
 - Codex 本地 store 没有稳定的 provider-native skill-run total。Codex 结构化逐回合 skill carrier 只能作为 defensible `inferred` Calls；`usage-audit` 明确报告这个已知 undercount，不读取或返回聊天正文。
 - 未来若接入 Codex reported runs，它属于独立的 provider-reported analytics 边界，必须携带 provider、subject kind、time window、scope 和 provenance；不得写入 `skill_usage_events`，也不得参与本地 ranking、total 或 delta。
 - Tauri desktop 已覆盖 macOS app update check 和用户确认后的 install/restart；React 不直接处理 updater asset URL、签名或安装。

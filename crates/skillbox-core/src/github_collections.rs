@@ -126,7 +126,7 @@ pub fn apply_github_skill_collection(
         {
             if existing_reviewed_sha.as_ref() != collection.reviewed_head_sha.as_ref() {
                 return Err(
-                    "Collection already has a different reviewed SHA; collection updates are not available until Phase D."
+                    "Collection already has a different reviewed SHA. Use github-collection-update-preview to review a collection-level update."
                         .to_string(),
                 );
             }
@@ -209,7 +209,16 @@ pub fn apply_github_skill_collection(
     result
 }
 
-fn build_github_skill_collection_preview(
+pub(crate) fn github_collection_id(source: &skillbox_github::GitHubSkillSource) -> String {
+    let source_url = sanitize_origin_url(&source.url);
+    let collection_identity = format!(
+        "skillbox-github-collection-identity-v1\n{}\n{}\n{}",
+        "github_remote", source_url, source.reference
+    );
+    format!("github-collection-{}", &sha256(&collection_identity)[..16])
+}
+
+pub(crate) fn build_github_skill_collection_preview(
     source: &skillbox_github::GitHubSkillSource,
     resolved_sha: &str,
     checkout: &Path,
@@ -386,11 +395,7 @@ fn build_github_skill_collection_preview(
         .collect::<Vec<_>>()
         .join("\n");
     let source_url = sanitize_origin_url(&source.url);
-    let collection_identity = format!(
-        "skillbox-github-collection-identity-v1\n{}\n{}\n{}",
-        "github_remote", source_url, source.reference
-    );
-    let collection_id = format!("github-collection-{}", &sha256(&collection_identity)[..16]);
+    let collection_id = github_collection_id(source);
     let preview_identity = format!(
         "skillbox-github-collection-preview-v1\n{}\n{}\n{}\n{}",
         source_url, source.reference, resolved_sha, child_seed

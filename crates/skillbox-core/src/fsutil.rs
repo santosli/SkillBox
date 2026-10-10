@@ -57,6 +57,26 @@ pub(crate) fn copy_skill_dir(source: &Path, destination: &Path) -> Result<()> {
     copy_skill_dir_with_link_root(source, destination, None)
 }
 
+pub(crate) fn replace_skill_directory(source: &Path, destination: &Path) -> Result<()> {
+    if !destination.exists() {
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        return copy_skill_dir(source, destination);
+    }
+    let staged = temporary_sibling_path(destination, "replace")?;
+    copy_skill_dir(source, &staged)?;
+    let retired = temporary_sibling_path(destination, "retired")?;
+    fs::rename(destination, &retired).map_err(|error| error.to_string())?;
+    if let Err(error) = fs::rename(&staged, destination) {
+        let _ = fs::rename(&retired, destination);
+        let _ = fs::remove_dir_all(&staged);
+        return Err(error.to_string());
+    }
+    let _ = fs::remove_dir_all(&retired);
+    Ok(())
+}
+
 pub(crate) fn copy_skill_dir_from_checkout(
     source: &Path,
     destination: &Path,

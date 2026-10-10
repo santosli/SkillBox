@@ -134,6 +134,100 @@ function UserSkillControlPanel({ isPreparingSync, isSyncing, syncAction, onOpenS
   );
 }
 
+function CollectionControlPanel({
+  collection,
+  isChecking,
+  onCheckCollectionUpdate,
+  onRollbackCollection
+}) {
+  if (!collection) {
+    return null;
+  }
+  const sourceKind = collection.sourceKind || collection.source_kind;
+  if (sourceKind !== 'github_remote') {
+    return null;
+  }
+  const displayName = collection.displayName || collection.display_name || 'GitHub collection';
+  const requestedReference = collection.requestedReference || collection.requested_reference || collection.branch || 'ref';
+  const reviewedSha = collection.reviewedHeadSha || collection.reviewed_head_sha || '';
+  const previousSha = collection.previousReviewedHeadSha || collection.previous_reviewed_head_sha || '';
+  const sourceUrl = collection.sourceUrl || collection.source_url || '';
+
+  return (
+    <section className="skillDetailControlSection" aria-label="GitHub collection">
+      <div className="skillDetailSectionHeader">
+        <span>GitHub collection</span>
+        <small>{requestedReference} · {reviewedSha ? reviewedSha.slice(0, 8) : 'no SHA'}</small>
+      </div>
+      <p className="skillDetailControlCopy">
+        {displayName} follows one reviewed SHA. Children stay independently tracked and are not auto-deployed.
+      </p>
+      {sourceUrl ? <small>{sourceUrl}</small> : null}
+      <div className="skillDetailControlActions">
+        <button
+          className="button secondary"
+          disabled={isChecking}
+          type="button"
+          onClick={onCheckCollectionUpdate}
+        >
+          {isChecking ? 'Checking...' : 'Check collection update'}
+        </button>
+        {previousSha ? (
+          <button className="button secondary" type="button" onClick={onRollbackCollection}>
+            Roll back collection
+          </button>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+export function CollectionRollbackDialog({ dialog, onClose, onConfirm }) {
+  const preview = dialog.preview || {};
+  const fromSha = preview.from_sha || preview.fromSha || '';
+  const toSha = preview.to_sha || preview.toSha || '';
+  const members = preview.members || [];
+  const leaving = preview.leaving_skill_names || preview.leavingSkillNames || [];
+  const blocked = (preview.errors || []).length > 0;
+
+  return (
+    <ConfirmDialog
+      className="collectionRollbackDialog"
+      closeLabel="Close collection rollback confirmation"
+      confirmDisabled={blocked || dialog.loading || !(preview.preview_id || preview.previewId)}
+      confirmLabel="Roll back collection"
+      description={`Restore ${preview.display_name || preview.displayName || 'this collection'} from ${fromSha.slice(0, 8) || 'the current SHA'} to ${toSha.slice(0, 8) || 'the previous SHA'}.`}
+      error={dialog.error}
+      loading={dialog.applying}
+      loadingLabel="Rolling back..."
+      title="Roll back collection?"
+      titleId="collection-rollback-title"
+      onClose={onClose}
+      onConfirm={onConfirm}
+    >
+      {dialog.loading ? <LoadingNotice compact>Reviewing the previous collection revision...</LoadingNotice> : null}
+      <p className="confirmDialogImpact">
+        SkillBox restores reviewed member snapshots. Skills added after that SHA stay independently tracked and are not deleted. Deployments are not changed automatically.
+      </p>
+      {leaving.length > 0 ? (
+        <p className="confirmDialogImpact">Leaving collection membership: {leaving.join(', ')}.</p>
+      ) : null}
+      {members.length > 0 ? (
+        <ul className="localImportPaths" aria-label="Collection members to restore">
+          {members.map((member) => (
+            <li key={member.relative_path || member.relativePath}>
+              <div className="localImportPathMeta">
+                <span>{member.managed_skill_name || member.managedSkillName || member.skill_name}</span>
+                <small>{member.restorable === false ? member.message : 'Restore reviewed snapshot'}</small>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </ConfirmDialog>
+  );
+}
+
 function UserSkillVersionHistoryPanel({ loading, versions }) {
   const versionCount = versions?.versions?.length || 0;
 
@@ -517,6 +611,9 @@ export function SkillDetailDialog({
   onRequestTypeChange,
   onReviewRollback,
   onReviewUpdate,
+  collection = null,
+  onCheckCollectionUpdate,
+  onRollbackCollection,
   sourceUrl,
   importRecords = [],
   importRecordsLoading = false,
@@ -699,6 +796,12 @@ export function SkillDetailDialog({
             <SkillTypeControl
               skill={skill}
               onRequestTypeChange={onRequestTypeChange}
+            />
+            <CollectionControlPanel
+              collection={collection}
+              isChecking={isChecking}
+              onCheckCollectionUpdate={onCheckCollectionUpdate}
+              onRollbackCollection={onRollbackCollection}
             />
             <section className="skillDetailControlSection skillDetailTagsControl" aria-label="Skill tags">
               <div className="skillDetailSectionHeader">

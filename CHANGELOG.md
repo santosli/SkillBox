@@ -9,6 +9,8 @@ version tags such as `v0.3.0`.
 
 - Default local history sync to incremental file cursors, refresh it hourly in the desktop background, and keep CLI `--full` for a complete rescan.
 - Show Last sync time beside Usage page actions after each background or Sync histories scan.
+- Add GitHub collection-level update preview/apply and one-step rollback to the previous reviewed SHA, with schema v10 revision backups, CLI/Tauri/desktop review, and no auto-deploy.
+- Update source-map-js to 1.2.2 to clear the high-severity npm audit finding.
 
 ## 0.9.5
 
