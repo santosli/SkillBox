@@ -120,6 +120,22 @@ where
     ));
 
     for (index, path) in files.into_iter().enumerate() {
+        let Some(stamp) = take_history_file_scan(
+            &connection,
+            USAGE_HISTORY_CURSOR_PROVIDER_CLAUDE,
+            &path,
+            request.incremental,
+            &mut result.unchanged_files,
+        )?
+        else {
+            progress(UsageBackfillProgress::new(
+                "claude-code",
+                "scanning",
+                index + 1,
+                Some(total),
+            ));
+            continue;
+        };
         result.scanned_files = result.scanned_files.saturating_add(1);
         match extract_claude_session_skill_candidates(&path, &runtime_roots, home) {
             Ok(extraction) => {
@@ -152,6 +168,17 @@ where
                         }
                     }
                 }
+                if let Err(error) = upsert_history_file_cursor(
+                    &connection,
+                    USAGE_HISTORY_CURSOR_PROVIDER_CLAUDE,
+                    &path,
+                    stamp,
+                ) {
+                    push_backfill_error(
+                        &mut result.errors,
+                        format!("Unable to persist Claude Code history cursor: {error}"),
+                    );
+                }
             }
             Err(error) => {
                 result.skipped = result.skipped.saturating_add(1);
@@ -168,15 +195,15 @@ where
     progress(UsageBackfillProgress::new(
         "claude-code",
         "complete",
-        result.scanned_files,
+        result.inventoried_files(),
         Some(total),
     ));
 
-    let scanned_files = u32::try_from(result.scanned_files).unwrap_or(u32::MAX);
-    if let Err(error) = write_u32_preference(
+    if let Err(error) = persist_history_coverage_count(
         &paths.database_path,
         "claude_code_usage_backfill_scanned_files",
-        scanned_files,
+        result.inventoried_files(),
+        request.incremental,
     ) {
         push_backfill_error(
             &mut result.errors,
@@ -186,7 +213,7 @@ where
     if let Err(error) = persist_usage_backfill_audit(
         &paths.database_path,
         "claude_code_session_backfill",
-        result.scanned_files,
+        result.inventoried_files(),
         &result,
     ) {
         push_backfill_error(
@@ -836,6 +863,7 @@ mod tests {
 
         let request = BackfillClaudeCodeSessionUsageRequest {
             projects_root: Some(projects_root.clone()),
+            ..Default::default()
         };
         let first =
             backfill_claude_code_session_usage_for_home(request.clone(), &home, &managed_root)
@@ -847,9 +875,24 @@ mod tests {
         assert_eq!(first.skipped, 0);
 
         let second =
-            backfill_claude_code_session_usage_for_home(request, &home, &managed_root).unwrap();
+            backfill_claude_code_session_usage_for_home(request.clone(), &home, &managed_root)
+                .unwrap();
+        assert_eq!(second.scanned_files, 0);
+        assert_eq!(second.unchanged_files, 2);
         assert_eq!(second.recorded, 0);
-        assert_eq!(second.deduplicated, 3);
+        assert_eq!(second.deduplicated, 0);
+
+        let full = backfill_claude_code_session_usage_for_home(
+            BackfillClaudeCodeSessionUsageRequest {
+                incremental: false,
+                ..request
+            },
+            &home,
+            &managed_root,
+        )
+        .unwrap();
+        assert_eq!(full.recorded, 0);
+        assert_eq!(full.deduplicated, 3);
 
         let paths = ensure_managed_layout(&managed_root).unwrap();
         let connection = open_database(&paths.database_path).unwrap();
@@ -934,6 +977,7 @@ mod tests {
         let result = backfill_claude_code_session_usage_for_home(
             BackfillClaudeCodeSessionUsageRequest {
                 projects_root: Some(projects_root),
+                ..Default::default()
             },
             &home,
             &managed_root,

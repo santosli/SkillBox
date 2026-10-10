@@ -1693,7 +1693,18 @@ pub struct UsageHookRecordResult {
     pub skipped: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UsageHistorySyncStatus {
+    pub last_synced_at: Option<String>,
+    pub interval_seconds: u64,
+    pub due: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BackfillCodexSessionUsageRequest {
     #[serde(default, alias = "includeArchived")]
     pub include_archived: bool,
@@ -1701,26 +1712,63 @@ pub struct BackfillCodexSessionUsageRequest {
     pub sessions_root: Option<PathBuf>,
     #[serde(default, alias = "archivedSessionsRoot")]
     pub archived_sessions_root: Option<PathBuf>,
+    #[serde(default = "default_true")]
+    pub incremental: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+impl Default for BackfillCodexSessionUsageRequest {
+    fn default() -> Self {
+        Self {
+            include_archived: false,
+            sessions_root: None,
+            archived_sessions_root: None,
+            incremental: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BackfillClaudeCodeSessionUsageRequest {
     #[serde(default, alias = "projectsRoot")]
     pub projects_root: Option<PathBuf>,
+    #[serde(default = "default_true")]
+    pub incremental: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+impl Default for BackfillClaudeCodeSessionUsageRequest {
+    fn default() -> Self {
+        Self {
+            projects_root: None,
+            incremental: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BackfillCursorSessionUsageRequest {
     #[serde(default, alias = "databasePath")]
     pub database_path: Option<PathBuf>,
     #[serde(default, alias = "projectsRoot")]
     pub projects_root: Option<PathBuf>,
+    #[serde(default = "default_true")]
+    pub incremental: bool,
+}
+
+impl Default for BackfillCursorSessionUsageRequest {
+    fn default() -> Self {
+        Self {
+            database_path: None,
+            projects_root: None,
+            incremental: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
 pub struct BackfillCodexSessionUsageResult {
     pub scanned_files: usize,
     pub scanned_turns: usize,
+    pub unchanged_files: usize,
     pub discovered: usize,
     pub recorded: usize,
     pub deduplicated: usize,
@@ -1737,6 +1785,12 @@ pub struct BackfillCodexSessionUsageResult {
     pub cursor_transcript_duplicate_files: usize,
     pub cursor_transcript_historical_missing: usize,
     pub cursor_transcript_unsafe_rejected: usize,
+}
+
+impl BackfillCodexSessionUsageResult {
+    pub(crate) fn inventoried_files(&self) -> usize {
+        self.scanned_files.saturating_add(self.unchanged_files)
+    }
 }
 
 #[derive(Debug, Clone, Default)]

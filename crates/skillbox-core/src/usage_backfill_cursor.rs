@@ -76,55 +76,89 @@ where
         open_database(&paths.database_path).map_err(|error| error.to_string())?;
     let mut workspace_roots = Vec::new();
     let state_database_available = database_path.is_file();
+    let mut skipped_cursor_state = false;
     if state_database_available {
-        progress(UsageBackfillProgress::new(
-            "cursor",
-            "scanning-state",
-            0,
-            None,
-        ));
-        let cursor_database = open_cursor_database_read_only(&database_path)?;
-        validate_cursor_database_schema(&cursor_database)?;
-        let sessions = load_cursor_composer_sessions(&cursor_database, &mut result)?;
-        progress(UsageBackfillProgress::new(
-            "cursor",
-            "scanning-state",
-            sessions.len(),
-            Some(sessions.len()),
-        ));
-        let mut sessions_by_id = HashMap::new();
-        for session in sessions {
-            sessions_by_id.insert(session.composer_id, session.workspace);
+        match take_history_file_scan(
+            &managed_database,
+            USAGE_HISTORY_CURSOR_PROVIDER_CURSOR_STATE,
+            &database_path,
+            request.incremental,
+            &mut result.unchanged_files,
+        )? {
+            None => {
+                skipped_cursor_state = true;
+                progress(UsageBackfillProgress::new(
+                    "cursor",
+                    "scanning-state",
+                    0,
+                    Some(0),
+                ));
+            }
+            Some(stamp) => {
+                progress(UsageBackfillProgress::new(
+                    "cursor",
+                    "scanning-state",
+                    0,
+                    None,
+                ));
+                let cursor_database = open_cursor_database_read_only(&database_path)?;
+                validate_cursor_database_schema(&cursor_database)?;
+                let sessions = load_cursor_composer_sessions(&cursor_database, &mut result)?;
+                progress(UsageBackfillProgress::new(
+                    "cursor",
+                    "scanning-state",
+                    sessions.len(),
+                    Some(sessions.len()),
+                ));
+                let mut sessions_by_id = HashMap::new();
+                for session in sessions {
+                    sessions_by_id.insert(session.composer_id, session.workspace);
+                }
+                workspace_roots.extend(sessions_by_id.values().filter_map(Option::as_ref).cloned());
+                let runtime_roots = cursor_runtime_roots(
+                    home,
+                    &paths,
+                    sessions_by_id.values().filter_map(Option::as_deref),
+                );
+                let mut seen_candidates = HashSet::new();
+                stream_cursor_skill_rules(
+                    &cursor_database,
+                    &sessions_by_id,
+                    home,
+                    &paths,
+                    &runtime_roots,
+                    &mut managed_database,
+                    &mut seen_candidates,
+                    &mut result,
+                )?;
+                if let Err(error) = upsert_history_file_cursor(
+                    &managed_database,
+                    USAGE_HISTORY_CURSOR_PROVIDER_CURSOR_STATE,
+                    &database_path,
+                    stamp,
+                ) {
+                    push_cursor_backfill_error(
+                        &mut result.errors,
+                        format!("Unable to persist Cursor state history cursor: {error}"),
+                    );
+                }
+            }
         }
-        workspace_roots.extend(sessions_by_id.values().filter_map(Option::as_ref).cloned());
-        let runtime_roots = cursor_runtime_roots(
-            home,
-            &paths,
-            sessions_by_id.values().filter_map(Option::as_deref),
-        );
-        let mut seen_candidates = HashSet::new();
-        stream_cursor_skill_rules(
-            &cursor_database,
-            &sessions_by_id,
-            home,
-            &paths,
-            &runtime_roots,
-            &mut managed_database,
-            &mut seen_candidates,
-            &mut result,
-        )?;
     } else if database_path_was_explicit {
         return Err(format!(
             "Cursor history database was not found: {}",
             database_path.display()
         ));
     }
-    result.scanned_cursor_state_sessions = result.scanned_files;
-    result.cursor_state_references = result
-        .recorded
-        .saturating_add(result.deduplicated)
-        .saturating_add(result.upgraded);
-    let state_audit_result = state_database_available.then(|| result.clone());
+    if !skipped_cursor_state {
+        result.scanned_cursor_state_sessions = result.scanned_files;
+        result.cursor_state_references = result
+            .recorded
+            .saturating_add(result.deduplicated)
+            .saturating_add(result.upgraded);
+    }
+    let state_audit_result =
+        (state_database_available && !skipped_cursor_state).then(|| result.clone());
 
     let transcript_root_available = projects_root.is_dir();
     let mut transcript_audit_result = None;
@@ -136,6 +170,7 @@ where
             home,
             &runtime_roots,
             &mut managed_database,
+            request.incremental,
             &mut progress,
         )?;
         transcript_audit_result = Some(transcript_result.clone());
@@ -154,23 +189,26 @@ where
         ));
     }
 
-    let scanned_sessions = u32::try_from(result.scanned_cursor_state_sessions).unwrap_or(u32::MAX);
-    if let Err(error) = write_u32_preference(
+    if let Err(error) = persist_history_coverage_count(
         &paths.database_path,
         "cursor_usage_backfill_scanned_sessions",
-        scanned_sessions,
+        result.scanned_cursor_state_sessions,
+        request.incremental,
     ) {
         push_cursor_backfill_error(
             &mut result.errors,
             format!("Unable to persist Cursor scan coverage: {error}"),
         );
     }
-    let scanned_transcripts =
-        u32::try_from(result.scanned_cursor_transcript_files).unwrap_or(u32::MAX);
-    if let Err(error) = write_u32_preference(
+    let scanned_transcripts = transcript_audit_result
+        .as_ref()
+        .map(BackfillCodexSessionUsageResult::inventoried_files)
+        .unwrap_or(0);
+    if let Err(error) = persist_history_coverage_count(
         &paths.database_path,
         "cursor_usage_backfill_scanned_transcript_files",
         scanned_transcripts,
+        request.incremental,
     ) {
         push_cursor_backfill_error(
             &mut result.errors,
@@ -207,11 +245,9 @@ where
             result.cursor_transcript_unsafe_rejected,
         ),
     ] {
-        if let Err(error) = write_u32_preference(
-            &paths.database_path,
-            key,
-            u32::try_from(value).unwrap_or(u32::MAX),
-        ) {
+        if let Err(error) =
+            persist_history_coverage_count(&paths.database_path, key, value, request.incremental)
+        {
             push_cursor_backfill_error(
                 &mut result.errors,
                 format!("Unable to persist Cursor transcript diagnostics: {error}"),
@@ -235,7 +271,7 @@ where
         if let Err(error) = persist_usage_backfill_audit(
             &paths.database_path,
             "cursor_agent_transcript_read",
-            result.scanned_cursor_transcript_files,
+            transcript_audit_result.inventoried_files(),
             &transcript_audit_result,
         ) {
             push_cursor_backfill_error(
@@ -250,11 +286,13 @@ where
         "complete",
         result
             .scanned_cursor_state_sessions
-            .saturating_add(result.scanned_cursor_transcript_files),
+            .saturating_add(result.scanned_cursor_transcript_files)
+            .saturating_add(result.unchanged_files),
         Some(
             result
                 .scanned_cursor_state_sessions
-                .saturating_add(result.scanned_cursor_transcript_files),
+                .saturating_add(result.scanned_cursor_transcript_files)
+                .saturating_add(result.unchanged_files),
         ),
     ));
     Ok(result)
@@ -963,11 +1001,27 @@ mod tests {
         assert_eq!(first.deduplicated, 0);
         assert!(first.errors.is_empty(), "{:?}", first.errors);
 
-        let second = backfill_cursor_session_usage_for_home(request, &home, &managed_root).unwrap();
-        assert_eq!(second.scanned_files, 1);
-        assert_eq!(second.discovered, 1);
+        let second =
+            backfill_cursor_session_usage_for_home(request.clone(), &home, &managed_root).unwrap();
+        assert_eq!(second.scanned_files, 0);
+        assert_eq!(second.unchanged_files, 1);
+        assert_eq!(second.discovered, 0);
         assert_eq!(second.recorded, 0);
-        assert_eq!(second.deduplicated, 1);
+        assert_eq!(second.deduplicated, 0);
+
+        let full = backfill_cursor_session_usage_for_home(
+            BackfillCursorSessionUsageRequest {
+                incremental: false,
+                ..request
+            },
+            &home,
+            &managed_root,
+        )
+        .unwrap();
+        assert_eq!(full.scanned_files, 1);
+        assert_eq!(full.discovered, 1);
+        assert_eq!(full.recorded, 0);
+        assert_eq!(full.deduplicated, 1);
 
         let managed_paths = managed_paths(&managed_root);
         let managed_database = open_database(&managed_paths.database_path).unwrap();

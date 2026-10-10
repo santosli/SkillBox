@@ -371,6 +371,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 sessions_root: option(command_args, "--sessions-root").map(PathBuf::from),
                 archived_sessions_root: option(command_args, "--archived-sessions-root")
                     .map(PathBuf::from),
+                incremental: !has_flag(command_args, "--full"),
             },
             managed_root(command_args),
         )?),
@@ -378,6 +379,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             print_json(&skillbox_core::backfill_claude_code_session_usage(
                 skillbox_core::BackfillClaudeCodeSessionUsageRequest {
                     projects_root: option(command_args, "--projects-root").map(PathBuf::from),
+                    incremental: !has_flag(command_args, "--full"),
                 },
                 managed_root(command_args),
             )?)
@@ -386,6 +388,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             skillbox_core::BackfillCursorSessionUsageRequest {
                 database_path: option(command_args, "--database-path").map(PathBuf::from),
                 projects_root: option(command_args, "--projects-root").map(PathBuf::from),
+                incremental: !has_flag(command_args, "--full"),
             },
             managed_root(command_args),
         )?),
@@ -756,9 +759,9 @@ Commands:
   skillbox usage-record --skill <name> --agent <id> --runtime-root <path> [--event-id <id>] [--used-at <rfc3339>] [--prompt-excerpt <text>] [--metadata-json <json>] [--managed-root <path>]
   skillbox usage-rankings [--range 7d|30d|all] [--type user|remote|system] [--agent <id>] [--workspace <path>] [--include-unmanaged] [--managed-root <path>]
   skillbox usage-audit [--managed-root <path>]
-  skillbox usage-backfill-codex [--include-archived] [--sessions-root <path>] [--archived-sessions-root <path>] [--managed-root <path>]
-  skillbox usage-backfill-claude-code [--projects-root <path>] [--managed-root <path>]
-  skillbox usage-backfill-cursor [--database-path <path>] [--projects-root <path>] [--managed-root <path>]
+  skillbox usage-backfill-codex [--include-archived] [--full] [--sessions-root <path>] [--archived-sessions-root <path>] [--managed-root <path>]
+  skillbox usage-backfill-claude-code [--full] [--projects-root <path>] [--managed-root <path>]
+  skillbox usage-backfill-cursor [--full] [--database-path <path>] [--projects-root <path>] [--managed-root <path>]
   skillbox usage-hook codex|claude-code [--managed-root <path>]
   skillbox usage-hook-status
   skillbox usage-hook-install <target>
@@ -893,6 +896,7 @@ mod tests {
         assert!(help_text().contains("skillbox usage-backfill-codex"));
         assert!(help_text().contains("skillbox usage-backfill-claude-code"));
         assert!(help_text().contains("skillbox usage-backfill-cursor"));
+        assert!(help_text().contains("[--full]"));
     }
 
     #[test]

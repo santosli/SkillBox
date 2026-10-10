@@ -1162,6 +1162,7 @@ test('usage is an accessible top-level page separate from history', () => {
   assert.match(rankingsPageSource, /<PageTitleRow[\s\S]*title="Usage"/);
   assert.doesNotMatch(rankingsPageSource, /count=\{rows\.length\}/);
   assert.doesNotMatch(rankingsPageSource, /subtitle=/);
+  assert.match(rankingsPageSource, /className="usageLastSynced"/);
   assert.match(appSource, /range: 'all_time'/);
   assert.match(rankingsPageSource, /onClick=\{onRefresh\}/);
   assert.match(rankingsPageSource, /panelNotice notice/);
@@ -1215,6 +1216,10 @@ test('usage is an accessible top-level page separate from history', () => {
   assert.match(appSource, /UsageCallHeatmap/);
   assert.match(appSource, /usageStatsTableRows/);
   assert.match(appSource, /onSelectDate/);
+  assert.match(
+    rankingsPageSource,
+    /if \(filters\.range !== option\.id\) \{\s*setSelectedDate\(''\);\s*\}\s*updateFilters\(\{ range: option\.id \}\)/
+  );
   assert.doesNotMatch(appSource, /Select a day to see skill calls/);
   assert.doesNotMatch(appSource, /usageHeatmapDetail/);
   assert.doesNotMatch(appSource, /Top skills by calls/);
@@ -1222,11 +1227,12 @@ test('usage is an accessible top-level page separate from history', () => {
   assert.doesNotMatch(appSource, /<strong>\{row\.usageCount\} locally observed calls<\/strong>/);
   assert.match(appSource, /<table className="usageRankingTable">/);
   assert.match(css, /\.usageRankingSnapshot\s*\{[^}]*display:\s*grid;/s);
+  assert.match(css, /\.usageRankingSnapshot\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
   assert.match(css, /\.usageRankingTableWrap\s*\{[^}]*overflow-x:\s*auto;/s);
   assert.match(css, /\.usageRankingTable\s*\{[^}]*min-width:\s*720px;/s);
   assert.match(
     css,
-    /@media \(max-width:\s*1100px\)\s*\{[\s\S]*?\.usageRankingControls\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);[\s\S]*?\.usageRankingRangeField\s*\{[^}]*grid-column:\s*1 \/ -1;[\s\S]*?\.usageRankingRanges\s*\{[^}]*width:\s*100%;/s
+    /@container usage-ranking \(max-width:\s*1000px\)\s*\{[\s\S]*?\.usageRankingControls\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);[\s\S]*?\.usageRankingRangeField\s*\{[^}]*grid-column:\s*1 \/ -1;[\s\S]*?\.usageRankingRanges\s*\{[^}]*width:\s*100%;/s
   );
   assert.match(appSource, /<th scope="col">Rank<\/th>/);
   assert.match(appSource, /<th scope="col">Skill<\/th>/);
@@ -1267,6 +1273,7 @@ test('usage is an accessible top-level page separate from history', () => {
   assert.match(appSource, /<th scope="col">Last observed<\/th>/);
   assert.match(rankingsPageSource, /Sync histories/);
   assert.match(rankingsPageSource, /onSyncHistories/);
+  assert.match(css, /\.usageLastSynced\s*\{[^}]*white-space:\s*nowrap;/s);
   assert.match(rankingsPageSource, /UsageHistoryScanProgress/);
   assert.match(rankingsPageSource, /usageBackfillProgressLabel/);
   assert.match(rankingsPageSource, /role="progressbar"/);
@@ -1299,6 +1306,23 @@ test('usage is an accessible top-level page separate from history', () => {
   assert.match(tauriSource, /skillbox_core::backfill_claude_code_session_usage_with_progress/);
   assert.match(tauriSource, /async fn backfill_cursor_session_usage/);
   assert.match(tauriSource, /skillbox_core::backfill_cursor_session_usage_with_progress/);
+  assert.match(tauriSource, /async fn usage_history_sync_status/);
+  assert.match(tauriSource, /skillbox_core::usage_history_sync_status/);
+  assert.match(tauriSource, /async fn mark_usage_history_sync_completed/);
+  assert.match(tauriSource, /skillbox_core::mark_usage_history_sync_completed/);
+  assert.match(appSource, /USAGE_HISTORY_AUTO_SYNC_INTERVAL_MS/);
+  assert.match(appSource, /USAGE_HISTORY_AUTO_SYNC_START_DELAY_MS/);
+  assert.match(appSource, /USAGE_HISTORY_AUTO_SYNC_CHECK_MS/);
+  assert.match(appSource, /syncLocalUsageHistoriesRef\.current\(\{ auto: true \}\)/);
+  assert.match(appSource, /invoke\('usage_history_sync_status'\)/);
+  assert.match(appSource, /invoke\('mark_usage_history_sync_completed'\)/);
+  assert.match(appSource, /setUsageHistoryLastSyncedAt\(status\.lastSyncedAt\)/);
+  assert.match(appSource, /setUsageHistoryLastSyncedAt\(status\.lastSyncedAt \|\| new Date\(\)\.toISOString\(\)\)/);
+  assert.match(appSource, /lastSyncedLabel=\{usageHistoryLastSyncedLabel\(usageHistoryLastSyncedAt\)\}/);
+  assert.doesNotMatch(
+    appSource,
+    /if \(pageRef\.current !== 'usage' \|\| usageBackfillSyncIdRef/
+  );
   assert.match(tauriSource, /async fn usage_audit/);
   assert.match(tauriSource, /skillbox_core::usage_audit/);
   assert.match(appSource, /includeArchived:\s*true/);
@@ -1361,6 +1385,8 @@ test('usage is an accessible top-level page separate from history', () => {
   assert.doesNotMatch(css, /\.historyTypeTabs\s*\{[^}]*repeat\(3,/s);
   assert.match(css, /\.usageRankingTable\s*\{/);
   assert.match(css, /\.usageHeatmapSection\s*\{[^}]*width:\s*max-content;/s);
+  assert.match(css, /\.usageHeatmapSection\s*\{[^}]*min-width:\s*0;/s);
+  assert.match(css, /\.usageHeatmapScroll\s*\{[^}]*overflow-x:\s*auto;/s);
   assert.match(css, /\.usageHeatmap\s*\{[^}]*width:\s*max-content;/s);
   assert.match(css, /\.usageHeatmapGrid\s*\{/);
   assert.match(css, /\.usageHeatmapCell\s*\{[^}]*aspect-ratio:\s*1;/s);

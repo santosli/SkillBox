@@ -88,6 +88,22 @@ where
     ));
 
     for (index, path) in files.into_iter().enumerate() {
+        let Some(stamp) = take_history_file_scan(
+            &connection,
+            USAGE_HISTORY_CURSOR_PROVIDER_CODEX,
+            &path,
+            request.incremental,
+            &mut result.unchanged_files,
+        )?
+        else {
+            progress(UsageBackfillProgress::new(
+                "codex",
+                "scanning",
+                index + 1,
+                Some(total),
+            ));
+            continue;
+        };
         result.scanned_files += 1;
         match extract_codex_session_skill_candidates(&path) {
             Ok((candidates, parse_errors, scanned_turns)) => {
@@ -128,6 +144,17 @@ where
                         }
                     }
                 }
+                if let Err(error) = upsert_history_file_cursor(
+                    &connection,
+                    USAGE_HISTORY_CURSOR_PROVIDER_CODEX,
+                    &path,
+                    stamp,
+                ) {
+                    push_backfill_error(
+                        &mut result.errors,
+                        format!("Unable to persist Codex history cursor: {error}"),
+                    );
+                }
             }
             Err(error) => {
                 result.skipped += 1;
@@ -144,25 +171,26 @@ where
     progress(UsageBackfillProgress::new(
         "codex",
         "complete",
-        result.scanned_files,
+        result.inventoried_files(),
         Some(total),
     ));
 
-    let scanned_files = u32::try_from(result.scanned_files).unwrap_or(u32::MAX);
-    if let Err(error) = write_u32_preference(
+    if let Err(error) = persist_history_coverage_count(
         &paths.database_path,
         "codex_usage_backfill_scanned_files",
-        scanned_files,
+        result.inventoried_files(),
+        request.incremental,
     ) {
         push_backfill_error(
             &mut result.errors,
             format!("Unable to persist Codex scan coverage: {error}"),
         );
     }
-    if let Err(error) = write_u32_preference(
+    if let Err(error) = persist_history_coverage_count(
         &paths.database_path,
         "codex_usage_backfill_scanned_turns",
-        u32::try_from(result.scanned_turns).unwrap_or(u32::MAX),
+        result.scanned_turns,
+        request.incremental,
     ) {
         push_backfill_error(
             &mut result.errors,
@@ -172,7 +200,7 @@ where
     if let Err(error) = persist_usage_backfill_audit(
         &paths.database_path,
         "codex_session_backfill",
-        result.scanned_files,
+        result.inventoried_files(),
         &result,
     ) {
         push_backfill_error(

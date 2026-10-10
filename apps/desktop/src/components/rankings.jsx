@@ -35,6 +35,7 @@ export function UsageRankingsPage({
   error,
   filters,
   importingSkillName = '',
+  lastSyncedLabel = '',
   loading,
   notice = '',
   ranking,
@@ -76,6 +77,9 @@ export function UsageRankingsPage({
         title="Usage"
         actions={(
           <div className="pageTitleActions">
+            {lastSyncedLabel ? (
+              <span className="usageLastSynced">{lastSyncedLabel}</span>
+            ) : null}
             <button
               className="button secondary"
               disabled={busy}
@@ -111,7 +115,12 @@ export function UsageRankingsPage({
                   disabled={filtersLocked}
                   key={option.id}
                   type="button"
-                  onClick={() => updateFilters({ range: option.id })}
+                  onClick={() => {
+                    if (filters.range !== option.id) {
+                      setSelectedDate('');
+                    }
+                    updateFilters({ range: option.id });
+                  }}
                 >
                   <span>{option.label}</span>
                 </button>

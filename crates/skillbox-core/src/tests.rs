@@ -172,7 +172,8 @@ fn database_initialization_records_ordered_schema_migrations() {
             (6, "runtime_profiles".to_string()),
             (7, "usage_evidence_classification".to_string()),
             (8, "skill_collections".to_string()),
-            (9, "github_skill_collections".to_string())
+            (9, "github_skill_collections".to_string()),
+            (10, "usage_history_file_cursors".to_string())
         ]
     );
     assert_eq!(
@@ -188,6 +189,11 @@ fn database_initialization_records_ordered_schema_migrations() {
     assert!(table_column_names(&connection, "skill_collection_members")
         .unwrap()
         .contains(&"relative_path".to_string()));
+    assert!(
+        table_column_names(&connection, "usage_history_file_cursors")
+            .unwrap()
+            .contains(&"mtime_ms".to_string())
+    );
     for column in ["profile_id", "root_key", "format"] {
         assert!(table_column_names(&connection, "workspaces")
             .unwrap()
@@ -249,6 +255,11 @@ fn schema_v9_github_collection_migration_is_idempotent_for_existing_database() {
     assert!(table_column_names(&connection, "skill_collection_members")
         .unwrap()
         .contains(&"managed_skill_name".to_string()));
+    assert!(
+        table_column_names(&connection, "usage_history_file_cursors")
+            .unwrap()
+            .contains(&"mtime_ms".to_string())
+    );
 }
 
 #[test]
@@ -4887,34 +4898,38 @@ fn usage_backfill_imports_codex_session_skills_with_dedupe() {
     )
     .unwrap();
 
-    let first = backfill_codex_session_usage_for_home(
-        BackfillCodexSessionUsageRequest {
-            include_archived: false,
-            sessions_root: Some(home.join(".codex").join("sessions")),
-            archived_sessions_root: None,
-        },
-        &home,
-        &managed_root,
-    )
-    .unwrap();
+    let request = BackfillCodexSessionUsageRequest {
+        include_archived: false,
+        sessions_root: Some(home.join(".codex").join("sessions")),
+        ..Default::default()
+    };
+    let first =
+        backfill_codex_session_usage_for_home(request.clone(), &home, &managed_root).unwrap();
     assert_eq!(first.scanned_files, 1);
     assert_eq!(first.discovered, 3);
     assert_eq!(first.recorded, 3);
     assert_eq!(first.deduplicated, 0);
 
-    let second = backfill_codex_session_usage_for_home(
+    let second =
+        backfill_codex_session_usage_for_home(request.clone(), &home, &managed_root).unwrap();
+    assert_eq!(second.scanned_files, 0);
+    assert_eq!(second.unchanged_files, 1);
+    assert_eq!(second.discovered, 0);
+    assert_eq!(second.recorded, 0);
+    assert_eq!(second.deduplicated, 0);
+
+    let full = backfill_codex_session_usage_for_home(
         BackfillCodexSessionUsageRequest {
-            include_archived: false,
-            sessions_root: Some(home.join(".codex").join("sessions")),
-            archived_sessions_root: None,
+            incremental: false,
+            ..request
         },
         &home,
         &managed_root,
     )
     .unwrap();
-    assert_eq!(second.discovered, 3);
-    assert_eq!(second.recorded, 0);
-    assert_eq!(second.deduplicated, 3);
+    assert_eq!(full.discovered, 3);
+    assert_eq!(full.recorded, 0);
+    assert_eq!(full.deduplicated, 3);
 
     let rankings = list_skill_usage_rankings_at(
         SkillUsageRankingRequest {
@@ -5083,7 +5098,7 @@ fn usage_backfill_counts_codex_skill_md_file_reads_and_ignores_search_payloads()
         BackfillCodexSessionUsageRequest {
             include_archived: false,
             sessions_root: Some(sessions_root),
-            archived_sessions_root: None,
+            ..Default::default()
         },
         &home,
         &managed_root,
@@ -5177,7 +5192,7 @@ fn usage_backfill_uses_session_cwd_for_managed_workspace_identity() {
         BackfillCodexSessionUsageRequest {
             include_archived: false,
             sessions_root: Some(sessions_root),
-            archived_sessions_root: None,
+            ..Default::default()
         },
         &home,
         &managed_root,
@@ -5300,7 +5315,7 @@ fn usage_backfill_counts_invalid_json_lines_as_skipped_errors() {
         BackfillCodexSessionUsageRequest {
             include_archived: false,
             sessions_root: Some(sessions_root),
-            archived_sessions_root: None,
+            ..Default::default()
         },
         &home,
         &managed_root,
@@ -5341,7 +5356,7 @@ fn usage_backfill_ignores_non_rollouts_and_symlinked_entries() {
         BackfillCodexSessionUsageRequest {
             include_archived: false,
             sessions_root: Some(sessions_root),
-            archived_sessions_root: None,
+            ..Default::default()
         },
         &home,
         &managed_root,
@@ -5368,7 +5383,7 @@ fn usage_backfill_reports_codex_file_progress() {
         BackfillCodexSessionUsageRequest {
             include_archived: false,
             sessions_root: Some(sessions_root),
-            archived_sessions_root: None,
+            ..Default::default()
         },
         &home,
         &managed_root,

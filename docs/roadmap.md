@@ -80,7 +80,9 @@ local metrics are not a community leaderboard, trust score, or account-level
 analytics. A zero count means SkillBox currently has no Calls evidence; disabled
 hooks and unsupported provider events can make it incomplete.
 
-`Sync histories` is explicit and read-only toward provider stores. Codex accepts
+`Sync histories` is incremental by default, also runs hourly in the desktop
+background, shows Last sync time beside the Usage page actions, and stays
+read-only toward provider stores. Codex accepts
 complete per-turn `<skill>` blocks, `[$skill](.../SKILL.md)` links with an
 absolute path, and dedicated `SKILL.md` file reads as inferred invocation, while
 catalog/prose, search/find, mixed payloads, and outputs are excluded. Claude

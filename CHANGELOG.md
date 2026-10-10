@@ -7,7 +7,8 @@ version tags such as `v0.3.0`.
 
 ## Unreleased
 
-- No unreleased changes.
+- Default local history sync to incremental file cursors, refresh it hourly in the desktop background, and keep CLI `--full` for a complete rescan.
+- Show Last sync time beside Usage page actions after each background or Sync histories scan.
 
 ## 0.9.5
 

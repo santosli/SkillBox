@@ -955,11 +955,12 @@ Apply fast-forward:
   `backfill_codex_session_usage`、`backfill_claude_code_session_usage`、
   `backfill_cursor_session_usage`。
 - Rust CLI 入口：`usage-rankings [--range 7d|30d|all] [--type user|remote|system] [--agent <id>] [--workspace <runtime-root>] [--include-unmanaged]`、
-  `usage-audit`、`usage-backfill-codex [--include-archived]`、
-  `usage-backfill-claude-code [--projects-root <path>]`、
-  `usage-backfill-cursor [--database-path <path>]`。
-- Tauri command：`list_skill_usage_rankings`、`usage_audit` 和三个 provider backfill。
-- 桌面左侧一级导航进入 Usage 页面，或修改时间、skill type（User/Remote/System）、Agent、Workspace 过滤器；也可点击 `Sync histories`。
+  `usage-audit`、`usage-backfill-codex [--include-archived] [--full]`、
+  `usage-backfill-claude-code [--full] [--projects-root <path>]`、
+  `usage-backfill-cursor [--full] [--database-path <path>]`。
+- Tauri command：`list_skill_usage_rankings`、`usage_audit`、三个 provider backfill、
+  `usage_history_sync_status` 和 `mark_usage_history_sync_completed`。
+- 桌面启动约 15 秒后若同步窗口已到期，会在后台自动跑一次增量 history sync，之后每小时再跑；也可点击 `Sync histories` 立刻增量刷新。CLI `--full` 才全量重扫。Usage 右上角 `Sync histories` 左侧显示最近一次 history sync 完成时间（当天为 `Last sync HH:MM`），启动时从 `usage_history_sync_status.last_synced_at` 读取，后台刷新或手动 Sync 完成后更新。
 
 步骤：
 
@@ -978,7 +979,7 @@ Apply fast-forward:
 - 排序固定为 Calls 降序、last used time 降序、skill name 升序、source identity 升序，
   随后分配连续 ordinal rank；reference 数量不能提升默认排名。
 - 桌面 Call activity 用最近一年的紧凑热力图显示每日 Calls 强度；点击某一天会更新下方 Usage 统计表，而不是另开明细。7/30/all-time 过滤器继续作用于未选中日期时的 Usage 统计与 coverage，不缩小热力图窗口。精确名次、skill 名称、Calls、last used time 和 Actions 仍用同一张可访问的 Usage 统计表。History 把 Call、History reference 和管理操作作为不同 kind/filter 展示。
-- Usage 页提供 `Sync histories`，顺序运行三个互相独立的本地 provider 并在完成后刷新一次 ranking；扫描中桌面显示当前 provider 和已处理/总文件数（Cursor 再拆 sessions / transcripts），进度由 Rust backfill callback 经 Tauri event `skillbox://usage-backfill-progress` 推送；离开页面或完成后忽略迟到进度。单个 provider 失败时继续运行其余 provider，notice 明确成功/失败来源，已成功写入的幂等事件不回滚：
+- Usage 页提供 `Sync histories`，顺序运行三个互相独立的本地 provider 并在完成后刷新一次 ranking。默认增量：size/mtime 未变的 history 文件跳过解析；扫描中桌面显示当前 provider 和已处理/总文件数（Cursor 再拆 sessions / transcripts），进度由 Rust backfill callback 经 Tauri event `skillbox://usage-backfill-progress` 推送。后台小时级增量刷新离开 Usage 页也会继续跑完；迟到进度若当前不在 Usage 则不改其它页错误态。每次后台或手动 history sync 完成后，Usage 右上角更新为 `Last sync` 时间。单个 provider 失败时继续运行其余 provider，notice 明确成功/失败来源，已成功写入的幂等事件不回滚：
   - Codex 流式扫描本机 `~/.codex/sessions`（可选 `archived_sessions`）中的
     `rollout-*.jsonl`（不跟随 symlink），从 user turn 的完整
     `<skill><name>/<path>` block、`[$skill](.../SKILL.md)` link，以及
@@ -1027,7 +1028,7 @@ Apply fast-forward:
   不返回 prompt、chat body、tool payload/output、credentials 或完整 metadata。
 - 未来若接入 Codex reported runs，必须按 provider、subject kind、time window、scope 和 provenance 独立存储与展示；不得写入 `skill_usage_events`，不得参与本地 ranking、total 或 delta。
 - 查询只读取 `metadata_json.skill_source_kind` 这一受限身份字段，响应不返回 `prompt_excerpt` 或完整 `metadata_json`；usage 数据不上传、不跨设备合并，也不作为社区排行榜。
-- 导入预览或 backfill 进行中切换离开 Usage 时，迟到响应不得再打开确认框或把错误写到其它页面；loading 标记仍须清理，避免返回后按钮永久禁用。
+- 导入预览进行中切换离开 Usage 时，迟到响应不得再打开确认框或把错误写到其它页面；loading 标记仍须清理，避免返回后按钮永久禁用。后台 history 增量同步离开 Usage 后继续跑完，不得把失败写到 Dashboard 等其它页面。
 
 失败与回滚：
 
@@ -1050,13 +1051,15 @@ Apply fast-forward:
 - `cargo test -p skillbox-core --offline schema_v`
 - `cargo test -p skillbox-cli --offline usage_ranking`
 - `cargo run -p skillbox-cli --offline -- usage-rankings --range 30d --managed-root <temp-skillbox-root>`
+- `cargo test -p skillbox-core --offline usage_history_sync`
 - `cargo run -p skillbox-cli --offline -- usage-backfill-codex --sessions-root <temp-sessions> --managed-root <temp-skillbox-root>`
+- `cargo run -p skillbox-cli --offline -- usage-backfill-codex --full --sessions-root <temp-sessions> --managed-root <temp-skillbox-root>`
 - `cargo run -p skillbox-cli --offline -- usage-backfill-claude-code --projects-root <temp-claude-projects> --managed-root <temp-skillbox-root>`
 - `cargo run -p skillbox-cli --offline -- usage-backfill-cursor --database-path <temp-state-vscdb> --managed-root <temp-skillbox-root>`
 - `cargo run -p skillbox-cli --offline -- usage-audit --managed-root <temp-skillbox-root>`
 - `node --test apps/desktop/src/usageRankings.test.js apps/desktop/src/cardLayout.test.js`
 - `npm test`
-- 桌面手动验证 Usage 的 7/30/all、User/Remote/System、Agent/Workspace 组合过滤、Sync histories（含单 provider 失败）、空状态、键盘 focus、最后请求获胜和 managed skill detail 跳转。
+- 桌面手动验证 Usage 的 7/30/all、User/Remote/System、Agent/Workspace 组合过滤、Sync histories（含单 provider 失败和离开 Usage 后后台增量仍跑完）、完成后右上角显示 Last sync、空状态、键盘 focus、最后请求获胜和 managed skill detail 跳转。
 
 ## 15. App Updates
 

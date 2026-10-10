@@ -87,6 +87,8 @@ React UI
 - `backfill_codex_session_usage` -> `skillbox_core::backfill_codex_session_usage_with_progress`，并 emit `skillbox://usage-backfill-progress`
 - `backfill_claude_code_session_usage` -> `skillbox_core::backfill_claude_code_session_usage_with_progress`，并 emit `skillbox://usage-backfill-progress`
 - `backfill_cursor_session_usage` -> `skillbox_core::backfill_cursor_session_usage_with_progress`，并 emit `skillbox://usage-backfill-progress`
+- `usage_history_sync_status` -> `skillbox_core::usage_history_sync_status`
+- `mark_usage_history_sync_completed` -> `skillbox_core::mark_usage_history_sync_completed`
 - `usage_hook_statuses` -> `skillbox_core::usage_hook_statuses`
 - `install_usage_hook` -> `skillbox_core::install_usage_hook`
 - `check_app_update(force)` -> Tauri updater plugin HTTPS metadata check，非 force 请求复用 24 小时内、当前 app version 匹配的 SQLite 或进程内展示缓存
@@ -126,6 +128,7 @@ cargo run -p skillbox-cli --offline -- <command>
 - `usage_backfill_claude.rs` 只从本机 Claude Code project JSONL 的原生 Skill tool/command attribution 恢复 `confirmed` 事件，解析真实 `SKILL.md`（含其它本机 runtime 与 managed store），不复制消息正文
 - `usage_backfill_cursor.rs` 只读打开并验证 Cursor 本机 history SQLite schema；human bubble 中显式附加且解析到真实 `SKILL.md` 的 `context.cursorRules` 只记录为 `reference`，不兼容 schema fail closed
 - `usage_backfill_cursor_transcripts.rs` 有界读取 Cursor agent transcript；assistant `Read`/`ReadFile` 的绝对本机 `SKILL.md`，以及用户 `manually_attached_skills` 附加，按 transcript user turn + skill 去重并记录 `inferred` event。现存文件执行严格 traversal、symlink、allowed-root、regular-file、大小和 frontmatter 检查；安全的 historical-missing 路径只保留词法 evidence identity，不能成为文件系统或部署权限。
+- `usage_history_cursors.rs` 为 Codex/Claude/Cursor history 文件保存 size+mtime cursor；默认增量跳过未变化文件，CLI `--full` 才全量重扫；并记录桌面小时级自动同步窗口
 - `hooks.rs` agent hook 注入、transcript 解析，以及基于结构化 runtime context 的 workspace 归属
 - `operations.rs` operation 与 history 记录
 - `metadata.rs` 用户 favorites/tags 的 SQLite 持久化和 legacy desktop metadata 迁移
@@ -344,7 +347,7 @@ GitHub remote source 可以是仓库中的 skill 子目录，也可以是根目�
 - Rust core、CLI 和 Tauri 已覆盖 `~/.skillbox/user-skills` 的 outbound Git
   commit/push；reviewed inbound `origin/main` fast-forward 已随 v0.7.0 发布。
 - Rust core 已覆盖 remote skill 的 GitHub install preview/apply、GitHub update check、source binding、diff preview、update/rollback apply 和 operation log。
-- Rust core 和 Tauri 已覆盖 usage stats 显式上报，以及 Codex App、Codex CLI、Claude Code CLI 的 Stop hook 注入入口。schema v7 把本机 evidence 分为 `confirmed`、`inferred` 和 `reference`；用户可见 `Calls` 只包含前两类，History references 单独展示。Usage 支持 time range、User/Remote/System skill type、Agent 和 Workspace 的结构化过滤，并返回同一过滤快照内的 evidence totals、时间覆盖、可重叠 provenance source counts，以及按本机日历日分桶的 `daily` Calls。详情页、skill card 和 workspace Calls 与 Usage all-time 一样从 `skill_usage_events` 聚合，不再读 `skill_usage_stats` 缓存。桌面 Usage 用最近一年的紧凑热力图展示每日 Calls 强度，点击某一天会更新下方 Usage 统计表，不再使用 Top skill cards。`Sync histories` 顺序调用三个 provider，并通过 `skillbox://usage-backfill-progress` 显示当前 provider 和文件进度；单个 provider 失败不会撤销其他 provider 已成功写入或升级的幂等事件。
+- Rust core 和 Tauri 已覆盖 usage stats 显式上报，以及 Codex App、Codex CLI、Claude Code CLI 的 Stop hook 注入入口。schema v7 把本机 evidence 分为 `confirmed`、`inferred` 和 `reference`；用户可见 `Calls` 只包含前两类，History references 单独展示。Usage 支持 time range、User/Remote/System skill type、Agent 和 Workspace 的结构化过滤，并返回同一过滤快照内的 evidence totals、时间覆盖、可重叠 provenance source counts，以及按本机日历日分桶的 `daily` Calls。详情页、skill card 和 workspace Calls 与 Usage all-time 一样从 `skill_usage_events` 聚合，不再读 `skill_usage_stats` 缓存。桌面 Usage 用最近一年的紧凑热力图展示每日 Calls 强度，点击某一天会更新下方 Usage 统计表，不再使用 Top skill cards。`Sync histories` 与后台小时级刷新默认做增量扫描：schema v10 用 `usage_history_file_cursors` 跳过 size/mtime 未变的 Codex/Claude JSONL 和 Cursor state/transcript 文件，首次空 cursor 等价于全量盘点；CLI `--full` 才重扫全部文件。桌面启动约 15 秒后若已到期则自动增量同步，之后每小时再跑，离开 Usage 页也不会中断。Usage 右上角显示最近一次 history sync 完成时间（`Last sync`），启动时读取 `last_synced_at`，后台或手动同步完成后更新。顺序调用三个 provider，并通过 `skillbox://usage-backfill-progress` 显示当前 provider 和文件进度；单个 provider 失败不会撤销其他 provider 已成功写入或升级的幂等事件。
 - Codex 本地 store 没有稳定的 provider-native skill-run total。Codex 结构化逐回合 skill carrier 只能作为 defensible `inferred` Calls；`usage-audit` 明确报告这个已知 undercount，不读取或返回聊天正文。
 - 未来若接入 Codex reported runs，它属于独立的 provider-reported analytics 边界，必须携带 provider、subject kind、time window、scope 和 provenance；不得写入 `skill_usage_events`，也不得参与本地 ranking、total 或 delta。
 - Tauri desktop 已覆盖 macOS app update check 和用户确认后的 install/restart；React 不直接处理 updater asset URL、签名或安装。

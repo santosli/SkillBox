@@ -68,6 +68,7 @@ pub(crate) fn backfill_cursor_agent_transcript_usage(
         allowed_skill_root,
         runtime_roots,
         managed_database,
+        true,
         |_| {},
     )
 }
@@ -77,6 +78,7 @@ pub(crate) fn backfill_cursor_agent_transcript_usage_with_progress<F>(
     allowed_skill_root: &Path,
     runtime_roots: &[PathBuf],
     managed_database: &mut Connection,
+    incremental: bool,
     mut progress: F,
 ) -> Result<BackfillCodexSessionUsageResult>
 where
@@ -101,6 +103,22 @@ where
     let mut seen_transcript_hashes = HashSet::new();
     let mut seen_event_ids = HashSet::new();
     for (index, transcript) in files.into_iter().enumerate() {
+        let Some(stamp) = take_history_file_scan(
+            managed_database,
+            USAGE_HISTORY_CURSOR_PROVIDER_CURSOR_TRANSCRIPT,
+            &transcript.path,
+            incremental,
+            &mut result.unchanged_files,
+        )?
+        else {
+            progress(UsageBackfillProgress::new(
+                "cursor",
+                "scanning-transcripts",
+                index + 1,
+                Some(total),
+            ));
+            continue;
+        };
         result.scanned_files = result.scanned_files.saturating_add(1);
         result.scanned_cursor_transcript_files =
             result.scanned_cursor_transcript_files.saturating_add(1);
@@ -127,6 +145,20 @@ where
         result.cursor_transcript_read_file_candidates = result
             .cursor_transcript_read_file_candidates
             .saturating_add(extraction.read_file_candidates);
+        if let Err(error) = upsert_history_file_cursor(
+            managed_database,
+            USAGE_HISTORY_CURSOR_PROVIDER_CURSOR_TRANSCRIPT,
+            &transcript.path,
+            stamp,
+        ) {
+            push_cursor_transcript_error(
+                &mut result.errors,
+                format!(
+                    "Unable to persist Cursor transcript cursor for {}: {error}",
+                    transcript.transcript_id
+                ),
+            );
+        }
         if !seen_transcript_hashes.insert(extraction.content_hash) {
             result.cursor_transcript_duplicate_files =
                 result.cursor_transcript_duplicate_files.saturating_add(1);
@@ -216,6 +248,9 @@ pub(crate) fn merge_cursor_agent_transcript_backfill_result(
     target.scanned_files = target
         .scanned_files
         .saturating_add(transcript.scanned_files);
+    target.unchanged_files = target
+        .unchanged_files
+        .saturating_add(transcript.unchanged_files);
     target.discovered = target.discovered.saturating_add(transcript.discovered);
     target.recorded = target.recorded.saturating_add(transcript.recorded);
     target.deduplicated = target.deduplicated.saturating_add(transcript.deduplicated);
@@ -1139,11 +1174,13 @@ mod tests {
 
         let mut connection = open_database(&paths.database_path).unwrap();
         let runtime_roots = runtime_roots_under(&root);
-        let second = backfill_cursor_agent_transcript_usage(
+        let second = backfill_cursor_agent_transcript_usage_with_progress(
             &projects,
             &root,
             &runtime_roots,
             &mut connection,
+            false,
+            |_| {},
         )
         .unwrap();
         assert_eq!(second.recorded, 0);
@@ -1199,11 +1236,13 @@ mod tests {
             })
             .unwrap();
         assert!(metadata_json.contains("\"historical_missing\":true"));
-        let replay = backfill_cursor_agent_transcript_usage(
+        let replay = backfill_cursor_agent_transcript_usage_with_progress(
             &projects,
             &root,
             &runtime_roots_under(&root),
             &mut connection,
+            false,
+            |_| {},
         )
         .unwrap();
         assert_eq!(replay.recorded, 0);
@@ -1467,9 +1506,23 @@ mod tests {
         assert_eq!(first.inferred_cursor_transcript_calls, 1);
         assert_eq!(first.recorded, 1);
 
-        let second = backfill_cursor_session_usage_for_home(request, &home, &managed).unwrap();
+        let second =
+            backfill_cursor_session_usage_for_home(request.clone(), &home, &managed).unwrap();
         assert_eq!(second.recorded, 0);
-        assert_eq!(second.deduplicated, 1);
+        assert_eq!(second.unchanged_files, 1);
+        assert_eq!(second.deduplicated, 0);
+
+        let full = backfill_cursor_session_usage_for_home(
+            BackfillCursorSessionUsageRequest {
+                incremental: false,
+                ..request
+            },
+            &home,
+            &managed,
+        )
+        .unwrap();
+        assert_eq!(full.recorded, 0);
+        assert_eq!(full.deduplicated, 1);
         let audit = usage_audit(&managed).unwrap();
         assert_eq!(audit.confirmed_calls, 0);
         assert_eq!(audit.inferred_calls, 1);

@@ -983,6 +983,27 @@ async fn backfill_cursor_session_usage(
 }
 
 #[tauri::command]
+async fn usage_history_sync_status() -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result =
+            skillbox_core::usage_history_sync_status(skillbox_core::default_managed_root())?;
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Usage history sync status task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn mark_usage_history_sync_completed() -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        skillbox_core::mark_usage_history_sync_completed(skillbox_core::default_managed_root())?;
+        serde_json::to_value(true).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Usage history sync complete task failed: {error}"))?
+}
+
+#[tauri::command]
 async fn record_skill_usage(
     request: skillbox_core::RecordSkillUsageRequest,
 ) -> Result<Value, String> {
@@ -1281,6 +1302,8 @@ pub fn run() {
             backfill_codex_session_usage,
             backfill_claude_code_session_usage,
             backfill_cursor_session_usage,
+            usage_history_sync_status,
+            mark_usage_history_sync_completed,
             record_skill_usage,
             usage_hook_statuses,
             install_usage_hook,

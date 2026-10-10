@@ -481,6 +481,7 @@ export function normalizeCodexUsageBackfill(result = {}) {
   return {
     scannedFiles: numberOrZero(result.scannedFiles ?? result.scanned_files),
     scannedTurns: numberOrZero(result.scannedTurns ?? result.scanned_turns),
+    unchangedFiles: numberOrZero(result.unchangedFiles ?? result.unchanged_files),
     discovered: numberOrZero(result.discovered),
     recorded: numberOrZero(result.recorded),
     deduplicated: numberOrZero(result.deduplicated),
@@ -520,6 +521,49 @@ export function normalizeCodexUsageBackfill(result = {}) {
   };
 }
 
+export const USAGE_HISTORY_AUTO_SYNC_INTERVAL_MS = 60 * 60 * 1000;
+export const USAGE_HISTORY_AUTO_SYNC_START_DELAY_MS = 15 * 1000;
+export const USAGE_HISTORY_AUTO_SYNC_CHECK_MS = 60 * 1000;
+
+export function normalizeUsageHistorySyncStatus(status = {}) {
+  const intervalSeconds = Number(status?.intervalSeconds ?? status?.interval_seconds ?? 0);
+  return {
+    lastSyncedAt: String(status?.lastSyncedAt || status?.last_synced_at || '').trim(),
+    intervalSeconds: Number.isFinite(intervalSeconds) && intervalSeconds > 0 ? intervalSeconds : 0,
+    due: Boolean(status?.due)
+  };
+}
+
+export function formatUsageHistoryLastSyncedAt(lastSyncedAt, now = new Date()) {
+  const value = String(lastSyncedAt || '').trim();
+  if (!value) return '';
+
+  const parsed = /^\d+$/.test(value) ? new Date(Number(value) * 1000) : new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '';
+
+  const syncedDay = [parsed.getFullYear(), parsed.getMonth(), parsed.getDate()].join('-');
+  const currentDay = [now.getFullYear(), now.getMonth(), now.getDate()].join('-');
+  const time = [parsed.getHours(), parsed.getMinutes()]
+    .map((part) => String(part).padStart(2, '0'))
+    .join(':');
+
+  if (syncedDay === currentDay) {
+    return time;
+  }
+
+  const date = [
+    parsed.getFullYear(),
+    String(parsed.getMonth() + 1).padStart(2, '0'),
+    String(parsed.getDate()).padStart(2, '0')
+  ].join('-');
+  return `${date} ${time}`;
+}
+
+export function usageHistoryLastSyncedLabel(lastSyncedAt, now = new Date()) {
+  const formatted = formatUsageHistoryLastSyncedAt(lastSyncedAt, now);
+  return formatted ? `Last sync ${formatted}` : '';
+}
+
 export const usageHistorySyncProviders = [
   {
     id: 'codex',
@@ -547,6 +591,7 @@ export function usageHistorySyncNotice(results = []) {
     ...normalizeCodexUsageBackfill(result)
   }));
   const scanned = normalizedResults.reduce((total, result) => total + result.scannedFiles, 0);
+  const unchanged = normalizedResults.reduce((total, result) => total + result.unchangedFiles, 0);
   const recorded = normalizedResults.reduce((total, result) => total + result.recorded, 0);
   const deduplicated = normalizedResults.reduce(
     (total, result) => total + result.deduplicated,
@@ -566,6 +611,7 @@ export function usageHistorySyncNotice(results = []) {
     .join(', ');
   const parts = [
     `Scanned ${scanned} local history sources`,
+    ...(unchanged > 0 ? [`skipped ${unchanged} unchanged`] : []),
     `recorded ${recorded} new observations`,
     `${deduplicated} already recorded`,
     `${upgraded} evidence upgrade${upgraded === 1 ? '' : 's'}`

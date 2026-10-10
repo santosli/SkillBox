@@ -341,6 +341,13 @@ collection apply 只在一次 bounded fetch 后写入选中的 child，并在 ap
 managed target；Phase C 随 v0.9.0 发布。Phase D 的 collection-level
 update/rollback 不属于此迁移，仍是后续 v0.9.x 工作。
 
+schema v10 增加 `usage_history_file_cursors`。每行以 `(provider, path)` 记录最近一次
+成功扫描的 size 与 mtime_ms。默认 history sync 是增量的：size/mtime 未变则跳过该
+Codex/Claude JSONL 或 Cursor state/transcript 文件，不重解析、不把 coverage 计数打成
+0。空表时首次同步仍会盘点全部现存文件。CLI `--full`（`incremental=false`）忽略
+cursor 并重扫，coverage 可以下降。增量同步用 `max(previous, current)` 写入 scan
+coverage preferences，避免跳过未改文件时把已记录的文件/turn/session 数清零。
+
 Import Review 返回的 `ImportCandidateCollection` 还有一个只读的
 `source_kind`：`git_worktree` 表示可绑定 canonical worktree/HEAD 的本地 Git
 来源；`installed_source` 表示由受支持的 v3 installer lockfile 归并的来源
@@ -358,7 +365,8 @@ candidate name/path 的 HTTPS `well-known` base/source URL + SHA-256 digest；so
 `app_update_check_cache`、`codex_usage_backfill_scanned_files`、
 `codex_usage_backfill_scanned_turns`、`claude_code_usage_backfill_scanned_files`、
 `cursor_usage_backfill_scanned_sessions`、
-`cursor_usage_backfill_scanned_transcript_files` 和
+`cursor_usage_backfill_scanned_transcript_files`、
+`usage_history_last_sync_at` 和
 `usage_backfill_audit_<source>`。`commit_summary_cli` 是可选的绝对可执行文件路径，
 供 commit review Generate 调用；空值表示自动发现 Cursor Agent，否则使用内置 heuristic。
 不得保存带参数的 command line。`app_update_check_cache` 只记录最近一次成功的 updater metadata check 展示快照
@@ -367,7 +375,9 @@ candidate name/path 的 HTTPS `well-known` base/source URL + SHA-256 digest；so
 version 不匹配时必须忽略并重新通过 Tauri updater plugin 检查；下载和安装阶段仍由
 plugin 校验 updater asset 签名。usage coverage keys 保存最近一次 Codex、Claude Code 和
 Cursor history sync 扫描的 rollout/project JSONL 文件数、Codex turn 数、Cursor composer
-session 数或 Cursor agent transcript 文件数；backfill audit 仅保存 aggregate
+session 数或 Cursor agent transcript 文件数；增量同步跳过未改文件时这些 coverage
+计数不得下降。`usage_history_last_sync_at` 记录桌面最近一次完整（三 provider）history
+sync 结束时间，用于一小时自动增量窗口；Usage 页把该时间显示为右上角 `Last sync`。backfill audit 仅保存 aggregate
 discovered/recorded/deduplicated/upgraded/skipped/errors。它们不随 Usage 的时间、
 skill type、Agent 或 Workspace 过滤器变化，也不包含聊天正文。
 

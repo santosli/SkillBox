@@ -148,7 +148,11 @@ import {
   usageRankingRequest,
   normalizeCodexUsageBackfill,
   usageHistorySyncNotice,
-  usageHistorySyncProviders
+  usageHistorySyncProviders,
+  usageHistoryLastSyncedLabel,
+  normalizeUsageHistorySyncStatus,
+  USAGE_HISTORY_AUTO_SYNC_START_DELAY_MS,
+  USAGE_HISTORY_AUTO_SYNC_CHECK_MS
 } from './usageRankings.js';
 import {
   normalizeUsageBackfillProgress
@@ -467,6 +471,7 @@ export default function App() {
   const [usageBackfillLoading, setUsageBackfillLoading] = useState(false);
   const [usageBackfillProgress, setUsageBackfillProgress] = useState(null);
   const [usageBackfillNotice, setUsageBackfillNotice] = useState('');
+  const [usageHistoryLastSyncedAt, setUsageHistoryLastSyncedAt] = useState('');
   const [rankingImportSkillName, setRankingImportSkillName] = useState('');
   const [remoteContextLoading, setRemoteContextLoading] = useState({});
   const [userContextLoading, setUserContextLoading] = useState({});
@@ -487,6 +492,7 @@ export default function App() {
   const usageRankingRequestRef = useRef(0);
   const usageBackfillSyncIdRef = useRef(0);
   const usageBackfillActiveRef = useRef(false);
+  const syncLocalUsageHistoriesRef = useRef(async () => {});
   const rankingImportRequestRef = useRef(0);
   const historyRequestRef = useRef(0);
   const importScanControllerRef = useRef(null);
@@ -639,6 +645,39 @@ export default function App() {
 
     return () => window.clearInterval(intervalId);
   }, [preferences.statusRefreshIntervalMinutes]);
+
+  useEffect(() => {
+    if (!window.__TAURI_INTERNALS__) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const status = normalizeUsageHistorySyncStatus(
+          await invoke('usage_history_sync_status')
+        );
+        if (!cancelled && status.lastSyncedAt) {
+          setUsageHistoryLastSyncedAt(status.lastSyncedAt);
+        }
+      } catch {
+        // Usage stays without a last-refreshed time until the next successful sync.
+      }
+    })();
+
+    const startId = window.setTimeout(() => {
+      void syncLocalUsageHistoriesRef.current({ auto: true });
+    }, USAGE_HISTORY_AUTO_SYNC_START_DELAY_MS);
+    const intervalId = window.setInterval(() => {
+      void syncLocalUsageHistoriesRef.current({ auto: true });
+    }, USAGE_HISTORY_AUTO_SYNC_CHECK_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(startId);
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
   useEffect(() => {
     if (contentRef.current) {
@@ -2534,8 +2573,32 @@ export default function App() {
     }
   }
 
-  async function syncLocalUsageHistories() {
-    if (pageRef.current !== 'usage') return;
+  async function syncLocalUsageHistories({ auto = false } = {}) {
+    if (usageBackfillActiveRef.current) {
+      return;
+    }
+    if (auto) {
+      if (!window.__TAURI_INTERNALS__) {
+        return;
+      }
+      try {
+        const status = normalizeUsageHistorySyncStatus(
+          await invoke('usage_history_sync_status')
+        );
+        if (status.lastSyncedAt) {
+          setUsageHistoryLastSyncedAt(status.lastSyncedAt);
+        }
+        if (!status.due) {
+          return;
+        }
+      } catch {
+        return;
+      }
+      if (usageBackfillActiveRef.current) {
+        return;
+      }
+    }
+    const onUsagePage = () => pageRef.current === 'usage';
     const syncId = usageBackfillSyncIdRef.current + 1;
     usageBackfillSyncIdRef.current = syncId;
     usageBackfillActiveRef.current = true;
@@ -2549,12 +2612,16 @@ export default function App() {
       providerIndex: 1,
       providerCount
     });
-    setError('');
+    if (onUsagePage()) {
+      setError('');
+    }
     setUsageBackfillNotice('');
     try {
       const providerResults = [];
       for (const [index, provider] of usageHistorySyncProviders.entries()) {
-        if (pageRef.current !== 'usage' || usageBackfillSyncIdRef.current !== syncId) return;
+        if (usageBackfillSyncIdRef.current !== syncId) {
+          return;
+        }
         setUsageBackfillProgress({
           provider: provider.id,
           phase: 'scanning',
@@ -2568,6 +2635,7 @@ export default function App() {
             ? await invoke(provider.command, { request: provider.request, syncId })
             : {
                 scanned_files: provider.id === 'cursor' ? 4 : 2,
+                unchanged_files: 0,
                 discovered: provider.id === 'codex' ? 3 : 1,
                 recorded: provider.id === 'codex' ? 3 : 1,
                 deduplicated: 0,
@@ -2586,7 +2654,26 @@ export default function App() {
           });
         }
       }
-      if (pageRef.current !== 'usage') return;
+      if (usageBackfillSyncIdRef.current !== syncId) {
+        return;
+      }
+      if (window.__TAURI_INTERNALS__) {
+        try {
+          await invoke('mark_usage_history_sync_completed');
+          try {
+            const status = normalizeUsageHistorySyncStatus(
+              await invoke('usage_history_sync_status')
+            );
+            setUsageHistoryLastSyncedAt(status.lastSyncedAt || new Date().toISOString());
+          } catch {
+            setUsageHistoryLastSyncedAt(new Date().toISOString());
+          }
+        } catch {
+          // Ranking refresh still records the latest evidence.
+        }
+      } else {
+        setUsageHistoryLastSyncedAt(new Date().toISOString());
+      }
       const normalizedResults = providerResults.map((result) => ({
         provider: result.provider,
         ...normalizeCodexUsageBackfill(result)
@@ -2607,11 +2694,11 @@ export default function App() {
         setUsageBackfillNotice(syncNotice);
       }
       const rankingRefreshError = await loadUsageRankings(usageRankingFilters, {
-        clearError: !partialWarning,
-        reportError: !partialWarning,
+        clearError: onUsagePage() && !partialWarning,
+        reportError: onUsagePage() && !partialWarning,
         refreshSkills: true
       });
-      if (partialWarning && pageRef.current === 'usage') {
+      if (partialWarning && onUsagePage()) {
         setError(
           rankingRefreshError
             ? `${partialWarning} Usage refresh failed: ${rankingRefreshError}`
@@ -2619,7 +2706,9 @@ export default function App() {
         );
       }
     } catch (backfillError) {
-      if (pageRef.current !== 'usage') return;
+      if (!onUsagePage()) {
+        return;
+      }
       setError(
         backfillError.message
           || String(backfillError)
@@ -2633,6 +2722,7 @@ export default function App() {
       setUsageBackfillProgress(null);
     }
   }
+  syncLocalUsageHistoriesRef.current = syncLocalUsageHistories;
 
   function openRankedSkill(skillName) {
     const skill = skills.find((candidate) => candidate.name === skillName);
@@ -4606,6 +4696,7 @@ export default function App() {
             error={error}
             filters={usageRankingFilters}
             importingSkillName={rankingImportSkillName}
+            lastSyncedLabel={usageHistoryLastSyncedLabel(usageHistoryLastSyncedAt)}
             loading={usageRankingLoading}
             notice={usageBackfillNotice || notice}
             ranking={usageRankings}

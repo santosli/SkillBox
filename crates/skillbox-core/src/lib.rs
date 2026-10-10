@@ -96,6 +96,7 @@ mod usage_backfill;
 mod usage_backfill_claude;
 mod usage_backfill_cursor;
 mod usage_backfill_cursor_transcripts;
+mod usage_history_cursors;
 mod workspaces;
 
 pub use collections::*;
@@ -125,6 +126,7 @@ pub use usage_backfill::*;
 pub use usage_backfill_claude::*;
 pub use usage_backfill_cursor::*;
 pub(crate) use usage_backfill_cursor_transcripts::*;
+pub use usage_history_cursors::*;
 pub use workspaces::*;
 
 #[cfg(test)]

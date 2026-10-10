@@ -2,7 +2,7 @@ use crate::*;
 use fs2::FileExt;
 use std::fs::{File, OpenOptions};
 
-pub(crate) const LATEST_DATABASE_SCHEMA_VERSION: i64 = 9;
+pub(crate) const LATEST_DATABASE_SCHEMA_VERSION: i64 = 10;
 
 pub(crate) fn open_database(database_path: &Path) -> Result<Connection> {
     let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
@@ -97,6 +97,7 @@ pub(crate) fn run_database_migrations(connection: &mut Connection) -> Result<()>
         (7_i64, "usage_evidence_classification"),
         (8_i64, "skill_collections"),
         (9_i64, "github_skill_collections"),
+        (10_i64, "usage_history_file_cursors"),
     ] {
         let applied: bool = connection
             .query_row(
@@ -122,6 +123,7 @@ pub(crate) fn run_database_migrations(connection: &mut Connection) -> Result<()>
             7 => apply_usage_evidence_classification_migration(&transaction)?,
             8 => apply_skill_collections_migration(&transaction)?,
             9 => apply_github_skill_collections_migration(&transaction)?,
+            10 => apply_usage_history_file_cursors_migration(&transaction)?,
             _ => return Err(format!("Unknown database migration version: {version}")),
         }
         transaction
@@ -428,6 +430,24 @@ fn apply_skill_collections_migration(connection: &Connection) -> Result<()> {
             ",
         )
         .map_err(|error| error.to_string())
+}
+
+fn apply_usage_history_file_cursors_migration(connection: &Connection) -> Result<()> {
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS usage_history_file_cursors (
+              provider TEXT NOT NULL,
+              path TEXT NOT NULL,
+              size INTEGER NOT NULL,
+              mtime_ms INTEGER NOT NULL,
+              scanned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (provider, path)
+            );
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 fn apply_github_skill_collections_migration(connection: &Connection) -> Result<()> {

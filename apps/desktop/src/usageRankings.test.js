@@ -31,6 +31,12 @@ import {
   usageRankingSkillTypeOptions,
   usageHistorySyncNotice,
   usageHistorySyncProviders,
+  usageHistoryLastSyncedLabel,
+  formatUsageHistoryLastSyncedAt,
+  normalizeUsageHistorySyncStatus,
+  USAGE_HISTORY_AUTO_SYNC_INTERVAL_MS,
+  USAGE_HISTORY_AUTO_SYNC_START_DELAY_MS,
+  USAGE_HISTORY_AUTO_SYNC_CHECK_MS,
   usageRankingScopeLabel,
   usageRankingWorkspaceOptions
 } from './usageRankings.js';
@@ -423,6 +429,7 @@ test('summarizes Codex usage backfill results', () => {
     {
       scannedFiles: 12,
       scannedTurns: 0,
+      unchangedFiles: 0,
       discovered: 40,
       recorded: 28,
       deduplicated: 10,
@@ -491,6 +498,43 @@ test('syncs Codex, Claude Code, and Cursor histories with one provider-aware not
       }
     ]),
     'Scanned 11 local history sources, recorded 6 new observations, 3 already recorded, 1 evidence upgrade, by provider: Codex 3 new, Claude Code 2 new, Cursor 1 new; scanned 2 transcript files and 3 state sessions; 4 inferred transcript calls from 7 Read candidates and 1 ReadFile candidates, 2 state references; 2 same-turn duplicates, 1 duplicate files, 3 historical missing paths accepted, 1 unsafe paths rejected (1 error).'
+  );
+  assert.equal(
+    usageHistorySyncNotice([
+      { provider: 'Codex', scanned_files: 1, unchanged_files: 11, recorded: 0, deduplicated: 0 }
+    ]),
+    'Scanned 1 local history sources, skipped 11 unchanged, recorded 0 new observations, 0 already recorded, 0 evidence upgrades, by provider: Codex 0 new.'
+  );
+  assert.equal(USAGE_HISTORY_AUTO_SYNC_INTERVAL_MS, 60 * 60 * 1000);
+  assert.equal(USAGE_HISTORY_AUTO_SYNC_START_DELAY_MS, 15 * 1000);
+  assert.equal(USAGE_HISTORY_AUTO_SYNC_CHECK_MS, 60 * 1000);
+});
+
+test('formats Usage last-sync time from history sync status', () => {
+  const now = new Date('2026-09-21T10:53:00');
+  assert.deepEqual(
+    normalizeUsageHistorySyncStatus({
+      last_synced_at: '2026-09-21T02:53:00Z',
+      interval_seconds: 3600,
+      due: false
+    }),
+    {
+      lastSyncedAt: '2026-09-21T02:53:00Z',
+      intervalSeconds: 3600,
+      due: false
+    }
+  );
+  assert.equal(formatUsageHistoryLastSyncedAt('', now), '');
+  assert.equal(formatUsageHistoryLastSyncedAt('not-a-date', now), '');
+  assert.equal(formatUsageHistoryLastSyncedAt('2026-09-21T10:53:00', now), '10:53');
+  assert.equal(
+    formatUsageHistoryLastSyncedAt('2026-09-20T23:05:00', now),
+    '2026-09-20 23:05'
+  );
+  assert.equal(usageHistoryLastSyncedLabel('', now), '');
+  assert.equal(
+    usageHistoryLastSyncedLabel('2026-09-21T10:53:00', now),
+    'Last sync 10:53'
   );
 });
 
